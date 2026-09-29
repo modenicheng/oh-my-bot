@@ -306,11 +306,19 @@ func TestQuotaSlotReleasedOnReject(t *testing.T) {
 	if _, err := q.TryAcquire(context.Background(), 1); err != ErrBusy {
 		t.Fatalf("err = %v, want ErrBusy", err)
 	}
-	// 玩家 2 仍可用唯一并发位。
-	l2 := acquireOK(t, q, 2)
+	// 并发位满：玩家 2 等位，短超时 ctx → ErrConcurrency 包裹（不吞轮次）。
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := q.TryAcquire(ctx, 2); err == nil {
+		t.Fatal("player 2 acquired with full slots")
+	} else if err == ErrBusy || err == ErrRoundsExhausted {
+		t.Fatalf("err = %v, want ErrConcurrency wrap", err)
+	}
 	q.Commit(l, Usage{})
+	// 位归还后玩家 2 可用。
+	l2 := acquireOK(t, q, 2)
 	q.Commit(l2, Usage{})
-	// 位全部归还；玩家 1 轮次已尽拒因不变，玩家 3 可用。
+	// 玩家 1 轮次已尽拒因不变。
 	if _, err := q.TryAcquire(context.Background(), 1); err != ErrRoundsExhausted {
 		t.Fatalf("err = %v, want ErrRoundsExhausted", err)
 	}

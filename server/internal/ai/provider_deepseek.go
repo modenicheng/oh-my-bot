@@ -57,8 +57,6 @@ type DeepSeekProvider struct {
 	Model      string // 默认 deepseek-chat
 	Endpoint   string // 默认 https://api.deepseek.com/chat/completions
 	HTTPClient *http.Client
-	// Now 可注入时钟（测试用；nil → time.Now）。
-	Now func() time.Time
 }
 
 var _ Provider = (*DeepSeekProvider)(nil)
@@ -181,6 +179,10 @@ func (p *DeepSeekProvider) Complete(ctx context.Context, pc PromptContext) (Resu
 		return Result{}, Usage{}, &ProviderError{Category: CatProvider, Detail: "no choices in response"}
 	}
 
+	if cr.Usage.PromptTokens <= 0 && cr.Usage.CompletionTokens <= 0 {
+		// 计量是硬需求：无 usage 字段无法记账，视为 provider 契约异常。
+		return Result{}, Usage{}, &ProviderError{Category: CatProvider, Detail: "response missing usage fields"}
+	}
 	content := cr.Choices[0].Message.Content
 	script, explain, ok := extractScript(content)
 	if !ok {

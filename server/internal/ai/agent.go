@@ -91,7 +91,7 @@ func (a *Agent) HandlePrompt(ctx context.Context, playerID uint64, instruction s
 		return HandleOutcome{}, perr
 	}
 
-	out := HandleOutcome{Result: result}
+	out := HandleOutcome{Result: result, Usage: usage}
 	if a.scripts != nil {
 		newRev, accepted, serr := a.scripts.SubmitSource(playerID, pc.ScriptRev, result.NewScript)
 		if serr != nil {

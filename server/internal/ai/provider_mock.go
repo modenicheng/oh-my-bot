@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -80,23 +79,4 @@ func (m *MockProvider) CompleteCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.complete)
-}
-
-// atomicCounterProvider 计数并发（测试辅助，避免依赖 MockProvider 内部锁）。
-type atomicCounterProvider struct {
-	Provider
-	inFlight atomic.Int64
-	peak     atomic.Int64
-}
-
-func (p *atomicCounterProvider) Complete(ctx context.Context, pc PromptContext) (Result, Usage, error) {
-	cur := p.inFlight.Add(1)
-	for {
-		peak := p.peak.Load()
-		if cur <= peak || p.peak.CompareAndSwap(peak, cur) {
-			break
-		}
-	}
-	defer p.inFlight.Add(-1)
-	return p.Provider.Complete(ctx, pc)
 }
