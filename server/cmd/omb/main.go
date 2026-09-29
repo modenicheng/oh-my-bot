@@ -18,9 +18,9 @@ func main() {
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", netws.Handler(func(send func([]byte)) func([]byte) {
+	mux.Handle("/ws", netws.Handler(func(up []byte, send func([]byte)) {
 		// 骨架阶段：回显上行业务帧作为下行（联调探针用）。
-		return func(up []byte) { send(up) }
+		send(append([]byte{0x03}, up...))
 	}))
 	mux.Handle("/", http.FileServer(http.FS(webFS)))
 

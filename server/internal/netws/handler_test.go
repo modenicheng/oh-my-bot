@@ -9,11 +9,11 @@ import (
 	"github.com/coder/websocket"
 )
 
-// 端到端：客户端 ping → 服务器 pong 回显；服务器主动下行消息。
+// 端到端：客户端 ping→pong 回显；0x02 上行帧触发 0x03 下行。
 func TestPingPongAndDownlink(t *testing.T) {
-	h := Handler(func(send func([]byte)) func([]byte) {
-		go send(append([]byte{0x03}, []byte("hello")...))
-		return nil
+	h := Handler(func(up []byte, send func([]byte)) {
+		// 回显上行业务载荷作为下行业务帧（联调用）。
+		send(append([]byte{0x03}, up...))
 	})
 
 	s := httptest_server(h)
@@ -31,27 +31,30 @@ func TestPingPongAndDownlink(t *testing.T) {
 	if err := c.Write(ctx, websocket.MessageBinary, []byte{0x00, 1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.Write(ctx, websocket.MessageBinary, []byte{0x02, 0xAA, 0xBB}); err != nil {
+		t.Fatal(err)
+	}
 
-	gotDown, gotPong := false, false
-	for !gotDown || !gotPong {
+	gotPong, gotDown := false, false
+	for !gotPong || !gotDown {
 		_, data, err := c.Read(ctx)
 		if err != nil {
-			t.Fatalf("read: %v (down=%v pong=%v)", err, gotDown, gotPong)
+			t.Fatalf("read: %v (pong=%v down=%v)", err, gotPong, gotDown)
 		}
 		if len(data) == 0 {
 			continue
 		}
 		switch data[0] {
-		case 0x03: // 下行
-			if !bytes.Equal(data[1:], []byte("hello")) {
-				t.Fatalf("downlink payload: %q", data[1:])
-			}
-			gotDown = true
-		case 0x01: // pong 回显
+		case 0x01:
 			if !bytes.Equal(data[1:], []byte{1, 2, 3}) {
 				t.Fatalf("pong echo: %v", data[1:])
 			}
 			gotPong = true
+		case 0x03:
+			if !bytes.Equal(data[1:], []byte{0xAA, 0xBB}) {
+				t.Fatalf("downlink echo: %v", data[1:])
+			}
+			gotDown = true
 		case 0x00: // 服务器心跳 ping，忽略
 		default:
 			t.Fatalf("unexpected frame kind %d", data[0])
