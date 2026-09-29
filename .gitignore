@@ -8,3 +8,4 @@ server/omb
 server/omb.exe
 /data/
 *.log
+omb.exe*
