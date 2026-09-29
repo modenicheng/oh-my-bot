@@ -9,7 +9,7 @@
     :root {
       --bg: #0a0e14; --panel: #10141a; --line: #1f2733;
       --fg: #d8dee9; --fg-dim: #8b98a9;
-      --accent: #22d3ee; --danger: #ff5c5c;
+      --accent: #22d3ee; --danger: #ff5c5c; --lime: #a3e635; --amber: #fbbf24;
       --mono: ui-monospace, "JetBrains Mono", monospace;
     }
     html, *, *::before, *::after { box-sizing: inherit; }
@@ -50,6 +50,17 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
     #members { list-style: none; margin: 0; padding: 10px 12px; border: 1px solid var(--line);
                background: var(--bg); min-height: 64px; font-size: 13px; }
     #members .placeholder { color: var(--fg-dim); }
+    .m-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+    .m-row.stale { opacity: .55; }
+    .m-dot { width: 8px; height: 8px; background: var(--c, var(--fg-dim)); flex: none; }
+    .m-name { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-tag { margin-left: auto; color: var(--fg-dim); font-size: 11px; letter-spacing: .12em; flex: none; }
+    .m-count { color: var(--fg-dim); font-size: 12px; padding-top: 6px; margin-top: 6px;
+               border-top: 1px solid var(--line); }
+    /* 房主操作栏：START/WARMUP（RoomAction），非房主显示等待提示 */
+    #room-actions { display: flex; flex-direction: column; gap: 8px; }
+    .room-notice { font-family: var(--mono); font-size: 12px; color: var(--fg-dim);
+                   letter-spacing: .15em; padding: 2px 0; }
     #room-state { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
     #status { font-family: var(--mono); font-size: 13px; display: flex; align-items: center;
               gap: 8px; color: var(--fg-dim); }
@@ -78,11 +89,12 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
     .hud-left { position: absolute; left: 16px; bottom: 16px; width: 240px; }
     .hud-bar-label { font-size: 11px; letter-spacing: .2em; color: var(--fg-dim);
                      display: flex; justify-content: space-between; margin-bottom: 3px; }
-    .hud-bar { border: 1px solid var(--line); background: #10141acc; height: 10px;
+    .hud-bar { border: 1px solid var(--line); background: #10141a; height: 10px;
                position: relative; margin-bottom: 8px; }
-    .hud-bar-fill { position: absolute; inset: 0; width: 100%; background: var(--lime);
+    .hud-bar-fill { position: absolute; inset: 0; width: 100%;
                     transform-origin: left; transition: width .1s linear; }
-    #hud-en-fill { background: var(--accent); }
+    #hud-hp-fill { background: var(--danger); }
+    #hud-en-fill { background: var(--amber); }
     .hud-right { position: absolute; right: 16px; bottom: 16px; width: 220px;
                  border: 1px solid var(--line); background: #10141acc; padding: 8px 10px; }
     .hud-right-label { font-size: 11px; letter-spacing: .2em; color: var(--fg-dim); margin-bottom: 6px; }
@@ -99,8 +111,7 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
     .end-overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
                    align-items: center; justify-content: center; gap: 18px;
                    background: #0a0e14e6; pointer-events: none; }
-    .end-title { font-size: 26px; letter-spacing: .5em; color: var(--accent);
-                 text-shadow: 0 0 18px #22d3ee60; }
+    .end-title { font-size: 26px; letter-spacing: .5em; color: var(--accent); }
     .end-list { display: flex; flex-direction: column; gap: 4px; min-width: 320px;
                 border: 1px solid var(--line); background: var(--panel); padding: 14px 20px; }
     .end-row { display: flex; align-items: baseline; gap: 12px; font-family: var(--mono);
@@ -110,8 +121,12 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
     .end-score { color: var(--accent); }
     .end-title-row { font-size: 12px; color: var(--amber); padding-left: 3ch; }
     .end-empty { color: var(--fg-dim); font-size: 13px; }
+    .end-back { pointer-events: auto; border: 1px solid var(--accent); background: transparent;
+                color: var(--accent); padding: 8px 28px; font: inherit; letter-spacing: .25em;
+                cursor: pointer; }
+    .end-back:hover { box-shadow: 0 0 12px #22d3ee40; }
   </style>
-  <script type="module" crossorigin src="/assets/index-Cue0I-BP.js"></script>
+  <script type="module" crossorigin src="/assets/index-BmqxE8JU.js"></script>
 </head>
 <body>
   <div class="panel" id="app">
@@ -137,7 +152,12 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
       <h1>OH-MY-BOT</h1>
       <div id="room-code">······</div>
       <div class="field-label">在线成员</div>
-      <ul id="members"><li class="placeholder">等待其他玩家…</li></ul>
+      <ul id="members"><li class="placeholder">等待房间状态…</li></ul>
+      <div id="room-actions">
+        <button type="button" class="act" id="btn-start" hidden>开始对局</button>
+        <button type="button" class="act" id="btn-warmup" hidden>热身场</button>
+        <div class="room-notice" id="room-notice" hidden></div>
+      </div>
       <div id="room-state">—</div>
       <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
       <button type="button" class="act" id="btn-reconnect" hidden>重新连接</button>

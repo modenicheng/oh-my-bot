@@ -35,13 +35,13 @@ export class Hud {
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
 
-    // HP / 能量
+    // HP / 能量：HP 固定 neon-red 实色（STYLE.md：neon-red=生命/危险），能量 neon-amber；
+    // 深色底条 #10141a 不透明，移动中对比度可读（原 var(--lime) 未定义导致填充不可见）
     if (self) {
       const hp = clamp01(self.hpX10 / MAX_HP)
       const en = clamp01(self.energyX10 / MAX_EN)
       this.hpFill.style.width = `${(hp * 100).toFixed(1)}%`
       this.enFill.style.width = `${(en * 100).toFixed(1)}%`
-      this.hpFill.style.background = hp > 0.5 ? 'var(--lime)' : hp > 0.25 ? 'var(--amber)' : 'var(--danger)'
       this.hpText.textContent = self.dead ? `重生 ${self.respawnInS.toFixed(1)}s` : `${Math.round(self.hpX10 / 10)}`
       this.enText.textContent = `${Math.round(self.energyX10 / 10)}`
     }
@@ -93,8 +93,15 @@ export class Hud {
   }
 }
 
-/** 结算覆盖层：分数行 + 称号 */
-export function showMatchEnd(root: HTMLElement, rows: ScoreRow[], idToNick: Map<number, string>): void {
+/** 结算覆盖层：分数行 + 称号。重复调用防重（服务器幂等但客户端也只渲染一次）；
+ *  onBack：「回到房间」回调（本地切视图，不发 RoomAction）。 */
+export function showMatchEnd(
+  root: HTMLElement,
+  rows: ScoreRow[],
+  idToNick: Map<number, string>,
+  onBack?: () => void,
+): void {
+  hideMatchEnd(root) // 防重：丢弃旧覆盖层，确保全屏只有一个
   const overlay = document.createElement('div')
   overlay.className = 'end-overlay'
   const title = document.createElement('div')
@@ -105,7 +112,7 @@ export function showMatchEnd(root: HTMLElement, rows: ScoreRow[], idToNick: Map<
   if (rows.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'end-empty'
-    empty.textContent = '无比分数据'
+    empty.textContent = '本局无得分记录'
     overlay.appendChild(empty)
   } else {
     const list = document.createElement('div')
@@ -137,6 +144,15 @@ export function showMatchEnd(root: HTMLElement, rows: ScoreRow[], idToNick: Map<
       }
     }
     overlay.appendChild(list)
+  }
+
+  if (onBack) {
+    const back = document.createElement('button')
+    back.type = 'button'
+    back.className = 'end-back'
+    back.textContent = '回到房间'
+    back.addEventListener('click', onBack)
+    overlay.appendChild(back)
   }
 
   root.appendChild(overlay)

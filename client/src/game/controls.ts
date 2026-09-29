@@ -21,6 +21,8 @@ export interface GameDeps {
   hudRoot: HTMLElement
   /** 上行发送（RoomSession.send，帧已编码） */
   send: (data: Uint8Array) => void
+  /** 「回到房间」回调：结算层关闭后由大厅接手视图与操作栏（不发 RoomAction） */
+  onExitToRoom?: () => void
 }
 
 export class GameController {
@@ -35,15 +37,18 @@ export class GameController {
   private sendTimer: ReturnType<typeof setInterval> | undefined
   private ended = false
   private matchEndRows: ScoreRow[] = []
+  private endShown = false
   private canvas: HTMLCanvasElement
   private hudRoot: HTMLElement
   private send: (data: Uint8Array) => void
+  private onExitToRoom?: () => void
   private resizeObserver?: ResizeObserver
 
   constructor(deps: GameDeps) {
     this.canvas = deps.canvas
     this.hudRoot = deps.hudRoot
     this.send = deps.send
+    this.onExitToRoom = deps.onExitToRoom
     this.renderer = new Renderer(deps.canvas)
     this.hud = new Hud(deps.hudRoot)
   }
@@ -57,6 +62,7 @@ export class GameController {
       return false
     }
     this.ended = false
+    this.endShown = false
     this.matchEndRows = []
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
@@ -73,7 +79,32 @@ export class GameController {
     this.input.detach()
     this.map = null
     this.world = emptyWorld()
+    this.endShown = false
     hideMatchEnd(this.hudRoot)
+  }
+
+  /** 结算覆盖层是否在场（main.ts 据此决定 roomState 回大厅时不抢切视图） */
+  isMatchEndShown(): boolean {
+    return this.endShown && this.map !== null
+  }
+
+  /** 「回到房间」：本地关闭结算层并退回大厅视图；不发 RoomAction，
+   *  等下一次 roomState 刷新房间状态。 */
+  dismissMatchEnd(): void {
+    if (!this.endShown) return
+    this.endShown = false
+    hideMatchEnd(this.hudRoot)
+    this.exit()
+    this.onExitToRoom?.()
+  }
+
+  /** 最近一次 full 快照的机器人名单（大厅成员列表数据源；空 = 尚无对局数据） */
+  lastRoster(): Array<{ nick: string; color: string }> {
+    const out: Array<{ nick: string; color: string }> = []
+    for (const r of this.world.robots.values()) {
+      if (r.nick) out.push({ nick: r.nick, color: r.color || '' })
+    }
+    return out
   }
 
   /** ServerMsg 分发（main.ts 转发所有下行） */
@@ -96,8 +127,10 @@ export class GameController {
         break
       }
       case 'matchEnd': {
+        if (this.endShown) break // 事件去重：服务器幂等重发时不再重复渲染
         this.matchEndRows = ev.kind.value.scores
         this.ended = true
+        this.endShown = true
         this.showEnd(ev.kind.value)
         break
       }
@@ -203,6 +236,6 @@ export class GameController {
       const id = r.base?.id
       if (id !== undefined) idToNick.set(id, r.nick || `robot-${id}`)
     }
-    showMatchEnd(this.hudRoot, ev.scores, idToNick)
+    showMatchEnd(this.hudRoot, ev.scores, idToNick, () => this.dismissMatchEnd())
   }
 }
