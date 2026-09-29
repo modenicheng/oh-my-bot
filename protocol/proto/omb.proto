@@ -90,9 +90,10 @@ message CoreState {
 
 message UplinkState {
   EntityBase base = 1;
-  bool ready = 2;            // 冷却结束可黑
+  bool ready = 2;            // 本机玩家视角：个人 CD 结束且无人在引导，可黑
   uint32 hacking_id = 3;     // 正在引导的 robot id（0=无人）
-  sint32 progress_x10 = 4;   // 引导进度 0.0–1.5s ×10
+  sint32 progress_x10 = 4;   // 引导进度 0–8.0s ×10
+  uint32 my_cooldown_s = 5;  // 本机玩家对该桩的剩余个人 CD（每玩家每桩独立 30s）
 }
 
 // 自机私有状态（不下发他机）
@@ -124,11 +125,14 @@ message SnapshotDelta {
 
 message EvKill { uint32 killer = 1; uint32 victim = 2; uint32 assist = 3; Vec2 at = 4; }
 message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
-message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; }
+message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
 message EvSay { uint32 robot = 1; string text = 2; }
 message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
+message EvMatchStart { uint64 map_seed = 1; uint32 players = 2; } // 开局：种子随事件落盘（回放可复现）
+message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/robot 节流（铁头娃埋点）
+message EvScriptError { uint32 robot = 1; string error = 2; uint32 script_rev = 3; } // 人工智障埋点
 message EvMatchEnd { repeated ScoreRow scores = 1; }
 message ScoreRow { uint32 robot = 1; sint32 score = 2; repeated Title titles = 3; }
 enum Title {
@@ -161,7 +165,11 @@ message EvRoomState { // 房间生命周期广播（含 Session 榜）
   string host_nick = 3;
 }
 
-message EvAiQuota { uint32 rounds_left = 1; uint32 tokens_used_k = 2; }
+message EvAiQuota {
+  uint32 rounds_left = 1;
+  uint32 tokens_used_k = 2;
+  uint32 global_tokens_left_k = 3; // 全局护栏余量（2M token/局，触顶全员禁 AI）
+}
 
 message ServerEvent {
   uint32 tick = 1;
@@ -178,6 +186,9 @@ message ServerEvent {
     EvRoomState room_state = 18;
     EvAiQuota ai_quota = 19;
     EvScriptResult script_result = 20;
+    EvMatchStart match_start = 21;
+    EvWallHit wall_hit = 22;
+    EvScriptError script_error = 23;
   }
 }
 
