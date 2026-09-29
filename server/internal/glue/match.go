@@ -45,11 +45,12 @@ type Match struct {
 	playerOf map[uint32]uint64 // robotID -> playerID
 	lastSeq  map[uint64]uint32
 
-	tick     uint32
-	warmup   bool
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
+	tick       uint32
+	warmup     bool
+	stopOnce   sync.Once
+	finishOnce sync.Once
+	stop       chan struct{}
+	done       chan struct{}
 }
 
 // SessionInfo 装配参数（房间成员快照）。
@@ -106,6 +107,9 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	m.sim = sim.NewSim(seed, ids, sinkAll)
 	if err := m.sim.SetMap(def); err != nil {
 		return nil, fmt.Errorf("setmap: %w", err)
+	}
+	for pid, info := range players {
+		m.sim.SetRobotMeta(m.robotOf[pid], info.Nick, info.Color)
 	}
 	m.proj.SetPlayerMap(playerMap)
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
@@ -286,6 +290,10 @@ func robotOf(wv sim.WorldView, id uint32) (sim.RobotView, bool) {
 }
 
 func (m *Match) finish(wv sim.WorldView) {
+	m.finishOnce.Do(func() { m.finishLocked(wv) })
+}
+
+func (m *Match) finishLocked(wv sim.WorldView) {
 	rows := m.proj.Final()
 	scores := map[uint64]int32{}
 	for _, r := range rows {

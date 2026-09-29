@@ -163,6 +163,13 @@ type Sim struct {
 // the entity identity invariant and this constructor has no error result.
 // Map generation is intentionally absent: spawns default to the origin and can
 // be configured before tick 1. Player count validation belongs to the room.
+// SetRobotMeta 注入昵称与配色。须在 Tick 驱动启动前调用（装配期单线程，无锁）。
+func (s *Sim) SetRobotMeta(id uint32, nick, color string) {
+	if i, ok := s.index[id]; ok {
+		s.robots[i].Nick, s.robots[i].Color = nick, color
+	}
+}
+
 func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 	ids := append([]uint32(nil), playerIDs...)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
