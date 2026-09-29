@@ -1,78 +1,83 @@
-// Package mapgen 生成 oh-my-bot 的确定性八辐轮盘地图（MapDef）。
+// Package mapgen 生成 oh-my-bot 的确定性八辐轮盘地图（sim.MapDef）。
 //
-// 骨架拓扑永不变化（v0.3 §3）：8 个 45° 出生扇区、三环（外 55–80m /
-// 中 30–55m / 中央 <30m）、6 个普通 Uplink 错位扇区轴 22.5°、中央主 Uplink、
-// 外 16 + 中 12 + 中央 6 个 CorePad。骨架内的墙段、掩体、刷新点布局按种子
-// 随机生成。墙全部为 AABB，按 45° 旋转对称（绕原点旋转 90° 后集合不变），
-// 保证八辐骨架的拓扑公平性；同 seed 必产出同 MapHash（SHA256 canonical JSON）。
+// 骨架拓扑固定（v0.3 §3）：8 个 45° 出生扇区（轴角 k*45°，SpawnArea 为外环
+// 55–80m 内的轴对齐方块）、三环（外 55–80 / 中 30–55 / 中央 <30m）、6 个普通
+// Uplink 位于中环且角度错位扇区轴 22.5°、1 个中央主 Uplink（CORE_OPEN 激活）、
+// 外 16 + 中 12 + 中央 6 个 CorePad。骨架内的掩体布局按种子随机：中环密、
+// 外环疏。全部墙体为 AABB，集合在绕原点旋转 90° 下严格不变（4 次旋转封
+// 闭），因此对任意 k*45° 旋转各 45° 楔的墙体统计特征一致（八辐骨架公平性）。
+//
+// 确定性：生成路径只用整数/IEEE754 基本运算与字面量方向表（无 math 三角
+// 调用、无 map 遍历序依赖），同 seed 必产出同 MapHash = SHA256(canonical JSON)。
 package mapgen
 
 import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
-// 环半径边界（米）——与设计基准 v0.3 §3 对齐。
+// ---- 环带与锁区常量（v0.3 §3；单位米）----
+
 const (
 	outerMinR = 55.0 // 外环内边界
-	outerMaxR = 80.0 // 外环外边界
+	outerMaxR = 80.0 // 外环外边界（方形地图 160×160m 的半宽）
 	midMinR   = 30.0 // 中环内边界
 	midMaxR   = 55.0 // 中环外边界（= outerMinR）
-	coreMaxR  = 30.0 // 中央核心区边界（锁区半径）
+	coreZoneR = 28.0 // 中央锁区半径（<30m，CORE_OPEN 解锁）
+
+	spawnRadius = 67.5 // 出生方块中心所在半径（外环中段）
+	spawnHalf   = 8.5  // 出生方块半边长（17×17m，全部落在 [55,80] 环带内）
+
+	uplinkRLo       = 40.0 // 普通 Uplink 半径抖动下界（中环内）
+	uplinkRHi       = 45.0 // 普通 Uplink 半径抖动上界
+	normInteractR   = 2.5  // 普通 Uplink 交互半径（v0.3 §6）
+	mainInteractR   = 3.0  // 主 Uplink 交互半径
+	corePeriodTicks = 1800 // Core 刷新周期：30s @ 60Hz
 )
 
-// 锁区与主桩常量。
+// ---- CorePad 数量（Group 0=outer / 1=mid / 2=center）----
+
 const (
-	coreZoneR = 28.0 // 中央锁区半径（<30m）
-	mainUplinkR = 6.0 // 主 Uplink 距原点（<10m）
-	uplinkMidR  = 42.5 // 普通 Uplink 距原点（中环带 40–45m）
-	uplinkRBase = 40.0 // 普通 Uplink 半径随机下界
-	uplinkRSpan = 5.0  // 普通 Uplink 半径随机跨度（40–45m）
-	mainInteractR = 3.0 // 主 Uplink 交互半径
-	normInteractR = 2.5 // 普通 Uplink 交互半径（v0.3 §6）
+	padOuterN  = 16
+	padMidN    = 12
+	padCenterN = 6
 )
 
-// 墙体常量（米）。
-const (
-	gateLen        = 14.0 // 环向闸门墙半长（总长 28m）
-	gateThick      = 1.5  // 闸门墙厚
-	coverLen       = 2.0  // 掩体半长（4m）
-	coverThick     = 0.8  // 掩体厚
-	clearance      = 3.0  // 刷墙最小净空半径（出生点/桩/pad 周围）
-	ringRoadHalf   = 10.0 // 外环道路保留半宽（无墙带，保证出生区到中环畅通）
-)
-
-// CoreRules 数值（任务规格）。
-const (
-	corePeriodTicks = 1800 // 30s @ 60Hz
-)
-
-// GeneratorVer 是 mapgen 算法版本；布局算法变更时必须递增。
+// GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
 const GeneratorVer = 1
 
-// Generate 按 seed 生成确定性地图。骨架（扇区/Uplink 角度/锁区/规则）固定，
-// 墙与 CorePad 布局由 seed 驱动。返回的 MapDef 已含 MapHash。
-func Generate(seed uint64) (*sim.MapDef, error) {
-	r := newRng(seed)
+// 分段盐：各生成阶段使用独立随机流，避免阶段间重试纠缠。
+const (
+	saltUplinks uint64 = 0xD1B54A327F6109C3
+	saltPads    uint64 = 0x6A2E88C041D7B5A4
+	saltWalls   uint64 = 0x9F03C2D15E47A8B0
+)
 
-	walls, err := genWalls(r)
+// Generate 按 seed 生成确定性 MapDef。骨架（扇区/Uplink 角度/锁区/规则）固定，
+// 墙体掩体与 CorePad 布局由 seed 驱动；产出前经 BFS 连通性验证（1m 网格，
+// OUTER_RING 锁区封闭与 CORE_OPEN 开放两种模式）。
+func Generate(seed uint64) (*sim.MapDef, error) {
+	skeleton := skeletonWalls()
+	uplinks := genUplinks(newRng(seed ^ saltUplinks))
+	pads, err := genCorePads(newRng(seed ^ saltPads), skeleton, uplinks)
+	if err != nil {
+		return nil, fmt.Errorf("mapgen: pads: %w", err)
+	}
+	walls, err := genWalls(newRng(seed ^ saltWalls), skeleton, uplinks, pads)
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: walls: %w", err)
 	}
-
-	sectors := genSectors()
-	uplinks := genUplinks(r)
-	pads := genCorePads(r)
 
 	def := &sim.MapDef{
 		Version:      1,
 		GeneratorVer: GeneratorVer,
 		Seed:         seed,
 		Walls:        walls,
-		Sectors:      sectors,
+		Sectors:      genSectors(),
 		Uplinks:      uplinks,
 		CorePads:     pads,
 		CoreZone: sim.CoreZoneDef{
@@ -95,8 +100,8 @@ func Generate(seed uint64) (*sim.MapDef, error) {
 	return def, nil
 }
 
-// hashDef 计算 MapDef 的内容哈希：MapHash 字段置空后 canonical JSON
-// （定长字段有序 + 切片按既定顺序生成）的 SHA256 hex。
+// hashDef 计算 MapDef 的内容哈希：MapHash 置空后 canonical JSON（结构体字段
+// 序 + 有序切片 + 排序 map 键）的 SHA256 hex。它是"同 seed 同产出"的断言凭据。
 func hashDef(def *sim.MapDef) (string, error) {
 	clone := *def
 	clone.MapHash = ""
@@ -108,108 +113,127 @@ func hashDef(def *sim.MapDef) (string, error) {
 	return fmt.Sprintf("%x", sum), nil
 }
 
-// genSectors 生成 8 个出生扇区：中心角 = k*45°，SpawnArea 为外环 55–80m
-// 内约 45° 弧段的轴对齐包围盒。k=0 朝 +X，逆时针。
-func genSectors() [8]sim.Sector {
-	var sectors [8]sim.Sector
-	for k := 0; k < 8; k++ {
-		cos, sin := cosSin(k * 45.0)
-		cx, cy := cos*(outerMinR+outerMaxR)/2, sin*(outerMinR+outerMaxR)/2
-		// 弧段 AABB：内外边界与两条径向边的外接矩形，向中心角收缩 25%
-		// 避免相邻扇区 SpawnArea 重叠。
-		in, out := outerMinR+3, outerMaxR-3
-		x0, x1 := in*cos, out*cos
-		y0, y1 := in*sin, out*sin
-		shrink := 0.25
-		lo := sim.Vec2{min(x0, x1), min(y0, y1)}
-		hi := sim.Vec2{max(x0, x1), max(y0, y1)}
-		mid := sim.Vec2{(lo.X + hi.X) / 2, (lo.Y + hi.Y) / 2}
-		w, h2 := hi.X-lo.X, hi.Y-lo.Y
-		lo = sim.Vec2{mid.X - w*(1-shrink)/2, mid.Y - h2*(1-shrink)/2}
-		hi = sim.Vec2{mid.X + w*(1-shrink)/2, mid.Y + h2*(1-shrink)/2}
-		sectors[k] = sim.Sector{
-			ID:        uint32(k),
-			SpawnArea: sim.Rect{Min: lo, Max: hi},
-			Center:    sim.Vec2{cx, cy},
-		}
-	}
-	return sectors
+// sectorCenter 返回第 k 扇区轴线（k*45°）上 spawnRadius 处的中心点。
+func sectorCenter(k int) sim.Vec2 { return dirAt(2 * k).Scale(spawnRadius) }
+
+// spawnAreaOf 返回第 k 扇区的出生方块（轴对齐 17×17m，含于外环带）。
+func spawnAreaOf(k int) sim.Rect {
+	c := sectorCenter(k)
+	return rectOf(c.X, c.Y, spawnHalf, spawnHalf)
 }
 
-// genUplinks 生成 6 个普通 Uplink（中环 40–45m，角度 = k*45°+22.5° 选 6 个）
-// 与 1 个中央主 Uplink（<10m，ActivePhase=CORE_OPEN）。
-// 为公平起见 6 个角度取 k*45°+22.5° (k=0..7) 的 6 个，跳过两个对称位置。
+// genSectors 生成 8 个出生扇区：中心角 = k*45°，SpawnArea 为外环内的轴对齐
+// 方块（AABB 世界无法精确表达 45° 弧段，方块为兼顾"外环 + 扇区内 + 严格
+// 45° 旋转对称"的保守逼近，且比弧段外接矩形更小更安全）。
+func genSectors() [8]sim.Sector {
+	var out [8]sim.Sector
+	for k := 0; k < 8; k++ {
+		c := sectorCenter(k)
+		out[k] = sim.Sector{
+			ID:        uint32(k),
+			SpawnArea: rectOf(c.X, c.Y, spawnHalf, spawnHalf),
+			Center:    c,
+		}
+	}
+	return out
+}
+
+// uplinkSteps 为 6 个普通 Uplink 的方向表步进（22.5°·step）。
+// 取 {22.5°+k·90°} 四个加 {157.5°, 337.5°} 对径对：全部错位扇区轴 22.5°，
+// 且集合整体中心对称。Uplink 集合按审核裁决不要求旋转对称。
+var uplinkSteps = [6]int{1, 5, 7, 9, 13, 15}
+
+// genUplinks 生成 6 个普通 Uplink（中环 40–45m，角度 = k*45°+22.5°，半径由
+// seed 抖动）与 1 个中央主 Uplink（原点，CORE_OPEN 激活）。
 func genUplinks(r *rng) []sim.UplinkDef {
-	uplinks := make([]sim.UplinkDef, 0, 7)
-	// 6 个普通桩：角度 22.5° + k*60° 均匀分布（6 个错位轴恰好互不重合，
-	// 且都不与扇区轴 k*45° 对齐——最小差 7.5°）。
-	ids := r.perm6()
-	for i := 0; i < 6; i++ {
-		ang := 22.5 + float64(i)*60.0
-		rad := uplinkRBase + uplinkRSpan*r.float()
-		cos, sin := cosSin(ang)
-		uplinks = append(uplinks, sim.UplinkDef{
-			ID:          ids[i],
-			Pos:         sim.Vec2{rad * cos, rad * sin},
-			Main:        false,
+	out := make([]sim.UplinkDef, 0, 7)
+	for i, step := range uplinkSteps {
+		d := dirAt(step)
+		rad := uplinkRLo + (uplinkRHi-uplinkRLo)*r.float()
+		out = append(out, sim.UplinkDef{
+			ID:          uint32(i + 1),
+			Pos:         d.Scale(rad),
 			InteractR:   normInteractR,
 			ActivePhase: sim.PhaseOuterRing,
 		})
 	}
-	// 中央主桩。
-	uplinks = append(uplinks, sim.UplinkDef{
-		ID:          ids[6],
-		Pos:         sim.Vec2{mainUplinkR, 0},
+	out = append(out, sim.UplinkDef{
+		ID:          uint32(len(uplinkSteps) + 1),
+		Pos:         sim.Vec2{},
 		Main:        true,
-	 uplinkR:      0, // placeholder removed
 		InteractR:   mainInteractR,
 		ActivePhase: sim.PhaseCoreOpen,
 	})
-	return uplinks
+	return out
 }
 
-// perm6 返回 1..7 的随机排列（7 个 uplink ID）。
-func (r *rng) perm6() []uint32 {
-	const n = 7
-	a := make([]uint32, n)
-	for i := range a {
-		a[i] = uint32(i + 1)
-	}
-	for i := n - 1; i > 0; i-- {
-		j := r.intn(i + 1)
-		a[i], a[j] = a[j], a[i]
-	}
-	return a
-}
-
-// genCorePads 生成外 16 + 中 12 + 中央 6 个确定性刷新点。
-// Group 0=outer / 1=mid / 2=center。Value：普通 +10；中央组含 2 个 Mega +25。
-func genCorePads(r *rng) []sim.CorePadDef {
-	pads := make([]sim.CorePadDef, 0, 34)
+// genCorePads 生成外 16 + 中 12 + 中央 6 个刷新点（seed 驱动，笛卡尔拒绝采样
+// 保证全部落在目标环带内），与骨架墙、Uplink 保持净空；组内按 (x,y) 排序后
+// 顺序分配 ID（canonical 顺序）。中央组坐标序前两个为 Mega Core（+25）。
+func genCorePads(r *rng, skeleton []sim.Wall, uplinks []sim.UplinkDef) ([]sim.CorePadDef, error) {
+	pads := make([]sim.CorePadDef, 0, padOuterN+padMidN+padCenterN)
 	id := uint32(1)
-	// 外环 16：55–80m，随机角度。
-	for i := 0; i < 16; i++ {
-		ang := 360.0 * r.float()
-		rad := outerMinR + 5 + (outerMaxR-outerMinR-10)*r.float()
-		cos, sin := cosSin(ang)
-		pads = append(pads, sim.CorePadDef{ID: id, Pos: sim.Vec2{rad * cos, rad * sin}, Group: 0, Value: 10})
-		id++
+	place := func(group int, lo, hi, minGap float64, want int) error {
+		placed := make([]sim.Vec2, 0, want)
+		for tries := 0; len(placed) < want; tries++ {
+			if tries > 1000 {
+				return fmt.Errorf("group %d: exhausted placement tries", group)
+			}
+			x, y := r.rangeF(-hi, hi), r.rangeF(-hi, hi)
+			if r2 := x*x + y*y; r2 < lo*lo || r2 > hi*hi {
+				continue
+			}
+			p := sim.Vec2{X: x, Y: y}
+			if !padClear(p, minGap, placed, skeleton, uplinks) {
+				continue
+			}
+			placed = append(placed, p)
+		}
+		sort.Slice(placed, func(i, j int) bool {
+			if placed[i].X != placed[j].X {
+				return placed[i].X < placed[j].X
+			}
+			return placed[i].Y < placed[j].Y
+		})
+		for _, p := range placed {
+			pads = append(pads, sim.CorePadDef{ID: id, Pos: p, Group: group, Value: 10})
+			id++
+		}
+		return nil
 	}
-	// 中环 12：30–55m。
-	for i := 0; i < 5; i++ {
-		ang := 360.0 * r.float()
-		rad := midMinR + 5 + (midMaxR-midMinR-10)*r.float()
-		c strictly, sin := cosSin(ang)
-		pads = append(pads, sim.CorePadDef{ID: id, SetPos: sim.Vec2{rad * cos, rad * sin}, Group: 1, Value: 10})
-		id++
+	if err := place(0, 58, 76, 4.0, padOuterN); err != nil {
+		return nil, err
 	}
-	return pads
+	if err := place(1, 33, 52, 4.0, padMidN); err != nil {
+		return nil, err
+	}
+	if err := place(2, 4.5, 14, 3.0, padCenterN); err != nil {
+		return nil, err
+	}
+	// 中央组前两个（坐标序）为 Mega Core。
+	n := len(pads)
+	pads[n-padCenterN].Value = 25
+	pads[n-padCenterN+1].Value = 25
+	return pads, nil
 }
 
-// cosSin 由角度（度）返回 (cos, sin)。
-func cosSin(deg float64) (float64, float64) {
-	rad := deg * math.Pi / 180.0
-	return math.Cos(rad), math.Sin(rad)
+// padClear 校验候选刷新点：距已放置同组点 ≥ minGap、距骨架墙 ≥ 2.5m、
+// 距 Uplink ≥ 3m。
+func padClear(p sim.Vec2, minGap float64, placed []sim.Vec2, skeleton []sim.Wall, uplinks []sim.UplinkDef) bool {
+	for _, q := range placed {
+		if p.Sub(q).Len() < minGap {
+			return false
+		}
+	}
+	for _, w := range skeleton {
+		if pointRectDist2(p, wallRect(w)) < 2.5*2.5 {
+			return false
+		}
+	}
+	for _, u := range uplinks {
+		if p.Sub(u.Pos).Len() < 3.0 {
+			return false
+		}
+	}
+	return true
 }
-
-// min/max 在 Go 1.21+ 为内建。

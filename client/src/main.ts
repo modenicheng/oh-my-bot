@@ -95,14 +95,17 @@ function showFormError(msg: string): void {
 // ---- 连接会话 ---------------------------------------------------------------
 
 let session: RoomSession | null = null
+let lastJoin: { roomCode: string; nick: string; color: string } | null = null
 
 async function join(): Promise<void> {
   showFormError('')
   const invalid = validate()
   if (invalid) return showFormError(invalid)
 
-  const roomCode = inRoom.value
-  const nick = inNick.value.trim()
+  void joinWith(inRoom.value, inNick.value.trim(), selectedColor)
+}
+
+async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   btnJoin.disabled = true
   setStatus('off', 'connecting…')
 
@@ -114,10 +117,11 @@ async function join(): Promise<void> {
     await s.connect({
       roomCode,
       nick,
-      color: selectedColor,
+      color,
       onMessage: (msg) => onServerMsg(roomCode, msg),
       onDisconnect: (reason) => onDisconnected(reason),
     })
+    lastJoin = { roomCode, nick, color }
   } catch (err) {
     s.close()
     session = null
@@ -162,9 +166,14 @@ inNick.addEventListener('keydown', (e) => { if (e.key === 'Enter') void join() }
 
 btnReconnect.addEventListener('click', () => {
   btnReconnect.hidden = true
-  showView('join')
-  showFormError('连接已断开，可重新进入房间')
-  setStatus('off', 'idle')
+  if (!lastJoin) { // 无历史参数（理论不可达）：退回表单
+    showView('join')
+    setStatus('off', 'idle')
+    return
+  }
+  // 用上次成功参数直接重试：重连是恢复动作，不该让用户重新填表
+  setStatus('off', '重连中…')
+  void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
 })
 
 // ---- 心跳 RTT 状态行（沿用探针逻辑） ----------------------------------
