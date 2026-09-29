@@ -9,3 +9,9 @@ server/omb.exe
 /data/
 *.log
 omb.exe*
+
+# agent skills (repo-local, installed via npx skills)
+/.agents/
+/.claude/
+/.pi/
+/skills/

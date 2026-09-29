@@ -17,6 +17,9 @@ importers:
 
   client:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: ^2.16.0
+        version: 2.16.0
       '@omb/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
