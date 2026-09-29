@@ -48,6 +48,10 @@ func (l *fakeLauncher) Launch(seed uint64, playerIDs []uint64) MatchHandle {
 	return h
 }
 
+func (l *fakeLauncher) LaunchWarmup(seed uint64, playerIDs []uint64) MatchHandle {
+	return l.Launch(seed, playerIDs)
+}
+
 func (l *fakeLauncher) launchCount() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -156,15 +160,15 @@ func TestLegalTransitions(t *testing.T) {
 		if r.State() != Running {
 			t.Fatalf("state = %v, want Running", r.State())
 		}
-		if l.launches != 1 {
-			t.Fatalf("launches = %d, want 1", l.launches)
+		if l.launches != 2 { // warmup 实例 + 正式赛各 launch 一次
+			t.Fatalf("launches = %d, want 2 (warmup + start)", l.launches)
 		}
 		mustAction(t, r, 1, ActionAbort)
 		if r.State() != Ended {
 			t.Fatalf("state = %v, want Ended", r.State())
 		}
 		select {
-		case <-l.handles[0].aborted:
+		case <-l.handles[len(l.handles)-1].aborted: // 正式赛是最新实例
 		default:
 			t.Fatal("abort did not reach the match handle")
 		}
@@ -198,14 +202,14 @@ func TestLegalTransitions(t *testing.T) {
 		if r.State() != Running {
 			t.Fatalf("state = %v, want Running", r.State())
 		}
-		if l.launches != 2 {
-			t.Fatalf("launches = %d, want 2", l.launches)
+		if l.launches != 4 { // warmup + start + restart-warmup + start
+			t.Fatalf("launches = %d, want 4", l.launches)
 		}
 		if l.seeds[0] == l.seeds[1] {
 			t.Fatal("two matches reused the same seed")
 		}
-		if r.Seed() != l.seeds[1] {
-			t.Fatalf("Seed() = %d, want latest %d", r.Seed(), l.seeds[1])
+		if r.Seed() != l.seeds[len(l.seeds)-1] {
+			t.Fatalf("Seed() = %d, want latest %d", r.Seed(), l.seeds[len(l.seeds)-1])
 		}
 		if r.SessionSeq() != 2 {
 			t.Fatalf("SessionSeq = %d, want 2", r.SessionSeq())
@@ -563,8 +567,8 @@ func TestConcurrentCommandsAndBroadcast(t *testing.T) {
 	if r.State() != Warmup {
 		t.Fatalf("final state = %v, want Warmup", r.State())
 	}
-	if l.launches != 200 {
-		t.Fatalf("launches = %d, want 200", l.launches)
+	if l.launches != 400 {
+		t.Fatalf("launches = %d, want 400 (warmup+start pairs)", l.launches)
 	}
 }
 

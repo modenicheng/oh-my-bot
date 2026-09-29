@@ -49,6 +49,7 @@ type Match struct {
 	warmup     bool
 	stopOnce   sync.Once
 	finishOnce sync.Once
+	mu         sync.Mutex // 保护 lastSeq/encoders/runtimes 等跨 goroutine 可变状态
 	stop       chan struct{}
 	done       chan struct{}
 }
@@ -151,6 +152,8 @@ func (m *Match) HandleAiPrompt(pid uint64, text string) {
 
 // ForceResync 下 tick 全量快照。
 func (m *Match) ForceResync(pid uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if rid, ok := m.robotOf[pid]; ok {
 		if enc := m.encoders[rid]; enc != nil {
 			enc.ForceFull()
@@ -164,12 +167,14 @@ func (m *Match) SubmitScript(pid uint64, src string) (ok bool, errMsg string, re
 	if !ok {
 		return false, "not in match", 0
 	}
+	m.mu.Lock()
 	rt := m.scriptPool.RuntimeOf(rid)
 	if rt == nil {
 		rt = script.NewGojaRuntime(script.Config{})
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt // 记录已装载（runScripts 据此 Submit）
+		m.runtimes[rid] = rt
 	}
+	m.mu.Unlock()
 	if err := rt.Load(src); err != nil {
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
@@ -178,8 +183,13 @@ func (m *Match) SubmitScript(pid uint64, src string) (ok bool, errMsg string, re
 
 // ApplyClientInput 连接层收到输入帧转投模拟（带 seq 缓存供 ack）。
 func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
-	if rid, ok := m.robotOf[pid]; ok {
+	m.mu.Lock()
+	rid, ok := m.robotOf[pid]
+	if ok {
 		m.lastSeq[pid] = in.GetSeq()
+	}
+	m.mu.Unlock()
+	if ok {
 		m.sim.ApplyInput(rid, in)
 	}
 }
@@ -211,8 +221,19 @@ func (m *Match) step() {
 
 	wv := m.sim.WorldView()
 	m.runScripts(wv)
+	_ = wv // 快照循环在下方使用
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
+	m.mu.Lock()
+	seqSnap := make(map[uint64]uint32, len(m.lastSeq))
+	for k, v := range m.lastSeq {
+		seqSnap[k] = v
+	}
+	encodersSnap := make(map[uint32]*snapshot.DeltaEncoder, len(m.encoders))
+	for k, v := range m.encoders {
+		encodersSnap[k] = v
+	}
+	m.mu.Unlock()
 	for _, rv := range wv.Robots {
 		pid, ok := m.playerOf[rv.ID]
 		if !ok {
@@ -222,11 +243,13 @@ func (m *Match) step() {
 		if s == nil {
 			continue
 		}
-		enc := m.encoders[rv.ID]
+		enc := encodersSnap[rv.ID]
 		if enc == nil {
 			enc = snapshot.NewEncoder()
 			enc.ForceFull()
+			m.mu.Lock()
 			m.encoders[rv.ID] = enc
+			m.mu.Unlock()
 		}
 		obs := snapshot.BuildObservation(snapshot.World{
 			FrameView:   wv.Frame,
@@ -242,6 +265,7 @@ func (m *Match) step() {
 			TurretSrc: ctrl.TurretSrc,
 		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
+		_ = seqSnap
 		s.SendLossy(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
 	}
 

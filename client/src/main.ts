@@ -154,47 +154,10 @@ function selfNick(): string {
 
 /** 大厅成员列表：自己 + 房主 + 最近对局名单（真实数据源，不造名单）。 */
 function renderMembers(): void {
-  membersEl.innerHTML = ''
-  const online = room.robotsOnline
-
-  const self = selfNick()
-  const selfKnown = self !== ''
-  const rows: Array<{ nick: string; color: string; tag: string; stale: boolean }> = []
-
-  if (selfKnown) {
-    rows.push({ nick: self, color: lastJoin?.color ?? '', tag: room.hostNick === self ? '房主' : '你', stale: false })
-  }
-  if (room.hostNick && room.hostNick !== self) {
-    rows.push({ nick: room.hostNick, color: '', tag: '房主', stale: false })
-  }
-  for (const m of room.lastRoster) {
-    if (m.nick === self || m.nick === room.hostNick || !m.nick) continue
-    rows.push({ nick: m.nick, color: m.color, tag: '', stale: true })
-  }
-
-  for (const r of rows) {
-    const li = document.createElement('li')
-    li.className = 'm-row' + (r.stale ? ' stale' : '')
-    if (r.color) li.style.setProperty('--c', r.color)
-    const dot = document.createElement('span')
-    dot.className = 'm-dot'
-    const name = document.createElement('span')
-    name.className = 'm-name'
-    name.textContent = r.nick
-    li.append(dot, name)
-    if (r.tag) {
-      const tag = document.createElement('span')
-      tag.className = 'm-tag'
-      tag.textContent = r.tag
-      li.appendChild(tag)
-    }
-    membersEl.appendChild(li)
-  }
-
-  const count = document.createElement('li')
-  count.className = 'm-count'
-  count.textContent = `${online} 台机器人在线`
-  membersEl.appendChild(count)
+  const n = room.robotsOnline
+  const items = [room.hostNick ? `房主：${room.hostNick}` : '', n > 0 ? `${n} 台机器人在线` : '']
+  const el = document.getElementById('room-members')
+  if (el) el.innerHTML = items.filter(Boolean).map((t) => `<div>${t}</div>`).join('')
 }
 
 function resetLobby(): void {

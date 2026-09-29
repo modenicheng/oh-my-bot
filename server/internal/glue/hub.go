@@ -95,6 +95,8 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	if rc.Room.HostID() == 0 {
 		rc.Room.TransferHost(s.playerID)
 	}
+	// 昵称先于 Join 注入（StateBroadcast 的 host_nick 需要）
+	rc.Room.SetPendingNick(s.playerID, nick)
 	if err := rc.Room.Join(s.playerID, nick, color); err != nil {
 		return fmt.Errorf("join room: %w", err)
 	}

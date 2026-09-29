@@ -103,6 +103,8 @@ type MatchHandle interface {
 // expected to spawn a match with the given seed and players.
 type SimLauncher interface {
 	Launch(seed uint64, playerIDs []uint64) MatchHandle
+	// LaunchWarmup 装配热身场（同链路、warmup 语义：不落日志、无结算）。
+	LaunchWarmup(seed uint64, playerIDs []uint64) MatchHandle
 }
 
 // Member is a seated player.
@@ -132,6 +134,8 @@ type Room struct {
 	lastMatch  MatchHandle // handle kept after match end; Abort must be idempotent
 	aborted    bool        // true if last match was aborted by host
 	sessionSeq int         // number of matches started
+
+	pendingNicks map[uint64]string
 }
 
 // NewRoom creates a room with the given code and host. The host is not
@@ -168,6 +172,16 @@ func (r *Room) State() State {
 }
 
 // HostID returns the host's player id.
+// SetPendingNick 记录昵称（Join 前的 StateBroadcast 兜底用）。
+func (r *Room) SetPendingNick(playerID uint64, nick string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pendingNicks == nil {
+		r.pendingNicks = map[uint64]string{}
+	}
+	r.pendingNicks[playerID] = nick
+}
+
 // TransferHost 将房主移交给指定成员（仅允许从占位 0 移交——glue 首进接管）。
 func (r *Room) TransferHost(playerID uint64) {
 	r.mu.Lock()
@@ -288,7 +302,21 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		if r.state != Idle && r.state != Ended {
 			return fmt.Errorf("%w: Warmup from %s", ErrIllegalTransit, r.state)
 		}
+		if len(r.members) == 0 {
+			return ErrNoPlayers
+		}
+		if r.launcher == nil {
+			return ErrNoLauncher
+		}
+		seed, err := newSeed()
+		if err != nil {
+			return fmt.Errorf("room: generate seed: %w", err)
+		}
+		playerIDs := make([]uint64, len(r.joinOrder))
+		copy(playerIDs, r.joinOrder)
 		r.state = Warmup
+		// LaunchWarmup 须快（异步装配，同 Launch 契约：不得回调 Room）。
+		r.match = r.launcher.LaunchWarmup(seed, playerIDs)
 		return nil
 
 	case ActionStart:
@@ -336,9 +364,22 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		if r.state != Ended {
 			return fmt.Errorf("%w: Restart from %s", ErrIllegalTransit, r.state)
 		}
-		// Ended → Warmup: room persists, ready for the next match of the
-		// Session ("局散房不散").
+		// Ended → Warmup：房间保留、立即装配热身实例（"局散房不散"，玩家回到
+		// 可漫游/改码状态等待下一局）。
+		if len(r.members) == 0 {
+			return ErrNoPlayers
+		}
+		if r.launcher == nil {
+			return ErrNoLauncher
+		}
+		seed, err := newSeed()
+		if err != nil {
+			return fmt.Errorf("room: generate seed: %w", err)
+		}
+		playerIDs := make([]uint64, len(r.joinOrder))
+		copy(playerIDs, r.joinOrder)
 		r.state = Warmup
+		r.match = r.launcher.LaunchWarmup(seed, playerIDs)
 		return nil
 
 	default:
@@ -400,8 +441,11 @@ func (r *Room) SessionScores() []ScoreRow {
 
 // nickLocked returns the member's nick, or "" if not seated. Caller holds mu.
 func (r *Room) nickLocked(playerID uint64) string {
-	if m, ok := r.members[playerID]; ok {
+	if m, ok := r.members[playerID]; ok && m.Nick != "" {
 		return m.Nick
+	}
+	if n, ok := r.pendingNicks[playerID]; ok {
+		return n
 	}
 	return ""
 }
