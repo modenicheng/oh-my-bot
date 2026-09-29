@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
@@ -152,6 +153,20 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 	s.rc.BroadcastRoomState()
 }
 
+// SubmitScript 脚本提交 → 当前对局（结果回执走可靠通道）。
+func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
+	m := s.rc.currentMatch()
+	if m == nil || sub == nil {
+		return
+	}
+	ok, errMsg, rev := m.SubmitScript(s.playerID, sub.GetSource())
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{
+			ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev,
+		}},
+	}}})
+}
+
 // LeaveRoom 离房。
 func (s *Session) LeaveRoom() {
 	if s.rc == nil {
@@ -182,6 +197,18 @@ func (h *Hub) RouteOther(_ *ombv1.ClientMsg, _, _ func(*ombv1.ServerMsg)) {}
 type launcherAdapter struct{ rc *RoomConn }
 
 func (la *launcherAdapter) Launch(seed uint64, playerIDs []uint64) room.MatchHandle {
+	// Launch 在 room.HostCommand（reader 协程同步调用）里执行：装配全程异步化，
+	// 立即返回占位 handle，避免 reader 协程被 NewMatch/mapgen/log 初始化阻塞。
+	ch := make(chan *Match, 1)
+	go func() {
+		m, _ := la.launchSync(seed, playerIDs)
+		ch <- m
+	}()
+	// 房间状态机需要立即拿到 handle——返回包装器，把 Abort 转发给异步启动的 match。
+	return &asyncHandle{ch: ch}
+}
+
+func (la *launcherAdapter) launchSync(seed uint64, playerIDs []uint64) (*Match, error) {
 	players := map[uint64]SessionInfo{}
 	la.rc.mu.Lock()
 	for _, pid := range playerIDs {
@@ -196,7 +223,7 @@ func (la *launcherAdapter) Launch(seed uint64, playerIDs []uint64) room.MatchHan
 		la.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "match launch failed: " + err.Error()}},
 		}}})
-		return failedHandle{}
+		return nil, err
 	}
 	la.rc.setMatch(m)
 
@@ -210,7 +237,25 @@ func (la *launcherAdapter) Launch(seed uint64, playerIDs []uint64) room.MatchHan
 		}},
 	}}})
 	la.rc.BroadcastRoomState()
-	return m
+	return m, nil
+}
+
+// asyncHandle：包装异步启动的 match，实现 room.MatchHandle。
+type asyncHandle struct {
+	ch   chan *Match
+	once sync.Once
+}
+
+func (a *asyncHandle) Abort() {
+	a.once.Do(func() {
+		select {
+		case m := <-a.ch:
+			if m != nil {
+				m.Abort()
+			}
+		case <-time.After(2 * time.Second):
+		}
+	})
 }
 
 func (rc *RoomConn) setMatch(m *Match) {
@@ -224,10 +269,6 @@ func (rc *RoomConn) currentMatch() *Match {
 	defer rc.mu.Unlock()
 	return rc.match
 }
-
-type failedHandle struct{}
-
-func (failedHandle) Abort() {}
 
 // EnsureLauncher 给房间装 launcher（首次 Join 后惰性装配）。
 func (rc *RoomConn) EnsureLauncher() {

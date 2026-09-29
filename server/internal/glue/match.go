@@ -14,6 +14,7 @@ import (
 
 	"github.com/modenicheng/oh-my-bot/server/internal/mapgen"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"github.com/modenicheng/oh-my-bot/server/internal/script"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 	"github.com/modenicheng/oh-my-bot/server/internal/snapshot"
 	"github.com/modenicheng/oh-my-bot/server/internal/stats"
@@ -36,6 +37,9 @@ type Match struct {
 
 	encoders map[uint32]*snapshot.DeltaEncoder
 	wallIX   *snapshot.WallIndex
+
+	scriptPool *script.RunPool
+	runtimes   map[uint32]*script.GojaRuntime // robotID -> runtime（脚本装载/热更）
 
 	robotOf  map[uint64]uint32 // playerID -> robotID
 	playerOf map[uint32]uint64 // robotID -> playerID
@@ -101,6 +105,8 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	}
 	m.proj.SetPlayerMap(playerMap)
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
+	m.runtimes = map[uint32]*script.GojaRuntime{}
+	m.scriptPool = script.NewRunPool(script.Config{})
 
 	go m.run()
 	return m, nil
@@ -125,6 +131,24 @@ type multiSink struct {
 func (ms multiSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	ms.primary.OnEvent(tick, ev)
 	ms.secondary.OnEvent(tick, ev)
+}
+
+// SubmitScript 玩家脚本提交（编译失败保旧版——Hot Swap 语义）。
+func (m *Match) SubmitScript(pid uint64, src string) (ok bool, errMsg string, rev uint32) {
+	rid, ok := m.robotOf[pid]
+	if !ok {
+		return false, "not in match", 0
+	}
+	rt := m.scriptPool.RuntimeOf(rid)
+	if rt == nil {
+		rt = script.NewGojaRuntime(script.Config{})
+		m.scriptPool.Register(rid, rt)
+		m.runtimes[rid] = rt // 记录已装载（runScripts 据此 Submit）
+	}
+	if err := rt.Load(src); err != nil {
+		return false, err.Error(), rt.Rev() // 旧版本继续跑
+	}
+	return true, "", rt.Rev()
 }
 
 // ApplyClientInput 连接层收到输入帧转投模拟（带 seq 缓存供 ack）。
@@ -161,6 +185,7 @@ func (m *Match) step() {
 	m.sim.Tick()
 
 	wv := m.sim.WorldView()
+	m.runScripts(wv)
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
 	for _, rv := range wv.Robots {
@@ -199,6 +224,44 @@ func (m *Match) step() {
 		m.finish(wv)
 		return
 	}
+}
+
+// runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
+func (m *Match) runScripts(wv sim.WorldView) {
+	if len(m.runtimes) == 0 {
+		return
+	}
+	deadline := time.Now().Add(frameDue)
+	for rid := range m.runtimes {
+		self, ok := robotOf(wv, rid)
+		if !ok {
+			continue
+		}
+		obs := snapshot.BuildObservation(snapshot.World{
+			FrameView:   wv.Frame,
+			Robots:      wv.Robots,
+			Projectiles: wv.Projectiles,
+			Cores:       wv.Cores,
+			Uplinks:     wv.Uplinks,
+		}, m.wallIX, rid, wv.Partners[rid])
+		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
+	}
+	for _, res := range m.scriptPool.Collect(deadline) {
+		if res.Err != nil || res.Deferred {
+			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
+			continue
+		}
+		m.sim.ApplyScriptCommands(res.ID, res.Commands)
+	}
+}
+
+func robotOf(wv sim.WorldView, id uint32) (sim.RobotView, bool) {
+	for _, r := range wv.Robots {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return sim.RobotView{}, false
 }
 
 func (m *Match) finish(wv sim.WorldView) {

@@ -71,6 +71,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 		if cur := (*sess); cur != nil {
 			cur.HostCommand(p.RoomAction.GetKind())
 		}
+	case *ombv1.ClientMsg_ScriptSubmit:
+		if cur := (*sess); cur != nil {
+			cur.SubmitScript(p.ScriptSubmit)
+		}
 	default:
 		_ = sendLossy
 	}
