@@ -1,0 +1,12 @@
+{
+  "server": {
+    "id": "srv_01a0e0ff-a172-7f28-83ae-e15022d85e1c",
+    "url": "https://astral.modenc.top"
+  },
+  "version": 1,
+  "workspace": {
+    "id": "ws_01a0ecfa-afd8-7acb-b12a-679511c879cf",
+    "name": "oh-my-bot",
+    "slug": "oh-my-bot"
+  }
+}
