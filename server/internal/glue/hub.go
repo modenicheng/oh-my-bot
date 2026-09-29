@@ -197,18 +197,27 @@ func (h *Hub) RouteOther(_ *ombv1.ClientMsg, _, _ func(*ombv1.ServerMsg)) {}
 type launcherAdapter struct{ rc *RoomConn }
 
 func (la *launcherAdapter) Launch(seed uint64, playerIDs []uint64) room.MatchHandle {
+	return la.launch(true, seed, playerIDs, false)
+}
+
+// LaunchWarmup 热身场：同链路装配，标记 warmup（不落 JSONL、无 MatchEnd 结算）。
+func (la *launcherAdapter) LaunchWarmup(seed uint64, playerIDs []uint64) room.MatchHandle {
+	return la.launch(true, seed, playerIDs, true)
+}
+
+func (la *launcherAdapter) launch(_ bool, seed uint64, playerIDs []uint64, warmup bool) room.MatchHandle {
 	// Launch 在 room.HostCommand（reader 协程同步调用）里执行：装配全程异步化，
 	// 立即返回占位 handle，避免 reader 协程被 NewMatch/mapgen/log 初始化阻塞。
 	ch := make(chan *Match, 1)
 	go func() {
-		m, _ := la.launchSync(seed, playerIDs)
+		m, _ := la.launchSync(seed, playerIDs, warmup)
 		ch <- m
 	}()
 	// 房间状态机需要立即拿到 handle——返回包装器，把 Abort 转发给异步启动的 match。
 	return &asyncHandle{ch: ch}
 }
 
-func (la *launcherAdapter) launchSync(seed uint64, playerIDs []uint64) (*Match, error) {
+func (la *launcherAdapter) launchSync(seed uint64, playerIDs []uint64, warmup bool) (*Match, error) {
 	players := map[uint64]SessionInfo{}
 	la.rc.mu.Lock()
 	for _, pid := range playerIDs {
@@ -218,7 +227,7 @@ func (la *launcherAdapter) launchSync(seed uint64, playerIDs []uint64) (*Match, 
 	}
 	la.rc.mu.Unlock()
 
-	m, err := NewMatch(la.rc, seed, int(seed&0xffffffff), players)
+	m, err := NewMatch(la.rc, seed, int(seed&0xffffffff), players, warmup)
 	if err != nil {
 		la.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "match launch failed: " + err.Error()}},

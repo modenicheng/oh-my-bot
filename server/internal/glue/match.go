@@ -46,6 +46,7 @@ type Match struct {
 	lastSeq  map[uint64]uint32
 
 	tick     uint32
+	warmup   bool
 	stopOnce sync.Once
 	stop     chan struct{}
 	done     chan struct{}
@@ -61,7 +62,7 @@ type SessionInfo struct {
 // NewMatch 装配并启动（独立 goroutine 60Hz 驱动）。
 // seed/matchSeq 必须由调用方传入：room.HostCommand 持 room.mu 调 Launch，
 // 此处反查 Room.Seed()/SessionSeq() 会非重入死锁。
-func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo) (*Match, error) {
+func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo, warmup bool) (*Match, error) {
 	m := &Match{
 		rc:       rc,
 		proj:     stats.NewProjector(),
@@ -91,15 +92,18 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		ids = append(ids, rid)
 	}
 
-	// 事件管线：sim → 日志落盘 + 投影 + 可靠广播（multiSink 组合）
-	matchID := fmt.Sprintf("%s-%d", rc.Code, matchSeq)
-	ml, err := sim.NewMatchEventLogIn("data/matches", matchID)
-	if err != nil {
-		return nil, fmt.Errorf("event log: %w", err)
+	// 事件管线：sim → 日志落盘（正式局）+ 投影 + 可靠广播
+	var sinkAll sim.EventSink = m.newSink()
+	if !warmup {
+		matchID := fmt.Sprintf("%s-%d", rc.Code, matchSeq)
+		ml, err := sim.NewMatchEventLogIn("data/matches", matchID)
+		if err != nil {
+			return nil, fmt.Errorf("event log: %w", err)
+		}
+		m.log = ml
+		sinkAll = multiSink{primary: ml, secondary: sinkAll}
 	}
-	m.log = ml
-	sink := m.newSink()
-	m.sim = sim.NewSim(seed, ids, multiSink{primary: ml, secondary: sink})
+	m.sim = sim.NewSim(seed, ids, sinkAll)
 	if err := m.sim.SetMap(def); err != nil {
 		return nil, fmt.Errorf("setmap: %w", err)
 	}
@@ -220,7 +224,7 @@ func (m *Match) step() {
 		s.SendLossy(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
 	}
 
-	if m.tick >= matchTicks {
+	if m.tick >= matchTicks && !m.warmup {
 		m.finish(wv)
 		return
 	}
