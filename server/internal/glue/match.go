@@ -8,6 +8,7 @@ package glue
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/mapgen"
@@ -82,9 +83,15 @@ func NewMatch(rc *RoomConn, players map[uint64]SessionInfo) (*Match, error) {
 		ids = append(ids, rid)
 	}
 
-	// 事件管线：sim → 投影 + 可靠广播（日志由 sim.MatchEventLog 另行落盘）
+	// 事件管线：sim → 日志落盘 + 投影 + 可靠广播（multiSink 组合）
+	matchID := fmt.Sprintf("%s-%d", rc.Code, rc.Room.SessionSeq())
+	ml, err := sim.NewMatchEventLogIn("data/matches", matchID)
+	if err != nil {
+		return nil, fmt.Errorf("event log: %w", err)
+	}
+	m.log = ml
 	sink := m.newSink()
-	m.sim = sim.NewSim(rc.Room.Seed(), ids, sink)
+	m.sim = sim.NewSim(rc.Room.Seed(), ids, multiSink{primary: ml, secondary: sink})
 	if err := m.sim.SetMap(def); err != nil {
 		return nil, fmt.Errorf("setmap: %w", err)
 	}
@@ -104,6 +111,17 @@ func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 }
 
 func (m *Match) newSink() sim.EventSink { return glueSink{m: m} }
+
+// multiSink：事件先落盘再投影广播（日志失败不阻断模拟——Err 由 Close 报告）。
+type multiSink struct {
+	primary   *sim.MatchEventLog
+	secondary sim.EventSink
+}
+
+func (ms multiSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	ms.primary.OnEvent(tick, ev)
+	ms.secondary.OnEvent(tick, ev)
+}
 
 // ApplyClientInput 连接层收到输入帧转投模拟（带 seq 缓存供 ack）。
 func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
@@ -172,6 +190,7 @@ func (m *Match) step() {
 
 	if m.tick >= matchTicks {
 		m.finish(wv)
+		return
 	}
 }
 
@@ -188,6 +207,12 @@ func (m *Match) finish(wv sim.WorldView) {
 		Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: finalRowsOf(rows)},
 	}
 	m.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
+	if m.log != nil {
+		if err := m.log.Close(); err != nil {
+			// 日志失败不推翻对局结果，但要可见（运维排查）
+			log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
+		}
+	}
 }
 
 func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
