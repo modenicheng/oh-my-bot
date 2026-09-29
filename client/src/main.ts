@@ -156,7 +156,12 @@ function selfNick(): string {
 /** 大厅成员列表：自己 + 房主 + 最近对局名单（真实数据源，不造名单）。 */
 function renderMembers(): void {
   const n = room.robotsOnline
-  const items = [room.hostNick ? `房主：${room.hostNick}` : '', n > 0 ? `${n} 台机器人在线` : '']
+  const me = selfNick()
+  const items = [
+    room.hostNick ? `房主：${room.hostNick}` : '',
+    me && me !== room.hostNick ? `你：${me}` : '',
+    n > 0 ? `在线：${n} 人` : '',
+  ]
   const el = document.getElementById('room-members')
   if (el) el.innerHTML = items.filter(Boolean).map((t) => `<div>${t}</div>`).join('')
 }
