@@ -5,6 +5,6 @@ import (
 	"net/http/httptest"
 )
 
-func httptest_server(h http.Handler) *httptest.Server {
-	return httptest.NewServer(h)
-}
+type testserverT = httptest.Server
+
+func newTestServer(h http.Handler) *httptest.Server { return httptest.NewServer(h) }

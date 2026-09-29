@@ -32,6 +32,9 @@ message ClientInput {
   bool dash = 6;
   bool shield = 7;
   bool interact = 8;
+  // 本帧实际操作过的轴才置位（bit0 move / bit1 aim / bit2 fire / bit3 ability）。
+  // 未置位轴 = 本帧未操作：仲裁器不视为抢占，脚本轴保持。
+  uint32 axis_mask = 9;
 }
 
 message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
@@ -43,6 +46,7 @@ message RoomAction {
 }
 message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
 message AiPrompt { string text = 1; } // AI Agent 配额内改码请求
+message ResyncRequest {} // 客户端检测快照缺口（base_tick 断链）时请求全量重同步
 
 message ClientMsg {
   oneof payload {
@@ -54,6 +58,7 @@ message ClientMsg {
     ScriptSubmit script_submit = 6;
     AiPrompt ai_prompt = 7;
     AssistToggle assist_toggle = 8;
+    ResyncRequest resync_request = 9;
   }
 }
 
@@ -111,14 +116,15 @@ message SnapshotDelta {
   Phase phase = 3;
   uint32 time_left_s = 4;    // 剩余秒
   bool full = 5;             // 首帧/重同步：全量实体表
-  repeated RobotState robots = 6;      // AOI 裁剪后
-  repeated uint32 robot_gone = 7;      // tombstone：离开视野的实体 id
-  repeated ProjectileState projectiles = 8;
-  repeated uint32 projectile_gone = 9;
-  repeated CoreState cores = 10;
-  repeated uint32 core_gone = 11;
-  repeated UplinkState uplinks = 12;
-  SelfState self = 13;
+  uint32 base_tick = 6;      // 本 delta 基于的上一快照 tick（缺口检测）
+  repeated RobotState robots = 7;      // AOI 裁剪后
+  repeated uint32 robot_gone = 8;      // tombstone：离开视野的实体 id
+  repeated ProjectileState projectiles = 9;
+  repeated uint32 projectile_gone = 10;
+  repeated CoreState cores = 11;
+  repeated uint32 core_gone = 12;
+  repeated UplinkState uplinks = 13;
+  SelfState self = 14;
 }
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
@@ -156,6 +162,20 @@ message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，�
   uint32 client_script_id = 1;
   bool ok = 2;
   string error = 3; // 编译/加载错误摘要
+  uint32 script_rev = 4; // 服务器侧版本号（单调递增）
+}
+
+message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务器为唯一 owner）
+  string map_json = 1;         // MapDef 序列化（与 mapgen.Generate 同源）
+  string map_hash = 2;        // 一致性校验
+  uint32 generator_version = 3;
+}
+
+message EvAiUsage { // AI 配额事实（每次扣减/护栏触顶）
+  uint32 robot = 1;
+  uint32 rounds_delta = 2;
+  uint32 tokens_delta = 3;    // 实际消耗（usage 字段累加）
+  uint32 global_left_k = 4;   // 全局护栏余量（千 token）
 }
 
 message EvRoomState { // 房间生命周期广播（含 Session 榜）
@@ -189,6 +209,8 @@ message ServerEvent {
     EvMatchStart match_start = 21;
     EvWallHit wall_hit = 22;
     EvScriptError script_error = 23;
+    EvMapBootstrap map_bootstrap = 24;
+    EvAiUsage ai_usage = 25;
   }
 }
 

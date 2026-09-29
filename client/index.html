@@ -5,29 +5,90 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>oh-my-bot</title>
   <style>
-    /* tokens: client/STYLE.md */
-    html, body { margin: 0; height: 100%; background: #0a0e14; color: #d8dee9;
+    /* tokens: client/STYLE.md — 暗底 #0a0e14/#10141a、1px #1f2733 描边、radius 0、荧光只做状态高亮 */
+    :root {
+      --bg: #0a0e14; --panel: #10141a; --line: #1f2733;
+      --fg: #d8dee9; --fg-dim: #8b98a9;
+      --accent: #22d3ee; --danger: #ff5c5c;
+      --mono: ui-monospace, "JetBrains Mono", monospace;
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
                  font: 14px/1.6 Inter, system-ui, sans-serif; display: grid; place-items: center; }
     body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
-                   background-image: linear-gradient(#1f2733 1px, transparent 1px),
-                                     linear-gradient(90deg, #1f2733 1px, transparent 1px);
+                   background-image: linear-gradient(var(--line) 1px, transparent 1px),
+                                     linear-gradient(90deg, var(--line) 1px, transparent 1px);
                    background-size: 24px 24px; opacity: .04; }
-    .panel { border: 1px solid #1f2733; background: #10141a; padding: 24px 32px;
-             display: flex; flex-direction: column; gap: 12px; }
-    h1 { margin: 0; font-size: 15px; letter-spacing: .35em; font-weight: 600; color: #d8dee9; }
-    #status { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px;
-              display: flex; align-items: center; gap: 8px; color: #8b98a9; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff5c5c;
-           box-shadow: 0 0 8px #ff5c5c40; }
-    .ok #status { color: #22d3ee; }
-    .ok .dot { background: #22d3ee; box-shadow: 0 0 8px #22d3ee40; }
+    .panel { border: 1px solid var(--line); background: var(--panel); padding: 28px 32px;
+             width: 340px; display: flex; flex-direction: column; gap: 14px; }
+    h1 { margin: 0; font-size: 15px; letter-spacing: .35em; font-weight: 600; color: var(--fg); }
+    .sub { font-size: 12px; color: var(--fg-dim); letter-spacing: .2em; }
+    label { display: flex; flex-direction: column; gap: 6px;
+            font-size: 12px; color: var(--fg-dim); }
+    input[type=text] { border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+                       padding: 8px 10px; font: inherit; outline: none; }
+    input[type=text]:focus { border-color: var(--accent); }
+    #in-room { font-family: var(--mono); letter-spacing: .3em; text-transform: uppercase; }
+    .field-label { font-size: 12px; color: var(--fg-dim); letter-spacing: .2em; }
+    .hint { font-size: 11px; color: var(--fg-dim); }
+    #swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+    .swatch { width: 100%; aspect-ratio: 1; border: 1px solid var(--line); padding: 0;
+              cursor: pointer; background: var(--sw); }
+    .swatch:hover { border-color: var(--sw); }
+    .swatch.sel { border-color: var(--sw); box-shadow: 0 0 8px var(--sw); outline: none; }
+    button.act { border: 1px solid var(--accent); background: transparent; color: var(--accent);
+                 padding: 9px 0; font: inherit; letter-spacing: .25em; cursor: pointer; }
+    button.act:hover:not(:disabled) { box-shadow: 0 0 12px #22d3ee40; }
+    button.act:disabled { opacity: .45; cursor: default; }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    button.danger:hover:not(:disabled) { box-shadow: 0 0 12px #ff5c5c40; }
+    .error-line { font-size: 12px; color: var(--danger); min-height: 1.2em; }
+    /* 大厅 */
+    #room-code { font-family: var(--mono); font-size: 34px; letter-spacing: .3em; color: var(--accent);
+                 padding: 6px 0 2px; border: 1px solid var(--line); background: var(--bg);
+                 text-align: center; }
+    #members { list-style: none; margin: 0; padding: 10px 12px; border: 1px solid var(--line);
+               background: var(--bg); min-height: 64px; font-size: 13px; }
+    #members .placeholder { color: var(--fg-dim); }
+    #room-state { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
+    #status { font-family: var(--mono); font-size: 13px; display: flex; align-items: center;
+              gap: 8px; color: var(--fg-dim); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger);
+           box-shadow: 0 0 8px #ff5c5c40; flex: none; }
+    .ok #status { color: var(--accent); }
+    .ok .dot { background: var(--accent); box-shadow: 0 0 8px #22d3ee40; }
+    .down #status { color: var(--danger); }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <div class="panel" id="app">
-    <h1>OH-MY-BOT</h1>
-    <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
-    <div id="detail" style="font-family: ui-monospace, 'JetBrains Mono', monospace; font-size: 12px; color: #8b98a9;">—</div>
+    <!-- 进房界面 -->
+    <section id="view-join">
+      <h1>OH-MY-BOT</h1>
+      <div class="sub">进入房间</div>
+      <label>房间码
+        <input type="text" id="in-room" maxlength="6" spellcheck="false" autocomplete="off"
+               placeholder="ABC123">
+      </label>
+      <label>昵称
+        <input type="text" id="in-nick" maxlength="16" spellcheck="false" autocomplete="off"
+               placeholder="1-16 个字符">
+      </label>
+      <div class="field-label">颜色</div>
+      <div id="swatches"></div>
+      <button type="button" class="act" id="btn-join">进入房间</button>
+      <div class="error-line" id="form-error"></div>
+    </section>
+    <!-- 房间大厅 -->
+    <section id="view-room" hidden>
+      <h1>OH-MY-BOT</h1>
+      <div id="room-code">······</div>
+      <div class="field-label">在线成员</div>
+      <ul id="members"><li class="placeholder">等待其他玩家…</li></ul>
+      <div id="room-state">—</div>
+      <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
+      <button type="button" class="act danger" id="btn-reconnect" hidden>重新连接</button>
+    </section>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
