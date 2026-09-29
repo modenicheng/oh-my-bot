@@ -1,8 +1,7 @@
 package mapgen
 
-// rng 是 xoshiro256** 伪随机流（splitmix64 播种）。
-// 纯整数运算、无平台相关浮点库调用，同 seed 必产出同一序列——
-// 确定性地图生成（同 seed 同 MapHash）依赖这一点。
+// rng 是 xoshiro256** 伪随机流（splitmix64 播种）。纯整数运算，同 seed 必
+// 产出同一序列——确定性地图生成（同 seed 同 MapHash）依赖这一点。
 type rng struct {
 	s [4]uint64
 }
@@ -35,11 +34,11 @@ func (r *rng) next() uint64 {
 	return res
 }
 
-// float 返回 [0,1) 内的均匀浮点（53 位精度，(next>>11)·2⁻⁵³）。
+// float 返回 [0,1) 内的均匀浮点（53 位精度：(next>>11)·2⁻⁵³）。
 func (r *rng) float() float64 { return float64(r.next()>>11) * (1.0 / (1 << 53)) }
 
-// rangeF 返回 [lo,hi) 内的均匀浮点。
+// rangeF 返回 [lo,hi) 内的均匀浮点（乘加合成，确定性）。
 func (r *rng) rangeF(lo, hi float64) float64 { return lo + (hi-lo)*r.float() }
 
-// intn 返回 [0,n) 内的整数（取模；模偏差对地图布局无影响且完全确定）。
+// intn 返回 [0,n) 内的整数。掩模偏差对地图布局无影响且完全确定。
 func (r *rng) intn(n int) int { return int(r.next() % uint64(n)) }

@@ -1,18 +1,14 @@
 package mapgen
 
-import (
-	"math"
+import "github.com/modenicheng/oh-my-bot/server/internal/sim"
 
-	"github.com/modenicheng/oh-my-bot/server/internal/sim"
-)
-
-// dirCount 为方向表分辨率：48 步 × 7.5° = 360°。扇区轴（k*45° = 6k 步）与
-// Uplink 错位角（k*45°+22.5° = 6k+3 步）都是表上精确点——生成路径零三角
-// 函数调用（浮点基本运算 + 字面量表），保证跨平台 bit 级确定性。
+// dirCount 为方向表分辨率：48 步 × 7.5° = 360°。扇区轴（k*45° = 6k 步）
+// 与 Uplink 错位角（k*45°+22.5° = 6k+3 步）都是表上精确点——生成路径零
+// 三角函数调用（浮点乘加 + 字面量表），保证跨平台 bit 级确定性。
 const dirCount = 48
 
 // dirTable 为 7.5° 步进的单位向量字面量表（6 位小数）。TestDirTable 校验
-// 单位长度与相邻夹角（dot = cos7.5°），防止手抄笔误进入产出。
+// 单位长度与相邻夹角，防止手抄笔误进入产出。
 var dirTable = [dirCount]struct{ x, y float64 }{
 	{1.000000, 0.000000}, {0.991445, 0.130526}, {0.965926, 0.258819}, {0.923880, 0.382683},
 	{0.866025, 0.500000}, {0.793353, 0.608761}, {0.707107, 0.707107}, {0.608761, 0.793353},
@@ -34,24 +30,57 @@ func dirAt(step int) sim.Vec2 {
 	return sim.Vec2{X: d.x, Y: d.y}
 }
 
-// rectOf 构造中心 (cx,cy)、半边 (hx,hy) 的轴对齐矩形。
-func rectOf(cx, cy, hx, hy float64) sim.Rect {
-	return sim.Rect{
-		Min: sim.Vec2{X: cx - hx, Y: cy - hy},
-		Max: sim.Vec2{X: cx + hx, Y: cy + hy},
+// r2 = √2/2（45° 旋转系数）。用字面量而非 math.Sqrt2/2，与 rot45 的
+// 乘加序列共同构成确定性算术。
+const r2 = 0.7071067811865476
+
+// rot90 为绕原点的 90° 整格旋转（精确算术：(x,y) → (-y,x)）。
+func rot90(p sim.Vec2) sim.Vec2 { return sim.Vec2{X: -p.Y, Y: p.X} }
+
+// rot45 为绕原点的 45° 旋转（(x,y) → ((x−y)·r2, (x+y)·r2)）。产出经
+// IEEE754 乘加后完全可复现；用于掩体中心的八分对称标记。
+func rot45(p sim.Vec2) sim.Vec2 {
+	return sim.Vec2{X: (p.X - p.Y) * r2, Y: (p.X + p.Y) * r2}
+}
+
+// rotateK 返回 p 绕原点旋转 k·45° 后的位置：偶数 k 走精确整格旋转
+// （90° 的倍数），奇数 k 先做一次 45° 旋转再做整格旋转。
+func rotateK(p sim.Vec2, k int) sim.Vec2 {
+	q := p
+	if k%2 != 0 {
+		q = rot45(q)
 	}
+	switch ((k % 4) + 4) % 4 {
+	case 1, -3:
+		q = rot90(q)
+	case 2, -2:
+		q = rot90(rot90(q))
+	case 3, -1:
+		q = rot90(rot90(rot90(q)))
+	}
+	return q
 }
 
-// wallRect 将 Wall 转为同构 Rect。
-func wallRect(w sim.Wall) sim.Rect {
-	return sim.Rect{Min: w.Min, Max: w.Max}
+// rect 为 mapgen 内部轴对齐矩形（与 sim.Rect/Min-Max 语义同构）。
+type rect struct {
+	MinX, MinY, MaxX, MaxY float64
 }
 
-// rectNearestDist2 点到 AABB 的最近距离平方（点在矩形内为 0）。
-// 只用乘加运算，避免 Hypot/Sqrt 的平台差异。
-func rectNearestDist2(r sim.Rect, p sim.Vec2) float64 {
-	dx := math.Max(r.Min.X-p.X, p.X-r.Max.X)
-	dy := math.Max(r.Min.Y-p.Y, p.Y-r.Max.Y)
+// rectAt 构造中心 p、半边 (hx,hy) 的矩形。
+func rectAt(p sim.Vec2, hx, hy float64) rect {
+	return rect{MinX: p.X - hx, MinY: p.Y - hy, MaxX: p.X + hx, MaxY: p.Y + hy}
+}
+
+// wallRect 将 sim.Wall 转为内部 rect。
+func wallRect(w sim.Wall) rect {
+	return rect{MinX: w.Min.X, MinY: w.Min.Y, MaxX: w.Max.X, MaxY: w.Max.Y}
+}
+
+// nearestDist2 点到矩形最近距离的平方（点在内为 0）。只用 min/max/乘加，
+// 无 Sqrt，保证确定性。
+func nearestDist2(r rect, p sim.Vec2) float64 {
+	dx := max(r.MinX-p.X, p.X-r.MaxX)
+	dy := max(r.MinY-p.Y, p.Y-r.MaxY)
 	if dx < 0 {
 		dx = 0
 	}
@@ -61,17 +90,10 @@ func rectNearestDist2(r sim.Rect, p sim.Vec2) float64 {
 	return dx*dx + dy*dy
 }
 
-// rectFarthestDist2 点到 AABB 最远角的距离平方。
-func rectFarthestDist2(r sim.Rect, p sim.Vec2) float64 {
-	dx := math.Max(p.X-r.Min.X, r.Max.X-p.X)
-	dy := math.Max(p.Y-r.Min.Y, r.Max.Y-p.Y)
-	return dx*dx + dy*dy
-}
-
-// rectGap2 两 AABB 的间隙平方；相交返回 -1（无法开方，区分"接触"与"重叠"）。
-func rectGap2(a, b sim.Rect) float64 {
-	dx := math.Max(a.Min.X-b.Max.X, b.Min.X-a.Max.X)
-	dy := math.Max(a.Min.Y-b.Max.Y, b.Min.Y-a.Max.Y)
+// gap2 两矩形间隙的平方；相交或接触返回 -1。
+func gap2(a, b rect) float64 {
+	dx := max(a.MinX-b.MaxX, b.MinX-a.MaxX)
+	dy := max(a.MinY-b.MaxY, b.MinY-a.MaxY)
 	if dx < 0 {
 		dx = 0
 	}
