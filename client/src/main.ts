@@ -137,7 +137,8 @@ function onRoomState(state: number, hostNick: string, robotsOnline: number): voi
   const isHost = hostNick !== '' && hostNick === selfNick()
   const idleLike = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP
   btnStart.hidden = !(isHost && idleLike && !isInGame())
-  btnWarmup.hidden = !(isHost && state === EvRoomState_State.R_ENDED && !isInGame())
+  // 热身场：Idle（开局前练习）与 Ended（下局前重整）都可用（room 状态机两态均合法）
+  btnWarmup.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_ENDED) && !isInGame())
   if (btnStart.hidden && btnWarmup.hidden) {
     roomNotice.hidden = false
     roomNotice.textContent = state === EvRoomState_State.R_RUNNING ? '对局进行中' : (isHost ? '等待开始' : '等待房主开始')
