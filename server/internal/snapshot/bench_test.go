@@ -10,9 +10,9 @@ import (
 // ---- 合成场景：64 机器人 + 64 弹丸 + 40 墙，地图 80×80m ----
 
 const (
-	benchRobots  = 64
-	benchWalls   = 40
-	benchMapSize = 80.0
+	benchRobots    = 64
+	benchWallCount = 40
+	benchMapSize   = 80.0
 )
 
 func benchWalls(r *rand.Rand) []sim.Wall {
@@ -76,7 +76,6 @@ func BenchmarkVisibility(b *testing.B) {
 func BenchmarkVisibilityNoIndex(b *testing.B) {
 	r := rand.New(rand.NewSource(40))
 	walls := benchWalls(r)
-	ix := NewWallIndex(walls, 0)
 	w := benchWorld(r, 1)
 
 	// 用 cellSide 极小的退化索引模拟全表扫描（每查询遍历全部 40 墙）。

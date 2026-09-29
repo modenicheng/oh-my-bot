@@ -115,10 +115,11 @@ func TestDeltaChangeDetection(t *testing.T) {
 		t.Fatalf("无变化帧应空：got %v", robotIDs(d))
 	}
 
-	// Turret 变化不触发重发（契约：仅位置/HP/能量）。
-	chg3 := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
-	chg3.Robots[1].Turret = 1.5
-	d = enc.Encode(5, 0, sim.PhaseOuterRing, 476, obsOf(chg3, 1, 2, nil), selfIn(1))
+	// Turret 变化不触发重发（契约：仅位置/HP/能量）。chg4 基于 chg2（同能量）只改 turret。
+	chg4 := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
+	chg4.Robots[1].EnergyX10 = 500
+	chg4.Robots[1].Turret = 1.5
+	d = enc.Encode(5, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
 	if len(d.Robots) != 0 {
 		t.Fatalf("纯 turret 变化不应重发：got %v", robotIDs(d))
 	}
