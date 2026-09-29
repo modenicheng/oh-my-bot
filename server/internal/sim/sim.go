@@ -58,18 +58,6 @@ type ScriptRuntime interface {
 	Run(ctx context.Context, frame ScriptFrame) (Input, error)
 }
 
-// ScriptFrame will be supplemented with visibility-filtered observations by the
-// perception layer. Never give scripts the unrestricted checkpoint/player table.
-type ScriptFrame struct {
-	Tick uint32
-	Self Robot
-}
-
-type Vec2 struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-}
-
 func (v Vec2) finite() bool {
 	return !math.IsNaN(v.X) && !math.IsNaN(v.Y) && !math.IsInf(v.X, 0) && !math.IsInf(v.Y, 0)
 }
