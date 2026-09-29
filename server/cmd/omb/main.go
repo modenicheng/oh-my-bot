@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,6 +22,9 @@ import (
 
 //go:embed all:web
 var webFS embed.FS
+
+//go:embed all:manual
+var manualFS embed.FS
 
 // webRoot strips the embed "web/" prefix so the site root maps web/ content.
 var webRoot = func() fs.FS {
@@ -58,6 +62,30 @@ func main() {
 		sort.Strings(names)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(names)
+	})
+	// 手册 API：目录树 + 原始 markdown（ADR-0011 客户端阅读器数据源）
+	mux.HandleFunc("/api/manual", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(buildManualTreeFS(manualFS, "manual"))
+	})
+	mux.HandleFunc("/api/manual/", func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, "/api/manual/")
+		if rel == "" || strings.Contains(rel, "..") {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		full := path.Join("manual", rel)
+		if !strings.HasSuffix(full, ".md") {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		data, err := manualFS.ReadFile(full)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("/api/replay/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/replay/")
@@ -141,4 +169,36 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	sess.BindRoom(rc)
 	*sessOut = sess
 	rc.BroadcastRoomState()
+}
+
+type manualNode struct {
+	Path     string       `json:"path"`
+	Title    string       `json:"title"`
+	Children []manualNode `json:"children,omitempty"`
+}
+
+// buildManualTreeFS 递归构建 manual/ 目录树（title 取文件名去扩展名）。
+func buildManualTreeFS(fsys embed.FS, root string) []manualNode {
+	entries, err := fsys.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []manualNode
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if e.IsDir() {
+			children := buildManualTreeFS(fsys, path.Join(root, name))
+			if len(children) > 0 {
+				out = append(out, manualNode{Path: name, Title: name, Children: children})
+			}
+			continue
+		}
+		if strings.HasSuffix(name, ".md") {
+			out = append(out, manualNode{Path: strings.TrimSuffix(name, ".md"), Title: strings.TrimSuffix(name, ".md")})
+		}
+	}
+	return out
 }
