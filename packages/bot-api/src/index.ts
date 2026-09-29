@@ -20,8 +20,8 @@ export interface Self {
   energy: number
   position: Vec2
   velocity: Vec2
-  /** 各轴当前控制来源：human=手操 / script=代码 / snippet=驾驶辅助。 */
-  control: { move: 'human' | 'script' | 'snippet'; turret: 'human' | 'script' | 'snippet' }
+  // 注：控制轴归属（human/script/snippet）不对脚本暴露（ADR-0009：
+  // 脚本不可感知手操状态）；该信息仅下发客户端 UI（SelfState.move_src）。
 }
 
 export interface GameInfo {
