@@ -137,6 +137,23 @@ func (ms multiSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	ms.secondary.OnEvent(tick, ev)
 }
 
+// HandleAiPrompt v1 最小实现：AI 服务接入前的占位回执（quota 未配 key 时提示）。
+// 完整链（QuotaService→Provider→改码→ScriptSubmit）在 AI 运营配置就绪后启用。
+func (m *Match) HandleAiPrompt(pid uint64, text string) {
+	m.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "AI agent: not configured (set DEEPSEEK_API_KEY) — prompt: " + text}},
+	}}})
+}
+
+// ForceResync 下 tick 全量快照。
+func (m *Match) ForceResync(pid uint64) {
+	if rid, ok := m.robotOf[pid]; ok {
+		if enc := m.encoders[rid]; enc != nil {
+			enc.ForceFull()
+		}
+	}
+}
+
 // SubmitScript 玩家脚本提交（编译失败保旧版——Hot Swap 语义）。
 func (m *Match) SubmitScript(pid uint64, src string) (ok bool, errMsg string, rev uint32) {
 	rid, ok := m.robotOf[pid]

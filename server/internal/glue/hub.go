@@ -167,6 +167,20 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 	}}})
 }
 
+// AiPrompt AI 改码请求 → 当前对局（配额检查在 Match/AI 服务侧）。
+func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
+	if m := s.rc.currentMatch(); m != nil && p != nil {
+		m.HandleAiPrompt(s.playerID, p.GetText())
+	}
+}
+
+// Resync 请求全量重同步（下 tick 强制 full 快照）。
+func (s *Session) Resync() {
+	if m := s.rc.currentMatch(); m != nil {
+		m.ForceResync(s.playerID)
+	}
+}
+
 // LeaveRoom 离房。
 func (s *Session) LeaveRoom() {
 	if s.rc == nil {
