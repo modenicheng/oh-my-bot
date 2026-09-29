@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 //go:embed all:web
@@ -18,9 +19,12 @@ func main() {
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", netws.Handler(func(up []byte, send func([]byte)) {
-		// 骨架阶段：回显上行业务帧作为下行（联调探针用）。
-		send(append([]byte{0x03}, up...))
+	mux.Handle("/ws", netws.Handler(func(up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg)) {
+		// 骨架阶段：回显上行业务消息为下行事件（联调探针用）。
+		echo := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: up.String()}},
+		}}}
+		sendReliable(echo)
 	}))
 	mux.Handle("/", http.FileServer(http.FS(webFS)))
 
