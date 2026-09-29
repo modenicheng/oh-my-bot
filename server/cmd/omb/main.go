@@ -47,32 +47,49 @@ func main() {
 }
 
 // handleUpstream 全量上行路由（Phase D glue：join/leave/room_action/input/…）。
+// currentSession 由 ws 连接闭包维护（本连接的会话上下文）。
+// 注意：netws.Handler 每连接一个 onUp 闭包；此处 v1 以包级变量近似（单进程
+// 多连接由 handleJoin 每次覆写——冒烟/单人验证用，正式多路会话在 Phase D 收尾时
+// 改为 onUp 闭包捕获）。
+var currentSession *glue.Session
+
 func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg)) {
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
-		handleJoin(hub, p.Join, sendReliable)
+		handleJoin(hub, p.Join, sendReliable, sendLossy)
 	case *ombv1.ClientMsg_Input:
-		// 输入路由在会话绑定后经 Match.ApplyClientInput；此处经 hub 转发
-		hub.RouteInput(up, sendReliable, sendLossy)
+		if cur := currentSession; cur != nil {
+			cur.RouteInput(p.Input)
+		}
+	case *ombv1.ClientMsg_WarmupInput:
+		if cur := currentSession; cur != nil {
+			cur.RouteInput(p.WarmupInput)
+		}
 	case *ombv1.ClientMsg_Leave:
-		hub.RouteLeave(up)
+		if cur := currentSession; cur != nil {
+			cur.LeaveRoom()
+		}
+	case *ombv1.ClientMsg_RoomAction:
+		if cur := currentSession; cur != nil {
+			cur.HostCommand(p.RoomAction.GetKind())
+		}
 	default:
-		// script_submit / ai_prompt / assist_toggle / resync —— Phase D 后续接入
-		hub.RouteOther(up, sendReliable, sendLossy)
+		_ = sendLossy
 	}
 }
 
-func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable func(*ombv1.ServerMsg)) {
+func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg)) {
 	rc := hub.EnsureRoom(join.GetRoomCode())
-	sess := glue.NewSession(sendReliable)
+	rc.EnsureLauncher()
+	sess := glue.NewSession(sendReliable, sendLossy)
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
-		sendEv := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
-		}}}
-		sendReliable(sendEv)
+		}}})
 		return
 	}
-	// EvRoomState 广播（视觉审计 e 步依赖）
+	sess.BindRoom(rc)
+	currentSession = sess
 	rc.BroadcastRoomState()
 }

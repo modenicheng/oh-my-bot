@@ -3,7 +3,10 @@
 package glue
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sync"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -61,6 +64,7 @@ type RoomConn struct {
 	mu       sync.Mutex
 	sessions map[uint64]*Session // playerID -> 会话（本房间）
 	match    *Match              // 当前对局（nil=warmup/idle）
+	launcher room.SimLauncher
 }
 
 func newRoomConn(code string) *RoomConn {
@@ -86,6 +90,10 @@ type Session struct {
 func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	// 房主接管：占位 host=0 的房间由首位真实玩家接管（房间创建者语义）
+	if rc.Room.HostID() == 0 {
+		rc.Room.TransferHost(s.playerID)
+	}
 	if err := rc.Room.Join(s.playerID, nick, color); err != nil {
 		return fmt.Errorf("join room: %w", err)
 	}
@@ -111,9 +119,46 @@ func (rc *RoomConn) Broadcast(msg *ombv1.ServerMsg) {
 	}
 }
 
-// NewSession 构造会话。
-func NewSession(sendReliable func(*ombv1.ServerMsg)) *Session {
-	return &Session{SendReliable: sendReliable}
+// NewSession 构造会话（双通道）。
+func NewSession(sendReliable, sendLossy func(*ombv1.ServerMsg)) *Session {
+	return &Session{SendReliable: sendReliable, SendLossy: sendLossy}
+}
+
+// BindRoom 会话绑定房间（输入路由入口）。
+func (s *Session) BindRoom(rc *RoomConn) { s.rc = rc }
+
+// RouteInput 输入帧 → 当前对局。
+func (s *Session) RouteInput(in *ombv1.ClientInput) {
+	if m := s.rc.currentMatch(); m != nil && in != nil {
+		m.ApplyClientInput(s.playerID, in)
+	}
+}
+
+// HostCommand 房主指令 → 房间状态机。
+func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
+	act := map[ombv1.RoomAction_Kind]room.Action{
+		ombv1.RoomAction_START: room.ActionStart, ombv1.RoomAction_ABORT: room.ActionAbort,
+		ombv1.RoomAction_RESTART: room.ActionRestart, ombv1.RoomAction_WARMUP: room.ActionWarmup,
+	}[kind]
+	if act == 0 {
+		return
+	}
+	if err := s.rc.Room.HostCommand(s.playerID, act); err != nil {
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "command failed: " + err.Error()}},
+		}}})
+		return
+	}
+	s.rc.BroadcastRoomState()
+}
+
+// LeaveRoom 离房。
+func (s *Session) LeaveRoom() {
+	if s.rc == nil {
+		return
+	}
+	_ = s.rc.Room.Leave(s.playerID)
+	s.rc.BroadcastRoomState()
 }
 
 // BroadcastRoomState 状态广播（可靠通道全员）。
@@ -124,15 +169,8 @@ func (rc *RoomConn) BroadcastRoomState() {
 	}}})
 }
 
-// RouteInput 输入帧路由到当前对局（无对局时丢弃——热身/大厅态）。
-func (h *Hub) RouteInput(up *ombv1.ClientMsg, _, _ func(*ombv1.ServerMsg)) {
-	if in := up.GetInput(); in != nil {
-		if s := h.sessionBySend(nil); s != nil {
-			_ = s
-		}
-	}
-	// 会话→playerID 绑定经 Join 完成；输入按 playerID 路由（v1：房间内单对局）
-}
+// RouteInput 占位：输入按 Session 路由（连接闭包捕获会话，见 main.go）。
+func (h *Hub) RouteInput(_ *ombv1.ClientMsg, _, _ func(*ombv1.ServerMsg)) {}
 
 // RouteLeave 离房（成员移除 + 状态广播）。
 func (h *Hub) RouteLeave(_ *ombv1.ClientMsg) {}
@@ -140,4 +178,63 @@ func (h *Hub) RouteLeave(_ *ombv1.ClientMsg) {}
 // RouteOther 其他上行（script/ai/assist/resync——Phase D 后续）。
 func (h *Hub) RouteOther(_ *ombv1.ClientMsg, _, _ func(*ombv1.ServerMsg)) {}
 
-func (h *Hub) sessionBySend(_ func(*ombv1.ServerMsg)) *Session { return nil }
+// launcherAdapter 实现 room.SimLauncher：Start → 装配 Match + 地图下发。
+type launcherAdapter struct{ rc *RoomConn }
+
+func (la *launcherAdapter) Launch(seed uint64, playerIDs []uint64) room.MatchHandle {
+	players := map[uint64]SessionInfo{}
+	la.rc.mu.Lock()
+	for _, pid := range playerIDs {
+		if s, ok := la.rc.sessions[pid]; ok {
+			players[pid] = SessionInfo{PlayerID: pid, Nick: s.nick, Color: s.color}
+		}
+	}
+	la.rc.mu.Unlock()
+
+	m, err := NewMatch(la.rc, seed, int(seed&0xffffffff), players)
+	if err != nil {
+		la.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "match launch failed: " + err.Error()}},
+		}}})
+		return failedHandle{}
+	}
+	la.rc.setMatch(m)
+
+	// 地图一次性可靠下发（服务器为地图唯一 owner——审核阻塞项 2）
+	mapJSON, _ := json.Marshal(m.mapDef)
+	hh := fnv.New128a()
+	hh.Write(mapJSON)
+	la.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{
+			MapJson: string(mapJSON), MapHash: hex.EncodeToString(hh.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer),
+		}},
+	}}})
+	la.rc.BroadcastRoomState()
+	return m
+}
+
+func (rc *RoomConn) setMatch(m *Match) {
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+}
+
+func (rc *RoomConn) currentMatch() *Match {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.match
+}
+
+type failedHandle struct{}
+
+func (failedHandle) Abort() {}
+
+// EnsureLauncher 给房间装 launcher（首次 Join 后惰性装配）。
+func (rc *RoomConn) EnsureLauncher() {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if rc.launcher == nil {
+		rc.launcher = &launcherAdapter{rc: rc}
+		rc.Room.SetSimLauncher(rc.launcher)
+	}
+}

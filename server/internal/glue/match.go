@@ -9,6 +9,7 @@ package glue
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/mapgen"
@@ -40,9 +41,10 @@ type Match struct {
 	playerOf map[uint32]uint64 // robotID -> playerID
 	lastSeq  map[uint64]uint32
 
-	tick uint32
-	stop chan struct{}
-	done chan struct{}
+	tick     uint32
+	stopOnce sync.Once
+	stop     chan struct{}
+	done     chan struct{}
 }
 
 // SessionInfo 装配参数（房间成员快照）。
@@ -53,7 +55,9 @@ type SessionInfo struct {
 }
 
 // NewMatch 装配并启动（独立 goroutine 60Hz 驱动）。
-func NewMatch(rc *RoomConn, players map[uint64]SessionInfo) (*Match, error) {
+// seed/matchSeq 必须由调用方传入：room.HostCommand 持 room.mu 调 Launch，
+// 此处反查 Room.Seed()/SessionSeq() 会非重入死锁。
+func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo) (*Match, error) {
 	m := &Match{
 		rc:       rc,
 		proj:     stats.NewProjector(),
@@ -65,8 +69,8 @@ func NewMatch(rc *RoomConn, players map[uint64]SessionInfo) (*Match, error) {
 		done:     make(chan struct{}),
 	}
 
-	// 地图：种子来自房间状态机（Start 时生成）
-	def, err := mapgen.Generate(rc.Room.Seed())
+	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
+	def, err := mapgen.Generate(seed)
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: %w", err)
 	}
@@ -84,14 +88,14 @@ func NewMatch(rc *RoomConn, players map[uint64]SessionInfo) (*Match, error) {
 	}
 
 	// 事件管线：sim → 日志落盘 + 投影 + 可靠广播（multiSink 组合）
-	matchID := fmt.Sprintf("%s-%d", rc.Code, rc.Room.SessionSeq())
+	matchID := fmt.Sprintf("%s-%d", rc.Code, matchSeq)
 	ml, err := sim.NewMatchEventLogIn("data/matches", matchID)
 	if err != nil {
 		return nil, fmt.Errorf("event log: %w", err)
 	}
 	m.log = ml
 	sink := m.newSink()
-	m.sim = sim.NewSim(rc.Room.Seed(), ids, multiSink{primary: ml, secondary: sink})
+	m.sim = sim.NewSim(seed, ids, multiSink{primary: ml, secondary: sink})
 	if err := m.sim.SetMap(def); err != nil {
 		return nil, fmt.Errorf("setmap: %w", err)
 	}
@@ -131,7 +135,10 @@ func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
 	}
 }
 
-func (m *Match) Stop()                 { close(m.stop) }
+// Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
+func (m *Match) Abort() { m.Stop() }
+
+func (m *Match) Stop()                 { m.stopOnce.Do(func() { close(m.stop) }) }
 func (m *Match) Done() <-chan struct{} { return m.done }
 
 func (m *Match) run() {

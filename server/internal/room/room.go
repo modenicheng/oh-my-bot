@@ -168,6 +168,16 @@ func (r *Room) State() State {
 }
 
 // HostID returns the host's player id.
+// TransferHost 将房主移交给指定成员（仅允许从占位 0 移交——glue 首进接管）。
+func (r *Room) TransferHost(playerID uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.host != 0 {
+		return
+	}
+	r.host = playerID
+}
+
 func (r *Room) HostID() uint64 {
 	return r.host
 }
