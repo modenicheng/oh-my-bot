@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -13,11 +15,13 @@ import (
 
 // ============ GojaRuntime：sim.Runtime 的 goja 实现 ============
 
-// GojaRuntime 每 bot 一个实例。Tick 由所属池 worker 串行调用，
-// 运行时自身不加锁；VM 全局 = 模块状态，跨 tick 存活；每次 Load 重建。
+// GojaRuntime 每 bot 一个实例。Tick 可被池 worker 调用、Load 可被房间
+// goroutine 调用（Hot Swap），内部互斥串行化；VM 全局 = 模块状态，
+// 跨 tick 存活；每次成功 Load 重建。
 type GojaRuntime struct {
 	cfg Config
 
+	mu     sync.Mutex
 	vm     *goja.Runtime
 	tickFn goja.Callable
 	rev    uint32
@@ -52,20 +56,32 @@ var (
 	reImportType    = regexp.MustCompile(`(?m)^[ \t]*import\s+type\s[^\n]*$`)
 	reImportSide    = regexp.MustCompile(`(?m)^[ \t]*import\s*['"][^'"]*['"];?[ \t]*$`)
 	reExportDefault = regexp.MustCompile(`(?m)^[ \t]*export\s+default\s[^\n]*$`)
-	reExportNamed   = regexp.MustCompile(`(?m)^([ \t]*)export\s+(?=(?:const|let|var|function|class)\b)`)
+	reExportNamed   = regexp.MustCompile(`(?m)^[ \t]*export[ \t]+(?:(?:const|let|var)\s+[A-Za-z_$][\w$]*|function\s+[A-Za-z_$][\w$]*|class\s+[A-Za-z_$][\w$]*)`)
 )
 
 func stripModuleSyntax(src string) string {
 	out := reImportType.ReplaceAllString(src, "")
 	out = reImportSide.ReplaceAllString(out, "")
 	out = reExportDefault.ReplaceAllString(out, "")
-	out = reExportNamed.ReplaceAllString(out, "$1")
+	// export const x = 1 → const x = 1（保留声明，只去 export 关键字）。
+	out = reExportNamed.ReplaceAllStringFunc(out, trimLeadingExport)
 	return out
+}
+
+// trimLeadingExport 去掉行内 export（保留前导空白与后续声明）。
+func trimLeadingExport(line string) string {
+	i := strings.Index(line, "export")
+	if i < 0 {
+		return line
+	}
+	return line[:i] + line[i+len("export"):]
 }
 
 // Load 编译装载玩家源码。失败（TS 源码、语法错、运行时错、缺 tick 入口）
 // 返回 err 且不替换旧版本——Hot Swap 语义：对局中提交坏脚本，旧脚本继续跑。
 func (r *GojaRuntime) Load(source string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
 		return ErrClosed
 	}
@@ -120,10 +136,16 @@ func callableValue(v goja.Value) bool {
 }
 
 // Rev 当前版本号（Load 成功单调 +1；0 = 未装载）。
-func (r *GojaRuntime) Rev() uint32 { return r.rev }
+func (r *GojaRuntime) Rev() uint32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rev
+}
 
 // Close 关闭运行时。后续 Load/Tick 返回 ErrClosed / ErrNoModule。
 func (r *GojaRuntime) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
 		return
 	}
@@ -135,9 +157,24 @@ func (r *GojaRuntime) Close() {
 	r.tickFn = nil
 }
 
-// Tick 在配额内执行一次 tick(ctx) 并收集命令。
+// Tick 在默认配额内执行一次 tick(ctx) 并收集命令。
 // 超时 → ErrQuotaExceeded；脚本异常 → 包装 err。两者命令全清（idle）。
 func (r *GojaRuntime) Tick(frame sim.ScriptFrame) (sim.ScriptCommands, error) {
+	return r.tickLocked(frame, r.cfg.TickTimeout)
+}
+
+// tickWithQuota 池 worker 入口：配额可收紧为帧剩余预算。
+func (r *GojaRuntime) tickWithQuota(frame sim.ScriptFrame, quota time.Duration) (sim.ScriptCommands, error) {
+	if quota <= 0 {
+		return sim.ScriptCommands{}, ErrQuotaExceeded
+	}
+	return r.tickLocked(frame, quota)
+}
+
+// tickLocked 互斥下执行（与 Load/Close 串行，保证 Hot Swap 原子性）。
+func (r *GojaRuntime) tickLocked(frame sim.ScriptFrame, quota time.Duration) (sim.ScriptCommands, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed || r.tickFn == nil || r.vm == nil {
 		return sim.ScriptCommands{}, ErrNoModule
 	}
@@ -148,7 +185,7 @@ func (r *GojaRuntime) Tick(frame sim.ScriptFrame) (sim.ScriptCommands, error) {
 
 	// 配额中断：AfterFunc 到点 Interrupt。执行后 ClearInterrupt 复位
 	//（goja 中断标记 VM 级粘滞，不复位会污染下一 tick）。
-	timer := time.AfterFunc(r.cfg.TickTimeout, func() { vm.Interrupt(r.interruptVal) })
+	timer := time.AfterFunc(quota, func() { vm.Interrupt(r.interruptVal) })
 	defer func() {
 		timer.Stop()
 		vm.ClearInterrupt()

@@ -2,6 +2,7 @@ package script
 
 import (
 	"github.com/dop251/goja"
+	"strconv"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -24,7 +25,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		if ro.Dead || ro.ID == selfID {
 			continue
 		}
-		_ = robots.Set(n, toJSRobotRef(vm, *ro, obs.IsPartner(ro.ID)))
+		_ = robots.Set(strconv.Itoa(n), toJSRobotRef(vm, *ro, obs.IsPartner(ro.ID)))
 		n++
 	}
 	_ = o.Set("robots", robots)
@@ -40,7 +41,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		_ = co.Set("id", float64(c.ID))
 		_ = co.Set("x", c.Pos.X)
 		_ = co.Set("y", c.Pos.Y)
-		_ = cores.Set(n, co)
+		_ = cores.Set(strconv.Itoa(n), co)
 		n++
 	}
 	_ = o.Set("cores", cores)
@@ -57,7 +58,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		if u.HackingID != 0 {
 			_ = uo.Set("holder", float64(u.HackingID))
 		}
-		_ = uplinks.Set(n, uo)
+		_ = uplinks.Set(strconv.Itoa(n), uo)
 		n++
 	}
 	_ = o.Set("uplinks", uplinks)
@@ -69,7 +70,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		_ = po.Set("id", float64(p.ID))
 		_ = po.Set("x", p.Pos.X)
 		_ = po.Set("y", p.Pos.Y)
-		_ = projs.Set(i, po)
+		_ = projs.Set(strconv.Itoa(i), po)
 	}
 	_ = o.Set("projectiles", projs)
 

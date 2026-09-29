@@ -12,6 +12,11 @@ var (
 			`\b(?:var|let|const)\s+[A-Za-z_$][\w$]*\s*(?:!\s*)?:\s*[A-Za-z_$][\w$.]*(?:<[^>]*>)?\s*[=;,]|` + // let x: T = /;
 			`^\s*[A-Za-z_$][\w$]*\s*(?:!\s*)?:\s*(?:number|string|boolean|void|any|unknown|never|Vec2|RobotRef|Observation|Self|GameInfo|BotModule)\b)`,
 	)
+	// tsParamAnnot 函数参数注解（JS 不存在）：`function f(x: T)` / `(x: T) =>` /
+	// 类方法/对象方法 `(ctx: TickContext)`。仅匹配典型 TS 类型形态，
+	// 避免误伤 JS 对象字面量与方法调用。
+	tsParamAnnot = regexp.MustCompile(
+		`\(\s*(?:this|[A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$.]*(?:<[^>()]*>)?\s*[,)]`)
 	// tsDecl TS 专属顶层声明（interface/type/enum/declare/abstract/namespace）。
 	tsDecl = regexp.MustCompile(`(?m)^\s*(?:export\s+)?(?:type|interface|enum|declare|abstract|namespace)\s+[A-Za-z_$]`)
 	// tsKeyword TS 专属语法关键字组合。
@@ -24,6 +29,7 @@ var (
 // 漏报由 goja 编译错兜底——同样拒绝、不替换旧版，安全侧一致。
 func detectTypeScript(src string) bool {
 	return tsTypeAnnot.MatchString(src) ||
+		tsParamAnnot.MatchString(src) ||
 		tsDecl.MatchString(src) ||
 		tsKeyword.MatchString(src) ||
 		tsAngle.MatchString(src)

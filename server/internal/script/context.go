@@ -1,7 +1,6 @@
 package script
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/dop251/goja"
