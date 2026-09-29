@@ -3,10 +3,16 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"flag"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
@@ -34,6 +40,39 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+
+	// 回放 API：对局列表 + 单局事件流（JSONL 原样透传，客户端逐行解析）
+	mux.HandleFunc("/api/matches", func(w http.ResponseWriter, _ *http.Request) {
+		entries, err := os.ReadDir("data/matches")
+		if err != nil {
+			http.Error(w, "no matches", http.StatusNotFound)
+			return
+		}
+		names := []string{}
+		for _, e := range entries {
+			if n := e.Name(); strings.HasSuffix(n, ".jsonl") {
+				names = append(names, strings.TrimSuffix(n, ".jsonl"))
+			}
+		}
+		sort.Strings(names)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(names)
+	})
+	mux.HandleFunc("/api/replay/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/replay/")
+		if id == "" || strings.Contains(id, "/") || strings.Contains(id, "..") {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		f, err := os.Open(filepath.Join("data/matches", id+".jsonl"))
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = io.Copy(w, f)
 	})
 	mux.Handle("/ws", netws.Handler(func(sendReliable, sendLossy func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
 		// 每连接一份会话上下文（工厂返回的 onUp 闭包捕获——多连接隔离）
