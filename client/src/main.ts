@@ -1,10 +1,11 @@
-// 房间页主流程：进房表单 → WS 连接 + JoinRoom → 房间大厅。
-// 样式令牌见 client/STYLE.md；连接层见 client/src/net.ts。
+// 房间页主流程：进房表单 → WS 连接 + JoinRoom → 房间大厅；mapBootstrap 后切游戏视图。
+// 样式令牌见 client/STYLE.md；连接层见 client/src/net.ts；游戏视图见 client/src/game/。
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, LeaveRoomSchema,
          type ServerMsg } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { RoomSession } from './net'
+import { GameController } from './game/controls'
 
 // ---- 常量 ---------------------------------------------------------------
 
@@ -33,6 +34,9 @@ const membersEl = $<HTMLUListElement>('members')
 const roomStateEl = $<HTMLDivElement>('room-state')
 const statusText = $<HTMLSpanElement>('status-text')
 const btnReconnect = $<HTMLButtonElement>('btn-reconnect')
+const viewGame = $<HTMLElement>('view-game')
+const gameCanvas = $<HTMLCanvasElement>('game-canvas')
+const hudRoot = $<HTMLElement>('hud')
 
 // ---- 进房表单 ---------------------------------------------------------------
 
@@ -77,9 +81,10 @@ function validate(): string | null {
 
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
-function showView(view: 'join' | 'room'): void {
-  viewJoin.hidden = view === 'room'
-  viewRoom.hidden = view === 'join'
+function showView(view: 'join' | 'room' | 'game'): void {
+  viewJoin.hidden = view !== 'join'
+  viewRoom.hidden = view !== 'room'
+  viewGame.hidden = view !== 'game'
 }
 
 function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
@@ -140,23 +145,69 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
 
 function onDisconnected(reason: string): void {
   stopRttLoop()
+  game?.exit()
+  game = null
   session?.close()
   session = null
   btnJoin.disabled = false // 修复：无论从哪个阶段断开，恢复进房按钮
   setStatus('down', reason)
   roomStateEl.textContent = '离线'
   btnReconnect.hidden = false
+  showView('room')
+}
+
+// ---- 游戏态切换 -------------------------------------------------------------
+
+let game: GameController | null = null
+
+function enterGame(): void {
+  if (!session) return
+  game?.exit()
+  game = new GameController({
+    canvas: gameCanvas,
+    hudRoot,
+    send: (data) => session?.state === 'online' && session.send(data),
+  })
+  showView('game')
+}
+
+function exitGame(): void {
+  game?.exit()
+  game = null
+  showView('room')
 }
 
 function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (session && roomCode) setStatus('ok', 'connected')
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
+    if (ev.kind.case === 'mapBootstrap') {
+      // 服务器下发地图：切游戏视图（解析失败留在大厅）
+      if (!game) enterGame()
+      const ok = game?.onMapBootstrap(ev.kind.value.mapJson) ?? false
+      if (!ok) {
+        game?.exit()
+        game = null
+        showView('room')
+        roomStateEl.textContent = '地图数据异常，无法进入对局'
+      }
+      return
+    }
     if (ev.kind.case === 'roomState') {
       const rs = ev.kind.value
       const stateName = ['空闲', '热身中', '对局中', '已结束'][rs.state] ?? `状态${rs.state}`
+      // 对局结束回大厅（服务器状态机回 idle/warmup）
+      if (rs.state === 0 || rs.state === 1) {
+        if (game) exitGame()
+      }
       roomStateEl.textContent = `房间 ${stateName} · 房主 ${rs.hostNick || '—'} · 机器人 ${rs.robotsOnline}`
+      return
     }
+    // 其余事件转给游戏视图（say/kill/phaseChange/matchEnd…）
+    game?.onMessage(msg)
+  } else {
+    // 快照帧转给游戏视图
+    game?.onMessage(msg)
   }
 }
 
@@ -193,6 +244,16 @@ function stopRttLoop(): void {
   if (rttTimer) clearInterval(rttTimer)
   rttTimer = undefined
 }
+
+// Space assist 开关（游戏态下全局拦截，避免页面滚动）
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && game && !e.repeat) {
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+    e.preventDefault()
+    game.toggleAssist()
+  }
+})
 
 // 离开页面时通知服务器
 window.addEventListener('beforeunload', () => {

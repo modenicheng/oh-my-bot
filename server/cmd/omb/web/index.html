@@ -60,8 +60,58 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
     .down #status { color: var(--danger); }
     [hidden] { display: none !important; }
     #view-join { display: flex; flex-direction: column; gap: 14px; }
+    /* 游戏视图：全屏 canvas + HUD 覆盖层（#app 面板化布局在此视图下解除） */
+    #view-game { position: fixed; inset: 0; display: block; }
+    #view-game[hidden] { display: none !important; }
+    #game-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+    #hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--mono); }
+    .hud-top { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+               display: flex; gap: 14px; align-items: baseline; }
+    .hud-phase { font-size: 12px; letter-spacing: .25em; color: var(--accent);
+                 border: 1px solid var(--line); background: #10141acc; padding: 3px 10px; }
+    .hud-clock { font-size: 22px; color: var(--fg); border: 1px solid var(--line);
+                 background: #10141acc; padding: 2px 12px; }
+    .hud-msg { position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+               font-size: 12px; color: var(--fg); background: #10141acc; border: 1px solid var(--line);
+               padding: 3px 10px; opacity: 0; transition: opacity .25s; max-width: 60%; }
+    .hud-msg.show { opacity: 1; }
+    .hud-left { position: absolute; left: 16px; bottom: 16px; width: 240px; }
+    .hud-bar-label { font-size: 11px; letter-spacing: .2em; color: var(--fg-dim);
+                     display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .hud-bar { border: 1px solid var(--line); background: #10141acc; height: 10px;
+               position: relative; margin-bottom: 8px; }
+    .hud-bar-fill { position: absolute; inset: 0; width: 100%; background: var(--lime);
+                    transform-origin: left; transition: width .1s linear; }
+    #hud-en-fill { background: var(--accent); }
+    .hud-right { position: absolute; right: 16px; bottom: 16px; width: 220px;
+                 border: 1px solid var(--line); background: #10141acc; padding: 8px 10px; }
+    .hud-right-label { font-size: 11px; letter-spacing: .2em; color: var(--fg-dim); margin-bottom: 6px; }
+    .hud-score-row { font-size: 12px; color: var(--fg); white-space: nowrap;
+                     overflow: hidden; text-overflow: ellipsis; }
+    .hud-assist { position: absolute; right: 16px; top: 14px; font-size: 12px;
+                  letter-spacing: .25em; color: var(--accent); border: 1px solid var(--line);
+                  background: #10141acc; padding: 3px 10px; }
+    .hud-assist.off { color: var(--fg-dim); }
+    .hud-hint { position: absolute; left: 16px; top: 14px; font-size: 11px; color: var(--fg-dim);
+                line-height: 1.8; border: 1px solid var(--line); background: #10141acc;
+                padding: 6px 10px; }
+    /* 结算覆盖层 */
+    .end-overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+                   align-items: center; justify-content: center; gap: 18px;
+                   background: #0a0e14e6; pointer-events: none; }
+    .end-title { font-size: 26px; letter-spacing: .5em; color: var(--accent);
+                 text-shadow: 0 0 18px #22d3ee60; }
+    .end-list { display: flex; flex-direction: column; gap: 4px; min-width: 320px;
+                border: 1px solid var(--line); background: var(--panel); padding: 14px 20px; }
+    .end-row { display: flex; align-items: baseline; gap: 12px; font-family: var(--mono);
+               font-size: 14px; }
+    .end-rank { color: var(--fg-dim); width: 2ch; }
+    .end-name { flex: 1; color: var(--fg); }
+    .end-score { color: var(--accent); }
+    .end-title-row { font-size: 12px; color: var(--amber); padding-left: 3ch; }
+    .end-empty { color: var(--fg-dim); font-size: 13px; }
   </style>
-  <script type="module" crossorigin src="/assets/index-C64_K_L3.js"></script>
+  <script type="module" crossorigin src="/assets/index-Cue0I-BP.js"></script>
 </head>
 <body>
   <div class="panel" id="app">
@@ -91,6 +141,29 @@ body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background
       <div id="room-state">—</div>
       <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
       <button type="button" class="act" id="btn-reconnect" hidden>重新连接</button>
+    </section>
+    <!-- 游戏视图（mapBootstrap 后显示） -->
+    <section id="view-game" hidden>
+      <canvas id="game-canvas"></canvas>
+      <div id="hud">
+        <div class="hud-top">
+          <span class="hud-phase" id="hud-phase">—</span>
+          <span class="hud-clock" id="hud-time">0:00</span>
+        </div>
+        <div class="hud-msg" id="hud-msg"></div>
+        <div class="hud-hint">WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾 · E/F 交互 · SPACE 辅助</div>
+        <div class="hud-assist" id="hud-assist">ASSIST ON</div>
+        <div class="hud-left">
+          <div class="hud-bar-label"><span>HP</span><span id="hud-hp-text">100</span></div>
+          <div class="hud-bar"><div class="hud-bar-fill" id="hud-hp-fill"></div></div>
+          <div class="hud-bar-label"><span>EN</span><span id="hud-en-text">100</span></div>
+          <div class="hud-bar"><div class="hud-bar-fill" id="hud-en-fill"></div></div>
+        </div>
+        <div class="hud-right">
+          <div class="hud-right-label">场上机器人</div>
+          <div id="hud-score-rows"></div>
+        </div>
+      </div>
     </section>
   </div>
 </body>
