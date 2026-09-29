@@ -31,6 +31,10 @@ export class WsTransport implements Transport {
           this.stats.rttMs = this.rttMs
           return
         }
+        if (buf[0] === 0) {
+          ws.send(new Uint8Array([1, ...buf.slice(1)])) // 服务器心跳 ping → 回 pong
+          return
+        }
         this.cb?.(buf)
       }
     })

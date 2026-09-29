@@ -6,6 +6,8 @@ import (
 	"flag"
 	"log"
 	"net/http"
+
+	"github.com/modenicheng/oh-my-bot/server/internal/netws"
 )
 
 //go:embed all:web
@@ -16,6 +18,10 @@ func main() {
 	flag.Parse()
 
 	mux := http.NewServeMux()
+	mux.Handle("/ws", netws.Handler(func(send func([]byte)) func([]byte) {
+		// 骨架阶段：回显上行业务帧作为下行（联调探针用）。
+		return func(up []byte) { send(up) }
+	}))
 	mux.Handle("/", http.FileServer(http.FS(webFS)))
 
 	log.Printf("oh-my-bot server listening on %s", *addr)
