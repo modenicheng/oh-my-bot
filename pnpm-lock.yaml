@@ -23,6 +23,9 @@ importers:
       '@omb/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
+      marked:
+        specifier: ^18.0.14
+        version: 18.0.14
     devDependencies:
       typescript:
         specifier: ^5.8.0
@@ -509,6 +512,11 @@ packages:
   magic-string@1.4.2:
     resolution: {integrity: sha512-vG+rjFRj1PqdIBozIxAGMjPlOhaVe+GXpbttY/iSK7rGcJRMlwNJO7dcUwmUqkymsFLJiNGI06t4D7Fr7yRC9g==}
 
+  marked@18.0.14:
+    resolution: {integrity: sha512-mBHK6FBHuBAlhgRe88w9F0O1AbwwXJUcQibUbC/QcdTbVGAD7aWza+xt3N6oT/jCZx3/OMeS+8rnuiHZcQ9s7A==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
@@ -962,6 +970,8 @@ snapshots:
   magic-string@1.4.2:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  marked@18.0.14: {}
 
   ms@2.1.3: {}
 

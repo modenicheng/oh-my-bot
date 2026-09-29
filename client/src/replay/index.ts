@@ -13,6 +13,7 @@ import {
   ReplayData,
   ReplayEvent,
   ReplayRecord,
+  ReplayCheckpoint,
   RobotBrief,
 } from './model'
 
@@ -31,13 +32,16 @@ export interface RobotTickState {
 
 export interface ReplayFrame {
   tick: number
-  phase: number | string
+  phase: number
   /** 查询 tick 时点的机器人态。 */
   robots: RobotTickState[]
   /** 分数表（事件累计）。 */
   scores: Map<number, ScoreAcc>
   /** 最近 4s（240 tick）内的 say 事件，供气泡渲染。 */
   bubbles: SayMark[]
+  /** 最近关键帧携带的核心/弹丸（仅 checkpoint 粒度，供参考渲染）。 */
+  cores: Array<{ id: number; pos: { x: number; y: number }; value: number; taken: boolean }>
+  projectiles: Array<{ id: number; owner: number; pos: { x: number; y: number }; heading: number }>
 }
 
 export interface ScoreAcc {
@@ -99,10 +103,12 @@ export class ReplayIndex {
   }
 
   private buildIndex(records: ReplayRecord[]): void {
-    let phase: number | string = 1
+    let phase = 1
     const robots = new Map<number, RobotTickState>()
     const scores = new Map<number, ScoreAcc>()
     const bubbles: SayMark[] = []
+    let cores: ReplayCheckpoint['cores'] = []
+    let projectiles: ReplayCheckpoint['projectiles'] = []
 
     const snapshot = (tick: number): FrameState => ({
       tick,
@@ -110,6 +116,8 @@ export class ReplayIndex {
       robots: cloneRobots(robots),
       scores: cloneScores(scores),
       bubbles: bubbles.filter((b) => tick - b.tick <= BUBBLE_TTL),
+      cores: cores.map((c) => ({ ...c, pos: { ...c.pos } })),
+      projectiles: projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     })
 
     const commit = (f: FrameState) => {
@@ -120,7 +128,7 @@ export class ReplayIndex {
     const init = records.find((r) => r.type === 'match_start')?.state
       ?? records.find((r) => r.type === 'checkpoint')?.state
     if (init) {
-      phase = init.phase
+      phase = numOr(init.phase, 1)
       for (const r of init.robots) {
         robots.set(r.id, {
           id: r.id,
@@ -145,7 +153,9 @@ export class ReplayIndex {
       if (rec.state) {
         // checkpoint / 后续 match_start：重置全量态
         const st = rec.state
-        phase = st.phase
+        phase = numOr(st.phase, phase)
+        cores = st.cores.map((c) => ({ ...c }))
+        projectiles = st.projectiles.map((p) => ({ ...p }))
         robots.clear()
         for (const r of st.robots) {
           robots.set(r.id, {
@@ -181,15 +191,16 @@ export class ReplayIndex {
 
   /** 查询 tick（含）时刻的状态。 */
   frameAt(queryTick: number): ReplayFrame {
-    const q = clamp(queryTick, 0, this.endTick)
+    const q = Math.max(0, Math.min(queryTick, this.endTick))
     // 二分找 ≤q 的最大关键帧
     let lo = 0
     let hi = this.keyTicks.length - 1
-    let best = this.keyTicks[0]
+    let best = this.keyTicks[0] ?? 0
     while (lo <= hi) {
       const mid = (lo + hi) >> 1
-      if (this.keyTicks[mid] <= q) {
-        best = this.keyTicks[mid]
+      const t = this.keyTicks[mid] ?? 0
+      if (t <= q) {
+        best = t
         lo = mid + 1
       } else {
         hi = mid - 1
@@ -202,16 +213,20 @@ export class ReplayIndex {
       robots: [...kf.robots.values()],
       scores: cloneScores(kf.scores),
       bubbles: kf.bubbles.filter((b) => q - b.tick <= BUBBLE_TTL),
+      cores: kf.cores.map((c) => ({ ...c, pos: { ...c.pos } })),
+      projectiles: kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     }
   }
 }
 
 interface FrameState {
   tick: number
-  phase: number | string
+  phase: number
   robots: Map<number, RobotTickState>
   scores: Map<number, ScoreAcc>
   bubbles: SayMark[]
+  cores: ReplayCheckpoint['cores']
+  projectiles: ReplayCheckpoint['projectiles']
 }
 
 function emptyScore(id: number): ScoreAcc {
@@ -348,8 +363,17 @@ export function numOr(v: any, dflt: number): number {
   return Number.isFinite(n) ? n : dflt
 }
 
+/** phase 归一为数字（事件/快照里可能是字符串枚举名）。 */
+export function phaseNum(p: any): number {
+  if (typeof p === 'number') return p
+  if (p === 'OUTER_RING' || p === 'PHASE_OUTER_RING') return 1
+  if (p === 'CORE_OPEN' || p === 'PHASE_CORE_OPEN') return 2
+  return numOr(p, 0)
+}
+
 export function phaseName(p: any): string {
-  if (p === 1 || p === 'OUTER_RING' || p === 'PHASE_OUTER_RING') return '外环'
-  if (p === 2 || p === 'CORE_OPEN' || p === 'PHASE_CORE_OPEN') return '核心开放'
-  return String(p ?? '')
+  const n = phaseNum(p)
+  if (n === 1) return '外环'
+  if (n === 2) return '核心开放'
+  return '—'
 }

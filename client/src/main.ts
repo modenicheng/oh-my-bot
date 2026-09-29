@@ -8,6 +8,8 @@ import { encodeClient } from '@omb/protocol'
 import { RoomSession } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
+import { ManualView } from './manual/manual'
+import { ReplayLibrary } from './replay/library'
 
 // ---- 常量 ---------------------------------------------------------------
 
@@ -42,6 +44,15 @@ const btnReconnect = $<HTMLButtonElement>('btn-reconnect')
 const viewGame = $<HTMLElement>('view-game')
 const gameCanvas = $<HTMLCanvasElement>('game-canvas')
 const hudRoot = $<HTMLElement>('hud')
+const viewManual = $<HTMLElement>('view-manual')
+const btnManual = $<HTMLButtonElement>('btn-manual')
+const btnReplay = $<HTMLButtonElement>('btn-replay')
+const viewReplays = $<HTMLElement>('view-replays')
+const replayListEl = $<HTMLElement>('replay-list')
+const replayErrorEl = $<HTMLElement>('replay-error')
+const btnReplaysBack = $<HTMLButtonElement>('btn-replays-back')
+const viewReplayPlayer = $<HTMLElement>('view-replay-player')
+const replayCanvas = $<HTMLCanvasElement>('replay-canvas')
 
 // ---- 进房表单 ---------------------------------------------------------------
 
@@ -86,10 +97,13 @@ function validate(): string | null {
 
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
-function showView(view: 'join' | 'room' | 'game'): void {
+function showView(view: 'join' | 'room' | 'game' | 'manual' | 'replays' | 'replay-player'): void {
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
+  viewManual.hidden = view !== 'manual'
+  viewReplays.hidden = view !== 'replays'
+  viewReplayPlayer.hidden = view !== 'replay-player'
 }
 
 function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
@@ -177,6 +191,60 @@ function resetLobby(): void {
   roomNotice.hidden = true
   roomStateEl.textContent = '已发送进房请求，等待服务器…'
 }
+
+// ---- 手册视图（v1 手册基建：不依赖 WS，大厅随时可进） -------------------------
+
+let manualView: ManualView | null = null
+
+function openManual(): void {
+  if (!manualView) {
+    manualView = new ManualView({
+      root: viewManual,
+      breadcrumb: $<HTMLElement>('manual-breadcrumb'),
+      sidebar: $<HTMLElement>('manual-sidebar'),
+      content: $<HTMLElement>('manual-content'),
+      status: $<HTMLElement>('manual-status'),
+      onExit: () => {
+        showView(session || lastJoin ? 'room' : 'join')
+        // 返回后用缓存状态刷新操作栏
+        if (session || lastJoin) onRoomState(room.state, room.hostNick, room.robotsOnline)
+      },
+    })
+  }
+  showView('manual')
+  void manualView.open()
+}
+
+btnManual.addEventListener('click', openManual)
+
+// ---- 回放库（对局列表 ⇄ 回放器；同源 HTTP，不依赖 WS） --------------------
+
+let replayLibrary: ReplayLibrary | null = null
+
+function openReplays(): void {
+  if (!replayLibrary) {
+    replayLibrary = new ReplayLibrary({
+      listRoot: replayListEl,
+      errorEl: replayErrorEl,
+      playerRoot: viewReplayPlayer,
+      canvas: replayCanvas,
+      onExitToList: () => showView('replays'),
+      showPlayer: () => showView('replay-player'),
+      showList: () => showView('replays'),
+    })
+  }
+  showView('replays')
+  void replayLibrary.open()
+}
+
+function closeReplays(): void {
+  replayLibrary?.exit()
+  replayLibrary = null
+  showView(session || lastJoin ? 'room' : 'join')
+}
+
+btnReplay.addEventListener('click', openReplays)
+btnReplaysBack.addEventListener('click', closeReplays)
 
 // ---- 连接会话 ---------------------------------------------------------------
 

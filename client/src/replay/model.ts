@@ -36,12 +36,14 @@ export interface ReplayRobotState {
 /** checkpoint 里渲染所需的实体快照。 */
 export interface ReplayCheckpoint {
   tick: number
-  phase: number | string
+  phase: number
   ended: boolean
   robots: ReplayRobotState[]
-  cores: Array<{ id: number; pos: ReplayVec2; value: number; taken: boolean }>
-  uplinks: Array<{ id: number; pos: ReplayVec2; hackingId: number }>
-  projectiles: Array<{ id: number; owner: number; pos: ReplayVec2; heading: number }>
+  cores: Array<{ id: number; pos: { x: number; y: number }; value: number; taken: boolean }>
+  uplinks: Array<{ id: number; pos: { x: number; y: number }; hackingId: number }>
+  projectiles: Array<{ id: number; owner: number; pos: { x: number; y: number }; heading: number }>
+  /** MapDef 原始对象（json tag "map"；序列化为字符串供 parseMapDef）。 */
+  mapJson: string | null
 }
 
 /** 事件记录（omb.proto ServerEvent oneof kind 的 protojson 形态）。 */
@@ -84,7 +86,7 @@ export function parseReplayNDJSON(text: string): ReplayData {
   let initCheckpoint: ReplayCheckpoint | null = null
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
+    const line = (lines[i] ?? '').trim()
     if (!line) continue
     let obj: any
     try {
@@ -132,31 +134,32 @@ function normalizeCheckpoint(st: any): ReplayCheckpoint {
   if (!st || typeof st !== 'object') throw new ReplayParseError('checkpoint 缺少 state')
   return {
     tick: num(st.tick, 0),
-    phase: st.phase,
+    phase: num(st.phase, 1),
     ended: !!st.ended,
     robots: (st.robots || []).map((r: any) => normalizeRobot(r)),
+    // CoreView 无 json tag → 大写键 ID/Pos/Value/Alive
     cores: (st.cores || []).map((c: any) => ({
-      id: num(c.id, 0),
-      pos: c.pos || { X: 0, Y: 0 },
-      value: num(c.value, 0),
-      taken: !!c.taken,
+      id: num(c.ID ?? c.id, 0),
+      pos: vec(c.Pos ?? c.pos),
+      value: num(c.Value ?? c.value, 0),
+      taken: !(c.Alive ?? c.alive ?? true),
     })),
+    // Uplink{def, hacking_id}；def（UplinkDef）带 id/pos
     uplinks: (st.uplinks || []).map((u: any) => {
-      // Uplink{def, hacking_id, progress_ticks}；def（UplinkDef）带 id/main
       const def = u.def || {}
-      const main = def.main || {}
       return {
         id: num(def.id != null ? def.id : u.id, 0),
-        pos: main.pos || main.Pos || { X: 0, Y: 0 },
+        pos: vec(def.pos ?? def.Pos),
         hackingId: num(u.hacking_id, 0),
       }
     }),
     projectiles: (st.projectiles || []).map((p: any) => ({
-      id: num(p.id, 0),
-      owner: num(p.owner, 0),
-      pos: p.pos || { X: 0, Y: 0 },
-      heading: num(p.heading, 0),
+      id: num(p.id ?? p.ID, 0),
+      owner: num(p.owner ?? p.Owner, 0),
+      pos: vec(p.pos ?? p.Pos),
+      heading: num(p.heading ?? p.Heading, 0),
     })),
+    mapJson: st.map != null ? JSON.stringify(st.map) : null,
   }
 }
 
@@ -190,4 +193,9 @@ function normalizeEvent(obj: any): ReplayEvent {
 
 function num(v: any, dflt: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : dflt
+}
+
+/** Vec2 无 json tag：Go 大写 X/Y；兼容小写。 */
+function vec(v: any): { x: number; y: number } {
+  return { x: num(v?.X ?? v?.x, 0), y: num(v?.Y ?? v?.y, 0) }
 }
