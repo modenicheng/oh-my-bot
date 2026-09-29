@@ -4,6 +4,7 @@ package main
 import (
 	"embed"
 	"flag"
+	"io/fs"
 	"log"
 	"net/http"
 
@@ -13,6 +14,15 @@ import (
 
 //go:embed all:web
 var webFS embed.FS
+
+// webRoot 剥掉 embed 的 web/ 前缀，使站点根直接映射 web/ 内容（index.html 在 /，assets 在 /assets/）。
+var webRoot = func() fs.FS {
+	sub, err := fs.Sub(webFS, "web")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}()
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
@@ -26,7 +36,7 @@ func main() {
 		}}}
 		sendReliable(echo)
 	}))
-	mux.Handle("/", http.FileServer(http.FS(webFS)))
+	mux.Handle("/", http.FileServer(http.FS(webRoot)))
 
 	log.Printf("oh-my-bot server listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, mux); logErr(err) {

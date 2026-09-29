@@ -1,0 +1,258 @@
+package sim
+
+import (
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"math"
+)
+
+func (s *Sim) prepareCombat() {
+	for i := range s.robots {
+		r := &s.robots[i]
+		c := &r.Combat
+		in := r.Control.Output
+		if r.State == Dead {
+			c.ShieldOn = false
+			continue
+		}
+		r.Energy = math.Min(MaxEnergy, r.Energy+EnergyRegen*DT)
+		c.ShieldOn = in.Shield && r.Energy+collisionEpsilon >= ShieldDrain*DT
+		if c.ShieldOn {
+			r.Energy = math.Max(0, r.Energy-ShieldDrain*DT)
+		}
+		if in.Dash && s.tick >= c.DashReady && r.Energy+collisionEpsilon >= DashCost {
+			direction := in.Move
+			if n := direction.Len(); n > 0 {
+				direction = direction.Scale(1 / n)
+			} else {
+				direction = Vec2{math.Cos(r.Heading), math.Sin(r.Heading)}
+			}
+			r.Energy = math.Max(0, r.Energy-DashCost)
+			c.DashReady, c.DashUntil, c.DashDirection = s.tick+DashCooldown, s.tick+DashDuration, direction
+		}
+		if c.PulseRequested && s.tick >= c.PulseReady && r.Energy+collisionEpsilon >= PulseCost {
+			r.Energy = math.Max(0, r.Energy-PulseCost)
+			c.PulseTick, c.PulseReady = s.tick, s.tick+PulseCooldown
+		}
+		c.PulseRequested = false
+	}
+}
+
+func (s *Sim) say(r *Robot, text string) {
+	if s.tick < r.Combat.SayReady {
+		return
+	}
+	r.Combat.SayReady = s.tick + SayCooldown
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: r.ID, Text: text}}})
+}
+
+func (s *Sim) fireProjectiles() {
+	for i := range s.robots {
+		r := &s.robots[i]
+		if r.State == Dead || !r.Control.Output.Fire || r.Combat.ShieldOn || s.tick < r.Combat.FireReady || r.Energy+collisionEpsilon < FireCost || s.nextProjectile == 0 {
+			continue
+		}
+		r.Energy = math.Max(0, r.Energy-FireCost)
+		r.Combat.FireReady = s.tick + FireInterval
+		s.projectiles = append(s.projectiles, Projectile{ID: s.nextProjectile, Owner: r.ID, Pos: r.Position, Heading: r.Heading, BaseHeading: r.Heading, Spread: (s.randomUnit()*2 - 1) * MaxSpread})
+		s.nextProjectile++ // zero means exhausted IDs: never wrap and reuse an entity.
+	}
+}
+
+func (s *Sim) stepProjectiles() {
+	alive := s.projectiles[:0]
+	for _, p := range s.projectiles {
+		remaining := ProjectileRange - p.Distance
+		if remaining <= collisionEpsilon {
+			continue
+		}
+		length := math.Min(ProjectileSpeed*DT, remaining)
+		falloff := math.Max(0, math.Min(1, (p.Distance+length/2-EffectiveRange)/(ProjectileRange-EffectiveRange)))
+		p.Heading = p.BaseHeading + p.Spread*falloff
+		delta := Vec2{math.Cos(p.Heading) * length, math.Sin(p.Heading) * length}
+		fraction, blocked := s.traceSolid(p.Pos, delta)
+		victim := -1
+		owner, ok := s.index[p.Owner]
+		if !ok {
+			continue
+		}
+		for i := range s.robots {
+			r := &s.robots[i]
+			if r.State == Dead || r.ID == p.Owner || r.ID == s.robots[owner].Combat.Partner {
+				continue
+			}
+			if t, hit := sweepCircle(p.Pos, delta, r.Position, RobotRadius); hit && (t < fraction-collisionEpsilon || (!blocked && victim < 0 && t <= fraction)) {
+				fraction, victim = t, i
+			}
+		}
+		p.Pos = p.Pos.Add(delta.Scale(fraction))
+		p.Distance += length * fraction
+		if victim >= 0 {
+			s.damage(p.Owner, &s.robots[victim], ShotDamage)
+			continue
+		}
+		if blocked || p.Distance >= ProjectileRange-collisionEpsilon {
+			continue
+		}
+		alive = append(alive, p)
+	}
+	s.projectiles = alive
+}
+
+func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
+	idx, ok := s.index[attacker]
+	if !ok || r.State == Dead || r.Combat.Invulnerable || attacker == r.ID || s.robots[idx].Combat.Partner == r.ID {
+		return
+	}
+	if r.Combat.ShieldOn {
+		amount *= ShieldDamageScale
+	}
+	amount = math.Min(amount, r.HP)
+	r.HP = math.Max(0, r.HP-amount)
+	if r.Combat.Damagers == nil {
+		r.Combat.Damagers = make(map[uint32]bool)
+	}
+	r.Combat.Damagers[attacker] = true
+	// EvHit.dmg is an integer in protocol v1. Physics retains fractional shield
+	// damage (4.2); only event telemetry is rounded, never the HP calculation.
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Hit{Hit: &ombv1.EvHit{From: attacker, To: r.ID, Dmg: int32(math.Round(amount))}}})
+	if r.HP > 0 {
+		return
+	}
+	partner := s.robots[idx].Combat.Partner
+	assist := uint32(0)
+	if partner != 0 && r.Combat.Damagers[partner] {
+		assist = partner
+	}
+	r.State, r.Velocity = Dead, Vec2{}
+	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false
+	r.Control = ControlState{Assist: r.Control.Assist}
+	r.Combat.ShieldOn, r.Combat.DashUntil, r.Combat.RespawnAt = false, 0, s.tick+RespawnDelay
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{Killer: attacker, Victim: r.ID, Assist: assist, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}}}})
+}
+
+func (s *Sim) respawnRobot(r *Robot) {
+	pos := r.SpawnPosition
+	if s.mapDef != nil {
+		if next, ok := s.spawnInSector(r.Sector); ok {
+			pos = next
+		}
+	}
+	r.Position, r.Velocity, r.HP, r.Energy = pos, Vec2{}, MaxHP, MaxEnergy
+	r.State, r.Heading, r.RespawnPending = Alive, 0, false
+	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false
+	r.Control = ControlState{Assist: r.Control.Assist}
+	// Personal station cooldowns survive death; combat cooldowns and controls do
+	// not. The 4s protection timer starts only after a new effective operation.
+	r.Combat = CombatState{Partner: r.Combat.Partner, Invulnerable: true, SayReady: r.Combat.SayReady}
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Respawn{Respawn: &ombv1.EvRespawn{Robot: r.ID, Sector: r.Sector}}})
+}
+
+// sweepCircle tests a point segment against a solid circle. Boundary contacts
+// moving inward count; tangencies and contacts moving away do not.
+func sweepCircle(p, d, center Vec2, radius float64) (float64, bool) {
+	offset := p.Sub(center)
+	a := d.X*d.X + d.Y*d.Y
+	c := offset.X*offset.X + offset.Y*offset.Y - radius*radius
+	if c < -collisionEpsilon {
+		return 0, true
+	}
+	dot := offset.X*d.X + offset.Y*d.Y
+	if a == 0 || dot >= 0 {
+		return 0, false
+	}
+	disc := dot*dot - a*c
+	if disc <= 0 {
+		return 0, false
+	}
+	t := c / (-dot + math.Sqrt(disc))
+	return math.Max(0, math.Min(1, t)), t >= -collisionEpsilon && t <= 1+collisionEpsilon
+}
+
+func segmentWall(p, d Vec2, w Wall) (float64, bool) {
+	lo, hi := 0.0, 1.0
+	slab := func(pos, delta, minV, maxV float64) bool {
+		if delta == 0 {
+			return pos >= minV && pos <= maxV
+		}
+		a, b := (minV-pos)/delta, (maxV-pos)/delta
+		if a > b {
+			a, b = b, a
+		}
+		lo, hi = math.Max(lo, a), math.Min(hi, b)
+		return lo <= hi
+	}
+	if !slab(p.X, d.X, w.Min.X, w.Max.X) || !slab(p.Y, d.Y, w.Min.Y, w.Max.Y) {
+		return 0, false
+	}
+	return lo, true
+}
+
+func (s *Sim) traceSolid(p, d Vec2) (float64, bool) {
+	fraction, hit := 1.0, false
+	for _, w := range s.walls {
+		if t, ok := segmentWall(p, d, w); ok && t <= fraction {
+			fraction, hit = t, true
+		}
+	}
+	if s.zoneLocked() {
+		if t, ok := sweepCircle(p, d, Vec2{}, s.mapDef.CoreZone.Radius); ok && t <= fraction {
+			fraction, hit = t, true
+		}
+	}
+	return fraction, hit
+}
+
+// LineOfSight must be called on the owner. Worker readers use WorldView instead.
+func (s *Sim) LineOfSight(from, to Vec2) bool {
+	if !from.finite() || !to.finite() {
+		return false
+	}
+	_, blocked := s.traceSolid(from, to.Sub(from))
+	return !blocked
+}
+
+func (s *Sim) pushRobot(r *Robot, delta Vec2) {
+	fraction := 1.0
+	for _, w := range s.walls {
+		if t, hit := sweepWall(r.Position, delta, w); hit && t < fraction {
+			fraction = t
+		}
+	}
+	if s.zoneLocked() {
+		if t, hit := sweepCircle(r.Position, delta, Vec2{}, s.mapDef.CoreZone.Radius+RobotRadius); hit && t < fraction {
+			fraction = t
+		}
+	}
+	r.Position = r.Position.Add(delta.Scale(fraction))
+}
+
+func (s *Sim) softCollide() {
+	// A bounded positional relaxation, not an impulse: no damage, dash cancellation
+	// or partner exemption. Iteration and ID order make coincident starts stable.
+	for pass := 0; pass < 3; pass++ {
+		for i := range s.robots {
+			a := &s.robots[i]
+			if a.State == Dead {
+				continue
+			}
+			for j := i + 1; j < len(s.robots); j++ {
+				b := &s.robots[j]
+				if b.State == Dead {
+					continue
+				}
+				delta := b.Position.Sub(a.Position)
+				distance := delta.Len()
+				if distance >= 2*RobotRadius-collisionEpsilon {
+					continue
+				}
+				direction := Vec2{X: 1}
+				if distance > collisionEpsilon {
+					direction = delta.Scale(1 / distance)
+				}
+				push := direction.Scale((2*RobotRadius - distance) / 2)
+				s.pushRobot(a, push.Scale(-1))
+				s.pushRobot(b, push)
+			}
+		}
+	}
+}

@@ -30,6 +30,7 @@ type LogRecord struct {
 	State   *Checkpoint
 	RobotID uint32
 	Input   *Input
+	Control *ControlRecord
 }
 
 type logHeader struct {
@@ -43,6 +44,7 @@ type diskRecord struct {
 	State   *Checkpoint     `json:"state,omitempty"`
 	RobotID uint32          `json:"robot_id,omitempty"`
 	Input   *Input          `json:"input,omitempty"`
+	Control *ControlRecord  `json:"control,omitempty"`
 }
 
 // MatchEventLog is single-owner like Sim. It flushes its buffer at construction,
@@ -140,6 +142,10 @@ func (l *MatchEventLog) OnMatchInit(state Checkpoint) {
 
 func (l *MatchEventLog) OnInput(tick uint32, robotID uint32, input Input) {
 	l.append(diskRecord{Type: "input", Tick: tick, RobotID: robotID, Input: &input})
+}
+
+func (l *MatchEventLog) OnControl(tick, robotID uint32, control ControlRecord) {
+	l.append(diskRecord{Type: "control", Tick: tick, RobotID: robotID, Control: &control})
 }
 
 func (l *MatchEventLog) OnCheckpoint(state Checkpoint) {
@@ -254,7 +260,7 @@ func (r *MatchEventLogReader) Read() (*LogRecord, error) {
 	if disk.Tick < r.lastTick {
 		return fail(errors.New("ticks moved backwards"))
 	}
-	record := &LogRecord{Type: disk.Type, Tick: disk.Tick, State: disk.State, RobotID: disk.RobotID, Input: disk.Input}
+	record := &LogRecord{Type: disk.Type, Tick: disk.Tick, State: disk.State, RobotID: disk.RobotID, Input: disk.Input, Control: disk.Control}
 	if disk.Type == "event" {
 		record.Event = &ombv1.ServerEvent{}
 		if err := protojson.Unmarshal(disk.Event, record.Event); err != nil {
@@ -308,7 +314,14 @@ func validateRecord(r diskRecord) error {
 	if r.Tick > MatchTicks {
 		return errors.New("sim: log tick beyond match end")
 	}
+	if r.Type != "control" && r.Control != nil {
+		return errors.New("sim: unexpected control payload")
+	}
 	switch r.Type {
+	case "control":
+		if r.Control == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 || r.Input != nil {
+			return errors.New("sim: invalid control record")
+		}
 	case "event":
 		if len(r.Event) == 0 || r.State != nil || r.Input != nil || r.RobotID != 0 || r.Tick == 0 {
 			return errors.New("sim: invalid event record")
@@ -325,7 +338,7 @@ func validateRecord(r diskRecord) error {
 		}
 	case "input":
 		if r.Input == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 ||
-			r.Input.MoveX < -1000 || r.Input.MoveX > 1000 || r.Input.MoveY < -1000 || r.Input.MoveY > 1000 {
+			r.Input.MoveX < -1000 || r.Input.MoveX > 1000 || r.Input.MoveY < -1000 || r.Input.MoveY > 1000 || r.Input.AxisMask & ^allAxes != 0 || !finite(r.Input.Aim) {
 			return errors.New("sim: invalid input record")
 		}
 	default:

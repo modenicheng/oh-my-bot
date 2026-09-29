@@ -14,16 +14,22 @@ func TestWallHitThrottlePerRobot(t *testing.T) {
 	if err := s.SetWalls([]Wall{{ID: 10, Min: Vec2{RobotRadius, -10}, Max: Vec2{1, 10}}}); err != nil {
 		t.Fatal(err)
 	}
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, MoveX: 1000})
+	if err := s.SetSpawn(1, Vec2{0, -2}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSpawn(2, Vec2{0, 2}, 1); err != nil {
+		t.Fatal(err)
+	}
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000})
 	advance(s, 16)
-	s.ApplyInput(2, &ombv1.ClientInput{Seq: 1, MoveX: 1000})
+	s.ApplyInput(2, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000})
 	advance(s, 91)
 	hits := map[uint32][]uint32{}
 	for _, ev := range sink.events {
 		if wall := ev.GetWallHit(); wall != nil {
 			hits[wall.Robot] = append(hits[wall.Robot], ev.Tick)
 			closeFloat(t, wall.At.X, 0)
-			closeFloat(t, wall.At.Y, 0)
+			closeFloat(t, wall.At.Y, float64(wall.Robot)*4-6)
 			if math.Abs(float64(wall.Impact)-Acceleration*DT) > 1e-7 {
 				t.Fatalf("wrong impact %g", wall.Impact)
 			}
@@ -34,17 +40,17 @@ func TestWallHitThrottlePerRobot(t *testing.T) {
 	}
 	for _, id := range []uint32{1, 2} {
 		r := mustRobot(t, s, id)
-		if r.Position != (Vec2{}) || r.Velocity != (Vec2{}) {
+		if r.Position != (Vec2{0, float64(id)*4 - 6}) || r.Velocity != (Vec2{}) {
 			t.Fatalf("robot %d penetrated wall", id)
 		}
 	}
 	// Throttling applies only to telemetry, never to collision response.
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, MoveX: -1000})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisMove), MoveX: -1000})
 	s.Tick()
 	if r := mustRobot(t, s, 1); r.Position.X >= 0 || r.Velocity.X >= 0 {
 		t.Fatal("robot stuck moving away from wall")
 	}
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, MoveX: 1000})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisMove), MoveX: 1000})
 	advance(s, 100)
 	if r := mustRobot(t, s, 1); r.Position.X > 1e-10 || r.Velocity.X != 0 {
 		t.Fatal("suppressed hit allowed penetration")
@@ -107,7 +113,7 @@ func TestSweepWallDoesNotTunnel(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, MoveX: 1000})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000})
 	advance(s, 100)
 	r := mustRobot(t, s, 1)
 	closeFloat(t, r.Position.X, 1-RobotRadius)

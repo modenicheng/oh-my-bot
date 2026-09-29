@@ -12,7 +12,8 @@
       --accent: #22d3ee; --danger: #ff5c5c;
       --mono: ui-monospace, "JetBrains Mono", monospace;
     }
-    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    html, *, *::before, *::after { box-sizing: inherit; }
+body { margin: 0; height: 100%; box-sizing: border-box; min-width: 0; background: var(--bg); color: var(--fg);
                  font: 14px/1.6 Inter, system-ui, sans-serif; display: grid; place-items: center; }
     body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
                    background-image: linear-gradient(var(--line) 1px, transparent 1px),
@@ -34,7 +35,7 @@
     .swatch { width: 100%; aspect-ratio: 1; border: 1px solid var(--line); padding: 0;
               cursor: pointer; background: var(--sw); }
     .swatch:hover { border-color: var(--sw); }
-    .swatch.sel { border-color: var(--sw); box-shadow: 0 0 8px var(--sw); outline: none; }
+    .swatch.sel { outline: 1px solid var(--sw); box-shadow: 0 0 6px color-mix(in srgb, var(--sw) 35%, transparent); }
     button.act { border: 1px solid var(--accent); background: transparent; color: var(--accent);
                  padding: 9px 0; font: inherit; letter-spacing: .25em; cursor: pointer; }
     button.act:hover:not(:disabled) { box-shadow: 0 0 12px #22d3ee40; }
@@ -87,7 +88,7 @@
       <ul id="members"><li class="placeholder">等待其他玩家…</li></ul>
       <div id="room-state">—</div>
       <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
-      <button type="button" class="act danger" id="btn-reconnect" hidden>重新连接</button>
+      <button type="button" class="act" id="btn-reconnect" hidden>重新连接</button>
     </section>
   </div>
   <script type="module" src="/src/main.ts"></script>

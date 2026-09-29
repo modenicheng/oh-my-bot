@@ -55,8 +55,8 @@ export class RoomSession {
       }
     })
 
-    // socket 层断开（服务器关闭 / 网络中断）
-    hookSocketClose(this.transport, () => this.fail(opts, '与服务器的连接已断开'))
+    // socket 层断开（服务器关闭 / 网络中断）：transport.onClose 立即上报，无需等 4s 看门狗
+    this.transport.onClose(() => this.fail(opts, '与服务器的连接已断开'))
 
     const join = create(JoinRoomSchema, {
       roomCode: opts.roomCode,
@@ -93,8 +93,3 @@ function wsUrl(): string {
   return `${proto}://${location.hostname}:8080/ws`
 }
 
-/** WsTransport 持有的是私有 ws 字段，这里借助 onMessage 之外唯一可挂钩的入口做 close 检测。 */
-function hookSocketClose(_t: WsTransport, _onClose: () => void): void {
-  // WsTransport 当前不暴露 close 事件；断线检测由心跳看门狗（4s 无 pong）兜底，
-  // onerror/onclose 由 transport 内部吞掉。保留此空位便于 transport 扩展后接入。
-}

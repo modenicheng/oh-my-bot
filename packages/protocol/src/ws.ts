@@ -6,6 +6,7 @@ import type { Transport, TransportStats } from './transport'
 export class WsTransport implements Transport {
   private ws?: WebSocket
   private cb?: (msg: Uint8Array) => void
+  private closeCb?: () => void
   private rttMs = 0
   private lastPing = 0
   private timer?: ReturnType<typeof setInterval>
@@ -23,7 +24,11 @@ export class WsTransport implements Transport {
         }, 2000)
         resolve()
       }
-      ws.onerror = () => reject(new Error(`ws connect failed: ${url}`))
+      ws.onerror = () => {
+        if (this.ws === undefined) reject(new Error(`ws connect failed: ${url}`))
+        this.closeCb?.()
+      }
+      ws.onclose = () => this.closeCb?.() // socket 断开（服务器关闭/网络中断）
       ws.onmessage = (ev) => {
         const buf = new Uint8Array(ev.data as ArrayBuffer)
         if (buf[0] === 1) {
@@ -50,8 +55,14 @@ export class WsTransport implements Transport {
     return () => { this.cb = undefined }
   }
 
+  /** socket 断开回调（onclose/onerror-after-open）。 */
+  onClose(cb: () => void): void {
+    this.closeCb = cb
+  }
+
   close(): void {
     clearInterval(this.timer)
+    this.closeCb = undefined
     this.ws?.close()
   }
 }

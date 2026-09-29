@@ -65,8 +65,8 @@ function normalize(): void {
   inNick.value = inNick.value.slice(0, 16)
 }
 
-inRoom.addEventListener('input', normalize)
-inNick.addEventListener('input', normalize)
+inRoom.addEventListener('input', () => { normalize(); showFormError('') })
+inNick.addEventListener('input', () => { normalize(); showFormError('') })
 
 function validate(): string | null {
   if (!ROOM_CODE_RE.test(inRoom.value)) return '房间码需为 6 位字母/数字'
@@ -138,6 +138,7 @@ function onDisconnected(reason: string): void {
   stopRttLoop()
   session?.close()
   session = null
+  btnJoin.disabled = false // 修复：无论从哪个阶段断开，恢复进房按钮
   setStatus('down', reason)
   roomStateEl.textContent = '离线'
   btnReconnect.hidden = false

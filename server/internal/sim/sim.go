@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -71,50 +72,62 @@ const (
 
 // Input is a plain value copy: retaining a ClientInput pointer (or copying its
 // protobuf runtime mutex) would let the caller corrupt a queued command.
-// Fire, Dash, Shield and Interact are recorded but not executed in this stage.
+// AxisMask records operated axes, including explicit zero/false release values.
 type Input struct {
-	Seq      uint32  `json:"seq"`
-	MoveX    int32   `json:"move_x"`
-	MoveY    int32   `json:"move_y"`
-	Fire     bool    `json:"fire"`
-	Aim      float64 `json:"aim"`
-	Dash     bool    `json:"dash"`
-	Shield   bool    `json:"shield"`
-	Interact bool    `json:"interact"`
+	AxisMask AxisMask `json:"axis_mask"`
+	Seq      uint32   `json:"seq"`
+	MoveX    int32    `json:"move_x"`
+	MoveY    int32    `json:"move_y"`
+	Fire     bool     `json:"fire"`
+	Aim      float64  `json:"aim"`
+	Dash     bool     `json:"dash"`
+	Shield   bool     `json:"shield"`
+	Interact bool     `json:"interact"`
 }
 
 // Robot includes control/cooldown state needed to continue from a checkpoint.
 // Sim only exposes copies; all mutation goes through its queued APIs.
 // HP and Energy use game units, not the wire protocol's x10 representation.
 type Robot struct {
-	ID              uint32      `json:"id"`
-	Position        Vec2        `json:"position"`
-	Velocity        Vec2        `json:"velocity"`
-	HP              float64     `json:"hp"`
-	Energy          float64     `json:"energy"`
-	State           RobotStatus `json:"state"`
-	Heading         float64     `json:"heading"`
-	SpawnPosition   Vec2        `json:"spawn_position"`
-	Sector          uint32      `json:"sector"`
-	Input           Input       `json:"input"`
-	PendingInput    Input       `json:"pending_input"`
-	InputPending    bool        `json:"input_pending"`
-	LatestSeq       uint32      `json:"latest_seq"`
-	HasSeq          bool        `json:"has_seq"`
-	RespawnPending  bool        `json:"respawn_pending"`
-	LastWallHitTick uint32      `json:"last_wall_hit_tick"`
-	HasWallHit      bool        `json:"has_wall_hit"`
+	ConsumedSeq     uint32       `json:"consumed_seq"`
+	Control         ControlState `json:"control"`
+	Combat          CombatState  `json:"combat"`
+	Nick            string       `json:"nick,omitempty"`
+	Color           string       `json:"color,omitempty"`
+	ID              uint32       `json:"id"`
+	Position        Vec2         `json:"position"`
+	Velocity        Vec2         `json:"velocity"`
+	HP              float64      `json:"hp"`
+	Energy          float64      `json:"energy"`
+	State           RobotStatus  `json:"state"`
+	Heading         float64      `json:"heading"`
+	SpawnPosition   Vec2         `json:"spawn_position"`
+	Sector          uint32       `json:"sector"`
+	Input           Input        `json:"input"`
+	PendingInput    Input        `json:"pending_input"`
+	InputPending    bool         `json:"input_pending"`
+	LatestSeq       uint32       `json:"latest_seq"`
+	HasSeq          bool         `json:"has_seq"`
+	RespawnPending  bool         `json:"respawn_pending"`
+	LastWallHitTick uint32       `json:"last_wall_hit_tick"`
+	HasWallHit      bool         `json:"has_wall_hit"`
 }
 
 // Checkpoint is the complete state of this stage, including static geometry,
 // held/pending controls, sequence guards and per-robot collision throttles.
 type Checkpoint struct {
-	Tick   uint32      `json:"tick"`
-	Seed   uint64      `json:"seed"`
-	Phase  ombv1.Phase `json:"phase"`
-	Ended  bool        `json:"ended"`
-	Robots []Robot     `json:"robots"`
-	Walls  []Wall      `json:"walls"`
+	Tick           uint32       `json:"tick"`
+	Seed           uint64       `json:"seed"`
+	Phase          ombv1.Phase  `json:"phase"`
+	Ended          bool         `json:"ended"`
+	Robots         []Robot      `json:"robots"`
+	Walls          []Wall       `json:"walls"`
+	Map            *MapDef      `json:"map,omitempty"`
+	RNG            uint64       `json:"rng"`
+	NextProjectile uint32       `json:"next_projectile"`
+	Projectiles    []Projectile `json:"projectiles"`
+	Cores          []CoreView   `json:"cores"`
+	Uplinks        []Uplink     `json:"uplinks"`
 }
 
 type consumedInput struct {
@@ -125,16 +138,24 @@ type consumedInput struct {
 // Sim never starts a goroutine/timer and never consults wall time. Tick is the
 // only clock. The sink owns wall timestamps and persistence latency/errors.
 type Sim struct {
-	seed     uint64
-	tick     uint32
-	phase    ombv1.Phase
-	ended    bool
-	robots   []Robot
-	index    map[uint32]int
-	walls    []Wall
-	sink     EventSink
-	events   []*ombv1.ServerEvent
-	consumed []consumedInput
+	seed           uint64
+	tick           uint32
+	phase          ombv1.Phase
+	ended          bool
+	robots         []Robot
+	index          map[uint32]int
+	walls          []Wall
+	sink           EventSink
+	events         []*ombv1.ServerEvent
+	consumed       []consumedInput
+	mapDef         *MapDef
+	rng            uint64
+	nextProjectile uint32
+	projectiles    []Projectile
+	cores          []CoreView
+	uplinks        []Uplink
+	view           atomic.Pointer[WorldView]
+	controlEvents  []controlRecord
 }
 
 // NewSim uses player IDs as robot IDs. Zero/duplicate IDs panic, as they violate
@@ -144,7 +165,7 @@ type Sim struct {
 func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 	ids := append([]uint32(nil), playerIDs...)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	s := &Sim{seed: seed, phase: ombv1.Phase_OUTER_RING, sink: eventSink,
+	s := &Sim{seed: seed, rng: seed, nextProjectile: 1, phase: ombv1.Phase_OUTER_RING, sink: eventSink,
 		robots: make([]Robot, len(ids)), index: make(map[uint32]int, len(ids)),
 		walls: make([]Wall, 0)}
 	for i, id := range ids {
@@ -152,8 +173,13 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 			panic("sim: robot IDs must be unique and nonzero")
 		}
 		s.index[id] = i
-		s.robots[i] = Robot{ID: id, HP: MaxHP, Energy: MaxEnergy, State: Alive, Sector: uint32(i % 8)}
+		s.robots[i] = Robot{ID: id, HP: MaxHP, Energy: MaxEnergy, State: Alive, Sector: uint32(i % 8), Control: ControlState{Assist: true}}
+		if id >= s.nextProjectile {
+			s.nextProjectile = id + 1
+		}
 	}
+	s.pairPartners()
+	s.publishView()
 	return s
 }
 
@@ -166,12 +192,18 @@ func (s *Sim) Robot(id uint32) (Robot, bool) {
 	if !ok {
 		return Robot{}, false
 	}
-	return s.robots[i], true
+	return cloneRobot(s.robots[i]), true
 }
 
 func (s *Sim) Snapshot() Checkpoint {
+	robots := make([]Robot, len(s.robots))
+	for i, r := range s.robots {
+		robots[i] = cloneRobot(r)
+	}
 	return Checkpoint{Tick: s.tick, Seed: s.seed, Phase: s.phase, Ended: s.ended,
-		Robots: append([]Robot{}, s.robots...), Walls: append([]Wall{}, s.walls...)}
+		Robots: robots, Walls: append([]Wall{}, s.walls...), Map: cloneMap(s.mapDef), RNG: s.rng,
+		NextProjectile: s.nextProjectile, Projectiles: append([]Projectile{}, s.projectiles...),
+		Cores: append([]CoreView{}, s.cores...), Uplinks: cloneUplinks(s.uplinks)}
 }
 
 // SetSpawn configures initial/respawn positions before the match starts.
@@ -185,7 +217,11 @@ func (s *Sim) SetSpawn(robotID uint32, pos Vec2, sector uint32) error {
 			return fmt.Errorf("sim: spawn overlaps wall %d", wall.ID)
 		}
 	}
+	if s.zoneLocked() && pos.Len() < s.mapDef.CoreZone.Radius+RobotRadius {
+		return fmt.Errorf("sim: spawn inside locked core")
+	}
 	s.robots[i].Position, s.robots[i].SpawnPosition, s.robots[i].Sector = pos, pos, sector
+	s.publishView()
 	return nil
 }
 
@@ -194,16 +230,21 @@ func (s *Sim) SetSpawn(robotID uint32, pos Vec2, sector uint32) error {
 // The last consumed control remains held until replaced (including a stop).
 func (s *Sim) ApplyInput(robotID uint32, in *ombv1.ClientInput) bool {
 	i, ok := s.index[robotID]
-	if !ok || in == nil || s.ended || math.IsNaN(in.Aim) || math.IsInf(in.Aim, 0) {
+	if !ok || in == nil || s.ended || AxisMask(in.AxisMask)&^allAxes != 0 || math.IsNaN(in.Aim) || math.IsInf(in.Aim, 0) {
 		return false
 	}
 	r := &s.robots[i]
 	if r.HasSeq && in.Seq <= r.LatestSeq {
 		return false
 	}
-	r.PendingInput = Input{Seq: in.Seq, MoveX: max(-1000, min(1000, in.MoveX)),
+	next := Input{Seq: in.Seq, AxisMask: AxisMask(in.AxisMask), MoveX: max(-1000, min(1000, in.MoveX)),
 		MoveY: max(-1000, min(1000, in.MoveY)), Fire: in.Fire, Aim: in.Aim,
 		Dash: in.Dash, Shield: in.Shield, Interact: in.Interact}
+	// Coalesce disjoint axes received before this tick; never lose an earlier release.
+	if r.InputPending {
+		next = mergeInput(r.PendingInput, next)
+	}
+	r.PendingInput = next
 	r.LatestSeq, r.HasSeq, r.InputPending = in.Seq, true, true
 	return true
 }
@@ -238,8 +279,17 @@ func (s *Sim) Tick() {
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MatchStart{
 			MatchStart: &ombv1.EvMatchStart{MapSeed: s.seed, Players: uint32(len(s.robots))}}})
 	}
+	s.controlEvents = s.controlEvents[:0]
+	s.changePhase()
 	s.consumeInputs()
+	s.prepareCombat()
 	s.moveAndCollide()
+	s.softCollide()
+	s.fireProjectiles()
+	s.stepProjectiles()
+	s.stepUplinks()
+	s.stepCores()
+	s.publishView()
 	s.emit(initial)
 	if s.tick%CheckpointInterval == 0 {
 		if sink, ok := s.sink.(CheckpointSink); ok {
@@ -249,23 +299,6 @@ func (s *Sim) Tick() {
 	clear(s.events) // Do not retain sink-owned event payloads between ticks.
 }
 
-func (s *Sim) consumeInputs() {
-	for i := range s.robots {
-		r := &s.robots[i]
-		if r.RespawnPending {
-			r.Position, r.Velocity, r.HP, r.Energy = r.SpawnPosition, Vec2{}, MaxHP, MaxEnergy
-			r.State, r.Heading, r.Input, r.RespawnPending = Alive, 0, Input{}, false
-			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Respawn{
-				Respawn: &ombv1.EvRespawn{Robot: r.ID, Sector: r.Sector}}})
-		}
-		if r.InputPending {
-			r.Input, r.PendingInput, r.InputPending = r.PendingInput, Input{}, false
-			r.Heading = r.Input.Aim
-			s.consumed = append(s.consumed, consumedInput{r.ID, r.Input})
-		}
-	}
-}
-
 func (s *Sim) moveAndCollide() {
 	for i := range s.robots {
 		r := &s.robots[i]
@@ -273,22 +306,37 @@ func (s *Sim) moveAndCollide() {
 			r.Velocity = Vec2{}
 			continue
 		}
-		direction := Vec2{float64(r.Input.MoveX) / 1000, float64(r.Input.MoveY) / 1000}
+		direction := r.Control.Output.Move
+		speed := MaxSpeed
+		if r.Combat.ShieldOn {
+			speed *= ShieldSpeedScale
+		}
 		if n := math.Hypot(direction.X, direction.Y); n > 1 {
 			direction.X /= n
 			direction.Y /= n
 		}
-		dv := Vec2{direction.X*MaxSpeed - r.Velocity.X, direction.Y*MaxSpeed - r.Velocity.Y}
+		if r.Combat.DashUntil == s.tick && r.Velocity.Len() > speed {
+			r.Velocity = r.Velocity.Scale(speed / r.Velocity.Len())
+		}
+		dv := Vec2{direction.X*speed - r.Velocity.X, direction.Y*speed - r.Velocity.Y}
 		if n := math.Hypot(dv.X, dv.Y); n > Acceleration*DT {
 			dv.X *= Acceleration * DT / n
 			dv.Y *= Acceleration * DT / n
 		}
 		r.Velocity.X += dv.X
 		r.Velocity.Y += dv.Y
+		if r.Combat.DashUntil > s.tick {
+			r.Velocity = r.Combat.DashDirection.Scale(DashSpeed)
+		}
 		delta := Vec2{r.Velocity.X * DT, r.Velocity.Y * DT}
 		fraction, hit := 1.0, false
 		for _, wall := range s.walls {
 			if t, ok := sweepWall(r.Position, delta, wall); ok && t <= fraction {
+				fraction, hit = t, true
+			}
+		}
+		if s.zoneLocked() {
+			if t, ok := sweepCircle(r.Position, delta, Vec2{}, s.mapDef.CoreZone.Radius+RobotRadius); ok && t <= fraction {
 				fraction, hit = t, true
 			}
 		}
@@ -306,13 +354,16 @@ func (s *Sim) moveAndCollide() {
 	}
 }
 
-func (s *Sim) emit(initial *Checkpoint) {
+func (s *Sim) changePhase() {
 	if s.tick == CoreOpenTick {
 		from := s.phase
 		s.phase = ombv1.Phase_CORE_OPEN
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_PhaseChange{
 			PhaseChange: &ombv1.EvPhaseChange{From: from, To: s.phase}}})
 	}
+}
+
+func (s *Sim) emit(initial *Checkpoint) {
 	if s.tick == MatchTicks {
 		s.ended = true
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: &ombv1.EvMatchEnd{}}})
@@ -323,6 +374,11 @@ func (s *Sim) emit(initial *Checkpoint) {
 		}
 		for _, in := range s.consumed {
 			replay.OnInput(s.tick, in.robotID, in.input)
+		}
+	}
+	if replay, ok := s.sink.(GameplayReplaySink); ok {
+		for _, c := range s.controlEvents {
+			replay.OnControl(s.tick, c.RobotID, c.Control)
 		}
 	}
 	for _, ev := range s.events {

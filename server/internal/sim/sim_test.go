@@ -111,10 +111,10 @@ func TestApplyInputSequenceAndOwnership(t *testing.T) {
 	if s.ApplyInput(1, nil) || s.ApplyInput(2, &ombv1.ClientInput{}) {
 		t.Fatal("invalid input accepted")
 	}
-	if !s.ApplyInput(1, &ombv1.ClientInput{Seq: 0, MoveX: 1000}) {
+	if !s.ApplyInput(1, &ombv1.ClientInput{Seq: 0, AxisMask: uint32(AxisMove), MoveX: 1000}) {
 		t.Fatal("initial zero seq rejected")
 	}
-	newest := &ombv1.ClientInput{Seq: 5, MoveY: 1000, Aim: 1.2, Fire: true, Dash: true, Shield: true, Interact: true}
+	newest := &ombv1.ClientInput{Seq: 5, AxisMask: uint32(AxisMove | AxisAim | AxisFire), MoveY: 1000, Aim: 1.2, Fire: true, Dash: true, Shield: true, Interact: true}
 	if !s.ApplyInput(1, newest) {
 		t.Fatal("new input rejected")
 	}
@@ -130,7 +130,7 @@ func TestApplyInputSequenceAndOwnership(t *testing.T) {
 	closeFloat(t, r.Velocity.X, 0)
 	closeFloat(t, r.Velocity.Y, Acceleration*DT)
 	closeFloat(t, r.Position.Y, Acceleration*DT*DT)
-	if r.Input.Seq != 5 || r.Heading != 1.2 || r.InputPending || !r.Input.Fire || !r.Input.Dash || !r.Input.Shield || !r.Input.Interact {
+	if r.Input.Seq != 5 || r.Heading != 1.2 || r.InputPending || !r.Input.Fire || r.Input.Dash || r.Input.Shield || r.Input.Interact {
 		t.Fatal("input not copied/consumed intact")
 	}
 	if len(sink.inputs) != 1 || sink.inputTicks[0] != 1 || sink.inputs[0].input.Seq != 5 {
@@ -160,7 +160,7 @@ func TestApplyInputValidation(t *testing.T) {
 			t.Fatal("nonfinite aim accepted")
 		}
 	}
-	if !s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, MoveX: math.MaxInt32, MoveY: math.MinInt32}) {
+	if !s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: math.MaxInt32, MoveY: math.MinInt32}) {
 		t.Fatal("invalid input poisoned seq guard")
 	}
 	s.Tick()
@@ -173,7 +173,7 @@ func TestApplyInputValidation(t *testing.T) {
 
 func TestMovementAccelerationSpeedAndBraking(t *testing.T) {
 	s := NewSim(42, []uint32{1}, nil)
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, MoveX: 1000, MoveY: 1000})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000, MoveY: 1000})
 	previous := Vec2{}
 	for i := 0; i < 100; i++ {
 		s.Tick()
@@ -185,7 +185,7 @@ func TestMovementAccelerationSpeedAndBraking(t *testing.T) {
 		previous = r.Velocity
 	}
 	closeFloat(t, math.Hypot(previous.X, previous.Y), MaxSpeed)
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisMove)})
 	advance(s, 121)
 	if r := mustRobot(t, s, 1); r.Velocity != (Vec2{}) {
 		t.Fatalf("did not stop: %+v", r.Velocity)
@@ -200,7 +200,7 @@ func TestMovementAccelerationSpeedAndBraking(t *testing.T) {
 func TestCheckpointIntervalsAndIsolation(t *testing.T) {
 	sink := &recordingSink{}
 	s := NewSim(23, []uint32{4, 2, 3}, sink)
-	s.ApplyInput(2, &ombv1.ClientInput{Seq: 9, MoveX: 1000})
+	s.ApplyInput(2, &ombv1.ClientInput{Seq: 9, AxisMask: uint32(AxisMove), MoveX: 1000})
 	advance(s, CheckpointInterval-1)
 	if len(sink.checkpoints) != 0 {
 		t.Fatal("checkpoint early")
@@ -242,7 +242,7 @@ func TestRespawnHook(t *testing.T) {
 	if err := s.SetSpawn(1, Vec2{2, 3}, 5); err != nil {
 		t.Fatal(err)
 	}
-	s.ApplyInput(1, &ombv1.ClientInput{Seq: 7, MoveX: 1000})
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 7, AxisMask: uint32(AxisMove), MoveX: 1000})
 	s.Tick()
 	s.robots[0].HP, s.robots[0].Energy, s.robots[0].State = 0, 20, Dead // Future damage system.
 	s.Tick()
@@ -300,7 +300,7 @@ func TestDeterministicOrdering(t *testing.T) {
 	x, y := NewSim(123, []uint32{3, 1, 2}, a), NewSim(123, []uint32{2, 3, 1}, b)
 	for _, s := range []*Sim{x, y} {
 		for _, id := range []uint32{3, 2, 1} {
-			s.ApplyInput(id, &ombv1.ClientInput{Seq: id, MoveX: int32(id) * 100})
+			s.ApplyInput(id, &ombv1.ClientInput{Seq: id, AxisMask: uint32(AxisMove), MoveX: int32(id) * 100})
 		}
 		advance(s, MatchTicks)
 	}
@@ -324,7 +324,7 @@ func BenchmarkTick64Robots(b *testing.B) {
 	}
 	s := NewSim(1, ids, nil)
 	for _, id := range ids {
-		s.ApplyInput(id, &ombv1.ClientInput{Seq: 1, MoveX: 1000, MoveY: 500})
+		s.ApplyInput(id, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000, MoveY: 500})
 	}
 	s.Tick()
 	b.ReportAllocs()

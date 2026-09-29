@@ -36,6 +36,11 @@ func (s *Sim) SetWalls(walls []Wall) error {
 		}
 	}
 	s.walls = next
+	if s.mapDef != nil {
+		s.mapDef = cloneMap(s.mapDef)
+		s.mapDef.Walls = append([]Wall{}, next...)
+	}
+	s.publishView()
 	return nil
 }
 
