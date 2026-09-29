@@ -5,17 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>oh-my-bot</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #10141a; color: #d8dee9;
-                 font: 14px/1.6 system-ui, sans-serif; display: grid; place-items: center; }
-    #status { font-family: ui-monospace, monospace; }
-    .ok { color: #7ee787; } .bad { color: #ff7b72; }
+    /* tokens: client/STYLE.md */
+    html, body { margin: 0; height: 100%; background: #0a0e14; color: #d8dee9;
+                 font: 14px/1.6 Inter, system-ui, sans-serif; display: grid; place-items: center; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+                   background-image: linear-gradient(#1f2733 1px, transparent 1px),
+                                     linear-gradient(90deg, #1f2733 1px, transparent 1px);
+                   background-size: 24px 24px; opacity: .04; }
+    .panel { border: 1px solid #1f2733; background: #10141a; padding: 24px 32px;
+             display: flex; flex-direction: column; gap: 12px; }
+    h1 { margin: 0; font-size: 15px; letter-spacing: .35em; font-weight: 600; color: #d8dee9; }
+    #status { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px;
+              display: flex; align-items: center; gap: 8px; color: #8b98a9; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff5c5c;
+           box-shadow: 0 0 8px #ff5c5c40; }
+    .ok #status { color: #22d3ee; }
+    .ok .dot { background: #22d3ee; box-shadow: 0 0 8px #22d3ee40; }
   </style>
-  <script type="module" crossorigin src="/assets/index-Baml5oOd.js"></script>
+  <script type="module" crossorigin src="/assets/index-DuGiZfIh.js"></script>
 </head>
 <body>
-  <div>
-    <h1>oh-my-bot</h1>
-    <p id="status" class="bad">connecting…</p>
+  <div class="panel" id="app">
+    <h1>OH-MY-BOT</h1>
+    <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
   </div>
 </body>
 </html>
