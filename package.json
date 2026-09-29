@@ -1,0 +1,12 @@
+{
+  "name": "oh-my-bot",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=22", "pnpm": ">=10" },
+  "scripts": {
+    "build": "pnpm -r --filter='./packages/*' build && pnpm --filter client build",
+    "dev:client": "pnpm --filter client dev",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
