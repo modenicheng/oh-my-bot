@@ -2,9 +2,10 @@ package sim
 
 import (
 	"fmt"
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"math"
 	"sort"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 func cloneMap(m *MapDef) *MapDef {
@@ -52,7 +53,7 @@ func (s *Sim) SetMap(def *MapDef) error {
 			return fmt.Errorf("sim: invalid uplink %d", u.ID)
 		}
 	}
-	if len(m.CorePads) > 0 && m.CoreRules.PeriodTicks <= 0 {
+	if len(m.CorePads) > 0 && (m.CoreRules.PeriodTicks <= 0 || uint64(m.CoreRules.PeriodTicks) > math.MaxUint32) {
 		return fmt.Errorf("sim: invalid core period")
 	}
 	for phase, weights := range m.CoreRules.GroupWeights {

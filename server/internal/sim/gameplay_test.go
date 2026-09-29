@@ -333,13 +333,13 @@ func TestInvulnerabilityThreeRulesAndDeathAxes(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		input ombv1.ClientInput
-	}{{"fire", ombv1.ClientInput{AxisMask: uint32(AxisFire), Fire: true}}, {"interact", ombv1.ClientInput{AxisMask: uint32(AxisAbility), Interact: true}}} {
+		input *ombv1.ClientInput
+	}{{"fire", &ombv1.ClientInput{AxisMask: uint32(AxisFire), Fire: true}}, {"interact", &ombv1.ClientInput{AxisMask: uint32(AxisAbility), Interact: true}}} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := NewSim(0, []uint32{1}, nil)
 			x.Respawn(1)
 			x.Tick()
-			x.ApplyInput(1, &tc.input)
+			x.ApplyInput(1, tc.input)
 			x.Tick()
 			if x.robots[0].Combat.Invulnerable {
 				t.Fatal("active action retained invulnerability")

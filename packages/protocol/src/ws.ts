@@ -6,6 +6,7 @@ import type { Transport, TransportStats } from './transport'
 export class WsTransport implements Transport {
   private ws?: WebSocket
   private cb?: (msg: Uint8Array) => void
+  private pongCb?: () => void
   private closeCb?: () => void
   private rttMs = 0
   private lastPing = 0
@@ -34,6 +35,7 @@ export class WsTransport implements Transport {
         if (buf[0] === 1) {
           this.rttMs = performance.now() - this.lastPing // kind 1 = pong
           this.stats.rttMs = this.rttMs
+          this.pongCb?.() // 业务层看门狗计时刷新（同时保留内部消费）
           return
         }
         if (buf[0] === 0) {
@@ -43,6 +45,11 @@ export class WsTransport implements Transport {
         this.cb?.(buf)
       }
     })
+  }
+
+  /** 订阅 pong 心跳（业务层看门狗计时刷新）。 */
+  onPong(cb: () => void): void {
+    this.pongCb = cb
   }
 
   send(msg: Uint8Array): void {

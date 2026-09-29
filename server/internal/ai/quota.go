@@ -93,10 +93,16 @@ func NewQuotaService(cfg QuotaConfig) *QuotaServiceImpl {
 
 // TryAcquire 尝试为玩家获取一次调用资格。
 //
-// 顺序：先占全局并发位（ctx 可取消等待），再在单一临界区内完成
-// 护栏 → 串行 → 轮次 → token 四项检查并预留轮次——检查与预留原子完成，
-// 避免 Restart 边界出现跨局撕裂。
+// 两阶段：先在锁内快速预检（护栏→串行→轮次→token，不碰信号量——
+// 同玩家重复请求必须立即 ErrBusy，不得排在其他玩家的并发位后面）；
+// 再等待全局并发位（ctx 可取消），得位后在单一临界区内重验并预留轮次
+// ——等待期间 Restart/护栏推进可能改变状态，重验与预留原子完成，
+// 避免跨局撕裂。
 func (s *QuotaServiceImpl) TryAcquire(ctx context.Context, playerID uint64) (Lease, error) {
+	if err := s.precheck(playerID); err != nil {
+		return Lease{}, err
+	}
+
 	select {
 	case s.slots <- struct{}{}:
 	case <-ctx.Done():
@@ -104,26 +110,12 @@ func (s *QuotaServiceImpl) TryAcquire(ctx context.Context, playerID uint64) (Lea
 	}
 
 	s.mu.Lock()
-	if s.globalUsed >= uint64(s.cfg.GlobalTokens) {
+	if err := s.precheckLocked(playerID); err != nil {
 		s.mu.Unlock()
 		s.releaseSlot()
-		return Lease{}, ErrGlobalGuardrail
+		return Lease{}, err
 	}
 	pq := s.playerLocked(playerID)
-	switch {
-	case pq.inFlight:
-		s.mu.Unlock()
-		s.releaseSlot()
-		return Lease{}, ErrBusy
-	case pq.roundsUsed >= s.cfg.PlayerRounds:
-		s.mu.Unlock()
-		s.releaseSlot()
-		return Lease{}, ErrRoundsExhausted
-	case pq.tokensUsed >= s.cfg.PlayerTokens:
-		s.mu.Unlock()
-		s.releaseSlot()
-		return Lease{}, ErrTokensExhausted
-	}
 	pq.roundsUsed++
 	pq.inFlight = true
 	lease := Lease{
@@ -133,6 +125,30 @@ func (s *QuotaServiceImpl) TryAcquire(ctx context.Context, playerID uint64) (Lea
 	}
 	s.mu.Unlock()
 	return lease, nil
+}
+
+// precheck 无锁包装的快速预检（拒因不碰信号量）。
+func (s *QuotaServiceImpl) precheck(playerID uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.precheckLocked(playerID)
+}
+
+// precheckLocked 检查护栏→串行→轮次→token（调用方持锁）。
+func (s *QuotaServiceImpl) precheckLocked(playerID uint64) error {
+	if s.globalUsed >= uint64(s.cfg.GlobalTokens) {
+		return ErrGlobalGuardrail
+	}
+	pq := s.playerLocked(playerID)
+	switch {
+	case pq.inFlight:
+		return ErrBusy
+	case pq.roundsUsed >= s.cfg.PlayerRounds:
+		return ErrRoundsExhausted
+	case pq.tokensUsed >= s.cfg.PlayerTokens:
+		return ErrTokensExhausted
+	}
+	return nil
 }
 
 // Commit 记录实际消耗并释放串行位与并发位。

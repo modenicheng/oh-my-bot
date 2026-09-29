@@ -43,8 +43,8 @@ export class RoomSession {
       }
     }, 1000)
 
+    this.transport.onPong(() => { this.lastPongAt = Date.now() }) // 心跳计时由 pong 专线上抛刷新
     this.offMessage = this.transport.onMessage((data) => {
-      this.lastPongAt = Date.now() // pong 帧也会走到 decodeServer 的 null 分支
       const msg = decodeServer(data)
       if (msg) {
         if (!settled) {
@@ -89,7 +89,8 @@ export class RoomSession {
 }
 
 function wsUrl(): string {
+  // 同源端口（服务器 embed 前端，HTTP/WS 同端口）；vite dev 由 proxy 转发
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.hostname}:8080/ws`
+  return `${proto}://${location.host}/ws`
 }
 

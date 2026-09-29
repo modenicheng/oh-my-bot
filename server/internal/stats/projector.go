@@ -1,0 +1,501 @@
+package stats
+
+import (
+	"fmt"
+	"math"
+	"sort"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	sim "github.com/modenicheng/oh-my-bot/server/internal/sim"
+)
+
+// Score weights (v0.3 §6). Core/Uplink values come from the event payloads.
+const (
+	ScoreKill   int32 = 25
+	ScoreAssist int32 = 10
+	ScoreHit    int32 = 1
+)
+
+// BEST_PARTNER pair cooperation score weights (v1 stats definition, see
+// titles.go): every kill by a duo member contributes pairCoopKill; a kill
+// whose assist IS the killer's partner (shared assist, v0.3 §7) additionally
+// contributes pairCoopMutualAssist.
+const (
+	pairCoopKill         int32 = 1
+	pairCoopMutualAssist int32 = 2
+)
+
+// movementSlack widens the per-interval physical distance cap (sim.MaxSpeed
+// over the elapsed ticks) so float rounding can never reject a legit delta;
+// teleports (respawn without a seen EvRespawn) still exceed it.
+const movementSlack = 1.05
+
+// robotStats is the per-robot accumulation state. "*At" fields record the tick
+// at which the counter reached its current value — the "first achiever wins"
+// tie-break input for max-value titles (v0.3 §13).
+type robotStats struct {
+	id uint32
+
+	score        int32
+	kills        int32
+	deaths       int32
+	assists      int32
+	hitsLanded   int32 // EvHit `from` count — v1 BARRAGE proxy for shots
+	cores        int32
+	uplinks      int32
+	wallHits     int32
+	aiRounds     int32
+	aiTokensK    int32
+	scriptErrors int32
+	// snippetUses counts CS_SNIPPET-sourced control activity. v1 has no
+	// snippet event source (snippet runtime unimplemented), so it stays 0;
+	// OLD_SCHOOL asserts on it anyway so the gate is future-proof.
+	snippetUses int32
+
+	killsAt        uint32
+	deathsAt       uint32
+	hitsAt         uint32
+	coresAt        uint32
+	uplinksAt      uint32
+	wallHitsAt     uint32
+	aiRoundsAt     uint32
+	scriptErrorsAt uint32
+
+	// RUNNER: cumulative checkpoint position delta.
+	dist        float64
+	distAt      uint32 // checkpoint tick of the last distance increment
+	lastPos     *sim.Vec2
+	lastPosTick uint32
+
+	// SURVIVOR: currently open alive segment (aliveSince) and best closed one.
+	aliveKnown   bool // an alive segment is open (respawn/first sighting)
+	aliveSince   uint32
+	maxSurvTicks uint32
+	maxSurvAt    uint32
+}
+
+type pairKey struct{ lo, hi uint32 }
+
+type pairCoop struct {
+	score int32
+	at    uint32 // tick of the last score increment (first-achiever tie-break)
+}
+
+// ProjectorImpl is the v1 Projector. It is a sequential, single-goroutine
+// consumer (same threading contract as sim.EventSink): glue feeds it from the
+// room/sim loop; tests feed it synchronously. It doubles as a
+// sim.CheckpointSink so glue can register one object for both event and
+// checkpoint streams (checkpoint lines carry the positions RUNNER needs).
+type ProjectorImpl struct {
+	robots map[uint32]*robotStats
+
+	// Glue-injected side tables (after EvMatchStart). The JSONL log has no
+	// partner/identity payload, so replay recalculation re-injects them via
+	// ReadReplayOptions; See completion report.
+	players  map[uint32]uint64
+	nicks    map[uint32]string
+	partners map[uint32]uint32
+	pairs    map[pairKey]*pairCoop
+
+	seen map[string]struct{} // event dedup (tick + kind + payload)
+
+	lastTick   uint32
+	hasCp      bool
+	lastCpTick uint32
+
+	matchStartSeen bool
+	matchEnded     bool
+
+	finalDone bool
+	final     []ScoreRow
+}
+
+var (
+	_ Projector          = (*ProjectorImpl)(nil)
+	_ sim.CheckpointSink = (*ProjectorImpl)(nil)
+)
+
+// NewProjector creates an empty projector for one match.
+func NewProjector() *ProjectorImpl {
+	return &ProjectorImpl{
+		robots:   make(map[uint32]*robotStats),
+		players:  make(map[uint32]uint64),
+		nicks:    make(map[uint32]string),
+		partners: make(map[uint32]uint32),
+		pairs:    make(map[pairKey]*pairCoop),
+		seen:     make(map[string]struct{}),
+	}
+}
+
+// SetPlayerMap implements Projector. Glue calls it right after EvMatchStart.
+func (p *ProjectorImpl) SetPlayerMap(m map[uint32]uint64) {
+	p.players = make(map[uint32]uint64, len(m))
+	for k, v := range m {
+		p.players[k] = v
+	}
+}
+
+// SetNickMap injects robotID→display nick. Ev* events carry no nicks
+// (RobotState.nick lives only in snapshots), so identity comes from glue.
+func (p *ProjectorImpl) SetNickMap(m map[uint32]string) {
+	p.nicks = make(map[uint32]string, len(m))
+	for k, v := range m {
+		p.nicks[k] = v
+	}
+}
+
+// SetPartnerMap injects the fixed random pairing (v0.3 §7: fixed for the whole match, cannot hurt each other, shared assists).
+// It is bidirectional glue data, absent from the event log by design; both the
+// live projector and ReadReplay receive the same map, keeping
+// "replay recalculation = live projection" exact for BEST_PARTNER.
+func (p *ProjectorImpl) SetPartnerMap(m map[uint32]uint32) {
+	p.partners = make(map[uint32]uint32, len(m))
+	for k, v := range m {
+		p.partners[k] = v
+	}
+}
+
+func (p *ProjectorImpl) robot(id uint32) *robotStats {
+	if r, ok := p.robots[id]; ok {
+		return r
+	}
+	r := &robotStats{id: id}
+	p.robots[id] = r
+	return r
+}
+
+// OnEvent consumes one event (same order as EventSink). Replaying an already
+// seen event is a no-op (tick+kind+payload dedup); events after EvMatchEnd are
+// ignored so a double-fed stream tail cannot skew the result.
+func (p *ProjectorImpl) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	if ev == nil || ev.Kind == nil || p.matchEnded {
+		return
+	}
+	key := eventKey(tick, ev)
+	if key == "" {
+		return // nil oneof payload: defensive, nothing to project
+	}
+	if _, dup := p.seen[key]; dup {
+		return
+	}
+	p.seen[key] = struct{}{}
+	if tick > p.lastTick {
+		p.lastTick = tick
+	}
+
+	switch k := ev.Kind.(type) {
+	case *ombv1.ServerEvent_Kill:
+		if e := k.Kill; e != nil {
+			p.onKill(tick, e)
+		}
+	case *ombv1.ServerEvent_CorePickup:
+		if e := k.CorePickup; e != nil {
+			r := p.robot(e.By)
+			r.score += e.Value
+			r.cores++
+			r.coresAt = tick
+		}
+	case *ombv1.ServerEvent_UplinkHack:
+		if e := k.UplinkHack; e != nil {
+			r := p.robot(e.By)
+			r.score += e.Value
+			r.uplinks++
+			r.uplinksAt = tick
+		}
+	case *ombv1.ServerEvent_Hit:
+		if e := k.Hit; e != nil {
+			r := p.robot(e.From)
+			r.score += ScoreHit
+			r.hitsLanded++
+			r.hitsAt = tick
+		}
+	case *ombv1.ServerEvent_Respawn:
+		if e := k.Respawn; e != nil {
+			r := p.robot(e.Robot)
+			r.aliveKnown = true
+			r.aliveSince = tick
+			// Respawn teleports to a sector spawn we do not know from the
+			// event; drop the last known position so the next checkpoint
+			// re-seeds instead of accumulating a teleport delta.
+			r.lastPos = nil
+		}
+	case *ombv1.ServerEvent_Say:
+		if e := k.Say; e != nil {
+			p.robot(e.Robot) // presence only: the speaker joins the board
+		}
+	case *ombv1.ServerEvent_PhaseChange:
+		// Consumed for completeness; no per-player projection.
+	case *ombv1.ServerEvent_WallHit:
+		if e := k.WallHit; e != nil {
+			r := p.robot(e.Robot)
+			r.wallHits++
+			r.wallHitsAt = tick
+		}
+	case *ombv1.ServerEvent_ScriptError:
+		if e := k.ScriptError; e != nil {
+			r := p.robot(e.Robot)
+			r.scriptErrors++
+			r.scriptErrorsAt = tick
+		}
+	case *ombv1.ServerEvent_MatchStart:
+		if e := k.MatchStart; e != nil {
+			p.matchStartSeen = true
+			_ = e // seed/players carry no per-robot projection in v1
+		}
+	case *ombv1.ServerEvent_AiUsage:
+		if e := k.AiUsage; e != nil && e.RoundsDelta > 0 {
+			r := p.robot(e.Robot)
+			r.aiRounds += int32(e.RoundsDelta)
+			r.aiTokensK += int32(e.TokensDelta)
+			r.aiRoundsAt = tick
+		}
+	case *ombv1.ServerEvent_MatchEnd:
+		if e := k.MatchEnd; e != nil {
+			p.matchEnded = true
+			// Close every open survival segment at the final tick; the
+			// embedded scores are the projector's own output serialized by
+			// glue, so they are deliberately not trusted here.
+			for _, r := range p.robots {
+				p.closeSegment(r, tick)
+			}
+		}
+	case *ombv1.ServerEvent_RoomState, *ombv1.ServerEvent_AiQuota,
+		*ombv1.ServerEvent_ScriptResult, *ombv1.ServerEvent_MapBootstrap:
+		// Consumed for completeness (full-event consumption); no stats effect.
+	}
+}
+
+func (p *ProjectorImpl) onKill(tick uint32, e *ombv1.EvKill) {
+	victim := p.robot(e.Victim)
+	victim.deaths++
+	victim.deathsAt = tick
+	p.closeSegment(victim, tick)
+
+	if e.Killer != 0 && e.Killer != e.Victim {
+		killer := p.robot(e.Killer)
+		killer.kills++
+		killer.killsAt = tick
+		killer.score += ScoreKill
+		if e.Assist != 0 && e.Assist != e.Killer {
+			a := p.robot(e.Assist)
+			a.assists++
+			a.score += ScoreAssist
+		}
+		// BEST_PARTNER: kills by a duo member (+1), mutual assist bonus (+2).
+		if partner, ok := p.partners[e.Killer]; ok && partner != e.Killer {
+			pk := pairKey{lo: e.Killer, hi: partner}
+			if pk.lo > pk.hi {
+				pk.lo, pk.hi = pk.hi, pk.lo
+			}
+			pc := p.pairs[pk]
+			if pc == nil {
+				pc = &pairCoop{}
+				p.pairs[pk] = pc
+			}
+			pc.score += pairCoopKill
+			if e.Assist != 0 && e.Assist == partner {
+				pc.score += pairCoopMutualAssist
+			}
+			pc.at = tick
+		}
+	}
+}
+
+func (p *ProjectorImpl) closeSegment(r *robotStats, tick uint32) {
+	if r.aliveKnown && tick > r.aliveSince {
+		if length := tick - r.aliveSince; length > r.maxSurvTicks {
+			r.maxSurvTicks = length
+			r.maxSurvAt = tick
+		}
+	}
+	r.aliveKnown = false
+}
+
+// OnCheckpoint ingests a full-state checkpoint (match_start line or 60s
+// checkpoint line). It is the only position source, feeding RUNNER deltas and
+// bootstrapping SURVIVOR segments when respawn events were not observed.
+// Duplicate/backwards checkpoints are ignored (idempotent re-feed).
+func (p *ProjectorImpl) OnCheckpoint(cp sim.Checkpoint) {
+	if p.hasCp && cp.Tick <= p.lastCpTick {
+		return
+	}
+	p.hasCp = true
+	p.lastCpTick = cp.Tick
+	if cp.Tick > p.lastTick {
+		p.lastTick = cp.Tick
+	}
+
+	for i := range cp.Robots {
+		rob := &cp.Robots[i]
+		r := p.robot(rob.ID)
+		pos := sim.Vec2{X: rob.Position.X, Y: rob.Position.Y}
+		if rob.State == sim.Dead {
+			// Death without a seen EvKill (defensive): close the segment at
+			// checkpoint granularity and remember the death-spot position.
+			p.closeSegment(r, cp.Tick)
+			r.lastPos = &pos
+			r.lastPosTick = cp.Tick
+			continue
+		}
+		if !r.aliveKnown {
+			r.aliveKnown = true
+			r.aliveSince = cp.Tick
+		}
+		if r.lastPos != nil {
+			elapsed := cp.Tick - r.lastPosTick
+			capDelta := sim.MaxSpeed * sim.DT * float64(elapsed) * movementSlack
+			if d := math.Hypot(pos.X-r.lastPos.X, pos.Y-r.lastPos.Y); d > 0 && d <= capDelta {
+				r.dist += d
+				r.distAt = cp.Tick
+			}
+			// d > capDelta: unexplained teleport — re-seed without counting.
+		}
+		r.lastPos = &pos
+		r.lastPosTick = cp.Tick
+	}
+}
+
+// Live returns the current board sorted by score desc, tie robotID asc.
+// Titles stay empty until Final (titles are settlement-only).
+func (p *ProjectorImpl) Live() LiveSnapshot {
+	sorted := p.sortedRobots()
+	rows := make([]ScoreRow, 0, len(sorted))
+	for _, r := range sorted {
+		rows = append(rows, ScoreRow{RobotID: r.id, PlayerID: p.players[r.id], Nick: p.nicks[r.id], Score: r.score})
+	}
+	sortRows(rows)
+	return LiveSnapshot{Tick: p.lastTick, Rows: rows}
+}
+
+// Final evaluates the 13 titles and freezes the settlement rows (computed
+// once; later calls return the cached result). Production glue calls it after
+// EvMatchEnd; calling earlier evaluates the state seen so far.
+func (p *ProjectorImpl) Final() []ScoreRow {
+	if p.finalDone {
+		// Defensive copy: the frozen settlement must not be mutable through a
+		// previously returned slice.
+		out := make([]ScoreRow, len(p.final))
+		copy(out, p.final)
+		return out
+	}
+	sorted := p.sortedRobots()
+	titles := p.evaluateTitles(sorted)
+	rows := make([]ScoreRow, 0, len(sorted))
+	for _, r := range sorted {
+		rows = append(rows, ScoreRow{
+			RobotID:  r.id,
+			PlayerID: p.players[r.id],
+			Nick:     p.nicks[r.id],
+			Score:    r.score,
+			Titles:   titles[r.id],
+		})
+	}
+	sortRows(rows)
+	p.final = rows
+	p.finalDone = true
+	out := make([]ScoreRow, len(rows))
+	copy(out, rows)
+	return out
+}
+
+func (p *ProjectorImpl) sortedRobots() []*robotStats {
+	ids := make([]uint32, 0, len(p.robots))
+	for id := range p.robots {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	out := make([]*robotStats, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, p.robots[id])
+	}
+	return out
+}
+
+func sortRows(rows []ScoreRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
+		}
+		return rows[i].RobotID < rows[j].RobotID
+	})
+}
+
+// eventKey builds the dedup fingerprint: tick + kind + full payload. The log
+// stream carries no event sequence numbers, so content within a tick is the
+// identity; a genuine same-tick identical-payload duplicate (e.g. two EvHit
+// with equal from/to/dmg) is indistinguishable from a replayed event and is
+// counted once — accepted v1 trade-off, noted in the completion report.
+func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
+	switch k := ev.Kind.(type) {
+	case *ombv1.ServerEvent_Kill:
+		if e := k.Kill; e != nil {
+			return fmt.Sprintf("%d|k|%d|%d|%d", tick, e.Killer, e.Victim, e.Assist)
+		}
+	case *ombv1.ServerEvent_CorePickup:
+		if e := k.CorePickup; e != nil {
+			return fmt.Sprintf("%d|c|%d|%d|%d", tick, e.By, e.CoreId, e.Value)
+		}
+	case *ombv1.ServerEvent_UplinkHack:
+		if e := k.UplinkHack; e != nil {
+			return fmt.Sprintf("%d|u|%d|%d|%d", tick, e.By, e.UplinkId, e.Value)
+		}
+	case *ombv1.ServerEvent_Hit:
+		if e := k.Hit; e != nil {
+			return fmt.Sprintf("%d|h|%d|%d|%d", tick, e.From, e.To, e.Dmg)
+		}
+	case *ombv1.ServerEvent_Respawn:
+		if e := k.Respawn; e != nil {
+			return fmt.Sprintf("%d|r|%d|%d", tick, e.Robot, e.Sector)
+		}
+	case *ombv1.ServerEvent_Say:
+		if e := k.Say; e != nil {
+			return fmt.Sprintf("%d|s|%d|%s", tick, e.Robot, e.Text)
+		}
+	case *ombv1.ServerEvent_PhaseChange:
+		if e := k.PhaseChange; e != nil {
+			return fmt.Sprintf("%d|p|%d|%d", tick, e.From, e.To)
+		}
+	case *ombv1.ServerEvent_WallHit:
+		if e := k.WallHit; e != nil {
+			at := e.At
+			ax, ay := 0.0, 0.0
+			if at != nil {
+				ax, ay = at.X, at.Y
+			}
+			return fmt.Sprintf("%d|w|%d|%v|%v|%v", tick, e.Robot, ax, ay, e.Impact)
+		}
+	case *ombv1.ServerEvent_ScriptError:
+		if e := k.ScriptError; e != nil {
+			return fmt.Sprintf("%d|e|%d|%s|%d", tick, e.Robot, e.Error, e.ScriptRev)
+		}
+	case *ombv1.ServerEvent_MatchStart:
+		if e := k.MatchStart; e != nil {
+			return fmt.Sprintf("%d|ms|%d|%d", tick, e.MapSeed, e.Players)
+		}
+	case *ombv1.ServerEvent_AiUsage:
+		if e := k.AiUsage; e != nil {
+			return fmt.Sprintf("%d|a|%d|%d|%d|%d", tick, e.Robot, e.RoundsDelta, e.TokensDelta, e.GlobalLeftK)
+		}
+	case *ombv1.ServerEvent_MatchEnd:
+		if k.MatchEnd != nil {
+			return fmt.Sprintf("%d|me|%d", tick, len(k.MatchEnd.Scores))
+		}
+	case *ombv1.ServerEvent_RoomState:
+		if e := k.RoomState; e != nil {
+			return fmt.Sprintf("%d|rs|%d|%d|%s", tick, e.State, e.RobotsOnline, e.HostNick)
+		}
+	case *ombv1.ServerEvent_AiQuota:
+		if e := k.AiQuota; e != nil {
+			return fmt.Sprintf("%d|aq|%d|%d|%d", tick, e.RoundsLeft, e.TokensUsedK, e.GlobalTokensLeftK)
+		}
+	case *ombv1.ServerEvent_ScriptResult:
+		if e := k.ScriptResult; e != nil {
+			return fmt.Sprintf("%d|sr|%d|%t|%s|%d", tick, e.ClientScriptId, e.Ok, e.Error, e.ScriptRev)
+		}
+	case *ombv1.ServerEvent_MapBootstrap:
+		if e := k.MapBootstrap; e != nil {
+			return fmt.Sprintf("%d|mb|%s|%d", tick, e.MapHash, e.GeneratorVersion)
+		}
+	}
+	return ""
+}

@@ -1,6 +1,7 @@
 // Package sim implements the single-owner, externally clocked authoritative match.
-// Call all methods and sink callbacks serially; network and script workers must
-// hand inputs to the owner rather than mutate a running simulation.
+// Mutating methods, state inspection and sink callbacks are single-owner. The
+// published View/WorldView and entity-view getters are safe for concurrent
+// readers; network/script workers submit commands through the owner.
 package sim
 
 import (
@@ -249,9 +250,9 @@ func (s *Sim) ApplyInput(robotID uint32, in *ombv1.ClientInput) bool {
 	return true
 }
 
-// Respawn is a queued hook for the future death scheduler (no death source or
-// 3s scheduling is implemented here). The next tick resets to the configured
-// spawn, preserving sequence/collision guards across lives.
+// Respawn is an explicit queued reset hook retained for callers and replay.
+// Combat deaths instead schedule their automatic respawn 180 ticks later.
+// Both preserve sequence/collision guards and personal Uplink cooldowns.
 func (s *Sim) Respawn(robotID uint32) bool {
 	i, ok := s.index[robotID]
 	if !ok || s.ended || s.robots[i].RespawnPending {
@@ -261,8 +262,10 @@ func (s *Sim) Respawn(robotID uint32) bool {
 	return true
 }
 
-// Tick advances exactly 1/60s. The order is input -> move/collide -> emit ->
-// checkpoint. Ticks after 28800 are no-ops, including checkpoint/end emission.
+// Tick advances exactly 1/60s: phase -> input/arbitration -> energy/movement ->
+// projectiles/objectives -> immutable view -> events -> checkpoint. Script
+// workers consume the last published frame and hand results to this owner.
+// Ticks after 28800 are no-ops, including checkpoint/end emission.
 func (s *Sim) Tick() {
 	if s.ended {
 		return

@@ -169,13 +169,17 @@ func (s *Sim) consumeInputs() {
 		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending {
 			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending}})
 		}
+		// Log even an input discarded by a same-tick respawn: its sequence guard
+		// has already advanced and must be reproducible from the replay stream.
+		if r.InputPending {
+			r.ConsumedSeq = r.PendingInput.Seq
+			s.consumed = append(s.consumed, consumedInput{r.ID, r.PendingInput})
+		}
 		if r.RespawnPending || (r.State == Dead && r.Combat.RespawnAt != 0 && s.tick >= r.Combat.RespawnAt) {
 			s.respawnRobot(r)
 		}
 		if r.InputPending {
 			r.Input, r.PendingInput, r.InputPending = r.PendingInput, Input{}, false
-			r.ConsumedSeq = r.Input.Seq
-			s.consumed = append(s.consumed, consumedInput{r.ID, r.Input})
 			if r.State != Dead {
 				c.HumanAxes |= r.Input.AxisMask
 				setAxes(&c.Human, ArbitratedInput{Move: Vec2{float64(r.Input.MoveX) / 1000, float64(r.Input.MoveY) / 1000}, Aim: r.Input.Aim, Fire: r.Input.Fire, Dash: r.Input.Dash, Shield: r.Input.Shield, Interact: r.Input.Interact}, r.Input.AxisMask)
