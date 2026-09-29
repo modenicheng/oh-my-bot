@@ -33,9 +33,10 @@ func dialAndKick(t *testing.T, ctx context.Context, s *testserverT) *websocket.C
 func TestDualChannelDelivery(t *testing.T) {
 	var sendReliable, sendLossy func(*ombv1.ServerMsg)
 	ready := make(chan struct{})
-	h := Handler(func(up *ombv1.ClientMsg, sr, sl func(*ombv1.ServerMsg)) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
 		sendReliable, sendLossy = sr, sl
 		close(ready)
+		return func(*ombv1.ClientMsg) {}
 	})
 	s := newTestServer(h)
 	defer s.Close()
@@ -71,7 +72,7 @@ func TestDualChannelDelivery(t *testing.T) {
 // 大帧（4KB）灌满 socket 缓冲 → writer 阻塞 → 队列真实填满 → kill。
 func TestReliableOverflowDisconnects(t *testing.T) {
 	big := strings.Repeat("x", 4096)
-	h := Handler(func(up *ombv1.ClientMsg, sr, sl func(*ombv1.ServerMsg)) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
 		ev := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 1, Text: big}}}}}
 		go func() {
@@ -79,6 +80,7 @@ func TestReliableOverflowDisconnects(t *testing.T) {
 				sr(ev) // 持续灌满：触发 kill
 			}
 		}()
+		return func(*ombv1.ClientMsg) {}
 	})
 	s := newTestServer(h)
 	defer s.Close()

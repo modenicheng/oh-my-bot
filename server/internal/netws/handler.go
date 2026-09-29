@@ -38,9 +38,10 @@ const (
 	reliableQueueLn = 1024 // 可靠通道大缓冲：满即断
 )
 
-// Handler 返回 /ws 端点。onUp 收到上行 ClientMsg 时回调；sendReliable/sendLossy
-// 用于异步下行（分通道语义，见包注释）。
-func Handler(onUp func(up *ombv1.ClientMsg, sendReliable func(*ombv1.ServerMsg), sendLossy func(*ombv1.ServerMsg))) http.Handler {
+// Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
+// 专属的 onUp（闭包可捕获每连接状态）；sendReliable/sendLossy 为该连接的下行通道。
+// 后续上行 ClientMsg 帧路由到返回的 onUp。
+func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg)) (onUp func(up *ombv1.ClientMsg))) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
 		if err != nil {
@@ -87,6 +88,8 @@ func Handler(onUp func(up *ombv1.ClientMsg, sendReliable func(*ombv1.ServerMsg),
 			}
 		}
 
+		connOnUp := sessionFactory(sendReliable, sendLossy)
+
 		readerErr := make(chan error, 1)
 		go func() {
 			for {
@@ -106,7 +109,9 @@ func Handler(onUp func(up *ombv1.ClientMsg, sendReliable func(*ombv1.ServerMsg),
 					if err := proto.Unmarshal(data[1:], msg); err != nil {
 						continue // 畸形上行丢弃
 					}
-					onUp(msg, sendReliable, sendLossy)
+					if connOnUp != nil {
+						connOnUp(msg)
+					}
 				}
 			}
 		}()
