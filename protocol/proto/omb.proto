@@ -1,0 +1,185 @@
+syntax = "proto3";
+package omb.v1;
+option go_package = "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen;ombv1";
+
+// oh-my-bot 线上协议 v1（ADR-0012：WS 二进制帧承载）。
+// 坐标系：地图中心为原点，米；1 tick = 1/60 s；角度弧度。
+// 实体 id：房间内全局唯一、单调递增 uint32。
+// 定点约定：hp/energy ×10 存 sint32，输入方向存千分比 int32——避免浮点序列化抖动。
+// AOI：Robot/Projectile 按 20m 视野+墙体遮挡裁剪（与 scan() 同一规则）；
+//      Core/Uplink 为地图对象，恒全量下发（数量小、状态稀疏变化）。
+
+import "google/protobuf/timestamp.proto";
+
+// ============ 共享 ============
+
+message Vec2 { double x = 1; double y = 2; }
+
+enum Phase { PHASE_UNSPECIFIED = 0; OUTER_RING = 1; CORE_OPEN = 2; }
+
+// 控制轴来源（ADR-0009 分轴仲裁）
+enum ControlSource { CS_UNSPECIFIED = 0; CS_HUMAN = 1; CS_SCRIPT = 2; CS_SNIPPET = 3; }
+
+// ============ 上行（0x02 帧） ============
+
+message ClientInput {
+  uint32 seq = 1;    // 每连接单调递增；服务器 ack 回传，预测和解用
+  int32 move_x = 2;  // 千分比 [-1000,1000]
+  int32 move_y = 3;
+  bool fire = 4;
+  double aim = 5;    // 弧度
+  bool dash = 6;
+  bool shield = 7;
+  bool interact = 8;
+}
+
+message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
+message LeaveRoom {}
+message RoomAction {
+  enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; }
+  Kind kind = 1;
+}
+message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
+message AiPrompt { string text = 1; } // AI Agent 配额内改码请求
+
+message ClientMsg {
+  oneof payload {
+    ClientInput input = 1;
+    ClientInput warmup_input = 2; // 热身场漫游
+    JoinRoom join = 3;
+    LeaveRoom leave = 4;
+    RoomAction room_action = 5;
+    ScriptSubmit script_submit = 6;
+    AiPrompt ai_prompt = 7;
+  }
+}
+
+// ============ 下行（0x03 帧） ============
+
+message EntityBase {
+  uint32 id = 1;
+  Vec2 pos = 2;
+  float heading = 3; // 炮塔朝向；底盘无朝向（全向移动）
+}
+
+message RobotState {
+  EntityBase base = 1;
+  sint32 hp_x10 = 2;
+  sint32 energy_x10 = 3;
+  bool shield_on = 4;
+  bool dashing = 5;
+  bool dead = 6;
+  uint32 respawn_in_s = 7; // dead=true 时有效
+  string nick = 8;         // 仅 full 快照携带
+  string color = 9;        // 仅 full 快照携带
+}
+
+message ProjectileState {
+  EntityBase base = 1;
+  uint32 owner_id = 2;
+}
+
+message CoreState {
+  EntityBase base = 1;
+  sint32 value = 2;  // +10 / +25(Mega)
+}
+
+message UplinkState {
+  EntityBase base = 1;
+  bool ready = 2;            // 冷却结束可黑
+  uint32 hacking_id = 3;     // 正在引导的 robot id（0=无人）
+  sint32 progress_x10 = 4;   // 引导进度 0.0–1.5s ×10
+}
+
+// 自机私有状态（不下发他机）
+message SelfState {
+  uint32 robot_id = 1;
+  ControlSource move_src = 2;   // 分轴仲裁结果（ADR-0009）
+  ControlSource turret_src = 3;
+  uint32 ai_rounds_left = 4;
+  uint32 ai_tokens_left_k = 5;  // 千 token
+}
+
+message SnapshotDelta {
+  uint32 tick = 1;
+  uint32 ack_seq = 2;        // 已确认的最新输入序号（和解用）
+  Phase phase = 3;
+  uint32 time_left_s = 4;    // 剩余秒
+  bool full = 5;             // 首帧/重同步：全量实体表
+  repeated RobotState robots = 6;      // AOI 裁剪后
+  repeated uint32 robot_gone = 7;      // tombstone：离开视野的实体 id
+  repeated ProjectileState projectiles = 8;
+  repeated uint32 projectile_gone = 9;
+  repeated CoreState cores = 10;
+  repeated uint32 core_gone = 11;
+  repeated UplinkState uplinks = 12;
+  SelfState self = 13;
+}
+
+// ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
+
+message EvKill { uint32 killer = 1; uint32 victim = 2; uint32 assist = 3; Vec2 at = 4; }
+message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
+message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; }
+message EvPhaseChange { Phase from = 1; Phase to = 2; }
+message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
+message EvSay { uint32 robot = 1; string text = 2; }
+message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
+message EvMatchEnd { repeated ScoreRow scores = 1; }
+message ScoreRow { uint32 robot = 1; sint32 score = 2; repeated Title titles = 3; }
+enum Title {
+  TITLE_UNSPECIFIED = 0;
+  WAR_MACHINE = 1;      // 战争机器：击毁最多
+  SCAVENGER = 2;        // 垃圾佬：Core 最多
+  SIGNAL_THIEF = 3;     // 信号大盗：Uplink 最多
+  RUNNER = 4;           // 跑路大师
+  WALL_HEAD = 5;        // 铁头娃：撞墙最多
+  SURVIVOR = 6;         // 苟王
+  PEACEMAKER = 7;       // 和平使者
+  AI_IDIOT = 8;         // 人工智障
+  BARRAGE = 9;          // 弹幕大师
+  BEST_PARTNER = 10;    // 最佳搭档
+  AI_REGULAR = 11;      // AI 常客
+  OLD_SCHOOL = 12;      // 古法编程
+  CNMB = 13;            // 充能面包：被击毁最多
+}
+
+message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，仅下发）
+  uint32 client_script_id = 1;
+  bool ok = 2;
+  string error = 3; // 编译/加载错误摘要
+}
+
+message EvRoomState { // 房间生命周期广播（含 Session 榜）
+  enum State { R_IDLE = 0; R_WARMUP = 1; R_RUNNING = 2; R_ENDED = 3; }
+  State state = 1;
+  uint32 robots_online = 2;
+  string host_nick = 3;
+}
+
+message EvAiQuota { uint32 rounds_left = 1; uint32 tokens_used_k = 2; }
+
+message ServerEvent {
+  uint32 tick = 1;
+  google.protobuf.Timestamp wall = 2; // 落 Match Event Log 用的墙钟
+  oneof kind {
+    EvKill kill = 10;
+    EvCorePickup core_pickup = 11;
+    EvUplinkHack uplink_hack = 12;
+    EvPhaseChange phase_change = 13;
+    EvRespawn respawn = 14;
+    EvSay say = 15;
+    EvHit hit = 16;
+    EvMatchEnd match_end = 17;
+    EvRoomState room_state = 18;
+    EvAiQuota ai_quota = 19;
+    EvScriptResult script_result = 20;
+  }
+}
+
+message ServerMsg {
+  oneof payload {
+    SnapshotDelta snapshot = 1;
+    ServerEvent event = 2;
+  }
+}

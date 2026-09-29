@@ -1,19 +1,28 @@
-// 消息层：与 .proto schema 对应的语义分组（编解码实现待 schema 工具链落地）。
-// 设计要点（v0.3 §12）：
-// - 下行：60Hz 快照（增量编码 + AOI 裁剪）；事件流（击毁/拾取/转段/热更…）
-// - 上行：输入序列（含序号，用于预测和解）、脚本提交、房间指令
-// 快照增量编码与 AOI 裁剪在传输层之上，两种 Transport 处理一致。
-
-export type ClientMsg =
-  | { t: 'input'; seq: number; move: { x: number; y: number }; fire: boolean; aim: number; dash: boolean; shield: boolean }
-  | { t: 'script.submit'; source: string }
-  | { t: 'room.join'; nick: string; color: string }
-  | { t: 'room.action'; action: 'start' | 'abort' | 'restart' | 'warmup' }
-
-export type ServerMsg =
-  | { t: 'snapshot'; tick: number; entities: Uint8Array; ackSeq: number }
-  | { t: 'event'; kind: string; payload: Uint8Array }
-  | { t: 'room.state'; state: unknown }
-  | { t: 'ai.quota'; rounds: number; tokens: number }
+// 帧编解码辅助：protobuf 生成类型 + Transport 二进制帧的胶水。
+// 帧协议（ADR-0012，与 server/internal/netws 一致）：
+//   0x00 ping / 0x01 pong / 0x02 上行 ClientMsg / 0x03 下行 ServerMsg
+import { toBinary, fromBinary } from '@bufbuild/protobuf'
+import { ClientMsgSchema, ServerMsgSchema, type ClientMsg, type ServerMsg } from './gen/proto/omb_pb'
 
 export const PROTOCOL_VERSION = 1
+
+export const frame = {
+  ping: 0x00, pong: 0x01, up: 0x02, down: 0x03,
+} as const
+
+export function encodeClient(msg: ClientMsg): Uint8Array {
+  const body = toBinary(ClientMsgSchema, msg)
+  const out = new Uint8Array(1 + body.length)
+  out[0] = frame.up
+  out.set(body, 1)
+  return out
+}
+
+export function decodeServer(data: Uint8Array): ServerMsg | null {
+  if (data.length < 2 || data[0] !== frame.down) return null
+  try {
+    return fromBinary(ServerMsgSchema, data.subarray(1))
+  } catch {
+    return null
+  }
+}

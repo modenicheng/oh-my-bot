@@ -1,0 +1,9 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: ../server/internal/protocol/gen
+    opt: paths=source_relative
+  - local: protoc-gen-es
+    out: ../packages/protocol/src/gen
+    opt:
+      - target=ts

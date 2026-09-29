@@ -3,10 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=22", "pnpm": ">=10" },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
   "scripts": {
     "build": "pnpm -r --filter='./packages/*' build && pnpm --filter client build",
     "dev:client": "pnpm --filter client dev",
     "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.73.0",
+    "vitest": "^5.0.2"
   }
 }
