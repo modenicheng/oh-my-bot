@@ -2,7 +2,9 @@
 package stats
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	sim "github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -52,10 +54,10 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 	for {
 		rec, err := reader.Read()
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break // clean stream end
+			}
 			return nil, fmt.Errorf("stats: replay record: %w", err)
-		}
-		if rec == nil {
-			break
 		}
 		switch rec.Type {
 		case "match_start", "checkpoint":

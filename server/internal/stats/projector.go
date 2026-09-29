@@ -113,6 +113,7 @@ type ProjectorImpl struct {
 var (
 	_ Projector          = (*ProjectorImpl)(nil)
 	_ sim.CheckpointSink = (*ProjectorImpl)(nil)
+	_ sim.ReplaySink     = (*ProjectorImpl)(nil)
 )
 
 // NewProjector creates an empty projector for one match.
@@ -310,6 +311,18 @@ func (p *ProjectorImpl) closeSegment(r *robotStats, tick uint32) {
 	}
 	r.aliveKnown = false
 }
+
+// OnMatchInit ingests the tick-0 initial state (sim.ReplaySink). Production
+// glue registers this projector in the same sink chain as the match log, so
+// the live path sees the same bootstrap as a replay — SURVIVOR segments open
+// from tick 0 and robots gain a position seed.
+func (p *ProjectorImpl) OnMatchInit(state sim.Checkpoint) {
+	p.OnCheckpoint(state)
+}
+
+// OnInput is a ReplaySink no-op: control inputs drive the sim, not the stats
+// projection.
+func (p *ProjectorImpl) OnInput(tick uint32, robotID uint32, input sim.Input) {}
 
 // OnCheckpoint ingests a full-state checkpoint (match_start line or 60s
 // checkpoint line). It is the only position source, feeding RUNNER deltas and
