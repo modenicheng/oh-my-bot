@@ -16,6 +16,13 @@ const paths = {
   skull: 'M4 1h8v2h2v8h-2v4h-2v-2H9v2H7v-2H6v2H4v-4H2V3h2Zm0 4v3h3V5Zm5 0v3h3V5ZM7 9v2h2V9Z',
   trophy: 'M4 1h8v2h3v6h-3v2H9v2h3v2H4v-2h3v-2H4V9H1V3h3Zm-1 4v2h2V5Zm8 0v2h2V5Z',
   chevron: 'M5 2h2v2h2v2h2v4H9v2H7v2H5v-4h2V6H5Z',
+  // 技能卡组与音频面板：全部整数轴对齐矩形
+  fire: 'M7 0h2v4H7ZM7 12h2v4H7ZM0 7h4v2H0ZM12 7h4v2h-4ZM5 5h6v6H5Z',
+  dash: 'M1 3h5v2H1ZM1 7h7v2H1ZM1 11h5v2H1ZM8 4h2v2h2v4h-2v2H8v-2h2V6H8Z',
+  shield: 'M2 1h12v6h-1v2h-2v2h-1v2h-1v1H7v-1H6v-2H5V9H3V7H2Z',
+  uplink: 'M5 1h6v5H5ZM3 3h1v3H3ZM12 3h1v3h-1ZM7 6h2v7H7ZM4 13h8v2H4Z',
+  sound: 'M2 5h3v6H2ZM5 3h2v10H5ZM9 6h1v4H9ZM11 4h1v8h-1Z',
+  soundOff: 'M2 5h3v6H2ZM5 3h2v10H5ZM10 6h1v1h-1ZM14 6h1v1h-1ZM11 7h1v1h-1ZM13 7h1v1h-1ZM12 8h1v1h-1ZM11 9h1v1h-1ZM13 9h1v1h-1ZM10 10h1v1h-1ZM14 10h1v1h-1Z',
 } as const
 export type IconName = keyof typeof paths
 

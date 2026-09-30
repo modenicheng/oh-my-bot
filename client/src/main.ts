@@ -5,15 +5,17 @@ import { ClientMsgSchema, RoomActionSchema,
          RoomAction_Kind, EvRoomState_State,
          type ServerMsg } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
-import { RoomSession } from './net'
+import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { ManualView } from './manual/manual'
 import { ReplayLibrary } from './replay/library'
 import { readRoute, saveProfile, loadProfile, writeRoute, type View } from './route'
 import { mountIcons } from './icons'
+import { audio } from './audio'
 
 mountIcons(document)
+audio.installUI()
 
 // ---- 常量 ---------------------------------------------------------------
 
@@ -45,6 +47,9 @@ const btnWarmup = $<HTMLButtonElement>('btn-warmup')
 const roomNotice = $<HTMLDivElement>('room-notice')
 const statusText = $<HTMLSpanElement>('status-text')
 const btnReconnect = $<HTMLButtonElement>('btn-reconnect')
+const connectionNotice = $('connection-notice')
+const connectionText = $('connection-text')
+const connectionRetry = $<HTMLButtonElement>('connection-retry')
 const viewGame = $<HTMLElement>('view-game')
 const gameCanvas = $<HTMLCanvasElement>('game-canvas')
 const hudRoot = $<HTMLElement>('hud')
@@ -103,7 +108,7 @@ function validate(): string | null {
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
 function showView(view: View, extra?: { doc?: string; replay?: string }): void {
-  game?.setActive(view === 'game')
+  game?.setActive(view === 'game' && session?.state === 'online' && !awaitingFull)
   writeRoute(view, lastJoin?.roomCode, extra)
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
@@ -271,6 +276,7 @@ btnReplaysBack.addEventListener('click', closeReplays)
 
 let session: RoomSession | null = null
 let lastJoin: { roomCode: string; nick: string; color: string } | null = null
+let awaitingFull = false
 
 async function join(): Promise<void> {
   showFormError('')
@@ -301,6 +307,7 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
       color,
       onMessage: (msg) => { if (session === s) onServerMsg(roomCode, msg) },
       onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
+      onStateChange: (state, retryInMs) => { if (session === s) onConnectionState(state, retryInMs) },
     })
     if (session !== s) { s.close(); return }
   } catch (err) {
@@ -319,21 +326,41 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
 }
 
 function onDisconnected(reason: string): void {
-  stopRttLoop()
-  game?.exit()
-  game = null
-  session?.close()
-  session = null
-  btnJoin.disabled = false // 修复：无论从哪个阶段断开，恢复进房按钮
+  awaitingFull = game !== null
+  game?.setActive(false)
   setStatus('down', reason)
-  roomStateEl.textContent = '离线'
   btnStart.hidden = true
   btnWarmup.hidden = true
+  $('btn-game-start').hidden = true
   roomNotice.hidden = false
-  roomNotice.textContent = '已离线，重新连接后可继续'
-  btnReconnect.hidden = false
-  showView('room')
+  roomNotice.textContent = '正在恢复连接，房间与昵称已保留'
 }
+
+function onConnectionState(state: SessionState, retryInMs = 0): void {
+  const online = state === 'online'
+  connectionNotice.hidden = online && !awaitingFull || state === 'idle'
+  connectionRetry.disabled = state === 'connecting' || online
+  btnReconnect.hidden = online || state === 'connecting'
+  if (online) {
+    connectionText.textContent = awaitingFull ? '已连接，正在同步对局…' : ''
+    setStatus('ok', '已连接')
+  } else if (state !== 'idle') {
+    const text = state === 'connecting' ? '正在连接房间…'
+      : navigator.onLine === false ? '网络已离线，恢复后自动重连'
+      : retryInMs > 0 ? `连接中断，${(retryInMs / 1000).toFixed(1)} 秒后重试` : '正在恢复连接…'
+    connectionText.textContent = text
+    setStatus('down', text)
+  }
+}
+
+function cancelConnection(): void {
+  session?.close(); session = null
+  stopRttLoop(); game?.exit(); game = null; awaitingFull = false
+  connectionNotice.hidden = true; btnJoin.disabled = false; btnReconnect.hidden = false
+  setStatus('off', '连接已取消'); showView('join')
+}
+$('connection-cancel').addEventListener('click', cancelConnection)
+connectionRetry.addEventListener('click', () => session?.retryNow())
 
 // ---- 游戏态切换 -------------------------------------------------------------
 
@@ -365,6 +392,9 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
+      connectionNotice.hidden = true
+      awaitingFull = false
+      stopRttLoop()
       session?.close()
       session = null
       game?.exit()
@@ -380,11 +410,16 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? 'replays' : !viewReplayPlayer.hidden ? 'replay-player' : null
       const utilityRoute = readRoute()
       if (!game) enterGame()
+      awaitingFull = true
+      game?.setActive(false)
       const ok = game?.onMapBootstrap(ev.kind.value.mapJson) ?? false
+      if (ok && !utilityView) showView('game')
       if (ok && utilityView) showView(utilityView, utilityRoute)
       if (!ok) {
         game?.exit()
         game = null
+        awaitingFull = false
+        connectionNotice.hidden = true
         showView('room')
         roomStateEl.textContent = '地图数据异常，无法进入对局'
       }
@@ -393,9 +428,13 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'roomState') {
       const rs = ev.kind.value
       // 对局结束回大厅（服务器状态机回 idle/warmup）；结算覆盖层在场时保留游戏视图
-      if (rs.state === EvRoomState_State.R_IDLE
-          && !viewGame.hidden && !game?.isMatchEndShown()) {
-        exitGame()
+      if (rs.state === EvRoomState_State.R_IDLE) {
+        awaitingFull = false
+        connectionNotice.hidden = true
+        if (game && !game.isMatchEndShown()) {
+          if (!viewGame.hidden) exitGame()
+          else { game.exit(); game = null }
+        }
       }
       onRoomState(rs.state, rs.hostNick, rs.robotsOnline)
       if (!restoredView) {
@@ -412,6 +451,9 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     game?.onMessage(msg)
     const snap = extractSnapshot(msg)
     if (snap?.full && game) {
+      awaitingFull = false
+      connectionNotice.hidden = true
+      game.setActive(!viewGame.hidden && session?.state === 'online')
       room.lastRoster = game.lastRoster()
       if (!viewGame.hidden) renderMembers()
     }
@@ -426,6 +468,7 @@ btnStart.addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
 btnWarmup.addEventListener('click', () => sendRoomAction(RoomAction_Kind.WARMUP))
 
 btnReconnect.addEventListener('click', () => {
+  if (session) { session.retryNow(); return }
   btnReconnect.hidden = true
   if (!lastJoin) { // 无历史参数（理论不可达）：退回表单
     showView('join')
@@ -466,16 +509,22 @@ window.addEventListener('keydown', (e) => {
 
 // Space assist 开关（游戏态下全局拦截，避免页面滚动）
 window.addEventListener('keydown', (e) => {
-  if ((e.code === 'Space' || e.code === 'Enter') && game && !viewGame.hidden && !e.repeat) {
+  if ((e.code === 'Space' || e.code === 'Enter') && game && !viewGame.hidden && !e.repeat && !e.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey) {
     const t = e.target as HTMLElement | null
-    if (t?.closest('input, textarea, button, a, select, [contenteditable]')) return
+    if (t?.closest('input, textarea, button, a, summary, select, [contenteditable]')) return
     e.preventDefault()
     game.toggleAssist()
   }
 })
 
 // 刷新仅断开传输；保留房间身份以恢复原机器人。
-window.addEventListener('pagehide', () => session?.close())
+window.addEventListener('pagehide', () => {
+  game?.setActive(false)
+  session?.close()
+})
+window.addEventListener('pageshow', e => {
+  if (e.persisted && lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
+})
 
 const profile = loadProfile(initialRoute.roomCode)
 if (profile) {

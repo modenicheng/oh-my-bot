@@ -3,6 +3,7 @@ import { Phase, Title } from '@omb/protocol'
 import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
+import type { GameFeedback } from './feedback'
 import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawUplink, drawProjectile, drawVitals } from './art'
 const ROBOT_R = 0.6
 
@@ -35,7 +36,7 @@ export function phaseName(p: number): string {
 
 
 export interface SayBubble { robotId: number; text: string; at: number }
-export interface RenderExtras { bubbles: SayBubble[] }
+export interface RenderExtras { bubbles: SayBubble[]; localAim?: number; feedback?: GameFeedback }
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D
@@ -59,6 +60,11 @@ export class Renderer {
       const st = world.uplinks.get(def.id)
       drawUplink(ctx, cam, def.pos.x, def.pos.y, def.main,
         world.phase >= def.activePhase && (st?.ready ?? true), st?.hackingId ? st.progressX10 / 80 : 0)
+      const selfPos = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
+      if (selfPos && world.phase >= def.activePhase && Math.hypot(selfPos.x - def.pos.x, selfPos.y - def.pos.y) <= def.interactR) {
+        ctx.save(); ctx.strokeStyle = '#22d3ee66'; ctx.lineWidth = 1; ctx.setLineDash([5, 7])
+        ctx.beginPath(); ctx.arc(cam.toPxX(def.pos.x), cam.toPxY(def.pos.y), def.interactR * cam.scale, 0, Math.PI * 2); ctx.stroke(); ctx.restore()
+      }
     }
     for (const core of world.cores.values()) {
       const p = core.base?.pos
@@ -78,10 +84,12 @@ export class Renderer {
         continue
       }
       const self = b.id === world.self?.robotId
-      drawRobot(ctx, cam, b.pos.x, b.pos.y, b.heading, r.color || ink.cyan, self,
+      const heading = self && extras.localAim !== undefined ? extras.localAim : b.heading
+      drawRobot(ctx, cam, b.pos.x, b.pos.y, heading, r.color || ink.cyan, self,
         r.shieldOn, r.dashing, r.isPartner, (r.invulnUntil ?? 0) > performance.now(), world.tick)
-      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self)
+      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn)
     }
+    extras.feedback?.draw(ctx, cam)
     this.drawBubbles(world, cam, extras)
   }
 
@@ -97,7 +105,8 @@ export class Renderer {
       if (age > 4) continue
       const alpha = age < 3 ? 1 : 1 - (age - 3)
       const x = cam.toPxX(pos.x)
-      const y = cam.toPxY(pos.y) - ROBOT_R * cam.scale - 26
+      const radius = Math.max(6, ROBOT_R * cam.scale)
+      const y = cam.toPxY(pos.y) - (r!.shieldOn ? radius * 1.65 + 9 : radius) - 34
       ctx.save()
       ctx.globalAlpha = alpha
       ctx.font = `12px ${mono}`

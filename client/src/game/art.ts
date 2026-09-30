@@ -6,7 +6,7 @@ export const ink = {
   bg: '#070d14', floor: '#101b25', panel: '#182735', line: '#29414f',
   text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d',
 } as const
-export const mono = 'ui-monospace, "JetBrains Mono", monospace'
+export const mono = '"Fusion Pixel", ui-monospace, monospace'
 const tau = Math.PI * 2
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 const sources = {
@@ -16,13 +16,16 @@ const sources = {
   uplink: new URL('../assets/uplink.svg', import.meta.url).href,
 }
 const sprites = {} as Record<keyof typeof sources, HTMLImageElement>
-export const artReady = Promise.all(Object.entries(sources).map(([name, url]) => new Promise<void>(resolve => {
+export const artReady = Promise.all([
+  document.fonts.load(`12px ${mono}`).catch(() => []),
+  ...Object.entries(sources).map(([name, url]) => new Promise<void>(resolve => {
   const image = new Image()
   sprites[name as keyof typeof sources] = image
   image.onload = () => resolve()
   image.onerror = () => resolve()
   image.src = url
-})))
+})),
+])
 
 function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: number, y: number, size: number): void {
   const image = sprites[name]
@@ -141,8 +144,19 @@ export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number
     ctx.strokeStyle = color; ctx.lineWidth = 2
     for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(x, y, r + 6, i * tau / 4 + 0.15, i * tau / 4 + 0.65); ctx.stroke() }
   }
-  if (shield || invulnerable || partner || dashing) {
-    ctx.lineWidth = shield ? 2 : 1; ctx.strokeStyle = partner ? ink.lime : ink.cyan
+  if (shield) {
+    const sr = r * 1.65 + 5
+    circle(ctx, x, y, sr); ctx.fillStyle = '#eff9ff12'; ctx.fill()
+    ctx.strokeStyle = '#f4fbff'; ctx.lineWidth = Math.max(3, cam.scale * 0.06); ctx.stroke()
+    circle(ctx, x, y, sr + 4); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 1; ctx.stroke()
+    ctx.fillStyle = '#ffffff'
+    for (let i = 0; i < 4; i++) {
+      const a = i * tau / 4
+      ctx.fillRect(Math.round(x + Math.cos(a) * sr) - 2, Math.round(y + Math.sin(a) * sr) - 2, 4, 4)
+    }
+  }
+  if (invulnerable || partner || dashing) {
+    ctx.lineWidth = 1; ctx.strokeStyle = partner ? ink.lime : ink.cyan
     ctx.globalAlpha = invulnerable && !motion.matches ? 0.65 + 0.25 * Math.sin(tick / 12) : 0.85
     if (partner || invulnerable) ctx.setLineDash([3, 4])
     circle(ctx, x, y, r + (dashing ? 9 : 5)); ctx.stroke()
@@ -164,12 +178,17 @@ export function drawCore(ctx: CanvasRenderingContext2D, cam: Camera, wx: number,
 export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, (main ? 2.1 : 1.7) * cam.scale)
   if (!visible(cam, x, y)) return
-  ctx.save(); ctx.globalAlpha = ready ? 1 : 0.5
+  ctx.save(); ctx.globalAlpha = ready || progress > 0 ? 1 : 0.55
   circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
   sprite(ctx, 'uplink', x, y, size)
   if (progress > 0) {
-    ctx.strokeStyle = ink.cyan; ctx.lineWidth = 3; ctx.beginPath()
-    ctx.arc(x, y, size * 0.8, -tau / 4, -tau / 4 + Math.min(1, progress) * tau); ctx.stroke()
+    circle(ctx, x, y, size * 0.9); ctx.strokeStyle = '#49616e'; ctx.lineWidth = 5; ctx.stroke()
+    ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
+    const a = -tau / 4 + Math.min(1, progress) * tau
+    ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
+    ctx.fillStyle = '#f4fbff'; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    ctx.font = `16px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
+    ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
   }
   ctx.restore()
 }
@@ -186,10 +205,11 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.fillStyle = ink.text; ctx.fillRect(-3, -1, 4, 2); ctx.restore()
 }
 
-export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean): void {
+export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
-  const w = Math.max(24, r * 2.5), by = y - r - 12
+  const clearance = shield ? r * 1.65 + 9 : r
+  const w = Math.max(24, r * 2.5), by = y - clearance - 12
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
   ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * Math.min(1, Math.max(0, hp / 100)), 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)

@@ -12,6 +12,8 @@ import { Camera } from './camera'
 import { Renderer, type SayBubble } from './render'
 import { InputSampler } from './input'
 import { Hud, showMatchEnd, hideMatchEnd } from './hud'
+import { GameFeedback } from './feedback'
+import { audio } from '../audio'
 
 const SEND_HZ = 60
 const FRAME_MS = 1000 / SEND_HZ
@@ -32,6 +34,7 @@ export class GameController {
   private renderer: Renderer
   private input = new InputSampler()
   private hud: Hud
+  private feedback: GameFeedback
   private bubbles: SayBubble[] = []
   private raf = 0
   private sendTimer: ReturnType<typeof setInterval> | undefined
@@ -46,6 +49,12 @@ export class GameController {
   private pixelRatio = 0
   private active = true
   private resyncAt = -Infinity
+  private startCuePending = false
+  private readonly releaseOnBlur = () => {
+    this.input.release()
+    this.sampleAndSend()
+  }
+  private readonly releaseWhenHidden = () => { if (document.hidden) this.releaseOnBlur() }
 
   constructor(deps: GameDeps) {
     this.canvas = deps.canvas
@@ -54,6 +63,9 @@ export class GameController {
     this.onExitToRoom = deps.onExitToRoom
     this.renderer = new Renderer(deps.canvas)
     this.hud = new Hud(deps.hudRoot)
+    this.feedback = new GameFeedback(text => this.hud.flashMsg(text))
+    window.addEventListener('blur', this.releaseOnBlur)
+    document.addEventListener('visibilitychange', this.releaseWhenHidden)
   }
 
   /** 收到 mapBootstrap：解析地图，进入游戏态 */
@@ -67,12 +79,16 @@ export class GameController {
     this.stopLoops()
     this.ended = false
     this.resyncAt = -Infinity
+    this.startCuePending = false
     this.endShown = false
     this.matchEndRows = []
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
+    this.feedback.reset()
+    this.input.assistOn = false
     this.world = emptyWorld()
-    this.hud.update(this.world)
+    this.hud.update(this.world, this.map)
+    this.hud.setAssist(false)
     this.setupCanvas()
     if (this.active) this.input.attach(this.canvas, this.cam)
     this.startLoops()
@@ -83,6 +99,10 @@ export class GameController {
   exit(): void {
     this.stopLoops()
     this.input.detach()
+    this.feedback.reset()
+    this.hud.dispose()
+    window.removeEventListener('blur', this.releaseOnBlur)
+    document.removeEventListener('visibilitychange', this.releaseWhenHidden)
     this.map = null
     this.world = emptyWorld()
     this.endShown = false
@@ -124,13 +144,20 @@ export class GameController {
         this.send(buildResync())
       } else if (result === 'applied') {
         this.input.acknowledge(snap.ackSeq)
+        if (snap.self?.assistOn !== undefined) this.input.assistOn = snap.self.assistOn
+        this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
         if (snap.full) this.resyncAt = -Infinity
       }
       return
     }
     if (msg.payload.case !== 'event') return
     const ev = msg.payload.value
+    if (!(ev.kind.case === 'matchEnd' && this.endShown)) this.feedback.event(ev, this.world, this.map, this.active)
     switch (ev.kind.case) {
+      case 'matchStart':
+        // The reliable start event precedes the first full snapshot.
+        this.startCuePending = !this.active
+        break
       case 'say': {
         this.bubbles.push({ robotId: ev.kind.value.robot, text: ev.kind.value.text, at: performance.now() })
         if (this.bubbles.length > 12) this.bubbles.shift()
@@ -170,12 +197,21 @@ export class GameController {
       this.input.detach()
     }
     this.active = active
-    if (active && this.map) this.input.attach(this.canvas, this.cam)
+    if (!active) this.feedback.pause()
+    if (active && this.map) {
+      this.input.attach(this.canvas, this.cam)
+      if (this.startCuePending && this.world.initialized && !this.ended) {
+        this.startCuePending = false
+        audio.play('matchStart')
+      }
+    }
   }
 
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
+    if (!this.active || !this.map || this.ended || !this.world.initialized) return
     if (this.input.toggleAssist()) {
+      audio.play('assist')
       this.send(encodeClient(create(ClientMsgSchema, {
         payload: { case: 'assistToggle', value: create(AssistToggleSchema, {}) },
       })))
@@ -233,8 +269,11 @@ export class GameController {
     const pos = self?.base?.pos
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
-    this.renderer.render(this.world, this.map, this.cam, { bubbles: this.bubbles })
-    this.hud.update(this.world)
+    this.renderer.render(this.world, this.map, this.cam, {
+      bubbles: this.bubbles, localAim: pos ? this.input.aimAt(pos.x, pos.y) : undefined, feedback: this.feedback,
+    })
+    this.hud.update(this.world, this.map)
+    this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }
 
@@ -245,7 +284,9 @@ export class GameController {
     const pos = self?.base?.pos
     const sx = pos?.x ?? 0
     const sy = pos?.y ?? 0
+    if (pos) this.cam.follow(pos.x, pos.y)
     const { msg, active } = this.input.sample(sx, sy)
+    this.feedback.input(msg, this.world, this.map)
     if (!active) return // 全零输入（无人类操作）不发，避免抢占脚本
     this.send(encodeClient(create(ClientMsgSchema, {
       payload: { case: 'input', value: msg },

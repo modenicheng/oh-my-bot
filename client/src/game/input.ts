@@ -24,22 +24,21 @@ export interface InputSample {
 export class InputSampler {
   private keys = new Set<string>()
   private mouseDown = false
-  private mousePx = { x: 0, y: 0 }
+  private pointer = { x: 0, y: 0 }
   /** 人类操作轴的粘性：某轴一旦被人类操作，就一直发该轴（人优先，直到脚本重新接管？不——
    * 语义按 controls.md：人类输入逐轴抢占且不自动归还。客户端实现：人类按下后轴位持续置 1，
    * 失焦时只发送一次停止帧；恢复脚本控制仍需显式切换辅助。 */
   private stickyAxes = 0
   private releaseAxes = 0
   private seq = 0
+  private lastAim = 0
   private cam: Camera | null = null
   private canvas: HTMLCanvasElement | null = null
   private disposers: (() => void)[] = []
-  /** E/F interact 按下沿（单帧 true） */
-  private interactEdge = false
   /** Shift dash 按下沿（单帧 true） */
   private dashEdge = false
   /** assist 开关状态（本地镜像） */
-  assistOn = true
+  assistOn = false
 
   attach(canvas: HTMLCanvasElement, cam: Camera): void {
     this.detach()
@@ -49,14 +48,14 @@ export class InputSampler {
     const onKeyDown = (e: KeyboardEvent) => {
       // 输入框聚焦时不动游戏输入（大厅/聊天场景）
       const t = e.target as HTMLElement | null
-      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || t?.closest('input, textarea, select, [contenteditable]')) return
+      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || t?.closest('input, textarea, select, button, a, summary, [contenteditable]')) return
       const k = e.code
       if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD') {
         this.keys.add(k)
         this.stickyAxes |= AXIS_MOVE
         e.preventDefault()
       } else if (k === 'KeyE' || k === 'KeyF') {
-        if (!e.repeat) this.interactEdge = true
+        this.keys.add(k)
         this.stickyAxes |= AXIS_ABILITY
         e.preventDefault()
       } else if (k === 'ShiftLeft' || k === 'ShiftRight') {
@@ -71,17 +70,16 @@ export class InputSampler {
     }
     const onKeyUp = (e: KeyboardEvent) => {
       const k = e.code
-      if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD' || k === 'KeyQ') this.keys.delete(k)
+      if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD' || k === 'KeyQ' || k === 'KeyE' || k === 'KeyF') this.keys.delete(k)
     }
     const onMouseMove = (e: MouseEvent) => {
-      const rect = this.canvas?.getBoundingClientRect()
-      if (!rect) return
-      this.mousePx.x = e.clientX - rect.left
-      this.mousePx.y = e.clientY - rect.top
+      this.pointer.x = e.clientX
+      this.pointer.y = e.clientY
       this.stickyAxes |= AXIS_AIM
     }
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
+        onMouseMove(e)
         this.mouseDown = true
         this.stickyAxes |= AXIS_FIRE
         e.preventDefault()
@@ -96,6 +94,8 @@ export class InputSampler {
       this.stickyAxes = 0
     }
 
+    const onVisibility = () => { if (document.hidden) onBlur() }
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('keydown', onKeyDown, { passive: false })
     window.addEventListener('keyup', onKeyUp)
     canvas.addEventListener('mousemove', onMouseMove)
@@ -104,6 +104,7 @@ export class InputSampler {
     window.addEventListener('blur', onBlur)
 
     this.disposers.push(
+      () => document.removeEventListener('visibilitychange', onVisibility),
       () => window.removeEventListener('keydown', onKeyDown),
       () => window.removeEventListener('keyup', onKeyUp),
       () => canvas.removeEventListener('mousemove', onMouseMove),
@@ -121,7 +122,6 @@ export class InputSampler {
     this.keys.clear()
     this.mouseDown = false
     this.dashEdge = false
-    this.interactEdge = false
   }
 
   detach(): void {
@@ -132,6 +132,16 @@ export class InputSampler {
     this.releaseAxes = 0
     this.canvas = null
     this.cam = null
+  }
+
+  /** Every draw and input sample uses the same current camera and CSS pointer position. */
+  aimAt(selfX: number, selfY: number): number | undefined {
+    if (!(this.stickyAxes & AXIS_AIM) || !this.cam || !this.canvas) return undefined
+    const rect = this.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return undefined
+    const px = (this.pointer.x - rect.left) * this.cam.cw / rect.width
+    const py = (this.pointer.y - rect.top) * this.cam.ch / rect.height
+    return Math.atan2(this.cam.toWorldY(py) - selfY, this.cam.toWorldX(px) - selfX)
   }
 
   /** Space 切换 assist：返回是否需要发 assistToggle 上行 */
@@ -161,21 +171,13 @@ export class InputSampler {
       moveY = Math.round((my / len) * MOVE_PER_MILLE)
     }
 
-    // aim：canvas 像素 → 世界 → 弧度
-    let aim = 0
-    const cam = this.cam
-    if (cam) {
-      const wx = cam.toWorldX(this.mousePx.x)
-      const wy = cam.toWorldY(this.mousePx.y)
-      aim = Math.atan2(wy - selfY, wx - selfX)
-    }
-
+    const aim = this.aimAt(selfX, selfY) ?? this.lastAim
+    this.lastAim = aim
     const dash = this.dashEdge
-    const interact = this.interactEdge
+    const interact = this.keys.has('KeyE') || this.keys.has('KeyF')
     this.dashEdge = false
-    this.interactEdge = false
 
-    // Q 为持续护盾；E/F 为交互按下沿。
+    // Q 护盾与 E/F 破解均按住持续，松开后发送显式 false。
     const shield = this.keys.has('KeyQ')
 
     const heldAxes = this.stickyAxes | this.releaseAxes
