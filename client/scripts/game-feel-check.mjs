@@ -197,7 +197,8 @@ class Fixture {
     st.gone = { robots: [], projectiles: [], cores: [] }
     if (mut) mut(st)
     this.pushDeltaWithBase(prev)
-    await sleep(26) // >= 1 client input frame at 60 Hz
+    await until(() => this.receivedTick >= st.tick, `browser receives snapshot ${st.tick}`)
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   }
 
   pushDeltaWithBase(baseTick) {
@@ -297,6 +298,14 @@ async function canvasCenter(page) {
 }
 
 async function joinGame(page, fix, errors) {
+  fix.page = page
+  fix.receivedTick = 0
+  page.on('websocket', ws => ws.on('framereceived', ({ payload }) => {
+    if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
+    const msg = fromBinary(ServerMsgSchema, payload.subarray(1))
+    if (msg.payload.case === 'snapshot') fix.receivedTick = msg.payload.value.tick
+    else if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'mapBootstrap') fix.receivedTick = 0
+  }))
   page.on('pageerror', e => errors.push(String(e)))
   await page.goto(BASE)
   await page.evaluate(() => document.fonts.ready)
@@ -364,7 +373,7 @@ async function fullPass(browser, fix) {
     assert.ok(fix.joins >= 1, 'fixture accepted join')
 
     // audio engine lazily creates its AudioContext on first trusted pointer/key
-    // event (audio.unlock()); 'z' is not bound to any input axis
+    // event; 'z' is not bound to any input axis
     await page.keyboard.press('z')
     await until(async () => (await page.evaluate(() => window.__ombAudio.contexts)) >= 1, 'AudioContext created on trusted input', 5000)
     // master = first created gain (ensure(): compressor -> gain -> destination)
