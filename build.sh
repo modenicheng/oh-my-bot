@@ -9,6 +9,8 @@ rm -rf web manual
 mkdir -p web manual
 cp -r ../../../client/dist/* web/
 cp -r ../../../docs/manual/* manual/
+# 补回占位文件，保证 git 状态干净（embed 目录被 gitignore 但 .gitkeep 跟踪）
+touch web/.gitkeep manual/.gitkeep
 cd ../..
 go build -o omb.exe ./cmd/omb
 echo "BUILD OK: server/omb.exe"

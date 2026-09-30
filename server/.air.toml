@@ -1,0 +1,20 @@
+# air 本地热重载配置（go install github.com/air-verse/air@latest 后在 server/ 下运行 air）。
+# 只监听 Go 源码：web/、manual/ 无 .go 文件，前端/手册更新不会触发后端重编译
+#（前端走 vite HMR，手册经 OMB_MANUAL_DIR 直读磁盘，见根 package.json dev:server）。
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/omb.exe ./cmd/omb"
+bin = "./tmp/omb.exe"
+include_ext = ["go"]
+exclude_dir = ["tmp", "data"]
+# Windows 下 air 用 TASKKILL 强杀旧进程（send_interrupt 仅非 Windows 生效）
+kill_delay = "2s"
+delay = 300
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true

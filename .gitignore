@@ -18,6 +18,10 @@ omb.exe*
 /skills/
 data/
 
-# build artifacts (copied at build time, same as web/)
-server/cmd/omb/manual/
-server/cmd/omb/web/
+# build artifacts (copied at build time, same as web/)；.gitkeep 保证
+# embed 目录在 fresh clone 下可编译（all: 前缀会嵌入 dotfile）
+server/cmd/omb/manual/*
+!server/cmd/omb/manual/.gitkeep
+server/cmd/omb/web/*
+!server/cmd/omb/web/.gitkeep
+server/tmp/
