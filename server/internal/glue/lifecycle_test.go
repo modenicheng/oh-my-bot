@@ -218,6 +218,60 @@ func TestSkillStateAndConfirmedShotSurviveReconnect(t *testing.T) {
 	h.Unregister(replacement)
 }
 
+func TestManualSayUsesCurrentSessionAndReliableBroadcast(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("say")
+	old, _ := bindLogged(t, h, rc, "pilot")
+	old.Say("no match")
+	m := assembledTestMatch(t, rc, old)
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+	current, log := bindLogged(t, h, rc, "pilot")
+	observer, observerLog := bindLogged(t, h, rc, "viewer")
+	old.Say("superseded")
+	current.Say("hello")
+	current.Say("flood")
+	for _, msg := range log.take() {
+		if msg.msg.GetEvent().GetSay() != nil {
+			t.Fatal("say broadcast before Tick")
+		}
+	}
+	m.step()
+	for _, msgs := range [][]sentMessage{log.take(), observerLog.take()} {
+		count := 0
+		for _, msg := range msgs {
+			if ev := msg.msg.GetEvent().GetSay(); ev != nil {
+				count++
+				if ev.Robot != m.robotOf[current.playerID] || ev.Text != "hello" || !msg.reliable {
+					t.Fatalf("invalid say broadcast: %v", msg)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected one reliable say, got %d", count)
+		}
+	}
+	rc.mu.Lock()
+	for i := 0; i < 179; i++ {
+		m.sim.Tick()
+	}
+	rc.mu.Unlock()
+	current.LeaveRoom()
+	current.Say("left")
+	h.Unregister(old)
+	old.Say("stale close")
+	log.take()
+	observerLog.take()
+	m.step()
+	for _, msg := range observerLog.take() {
+		if msg.msg.GetEvent().GetSay() != nil {
+			t.Fatal("detached session spoke after leaving")
+		}
+	}
+	h.Unregister(observer)
+}
+
 func TestCancelledAndSupersededLaunchCannotPublish(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "superseded", true: "aborted"}[cancelled], func(t *testing.T) {

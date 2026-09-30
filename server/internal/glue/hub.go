@@ -157,6 +157,15 @@ func (s *Session) RouteInput(in *ombv1.ClientInput) {
 		}
 	})
 }
+func (s *Session) Say(text string) {
+	s.withRoom(func(rc *RoomConn) {
+		if m := rc.match; m != nil && m.activeLocked() {
+			if rid, ok := m.robotOf[s.playerID]; ok {
+				m.sim.Say(rid, text)
+			}
+		}
+	})
+}
 func (s *Session) ToggleAssist() {
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {

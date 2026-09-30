@@ -3,6 +3,8 @@ package sim
 import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"math"
+	"strings"
+	"unicode"
 )
 
 func (s *Sim) prepareCombat() {
@@ -37,12 +39,44 @@ func (s *Sim) prepareCombat() {
 	}
 }
 
-func (s *Sim) say(r *Robot, text string) {
+// normalizeSay bounds visible text without allocating for the whole upstream string.
+func normalizeSay(text string) string {
+	var out strings.Builder
+	out.Grow(160)
+	count, space := 0, false
+	for _, ch := range text {
+		if unicode.IsSpace(ch) || unicode.IsControl(ch) {
+			space = count > 0
+			continue
+		}
+		if space {
+			if count >= 159 {
+				break
+			}
+			out.WriteByte(' ')
+			count++
+			space = false
+		}
+		out.WriteRune(ch)
+		count++
+		if count == 160 {
+			break
+		}
+	}
+	return out.String()
+}
+
+func (s *Sim) say(r *Robot, text string) bool {
 	if s.tick < r.Combat.SayReady {
-		return
+		return false
+	}
+	text = normalizeSay(text)
+	if text == "" {
+		return false
 	}
 	r.Combat.SayReady = s.tick + SayCooldown
 	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: r.ID, Text: text}}})
+	return true
 }
 
 func (s *Sim) fireProjectiles() {

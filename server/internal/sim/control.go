@@ -14,6 +14,7 @@ type ControlRecord struct {
 	ScriptFailed bool            `json:"script_failed,omitempty"`
 	Toggles      uint32          `json:"toggles,omitempty"`
 	Respawn      bool            `json:"respawn,omitempty"`
+	Say          string          `json:"say,omitempty"`
 }
 type controlRecord struct {
 	RobotID uint32
@@ -50,6 +51,25 @@ func (s *Sim) ApplyScriptCommands(id uint32, commands ScriptCommands) bool {
 	}
 	c := &s.robots[i].Control
 	c.PendingScript, c.ScriptPending, c.ScriptFailed = cloneCommands(&commands), true, false
+	return true
+}
+
+// Say queues manual chat for the next tick, sharing script say's cooldown.
+// Like input, it must be called while the Sim owner is locked.
+func (s *Sim) Say(id uint32, text string) bool {
+	i, ok := s.index[id]
+	if !ok || s.ended {
+		return false
+	}
+	r := &s.robots[i]
+	if r.State == Dead || s.tick+1 < r.Combat.SayReady || r.Control.PendingSay != "" {
+		return false
+	}
+	text = normalizeSay(text)
+	if text == "" {
+		return false
+	}
+	r.Control.PendingSay = text
 	return true
 }
 
@@ -166,8 +186,8 @@ func (s *Sim) consumeInputs() {
 	for i := range s.robots {
 		r := &s.robots[i]
 		c := &r.Control
-		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending {
-			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending}})
+		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" {
+			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay}})
 		}
 		// Log even an input discarded by a same-tick respawn: its sequence guard
 		// has already advanced and must be reproducible from the replay stream.
@@ -208,16 +228,18 @@ func (s *Sim) consumeInputs() {
 			}
 			s.operated(r, true)
 		}
+		if c.PendingSay != "" {
+			s.operated(r, s.say(r, c.PendingSay))
+			c.PendingSay = ""
+		}
 		if c.ScriptPending {
 			if c.ScriptFailed {
 				c.Script, c.ScriptAxes = ArbitratedInput{}, 0
 			} else if c.Assist && c.PendingScript != nil {
 				cmd := c.PendingScript
 				mask := c.acceptScript(cmd)
-				s.operated(r, mask&^c.HumanAxes != 0 || cmd.Say != nil || (cmd.PulseScan && c.HumanAxes&AxisAbility == 0))
-				if cmd.Say != nil {
-					s.say(r, *cmd.Say)
-				}
+				said := cmd.Say != nil && s.say(r, *cmd.Say)
+				s.operated(r, mask&^c.HumanAxes != 0 || said || (cmd.PulseScan && c.HumanAxes&AxisAbility == 0))
 				if cmd.PulseScan && c.HumanAxes&AxisAbility == 0 {
 					r.Combat.PulseRequested = true
 				}

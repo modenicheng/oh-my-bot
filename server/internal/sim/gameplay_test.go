@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -409,6 +410,247 @@ func TestPartnersFixedFriendlyFireSoftCollisionAndSay(t *testing.T) {
 		t.Fatalf("say CD %v", ticks)
 	}
 }
+
+type sayEvent struct {
+	*ombv1.EvSay
+	Tick uint32
+}
+
+func sayEvents(sink *recordingSink) []sayEvent {
+	out := []sayEvent{}
+	for _, ev := range sink.events {
+		if m := ev.GetSay(); m != nil {
+			out = append(out, sayEvent{m, ev.Tick})
+		}
+	}
+	return out
+}
+
+type capturedControl struct {
+	tick, robot uint32
+	control     ControlRecord
+}
+
+// controlCapture records the ControlRecord stream replay needs for manual say.
+type controlCapture struct {
+	recordingSink
+	controls []capturedControl
+}
+
+func (c *controlCapture) OnControl(tick, robotID uint32, control ControlRecord) {
+	c.controls = append(c.controls, capturedControl{tick, robotID,
+		ControlRecord{Script: cloneCommands(control.Script), ScriptFailed: control.ScriptFailed,
+			Toggles: control.Toggles, Respawn: control.Respawn, Say: control.Say}})
+}
+
+func TestManualSayQueueValidationAndCooldown(t *testing.T) {
+	sink := &recordingSink{}
+	s := NewSim(3, []uint32{1, 2}, sink)
+	// Manual say is a human path independent of assist arbitration.
+	if !s.Say(1, "hello") {
+		t.Fatal("alive manual say rejected without assist")
+	}
+	if len(sayEvents(sink)) != 0 {
+		t.Fatal("queued say emitted an event outside Tick")
+	}
+	if s.Say(99, "ghost") || s.Say(2, "") || s.Say(1, " \t ") {
+		t.Fatal("unknown robot or blank text accepted")
+	}
+	if s.Say(1, "second") {
+		t.Fatal("second manual say coalesced over a pending one")
+	}
+	s.Tick()
+	evs := sayEvents(sink)
+	if len(evs) != 1 || evs[0].Robot != 1 || evs[0].Text != "hello" || evs[0].Tick != 1 {
+		t.Fatalf("manual say not emitted on the next tick: %+v", evs)
+	}
+	// Queueable only when the next tick clears the cooldown: tick+1 >= 181.
+	if s.Say(1, "early") {
+		t.Fatal("manual say queued during cooldown")
+	}
+	stepTicks(s, 177) // tick 178: 179 still inside the window
+	if s.Say(1, "still early") {
+		t.Fatal("manual say queued on the last cooldown tick")
+	}
+	stepTicks(s, 2) // tick 180: queueable, consumed on tick 181
+	if !s.Say(1, "again") {
+		t.Fatal("manual say not queueable when cooldown expires")
+	}
+	s.Tick()
+	ticks := []uint32{}
+	for _, m := range sayEvents(sink) {
+		ticks = append(ticks, m.Tick)
+	}
+	if !reflect.DeepEqual(ticks, []uint32{1, 181}) {
+		t.Fatalf("manual say cooldown ticks %v", ticks)
+	}
+	// Dead and ended matches never queue.
+	d, _ := enemySim(t)
+	d.robots[1].State = Dead
+	if d.Say(2, "dead") {
+		t.Fatal("dead robot queued a say")
+	}
+	advance(s, MatchTicks)
+	if !s.Ended() || s.Say(1, "ended") {
+		t.Fatal("ended match queued a say")
+	}
+}
+
+func TestManualSayQueueDroppedIfKilledBeforeTick(t *testing.T) {
+	s, sink := enemySim(t)
+	s.Say(1, "pending")
+	s.damage(2, &s.robots[0], 100) // death lands before the queued say is consumed
+	s.Tick()
+	if len(sayEvents(sink)) != 0 {
+		t.Fatal("robot spoke on the tick it died")
+	}
+	if r := mustRobot(t, s, 1); r.Control.PendingSay != "" {
+		t.Fatal("dead robot retained a pending manual say")
+	}
+	if s.Say(1, "still dead") {
+		t.Fatal("dead robot queued a say after death")
+	}
+}
+
+func TestManualSayCooldownSurvivesDeath(t *testing.T) {
+	s, sink := enemySim(t)
+	if !s.Say(1, "first") {
+		t.Fatal("manual say rejected")
+	}
+	s.Tick() // emitted on tick 1, SayReady = 181
+	s.damage(2, &s.robots[0], 100)
+	s.Respawn(1)
+	s.Tick()          // explicit respawn resets combat but preserves the personal cooldown
+	stepTicks(s, 177) // tick 179: queueing would consume on 180, still blocked
+	if s.Say(1, "too soon") {
+		t.Fatal("say cooldown was reset by death")
+	}
+	stepTicks(s, 1) // tick 180: queueable, consumed on 181
+	if !s.Say(1, "after respawn") {
+		t.Fatal("say not queueable after respawn")
+	}
+	s.Tick()
+	ticks := []uint32{}
+	for _, m := range sayEvents(sink) {
+		ticks = append(ticks, m.Tick)
+	}
+	if !reflect.DeepEqual(ticks, []uint32{1, 181}) {
+		t.Fatalf("death broke the say cooldown schedule: %v", ticks)
+	}
+}
+
+func TestManualSayNormalizationAndLimit(t *testing.T) {
+	sink := &recordingSink{}
+	s := NewSim(8, []uint32{1}, sink)
+	// Blank after normalization is rejected and does not consume the cooldown:
+	// a real message queued immediately after still goes out.
+	if s.Say(1, " \x07 ") {
+		t.Fatal("blank say accepted")
+	}
+	// Runs of whitespace and control characters collapse to single spaces and trim.
+	if !s.Say(1, " \t\r\n a \x01\x02 b \t c ") {
+		t.Fatal("whitespace say rejected")
+	}
+	s.Tick()
+	texts := []string{}
+	for _, m := range sayEvents(sink) {
+		texts = append(texts, m.Text)
+	}
+	if !reflect.DeepEqual(texts, []string{"a b c"}) {
+		t.Fatalf("normalization wrong: %q", texts)
+	}
+	// The 160 codepoint cap applies to Unicode text, not bytes.
+	stepTicks(s, 179) // tick 180: queueable again
+	if !s.Say(1, strings.Repeat("中", 200)) {
+		t.Fatal("long unicode say rejected")
+	}
+	s.Tick()
+	evs := sayEvents(sink)
+	if got := evs[len(evs)-1].Text; got != strings.Repeat("中", 160) {
+		t.Fatalf("unicode say not capped at 160 codepoints: %d runes", len([]rune(got)))
+	}
+	stepTicks(s, 179) // tick 360
+	s.Say(1, strings.Repeat("x", 1000))
+	s.Tick()
+	evs = sayEvents(sink)
+	if got := evs[len(evs)-1].Text; got != strings.Repeat("x", 160) {
+		t.Fatalf("ascii say not capped at 160 codepoints: %d", len(got))
+	}
+}
+
+func TestManualSayWinsSameTickAndSharesScriptCooldown(t *testing.T) {
+	sink := &recordingSink{}
+	s := NewSim(11, []uint32{1}, sink)
+	s.AssistToggle(1)
+	s.ApplyScriptCommands(1, ScriptCommands{Say: ptr("script")})
+	if !s.Say(1, "manual") {
+		t.Fatal("manual say rejected")
+	}
+	s.Tick()
+	evs := sayEvents(sink)
+	if len(evs) != 1 || evs[0].Text != "manual" || evs[0].Robot != 1 || evs[0].Tick != 1 {
+		t.Fatalf("manual say must win the same tick: %+v", evs)
+	}
+	// Script say shares the same cooldown clock: blocked until tick 181.
+	s.ApplyScriptCommands(1, ScriptCommands{Say: ptr("script two")})
+	s.Tick()
+	if len(sayEvents(sink)) != 1 {
+		t.Fatal("script say bypassed the manual say cooldown")
+	}
+	stepTicks(s, 178) // tick 180: script result consumed on tick 181
+	s.ApplyScriptCommands(1, ScriptCommands{Say: ptr("script three")})
+	s.Tick()
+	evs = sayEvents(sink)
+	if len(evs) != 2 || evs[1].Text != "script three" || evs[1].Tick != 181 {
+		t.Fatalf("script say not released at cooldown expiry: %+v", evs)
+	}
+	// The reverse direction: the script-emitted say blocks a manual requeue
+	// until the next window (queueable at tick 360, consumed on 361).
+	stepTicks(s, 178) // tick 359
+	if s.Say(1, "manual early") {
+		t.Fatal("manual say bypassed the script say cooldown")
+	}
+	stepTicks(s, 1) // tick 360
+	if !s.Say(1, "manual late") {
+		t.Fatal("manual say not queueable after script cooldown")
+	}
+	s.Tick()
+	evs = sayEvents(sink)
+	if len(evs) != 3 || evs[2].Text != "manual late" || evs[2].Tick != 361 {
+		t.Fatalf("shared cooldown schedule wrong: %+v", evs)
+	}
+}
+
+func TestManualSayOperatedAndControlRecord(t *testing.T) {
+	s := NewSim(12, []uint32{1}, nil)
+	s.robots[0].Combat.Invulnerable, s.robots[0].Combat.InvulnUntil = true, 0
+	if !s.Say(1, "hi") {
+		t.Fatal("manual say rejected")
+	}
+	s.Tick()
+	if s.robots[0].Combat.InvulnUntil != 1+InvulnDuration {
+		t.Fatal("successful manual say did not start the protection timer")
+	}
+	capture := &controlCapture{}
+	c := NewSim(9, []uint32{1, 2}, capture)
+	c.Say(2, " \t ") // blank says must not produce a control record
+	if !c.Say(1, "logged") {
+		t.Fatal("manual say rejected")
+	}
+	c.Tick()
+	if len(capture.controls) != 1 {
+		t.Fatalf("control records: %+v", capture.controls)
+	}
+	rec := capture.controls[0]
+	if rec.tick != 1 || rec.robot != 1 || rec.control.Say != "logged" {
+		t.Fatalf("manual say not logged as a control record: %+v", rec)
+	}
+	c.Tick()
+	if len(capture.controls) != 1 {
+		t.Fatal("consumed manual say relogged")
+	}
+}
+
 func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 	s := NewSim(5, []uint32{1, 2}, nil)
 	m := gameMap()

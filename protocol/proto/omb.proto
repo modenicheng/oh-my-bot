@@ -46,6 +46,7 @@ message RoomAction {
 }
 message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
 message AiPrompt { string text = 1; } // AI Agent 配额内改码请求
+message Say { string text = 1; } // 手动全场发言；与脚本 say 共用 3s 冷却，最多 160 字符
 message ResyncRequest {} // 客户端检测快照缺口（base_tick 断链）时请求全量重同步
 
 message ClientMsg {
@@ -59,6 +60,7 @@ message ClientMsg {
     AiPrompt ai_prompt = 7;
     AssistToggle assist_toggle = 8;
     ResyncRequest resync_request = 9;
+    Say say = 10;
   }
 }
 

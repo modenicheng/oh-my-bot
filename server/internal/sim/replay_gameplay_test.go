@@ -58,6 +58,7 @@ func replayGameplay(t *testing.T, s *Sim, records []LogRecord, until uint32) {
 				r.Control.ScriptFailed = c.ScriptFailed
 				r.Control.ToggleCount = c.Toggles
 				r.RespawnPending = c.Respawn
+				r.Control.PendingSay = c.Say
 			}
 		}
 		s.Tick()
@@ -91,6 +92,11 @@ func TestGameplayLogAndCheckpointReplay(t *testing.T) {
 		if tick == 250 || tick == 300 {
 			s.AssistToggle(2)
 		}
+		if tick == 120 || tick == 650 {
+			if !s.Say(3, "manual replay") {
+				t.Fatal("manual say rejected")
+			}
+		}
 		if tick == 305 {
 			s.ClearScriptAxes(2)
 		}
@@ -103,6 +109,9 @@ func TestGameplayLogAndCheckpointReplay(t *testing.T) {
 		}
 		s.Tick()
 		if tick == 450 {
+			if !s.Say(3, "pending checkpoint") {
+				t.Fatal("pending checkpoint say rejected")
+			}
 			middle = s.Snapshot()
 		}
 	}
@@ -116,15 +125,24 @@ func TestGameplayLogAndCheckpointReplay(t *testing.T) {
 	if len(records) == 0 || records[0].Type != "match_start" {
 		t.Fatal("missing initial state")
 	}
-	controls := 0
+	controls, manual := 0, 0
 	var expected []*ombv1.ServerEvent
 	for _, rec := range records {
 		if rec.Type == "control" {
 			controls++
+			if rec.Control.Say != "" {
+				manual++
+			}
 		}
 		if rec.Event != nil {
 			expected = append(expected, rec.Event)
 		}
+	}
+	if manual != 3 {
+		t.Fatalf("manual say records: %d", manual)
+	}
+	if middle.Robots[2].Control.PendingSay != "pending checkpoint" {
+		t.Fatal("checkpoint lost pending say")
 	}
 	if controls < 60 {
 		t.Fatalf("missing gameplay controls: %d", controls)
@@ -160,14 +178,18 @@ func TestCheckpointDeepCopiesGameplayState(t *testing.T) {
 	s.robots[0].Combat.Damagers = map[uint32]bool{2: true}
 	s.uplinks[0].ReadyAt[1] = 30
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Say: ptr("original")})
+	if !s.Say(1, "pending") {
+		t.Fatal("manual say rejected")
+	}
 	cp := s.Snapshot()
+	cp.Robots[0].Control.PendingSay = "changed"
 	cp.Robots[0].Combat.Damagers[2] = false
 	cp.Robots[0].Control.PendingScript.Move.X = 99
 	*cp.Robots[0].Control.PendingScript.Say = "changed"
 	cp.Uplinks[0].ReadyAt[1] = 99
 	cp.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 99
 	fresh := s.Snapshot()
-	if !fresh.Robots[0].Combat.Damagers[2] || fresh.Robots[0].Control.PendingScript.Move.X != 1 || *fresh.Robots[0].Control.PendingScript.Say != "original" || fresh.Uplinks[0].ReadyAt[1] != 30 || fresh.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 {
+	if fresh.Robots[0].Control.PendingSay != "pending" || !fresh.Robots[0].Combat.Damagers[2] || fresh.Robots[0].Control.PendingScript.Move.X != 1 || *fresh.Robots[0].Control.PendingScript.Say != "original" || fresh.Uplinks[0].ReadyAt[1] != 30 || fresh.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 {
 		t.Fatal("checkpoint aliases live gameplay")
 	}
 	robot, _ := s.Robot(1)

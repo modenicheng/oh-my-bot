@@ -281,6 +281,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 		if cur := (*sess); cur != nil {
 			cur.SubmitScript(p.ScriptSubmit)
 		}
+	case *ombv1.ClientMsg_Say:
+		if cur := (*sess); cur != nil {
+			cur.Say(p.Say.GetText())
+		}
 	case *ombv1.ClientMsg_AiPrompt:
 		if cur := (*sess); cur != nil {
 			cur.AiPrompt(p.AiPrompt)

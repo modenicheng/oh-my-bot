@@ -39,7 +39,7 @@ export interface L0 {
   dash(): void
   shield(on: boolean): void
   interact(): void
-  /** 3s 冷却，自由文本（互信群体）。 */
+  /** 全场发言，最多 160 字符；空白合并，与 Enter 手动发言共用 3s 冷却。 */
   say(text: string): void
 }
 

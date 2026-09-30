@@ -37,6 +37,7 @@ type ControlState struct {
 	ScriptAxes    AxisMask        `json:"script_axes"`
 	Output        ArbitratedInput `json:"output"`
 	PendingScript *ScriptCommands `json:"pending_script,omitempty"`
+	PendingSay    string          `json:"pending_say,omitempty"`
 	ScriptPending bool            `json:"script_pending"`
 	ScriptFailed  bool            `json:"script_failed"`
 	ToggleCount   uint32          `json:"toggle_count"`
