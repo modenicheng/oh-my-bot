@@ -1,0 +1,101 @@
+/* Event panels share the HP/EN anchor; the opening gate belongs to the game stage. */
+#hud-left > #hud-msg {
+  --event-color: #8b98a9;
+  position: absolute;
+  inset: auto auto calc(100% + 12px) -2px;
+  width: calc(100% + 2px);
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 0;
+  border-left: 3px solid var(--event-color);
+  background: #10141af5;
+  color: #d8dee9;
+  transform: none;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, calc(100% - 8px) 4px, 100% 4px, 100% 100%, 8px 100%, 8px calc(100% - 4px), 0 calc(100% - 4px));
+  font: 16px/1.5 var(--pixel, 'Fusion Pixel', system-ui, sans-serif);
+  text-align: left;
+  text-shadow: none;
+  box-shadow: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+}
+
+#hud-left > #hud-msg::after {
+  content: '';
+  position: absolute;
+  inset: 0 8px auto 0;
+  height: 1px;
+  background: #36505f;
+}
+
+#hud-left > #hud-msg[data-kind='kill'] { --event-color: #ff5c5c; }
+#hud-left > #hud-msg[data-kind='uplink'] { --event-color: #b9d985; }
+#hud-left > #hud-msg > .pixel-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--event-color); }
+#hud-left > #hud-msg .hud-event-text { min-width: 0; overflow-wrap: anywhere; }
+#hud-left > #hud-msg.show { opacity: 1; visibility: visible; animation: hud-event-in 160ms steps(3, end); }
+
+#hud-inner-ring {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(440px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 24px;
+  background: #10141af5;
+  border-top: 3px solid #22d3ee;
+  border-bottom: 3px solid #36505f;
+  color: #d8dee9;
+  text-align: center;
+  text-shadow: none;
+  box-shadow: none;
+  clip-path: polygon(12px 0, calc(100% - 12px) 0, calc(100% - 12px) 6px, 100% 6px, 100% calc(100% - 6px), calc(100% - 12px) calc(100% - 6px), calc(100% - 12px) 100%, 12px 100%, 12px calc(100% - 6px), 0 calc(100% - 6px), 0 6px, 12px 6px);
+}
+
+#hud-inner-ring[hidden] { display: none; }
+#hud-inner-ring > .pixel-icon { flex: 0 0 32px; width: 32px; height: 32px; color: #22d3ee; }
+#hud-inner-ring .hud-inner-copy { flex: 1; min-width: 0; display: grid; gap: 8px; }
+#hud-inner-ring strong { font: 32px/1.1 var(--pixel, 'Fusion Pixel', system-ui, sans-serif); }
+#hud-inner-ring .hud-inner-copy > span { font: 12px/1.5 var(--mono, monospace); color: #8b98a9; }
+#hud-inner-ring.show { animation: hud-gate-open 440ms steps(5, end); }
+
+#hud-time.urgent { color: #ff5c5c; text-shadow: none; }
+#hud-time.countdown-pulse { animation: hud-countdown 480ms steps(4, end); }
+
+@keyframes hud-event-in {
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes hud-gate-open {
+  from { opacity: 0; transform: translateX(-50%) scaleX(.84); }
+  35% { opacity: 1; transform: translateX(-50%) scaleX(.94); }
+  to { opacity: 1; transform: translateX(-50%) scaleX(1); }
+}
+
+@keyframes hud-countdown {
+  0%, 25% { background: #5c2528; transform: scale(1.09); }
+  100% { background: #0a121ce8; transform: scale(1); }
+}
+
+@container (max-width: 1050px) {
+  #hud-inner-ring { top: 168px; }
+}
+
+@container (max-width: 540px) {
+  #hud-left > #hud-msg { gap: 6px; padding: 10px 8px; font-size: 12px; }
+  #hud-left > #hud-msg > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
+  #hud-inner-ring { gap: 10px; padding: 16px; }
+  #hud-inner-ring strong { font-size: 24px; }
+  #hud-inner-ring > .pixel-icon { width: 24px; height: 24px; flex-basis: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #hud-left > #hud-msg.show, #hud-inner-ring.show, #hud-time.countdown-pulse { animation: none; transition: none; }
+}

@@ -96,7 +96,11 @@ export class GameController {
     this.onExitToRoom = deps.onExitToRoom
     this.renderer = new Renderer(deps.canvas)
     this.hud = new Hud(deps.hudRoot)
-    this.feedback = new GameFeedback(text => this.hud.flashMsg(text))
+    this.feedback = new GameFeedback(
+      (text, kind) => this.hud.flashMsg(text, kind),
+      () => this.hud.showInnerRing(),
+      seconds => this.hud.pulseCountdown(seconds),
+    )
     this.chat.addEventListener('submit', this.submitChat)
     this.chat.addEventListener('keydown', this.chatKey)
     this.chat.addEventListener('focusout', this.leaveChat)
@@ -223,17 +227,6 @@ export class GameController {
         this.closeChat(false)
         this.endShown = true
         this.showEnd(ev.kind.value)
-        break
-      }
-      case 'phaseChange': {
-        const to = ev.kind.value.to
-        this.hud.flashMsg(to === 2 ? '核心区已开放' : '阶段切换')
-        break
-      }
-      case 'kill': {
-        const k = this.nickOf(ev.kind.value.killer)
-        const v = this.nickOf(ev.kind.value.victim)
-        this.hud.flashMsg(`${k} 击毁 ${v}`)
         break
       }
       default:
@@ -380,11 +373,6 @@ export class GameController {
     this.send(encodeClient(create(ClientMsgSchema, {
       payload: { case: 'input', value: msg },
     })))
-  }
-
-  private nickOf(id: number): string {
-    const r = this.world.robots.get(id)
-    return r?.nick || `robot-${id}`
   }
 
   private showEnd(ev: EvMatchEnd): void {

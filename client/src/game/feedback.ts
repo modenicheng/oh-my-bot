@@ -6,6 +6,7 @@ import type { WorldState } from './world'
 
 const tau = Math.PI * 2
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
+export type FeedbackKind = 'status' | 'kill' | 'uplink'
 type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'uplink' | 'dash' | 'death'
 interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: number; color: string; seed: number; heading: number }
 
@@ -19,15 +20,27 @@ export class GameFeedback {
   private completed = new Map<number, number>()
   private near = 0
   private baseline = false
+  private quietThroughTick = -1
+  private phase: number | undefined
+  private innerOpened = false
+  private seconds: number | undefined
+  private countdownWarned = false
+  private countdownTicks = new Set<number>()
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
-  constructor(private message: (text: string) => void) {}
+  constructor(
+    private message: (text: string, kind?: FeedbackKind) => void,
+    private onInnerRing?: () => void,
+    private onCountdown?: (seconds: number) => void,
+  ) {}
 
   reset(): void {
     this.effects = []; this.seen.clear(); this.robots.clear(); this.cores.clear()
     this.hackers.clear(); this.completed.clear(); this.near = 0; this.baseline = false; this.lastDenied = -Infinity
+    this.quietThroughTick = -1; this.phase = undefined; this.innerOpened = false
+    this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
     this.held = { fire: false, shield: false, interact: false }
     audio.stopGame()
   }
@@ -37,11 +50,18 @@ export class GameFeedback {
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
     const transitions = this.baseline && !snap.full && active && !document.hidden
     const selfId = world.self?.robotId
+    if (!transitions) this.quietThroughTick = Math.max(this.quietThroughTick, snap.tick)
+    if (world.phase >= map.coreZone.unlockPhase) {
+      if (transitions && this.phase !== undefined && this.phase < map.coreZone.unlockPhase) this.openInnerRing()
+      else if (!transitions) this.innerOpened = true
+    }
+    this.phase = world.phase
+    this.countdown(world, transitions)
     for (const [id, r] of world.robots) {
       const prev = this.robots.get(id), pos = r.base?.pos
       if (transitions && prev && pos) {
-        if (r.dashing && !prev.dash) { this.add('dash', pos, cyan, id, 320, r.base?.heading); this.sound('dash', pos, world) }
-        if (r.shieldOn !== prev.shield) this.sound(r.shieldOn ? 'shieldOn' : 'shieldOff', pos, world)
+        if (r.dashing && !prev.dash) { this.add('dash', pos, cyan, id, 320, r.base?.heading); this.sound('dash', pos, world, 1, id === selfId) }
+        if (r.shieldOn !== prev.shield) this.sound(r.shieldOn ? 'shieldOn' : 'shieldOff', pos, world, 1, id === selfId)
       }
       this.robots.set(id, { shield: r.shieldOn, dash: r.dashing, dead: r.dead })
     }
@@ -57,27 +77,28 @@ export class GameFeedback {
       const prev = this.hackers.get(id) ?? 0
       if (transitions && selfId) {
         if (u.hackingId === selfId && prev !== selfId) {
-          audio.play('uplinkStart'); this.message('正在黑入 · 持续按住 E / F')
+          audio.play('uplinkStart'); this.message('正在黑入 · 持续按住 E / F', 'uplink')
         } else if (prev === selfId && u.hackingId !== selfId && u.myCooldownS === 0 && world.tick > (this.completed.get(id) ?? -1) + 2) {
-          audio.play('uplinkCancel'); this.message('黑入中断 · 保持范围内，按住 E / F')
+          audio.play('uplinkCancel'); this.message('黑入中断 · 保持范围内，按住 E / F', 'uplink')
         }
       }
       this.hackers.set(id, u.hackingId)
     }
+    this.ambience(world, map, active, transitions)
     this.baseline = active && !document.hidden
-    this.ambience(world, map, active)
   }
 
-  ambience(world: WorldState, map: MapDefParsed, active: boolean): void {
+  ambience(world: WorldState, map: MapDefParsed, active: boolean, transitions = this.baseline): void {
     const self = world.robots.get(world.self?.robotId ?? 0), pos = self?.base?.pos
-    if (!active || !pos || self?.dead || document.hidden) { this.near = 0; audio.setUplink('off'); return }
+    if (!active || document.hidden) { this.baseline = false; this.near = 0; audio.setUplink('off'); return }
+    if (!pos || self?.dead) { this.near = 0; audio.setUplink('off'); return }
     const nearest = map.uplinks.filter(u => world.phase >= u.activePhase && (!u.main || world.phase >= 2) && Math.hypot(pos.x - u.pos.x, pos.y - u.pos.y) <= u.interactR)
       .sort((a, b) => Math.hypot(pos.x - a.pos.x, pos.y - a.pos.y) - Math.hypot(pos.x - b.pos.x, pos.y - b.pos.y))[0]
     const id = nearest?.id ?? 0
-    if (id && id !== this.near && this.baseline) {
+    if (id && id !== this.near && transitions) {
       audio.play('uplinkEnter')
       const state = world.uplinks.get(id)
-      this.message(state?.myCooldownS ? `Uplink 冷却 ${state.myCooldownS}s` : '已接入 Uplink · 按住 E / F 黑入')
+      this.message(state?.myCooldownS ? `Uplink 冷却 ${state.myCooldownS}s` : '已接入 Uplink · 按住 E / F 黑入', 'uplink')
     }
     this.near = id
     const u = world.uplinks.get(id)
@@ -85,24 +106,27 @@ export class GameFeedback {
   }
 
   event(ev: ServerEvent, world: WorldState, map: MapDefParsed, active: boolean): void {
-    if (!active || document.hidden) return
     const k = ev.kind
-    // Reliable delivery can be retried. Projectile IDs disambiguate simultaneous shots/hits.
+    const opening = k.case === 'phaseChange' && k.value.to >= map.coreZone.unlockPhase
+    if (!active) { if (opening) this.innerOpened = true; return }
+    // Reliable delivery can be retried. Keep background events seen so they cannot replay on return.
     const key = `${ev.tick}:${k.case}:${JSON.stringify(k.value, (_, value) => typeof value === 'bigint' ? value.toString() : value)}`
     if (this.seen.has(key)) return
     this.seen.add(key)
     if (this.seen.size > 512) this.seen.delete(this.seen.values().next().value!)
+    if (document.hidden) { this.baseline = false; if (opening) this.innerOpened = true; return }
+    if (ev.tick <= this.quietThroughTick && k.case !== 'matchStart' && k.case !== 'matchEnd') return
     const selfId = world.self?.robotId
     switch (k.case) {
       case 'shot':
         if (!world.robots.has(k.value.owner)) break
-        if (k.value.at) { this.add('shot', k.value.at, white, k.value.projectile, 110, k.value.heading); this.sound('shot', k.value.at, world) }
+        if (k.value.at) { this.add('shot', k.value.at, white, k.value.projectile, 110, k.value.heading); this.sound('shot', k.value.at, world, 1, k.value.owner === selfId) }
         break
       case 'projectileImpact':
         if (!world.robots.has(k.value.owner) && !world.robots.has(k.value.target)) break
         if (k.value.at) {
           this.add('impact', k.value.at, k.value.shield || k.value.invulnerable ? white : k.value.target ? red : cyan, k.value.projectile, 330)
-          this.sound(k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit', k.value.at, world)
+          this.sound(k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit', k.value.at, world, 1, k.value.target === selfId)
         }
         if (k.value.target === selfId && !k.value.invulnerable) this.message(k.value.shield ? '护盾吸收命中' : '机体受击')
         break
@@ -114,29 +138,43 @@ export class GameFeedback {
         }
         break
       case 'corePickup': {
+        const own = k.value.by === selfId
         const p = world.cores.get(k.value.coreId)?.base?.pos ?? map.corePads.find(p => p.id === k.value.coreId)?.pos
-        if (p) { this.add('pickup', p, green, k.value.coreId, 600); this.sound('corePickup', p, world) }
-        if (k.value.by === selfId) this.message(`拾取 Core · +${k.value.value} 分`)
+          ?? world.robots.get(k.value.by)?.base?.pos
+        if (p) this.add('pickup', p, green, k.value.coreId, 600)
+        // A delta can remove the core before its pickup event, including all position data for self.
+        if (own) { audio.play('corePickup'); this.message(`拾取 Core · +${k.value.value} 分`) }
+        else if (p) this.sound('corePickup', p, world)
         break
       }
       case 'uplinkHack': {
         const p = map.uplinks.find(u => u.id === k.value.uplinkId)?.pos
-        if (p) { this.add('uplink', p, green, k.value.uplinkId, 1000); this.sound('uplinkSuccess', p, world) }
+        if (p) this.add('uplink', p, green, k.value.uplinkId, 1000)
         if (k.value.by === selfId) {
+          audio.play('uplinkSuccess')
           this.completed.set(k.value.uplinkId, ev.tick)
-          this.message(`黑入完成 · +${k.value.value} 分 · 本桩冷却 30s`)
+          this.message(`黑入完成 · +${k.value.value} 分 · 本桩冷却 30s`, 'uplink')
+        } else {
+          if (p) this.sound('uplinkSuccess', p, world)
+          this.message(`${this.nickOf(k.value.by, world)} 黑入完成 · +${k.value.value} 分`, 'uplink')
         }
         break
       }
       case 'kill':
-        if (k.value.at) { this.add('death', k.value.at, red, k.value.victim, 650); this.sound('death', k.value.at, world) }
+        if (k.value.at) { this.add('death', k.value.at, red, k.value.victim, 650); this.sound('death', k.value.at, world, 1, k.value.victim === selfId) }
+        this.message(`${this.nickOf(k.value.killer, world)} 击毁 ${this.nickOf(k.value.victim, world)}`, 'kill')
         break
       case 'respawn':
         if (k.value.robot === selfId) { audio.play('respawn'); this.message('机体已重生') }
         break
       case 'matchStart': audio.play('matchStart'); break
       case 'matchEnd': audio.stopGame(); audio.play('matchEnd'); break
-      case 'phaseChange': audio.play('phase'); break
+      case 'phaseChange':
+        if (opening) {
+          if (this.baseline) this.openInnerRing()
+          else this.innerOpened = true
+        } else { audio.play('phase'); this.message('阶段切换') }
+        break
     }
   }
 
@@ -209,11 +247,46 @@ export class GameFeedback {
     this.effects.push({ kind, pos: { x: pos.x, y: pos.y }, at: performance.now(), duration, color, seed, heading })
   }
 
-  private sound(cue: SoundCue, pos: MapVec2, world: WorldState, intensity = 1): void {
+  private nickOf(id: number, world: WorldState): string {
+    return world.robots.get(id)?.nick || `robot-${id}`
+  }
+
+  private openInnerRing(): void {
+    if (this.innerOpened) return
+    this.innerOpened = true
+    audio.play('innerOpen')
+    if (this.onInnerRing) this.onInnerRing()
+    else this.message('核心区已开放')
+  }
+
+  private countdown(world: WorldState, transitions: boolean): void {
+    if (!world.initialized || !Number.isFinite(world.timeLeftS)) return
+    const seconds = Math.max(0, Math.floor(world.timeLeftS)), previous = this.seconds
+    this.seconds = seconds
+    if (!transitions) {
+      if (seconds <= 30) this.countdownWarned = true
+      if (seconds >= 1 && seconds <= 10) this.countdownTicks.add(seconds)
+      return
+    }
+    if (previous === undefined || seconds >= previous) return
+    const warning = previous > 30 && seconds <= 30 && !this.countdownWarned
+    const tick = seconds >= 1 && seconds <= 10 && !this.countdownTicks.has(seconds)
+    if (warning) { this.countdownWarned = true; audio.play('countdownWarning') }
+    if (tick) {
+      this.countdownTicks.add(seconds)
+      // A large jump gets one cue at the received second, never a burst of missed ticks.
+      if (!warning) audio.play('countdownTick')
+    }
+    if (warning || tick) this.onCountdown?.(seconds)
+  }
+
+  private sound(cue: SoundCue, pos: MapVec2, world: WorldState, intensity = 1, priority = false): void {
     const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
     if (!self) return
     const distance = Math.hypot(pos.x - self.x, pos.y - self.y)
     if (distance > 24) return
-    audio.play(cue, intensity * Math.max(0, 1 - distance / 24), Math.max(-0.8, Math.min(0.8, (pos.x - self.x) / 20)))
+    const gain = intensity * Math.max(0, 1 - distance / 24), pan = Math.max(-0.8, Math.min(0.8, (pos.x - self.x) / 20))
+    if (priority || cue === 'corePickup' || cue === 'uplinkSuccess') audio.play(cue, gain, pan, priority)
+    else audio.play(cue, gain, pan)
   }
 }

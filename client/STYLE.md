@@ -32,7 +32,7 @@
 ## 字体
 
 - UI：`Inter, system-ui, sans-serif`
-- 数据/代码/时序：`ui-monospace, "JetBrains Mono", monospace`（计分板、日志、编辑器）；HUD 数字与标题用 `Fusion Pixel` 像素字体，含机器人头顶发言气泡，其余文本不用像素字体
+- 数据/代码/时序：`ui-monospace, "JetBrains Mono", monospace`（计分板、日志、编辑器）；HUD 数字与标题用 `Fusion Pixel` 像素字体，含击杀/上链/转段横幅及机器人头顶发言气泡，其余文本不用像素字体
 
 ## 图形与入口
 

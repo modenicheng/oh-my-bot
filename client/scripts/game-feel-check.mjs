@@ -26,7 +26,7 @@ import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema, EvShotSchema, EvProjectileImpactSchema,
-  EvUplinkHackSchema, Vec2Schema,
+  EvUplinkHackSchema, EvCorePickupSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
 } from '../../packages/protocol/src/index.ts'
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -85,6 +85,7 @@ async function until(fn, label, timeout = 10000) {
 function freshState() {
   return {
     tick: 600,
+    phase: PHASE_OUTER,
     timeLeftS: 480,
     robots: [
       { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'feeltest', color: '#22d3ee', isPartner: false },
@@ -169,7 +170,7 @@ class Fixture {
       ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, nick: r.nick, color: r.color, isPartner: r.isPartner }
       : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS })
     return create(SnapshotDeltaSchema, {
-      tick: st.tick, ackSeq: ack, phase: PHASE_OUTER, timeLeftS: st.timeLeftS,
+      tick: st.tick, ackSeq: ack, phase: st.phase, timeLeftS: st.timeLeftS,
       full, baseTick,
       robots, robotGone: st.gone.robots,
       projectiles: st.projectiles, projectileGone: st.gone.projectiles,
@@ -334,7 +335,7 @@ async function hudMsgText(page) {
 /** pairwise no-overlap of large HUD regions at current viewport */
 async function assertNoHudOverlap(page, label) {
   const boxes = await page.evaluate(() => {
-    const sels = ['.hud-top', '.hud-left', '.hud-right', '.hud-hint', '#connection-notice', '#hud-msg', '.game-tools']
+    const sels = ['.hud-top', '.hud-left', '.hud-right', '.hud-hint', '#connection-notice', '#hud-msg', '#hud-inner-ring', '.game-tools']
     const out = []
     for (const s of sels) for (const el of document.querySelectorAll(s)) {
       const r = el.getBoundingClientRect()
@@ -643,6 +644,130 @@ async function quickPass(browser, fix, viewport, label, shotName) {
   }
 }
 
+async function bannerPass(browser, fix, reduced = false) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reduced ? 'reduce' : 'no-preference' })
+  await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(() => {
+    const drawText = CanvasRenderingContext2D.prototype.fillText
+    window.__sayPaint = null
+    CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) {
+      if (text === 'PIXEL SAY 气泡') window.__sayPaint = { x, y, at: performance.now(), font: this.font }
+      return drawText.call(this, text, x, y, ...args)
+    }
+  })
+  const page = await ctx.newPage(), errors = []
+  try {
+    await joinGame(page, fix, errors)
+    await fix.step(st => { st.robots[0].base.pos = { x: 20, y: 0 }; st.timeLeftS = 31 })
+    await sleep(150)
+    let sound = await audioStarted(page)
+    await fix.step(st => { st.cores.push({ base: { id: 999, pos: { x: 21, y: 0 }, heading: 0 }, value: 10 }); st.timeLeftS = 31 })
+    assert.equal(await audioStarted(page), sound + 3, 'new core has distinct three-note spawn cue')
+    await fix.step(st => { st.cores = []; st.gone.cores = [999]; st.timeLeftS = 31 })
+    sound = await audioStarted(page)
+    const pickup = fix.event('corePickup', EvCorePickupSchema, { by: SELF_ID, coreId: 999, value: 10 })
+    fix.bcast(pickup)
+    await until(async () => /拾取 Core/.test(await hudMsgText(page)), 'pickup banner after core tombstone')
+    assert.equal(await audioStarted(page), sound + 2, 'own pickup after tombstone has two-note confirmation')
+    sound = await audioStarted(page)
+    fix.bcast(pickup); await sleep(70)
+    assert.equal(await audioStarted(page), sound, 'duplicate pickup is silent')
+
+    await fix.step(st => { st.robots[1].base.pos = { x: 25, y: 2 }; st.timeLeftS = 31 })
+    const say = fix.event('say', EvSaySchema, { robot: ENEMY_ID, text: 'PIXEL SAY 气泡' })
+    fix.bcast(say)
+    await until(async () => await page.evaluate(() => window.__sayPaint !== null), 'say rendered on canvas')
+    const bubble = await page.evaluate(() => window.__sayPaint)
+    assert.ok(bubble.y < 400 + 2 * 32 - 30, 'bubble is above the speaking robot')
+    assert.match(bubble.font, /Fusion Pixel/, 'speech uses pixel font')
+    assert.doesNotMatch(await hudMsgText(page), /PIXEL SAY/, 'say never duplicates into HUD banner')
+    await shot(page, reduced ? '21-say-reduced.png' : '20-say-bubble.png')
+    await fix.step(st => { st.robots[1].base.pos.x = 27; st.timeLeftS = 31 })
+    await until(async () => await page.evaluate(x => window.__sayPaint.x > x + 40, bubble.x), 'speech follows the robot')
+    await sleep(2500)
+    fix.bcast(say) // A reliable duplicate must not extend the four-second bubble lifetime.
+    await until(async () => await page.evaluate(() => performance.now() - window.__sayPaint.at > 200), 'speech expires without duplicate refresh', 2200)
+
+    const kill = fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } })
+    fix.bcast(kill)
+    await until(async () => /击毁/.test(await hudMsgText(page)), 'kill banner')
+    assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'kill')
+    await sleep(230) // measure the final frame after the stepped banner entrance
+    const banner = await page.locator('#hud-msg').boundingBox(), hp = await page.locator('#hud-left').boundingBox()
+    assert.ok(banner.y + banner.height <= hp.y - 8 && Math.abs(banner.x - hp.x) < 2, 'kill banner anchored above HP/EN')
+    await shot(page, reduced ? '13-kill-reduced.png' : '11-kill-banner.png')
+    sound = await audioStarted(page)
+    fix.bcast(kill); await sleep(70)
+    assert.equal(await audioStarted(page), sound, 'duplicate kill is silent')
+    const hack = fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 })
+    fix.bcast(hack)
+    await until(async () => /黑入完成/.test(await hudMsgText(page)), 'uplink banner')
+    assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'uplink')
+    await shot(page, reduced ? '14-uplink-reduced.png' : '12-uplink-banner.png')
+
+    await page.locator('#game-canvas').focus()
+    await page.keyboard.press('c')
+    await page.locator('#workbench-editor').waitFor({ state: 'visible' })
+    await sleep(150)
+    sound = await audioStarted(page)
+    const opening = fix.event('phaseChange', EvPhaseChangeSchema, { from: 1, to: 2 }, fix.st.tick + 1)
+    fix.bcast(opening)
+    await fix.step(st => { st.phase = 2; st.timeLeftS = 31 })
+    await page.locator('#hud-inner-ring.show').waitFor()
+    await sleep(220)
+    assert.equal(await audioStarted(page), sound + 7, 'inner opening plays one staged seven-note cue')
+    fix.bcast(opening); await sleep(80)
+    assert.equal(await audioStarted(page), sound + 7, 'phase event plus snapshot never double plays')
+    const gate = await page.locator('#hud-inner-ring').boundingBox(), stage = await page.locator('#game-stage').boundingBox()
+    assert.ok(Math.abs(gate.x + gate.width / 2 - stage.x - stage.width / 2) < 2, 'inner banner centered on battlefield with sidebar open')
+    assert.ok(gate.y < stage.y + 180, 'inner banner remains in top region')
+    await assertNoHudOverlap(page, `inner-${reduced ? 'reduced' : 'motion'}`)
+    await shot(page, reduced ? '16-inner-reduced.png' : '15-inner-open.png')
+
+    await page.evaluate(() => {
+      window.__timerPulses = 0
+      document.getElementById('hud-time').addEventListener('animationstart', () => window.__timerPulses++)
+    })
+    sound = await audioStarted(page)
+    await fix.step(st => { st.timeLeftS = 30 })
+    assert.equal(await audioStarted(page), sound + 2, '30-second warning is double tone')
+    assert.equal(await page.locator('#hud-time').innerText(), '0:30')
+    assert.ok(await page.locator('#hud-time').evaluate(el => el.classList.contains('urgent')), '30-second timer is urgent')
+    const color = await page.locator('#hud-time').evaluate(el => getComputedStyle(el).color)
+    assert.equal(color, 'rgb(255, 92, 92)', 'urgent timer uses the existing red palette')
+    if (!reduced) await until(async () => await page.evaluate(() => window.__timerPulses) === 1, '30-second pulse')
+    await shot(page, reduced ? '18-countdown-reduced.png' : '17-countdown-30.png')
+    sound = await audioStarted(page)
+    await fix.step(st => { st.timeLeftS = 30 })
+    assert.equal(await audioStarted(page), sound, 'same authoritative second never repeats cue')
+    for (let remaining = 10; remaining >= 1; remaining--) {
+      await sleep(60)
+      sound = await audioStarted(page)
+      await fix.step(st => { st.timeLeftS = remaining })
+      assert.equal(await audioStarted(page), sound + 1, `last ${remaining} seconds plays one tick`)
+      await fix.step(st => { st.timeLeftS = remaining })
+      assert.equal(await audioStarted(page), sound + 1, `same ${remaining} second does not repeat`)
+    }
+    if (reduced) {
+      assert.equal(await page.evaluate(() => window.__timerPulses), 0, 'reduced motion suppresses countdown jumps')
+      assert.equal(await page.evaluate(() => document.getAnimations({ subtree: true }).length), 0, 'reduced motion suppresses all banner animations')
+    } else {
+      await until(async () => await page.evaluate(() => window.__timerPulses) === 11, '30 plus ten final countdown pulses')
+    }
+    sound = await audioStarted(page)
+    fix.sendFull(); await sleep(100)
+    assert.equal(await audioStarted(page), sound, 'full resync in final seconds stays silent')
+    await page.setViewportSize({ width: 480, height: 820 })
+    await page.locator('#workbench-close').click()
+    await fix.step(st => { st.timeLeftS = 1 })
+    fix.bcast(fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } }))
+    await until(async () => /击毁/.test(await hudMsgText(page)), 'narrow kill banner')
+    await assertNoHudOverlap(page, 'narrow-event-banner')
+    if (!reduced) await shot(page, '19-kill-narrow.png')
+    assert.deepEqual(errors, [], 'event and countdown pass has no page errors')
+  } finally { await ctx.close() }
+}
+
 /** prefers-reduced-motion: pipeline works and no DOM/CSS animations run on events */
 async function reducedMotionPass(browser, fix) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 600 }, reducedMotion: 'reduce' })
@@ -691,6 +816,8 @@ try {
   await quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')
   await quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')
   await reducedMotionPass(browser, fix)
+  await bannerPass(browser, fix)
+  await bannerPass(browser, fix, true)
 
   console.log('\n=== game-feel-check PASS ===')
   console.log(`joins accepted: ${fix.joins}, input frames captured: ${fix.inputs.length}`)

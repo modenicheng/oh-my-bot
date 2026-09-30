@@ -6,7 +6,8 @@ import { iconButton } from './icons'
 export type SoundCue =
   | 'shot' | 'hit' | 'shieldHit' | 'wallHit' | 'dash' | 'shieldOn' | 'shieldOff'
   | 'coreSpawn' | 'corePickup' | 'uplinkEnter' | 'uplinkStart' | 'uplinkCancel' | 'uplinkSuccess'
-  | 'matchStart' | 'matchEnd' | 'phase' | 'respawn' | 'death' | 'assist' | 'deny' | 'hover' | 'click'
+  | 'matchStart' | 'matchEnd' | 'phase' | 'innerOpen' | 'countdownWarning' | 'countdownTick'
+  | 'respawn' | 'death' | 'assist' | 'deny' | 'hover' | 'click'
 
 type UplinkMode = 'off' | 'near' | 'hacking'
 
@@ -30,8 +31,11 @@ const CUE: Record<SoundCue, Note[]> = {
   dash: [{ f: 350, d: 0.2, g: 0.3, filter: { type: 'bandpass', f: 350, to: 2600, q: 1.2 } }],
   shieldOn: [{ t: 'sine', f: 440, to: 880, d: 0.12, g: 0.26 }],
   shieldOff: [{ t: 'sine', f: 880, to: 440, d: 0.12, g: 0.22 }],
-  coreSpawn: [{ t: 'sine', f: 660, to: 990, d: 0.22, g: 0.26 }],
-  corePickup: [{ t: 'square', f: 523, d: 0.07, g: 0.2 }, { t: 'square', f: 784, d: 0.1, g: 0.22, at: 0.07 }],
+  coreSpawn: [
+    { t: 'triangle', f: 392, d: 0.1, g: 0.25 }, { t: 'triangle', f: 587, d: 0.1, g: 0.25, at: 0.1 },
+    { t: 'sine', f: 880, d: 0.2, g: 0.28, at: 0.2 },
+  ],
+  corePickup: [{ t: 'square', f: 784, d: 0.06, g: 0.19 }, { t: 'triangle', f: 1047, d: 0.1, g: 0.27, at: 0.05 }],
   uplinkEnter: [{ t: 'sine', f: 220, to: 262, d: 0.16, g: 0.24 }],
   uplinkStart: [{ t: 'square', f: 980, to: 1245, d: 0.09, g: 0.2 }],
   uplinkCancel: [{ t: 'square', f: 620, to: 300, d: 0.14, g: 0.2 }],
@@ -45,6 +49,17 @@ const CUE: Record<SoundCue, Note[]> = {
     { t: 'triangle', f: 294, d: 0.28, g: 0.28, at: 0.28 },
   ],
   phase: [{ t: 'sine', f: 700, d: 0.08, g: 0.18 }],
+  innerOpen: [
+    { t: 'sine', f: 98, to: 196, d: 0.6, g: 0.28 },
+    { t: 'square', f: 196, d: 0.07, g: 0.15, filter: { type: 'lowpass', f: 1600 } },
+    { t: 'square', f: 294, d: 0.07, g: 0.16, at: 0.1, filter: { type: 'lowpass', f: 2100 } },
+    { t: 'square', f: 392, d: 0.08, g: 0.17, at: 0.2, filter: { type: 'lowpass', f: 2600 } },
+    { t: 'triangle', f: 784, d: 0.28, g: 0.24, at: 0.32 },
+    { t: 'triangle', f: 988, d: 0.26, g: 0.16, at: 0.34 },
+    { t: 'sine', f: 1175, d: 0.24, g: 0.18, at: 0.36 },
+  ],
+  countdownWarning: [{ t: 'square', f: 880, d: 0.09, g: 0.25 }, { t: 'square', f: 1175, d: 0.1, g: 0.25, at: 0.16 }],
+  countdownTick: [{ t: 'square', f: 1320, d: 0.055, g: 0.23 }],
   respawn: [{ t: 'triangle', f: 330, to: 660, d: 0.18, g: 0.24 }],
   death: [
     { t: 'sawtooth', f: 300, to: 60, d: 0.32, g: 0.3, filter: { type: 'lowpass', f: 900, to: 200 } },
@@ -55,6 +70,13 @@ const CUE: Record<SoundCue, Note[]> = {
   hover: [{ t: 'sine', f: 1200, d: 0.03, g: 0.06 }],
   click: [{ t: 'sine', f: 720, to: 660, d: 0.05, g: 0.14 }],
 }
+
+const PRIORITY_CUES = new Set<SoundCue>([
+  'innerOpen', 'countdownWarning', 'countdownTick', 'matchStart', 'matchEnd',
+  'uplinkEnter', 'uplinkStart', 'uplinkCancel', 'uplinkSuccess', 'corePickup', 'respawn', 'assist', 'deny',
+])
+const AMBIENT_VOICES = 24
+const MAX_VOICES = 32
 
 interface Bus { ctx: BaseAudioContext; out: AudioNode; noise?: AudioBuffer }
 
@@ -112,9 +134,9 @@ interface Loop { mode: 'near' | 'hacking'; tune(progress: number): void; stop():
 class AudioEngine {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
-  private voices = 0
+  private voices = new Set<{ priority: boolean; stop(): void }>()
   private noise: AudioBuffer | undefined
-  private lastAt = new Map<SoundCue, number>()
+  private lastAt = new Map<string, number>()
   private desired: UplinkMode = 'off'
   private loop: Loop | null = null
   private ui = false
@@ -137,19 +159,30 @@ class AudioEngine {
   get muted(): boolean { return this.mute }
   get volume(): number { return this.vol }
 
-  play(cue: SoundCue, gain = 1, pan = 0): void {
-    if (this.mute || gain <= 0.01) return
+  play(cue: SoundCue, gain = 1, pan = 0, priority = PRIORITY_CUES.has(cue)): void {
+    if (this.mute || document.hidden || gain <= 0.01) return
     if (!this.ctx || this.ctx.state !== 'running') return
     const now = performance.now()
-    if (now - (this.lastAt.get(cue) ?? -1e9) < (cue === 'hover' ? 90 : 45)) return
-    this.lastAt.set(cue, now)
+    // A distant cue cannot throttle a confirmed self cue of the same kind.
+    const rateKey = `${cue}:${priority}`
+    if (now - (this.lastAt.get(rateKey) ?? -1e9) < (cue === 'hover' ? 90 : 45)) return
+    const notes = CUE[cue], limit = priority ? MAX_VOICES : AMBIENT_VOICES
+    if (this.voices.size + notes.length > limit) {
+      if (!priority) return
+      const required = this.voices.size + notes.length - limit
+      const expendable = [...this.voices].filter(v => !v.priority)
+      if (expendable.length < required) return
+      for (const voice of expendable.slice(0, required)) voice.stop()
+    }
+    this.lastAt.set(rateKey, now)
     const bus: Bus = { ctx: this.ctx, out: this.master!, noise: this.noise }
-    for (const n of CUE[cue]) {
-      if (this.voices >= 24) return
+    for (const n of notes) {
       const { src, nodes } = buildNote(n, bus, gain, pan)
       this.noise = bus.noise
-      this.voices++
-      src.onended = () => { this.voices--; for (const nd of nodes) nd.disconnect(); src.disconnect() }
+      const clean = () => { this.voices.delete(voice); for (const nd of nodes) nd.disconnect(); src.disconnect() }
+      const voice = { priority, stop: () => { src.onended = null; src.stop(); clean() } }
+      this.voices.add(voice)
+      src.onended = clean
     }
   }
 
@@ -162,7 +195,11 @@ class AudioEngine {
     else this.loop.tune(p)
   }
 
-  stopGame(): void { this.desired = 'off'; this.stopLoop() }
+  stopGame(): void {
+    this.desired = 'off'; this.stopLoop()
+    for (const voice of this.voices) voice.stop()
+    this.lastAt.clear()
+  }
 
   setMuted(muted: boolean): void {
     if (this.mute === muted) return

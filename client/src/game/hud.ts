@@ -5,7 +5,9 @@ import type { WorldState, RobotEnt } from './world'
 import type { MapDefParsed, MapUplink } from './mapdef'
 import { phaseName, titleName } from './render'
 import type { ScoreRow } from '@omb/protocol'
-import { icon } from '../icons'
+import { icon, type IconName } from '../icons'
+import type { FeedbackKind } from './feedback'
+import './hud.css'
 
 const MAX_HP = 1000   // hp_x10（×10）
 const MAX_EN = 1000   // energy_x10（×10）
@@ -15,6 +17,8 @@ const FIRE_COST_EN = 5   // server sim.FireCost
 const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
 const HACK_MAX_X10 = 80  // progress_x10 满值（8s × 10）
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
+const INNER_MS = 4200
+const BANNER_ICON: Record<FeedbackKind, IconName> = { status: 'target', kill: 'skull', uplink: 'uplink' }
 
 interface SkillCard {
   root: HTMLDivElement
@@ -36,6 +40,10 @@ export class Hud {
   private assistCard: HTMLDivElement
   private msgLine: HTMLDivElement
   private msgTimer: number | undefined
+  private innerBanner: HTMLDivElement
+  private innerTimer: number | undefined
+  private countdownTimer: number | undefined
+  private reduced = matchMedia('(prefers-reduced-motion: reduce)')
   private assistLocal = false
   private assistServer: boolean | undefined
   private skills: Record<'fire' | 'dash' | 'shield' | 'uplink', SkillCard>
@@ -57,6 +65,18 @@ export class Hud {
     this.assistEl = req(root, 'hud-assist')
     this.assistCard = req(root, 'skill-assist')
     this.msgLine = req(root, 'hud-msg')
+    this.msgLine.setAttribute('role', 'status')
+    if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
+    this.msgLine.setAttribute('aria-atomic', 'true')
+    this.leftPanel.append(this.msgLine)
+    this.innerBanner = document.createElement('div')
+    this.innerBanner.id = 'hud-inner-ring'
+    this.innerBanner.className = 'hud-inner-ring'
+    this.innerBanner.setAttribute('role', 'status')
+    this.innerBanner.setAttribute('aria-live', 'polite')
+    this.innerBanner.setAttribute('aria-atomic', 'true')
+    this.innerBanner.hidden = true
+    root.append(this.innerBanner)
     this.skills = {
       fire: { root: req(root, 'skill-fire'), cd: req(root, 'skill-fire-cd') },
       dash: { root: req(root, 'skill-dash'), cd: req(root, 'skill-dash-cd') },
@@ -71,6 +91,7 @@ export class Hud {
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
   update(world: WorldState, map?: MapDefParsed): void {
+    if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
 
@@ -99,6 +120,7 @@ export class Hud {
     const s = Math.floor(t % 60)
     const clock = world.initialized ? `${m}:${String(s).padStart(2, '0')}` : '—:—'
     if (this.timeEl.textContent !== clock) this.timeEl.textContent = clock
+    this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
     // 比分简表：行 = nick + hp（分数服务器未透出，用状态占位；签名查重重建）
     const rows = [...sortedRobots(world.robots)].slice(0, 8).map(r => ({
@@ -131,24 +153,77 @@ export class Hud {
   }
 
   /** 有界消息：定时自动清除，dispose 清理定时器（退出对局后可安全重入）。 */
-  flashMsg(text: string): void {
+  flashMsg(text: string, kind: FeedbackKind = 'status'): void {
+    // Keep confirmed kill/upload banners readable through routine combat hints.
+    if (kind === 'status' && this.msgTimer !== undefined && this.msgLine.dataset.kind !== 'status') return
     window.clearTimeout(this.msgTimer)
-    this.msgLine.textContent = text
-    this.msgLine.classList.remove('show')
-    // 强制重排以重启动画
-    void this.msgLine.offsetWidth
-    this.msgLine.classList.add('show')
+    const label = document.createElement('span')
+    label.className = 'hud-event-text'
+    label.textContent = text
+    this.msgLine.dataset.kind = kind
+    this.msgLine.replaceChildren(icon(BANNER_ICON[kind]), label)
+    this.restartAnimation(this.msgLine, 'show')
     this.msgTimer = window.setTimeout(() => this.clearMsg(), MSG_MS)
+  }
+
+  showInnerRing(): void {
+    window.clearTimeout(this.innerTimer)
+    const text = document.createElement('div')
+    text.className = 'hud-inner-copy'
+    const title = document.createElement('strong')
+    title.textContent = '核心区已开放'
+    const detail = document.createElement('span')
+    detail.textContent = '内环解锁 · 主 Uplink 已激活'
+    text.append(title, detail)
+    this.innerBanner.replaceChildren(icon('target'), text, icon('uplink'))
+    this.innerBanner.hidden = false
+    this.restartAnimation(this.innerBanner, 'show')
+    this.innerTimer = window.setTimeout(() => this.clearInnerRing(), INNER_MS)
+  }
+
+  pulseCountdown(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 30) return
+    window.clearTimeout(this.countdownTimer)
+    this.timeEl.dataset.countdown = String(seconds)
+    this.timeEl.classList.add('urgent')
+    this.restartAnimation(this.timeEl, 'countdown-pulse')
+    this.countdownTimer = window.setTimeout(() => this.clearCountdown(), 480)
   }
 
   clearMsg(): void {
     window.clearTimeout(this.msgTimer)
     this.msgTimer = undefined
     this.msgLine.classList.remove('show')
-    this.msgLine.textContent = ''
+    this.msgLine.replaceChildren()
+    delete this.msgLine.dataset.kind
   }
 
-  dispose(): void { this.clearMsg() }
+  dispose(): void {
+    this.clearMsg(); this.clearInnerRing(); this.clearCountdown()
+    this.timeEl.classList.remove('urgent')
+    this.innerBanner.remove()
+  }
+
+  private clearInnerRing(): void {
+    window.clearTimeout(this.innerTimer)
+    this.innerTimer = undefined
+    this.innerBanner.hidden = true
+    this.innerBanner.classList.remove('show')
+    this.innerBanner.replaceChildren()
+  }
+
+  private clearCountdown(): void {
+    window.clearTimeout(this.countdownTimer)
+    this.countdownTimer = undefined
+    this.timeEl.classList.remove('countdown-pulse')
+    delete this.timeEl.dataset.countdown
+  }
+
+  private restartAnimation(el: HTMLElement, className: string): void {
+    el.classList.remove(className)
+    if (!this.reduced.matches) void el.offsetWidth
+    el.classList.add(className)
+  }
 
   // ---- 技能卡组：纯状态显示 --------------------------------------------------
   // 冷却语义：readyTick 为服务器绝对 60Hz tick；字段缺失（旧服务器）显示 '—'
