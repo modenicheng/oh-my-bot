@@ -13,6 +13,7 @@ import {
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TypeScriptWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker'
 import botApiSource from '../../../packages/bot-api/src/index.ts?raw'
+import { completionContext, seedsForContext, type CompletionSeed } from './bot-completions'
 
 export interface BotEditor {
   getValue(): string
@@ -45,32 +46,54 @@ javascriptDefaults.setDiagnosticsOptions({
   noSyntaxValidation: false,
 })
 
+// 深底衬高对比代码：背景用页面底色 bg-0，正文 text 白；荧光只给
+// 光标/选中/括号匹配等状态，同屏不超过两主色（STYLE.md 荧光纪律）。
 monaco.editor.defineTheme('omb-bot', {
   base: 'vs-dark',
   inherit: true,
   rules: [],
   colors: {
-    'editor.background': '#10141a',
+    'editor.background': '#0a0e14',
     'editor.foreground': '#d8dee9',
-    'editor.lineHighlightBackground': '#161b24',
+    'editor.lineHighlightBackground': '#11161f',
     'editor.lineHighlightBorder': '#1f2733',
-    'editorLineNumber.foreground': '#8b98a9',
+    'editorLineNumber.foreground': '#4a5666',
     'editorLineNumber.activeForeground': '#d8dee9',
     'editorCursor.foreground': '#22d3ee',
-    'editor.selectionBackground': '#22d3ee33',
+    'editor.selectionBackground': '#22d3ee2e',
     'editor.inactiveSelectionBackground': '#1f2733',
     'editorIndentGuide.background1': '#1f2733',
-    'editorIndentGuide.activeBackground1': '#8b98a9',
+    'editorIndentGuide.activeBackground1': '#4a5666',
     'editorWidget.background': '#10141a',
-    'editorWidget.border': '#1f2733',
+    'editorWidget.border': '#2a3542',
     'editorSuggestWidget.background': '#10141a',
-    'editorSuggestWidget.border': '#1f2733',
+    'editorSuggestWidget.border': '#2a3542',
     'editorSuggestWidget.foreground': '#d8dee9',
     'editorSuggestWidget.highlightForeground': '#22d3ee',
     'editorSuggestWidget.selectedBackground': '#1f2733',
+    'editorHoverWidget.background': '#10141a',
+    'editorHoverWidget.border': '#2a3542',
+    'editorBracketMatch.background': '#22d3ee1f',
+    'editorBracketMatch.border': '#22d3ee66',
     'focusBorder': '#22d3ee',
   },
 })
+
+function toCompletionItem(seed: CompletionSeed): Omit<monaco.languages.CompletionItem, 'range'> {
+  return {
+    label: seed.label,
+    kind:
+      seed.kind === 'method' ? monaco.languages.CompletionItemKind.Method
+      : seed.kind === 'property' ? monaco.languages.CompletionItemKind.Property
+      : seed.kind === 'snippet' ? monaco.languages.CompletionItemKind.Snippet
+      : monaco.languages.CompletionItemKind.Keyword,
+    insertText: seed.insert,
+    insertTextRules:
+      seed.insert.includes('$') ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+    detail: seed.detail,
+    sortText: seed.kind === 'keyword' || seed.kind === 'snippet' ? `0${seed.label}` : undefined,
+  }
+}
 
 export function createBotEditor(
   container: HTMLElement,
@@ -120,6 +143,30 @@ export function createBotEditor(
       label: '提交机器人脚本',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
       run: () => callbacks.onSubmit(),
+    }),
+    // Bot API 前缀补全：ctx / ctx.api / 成员链。TS worker 已覆盖能推断的
+    // 通用补全，这里只补 JSDoc 类型链失效时仍可用的入口与方法，随编辑器销毁。
+    monaco.languages.registerCompletionItemProvider('javascript', {
+      triggerCharacters: ['.'],
+      provideCompletionItems(model, position) {
+        const linePrefix = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        })
+        const context = completionContext(linePrefix)
+        const seeds = seedsForContext(context)
+        if (seeds.length === 0) return { suggestions: [] }
+        const word = model.getWordUntilPosition(position)
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: context.atDot ? position.column : word.startColumn,
+          endColumn: position.column,
+        }
+        return { suggestions: seeds.map(seed => ({ ...toCompletionItem(seed), range })) }
+      },
     }),
   ]
   reportDiagnostics()
