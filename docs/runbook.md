@@ -22,10 +22,12 @@
 pnpm install           # 首次构建先安装依赖
 bash build.sh          # 构建出单文件程序 server/omb.exe
 cd server
-./omb.exe -addr :8080  # 启动服务器；:8080 是"监听 8080 端口"的写法
+./omb.exe              # 启动服务器；默认监听 127.0.0.1:27182（仅本机可访问）
 ```
 
-浏览器打开 `http://localhost:8080/`（localhost = 你自己这台机器）就能进房。
+浏览器打开 `http://127.0.0.1:27182/` 就能进房。
+
+未设置 `-addr` 或 `OMB_ADDR` 时只绑定本机回环地址（见 ADR-0014），默认不暴露给局域网；是否出现防火墙提示取决于系统策略。监听地址由 `-addr` 控制（环境变量 `OMB_ADDR` 可兜底，显式 flag 优先）：`-addr :27182` 监听所有网卡供局域网访问，`-addr unix:/path/to/omb.sock` 绑 unix socket 供反向代理连接——完整说明见 [deploy.md](deploy.md)。
 
 `build.sh` 按依赖顺序做了五件事：
 
@@ -42,9 +44,9 @@ cd server
 三条命令确认服务器活着（`curl` 是命令行的 HTTP 请求工具，相当于用命令访问网址）：
 
 ```bash
-curl http://localhost:8080/healthz      # 返回 200 = 服务器活着
-curl http://localhost:8080/api/manual   # 返回手册目录树 JSON
-curl http://localhost:8080/api/matches  # 返回历史对局列表；首局正式对局前目录不存在时返回 404
+curl http://127.0.0.1:27182/healthz      # 返回 200 = 服务器活着
+curl http://127.0.0.1:27182/api/manual   # 返回手册目录树 JSON
+curl http://127.0.0.1:27182/api/matches  # 返回历史对局列表；首局正式对局前目录不存在时返回 404
 ```
 
 双人对局冒烟：开两个浏览器窗口（一个用普通模式、一个用隐私模式），分别用不同昵称加入同一房间 → 房主点"开始对局" → 两边都能 WASD 移动、鼠标开火即通过。
@@ -67,7 +69,7 @@ go install github.com/air-verse/air@latest   # 确保 $(go env GOPATH)/bin 在 P
 
 ```bash
 pnpm install
-pnpm dev    # 同时起 omb(:8080, air 热重载) 与 vite(:5173)
+pnpm dev    # 同时起 omb(:27182, air 热重载) 与 vite(:5173)
 ```
 
 浏览器打开 `http://127.0.0.1:5173`。也可分两个终端：`pnpm dev:server` / `pnpm dev:client`。
@@ -76,9 +78,9 @@ pnpm dev    # 同时起 omb(:8080, air 热重载) 与 vite(:5173)
 - **Go 改动** → air 自动重编译并重启服务器（客户端会自动重连；服务器重启会清空进行中的对局，恢复后返回大厅）
 - **手册改动**（`docs/manual/` 下的 Markdown）→ 保存后刷新页面即生效（dev:server 经 `OMB_MANUAL_DIR` 直读磁盘，不占用 embed）
 
-代理拓扑：浏览器只连 5173；`/api` 与 `/ws` 由 vite 代理到 `127.0.0.1:8080`（环境变量 `OMB_DEV_UPSTREAM` 可覆盖；`/ws` 代理启用 `rewriteWsOrigin` 重写 Origin 以通过服务器校验，见 `client/vite.config.ts`）。
+代理拓扑：浏览器只连 5173；`/api` 与 `/ws` 由 vite 代理到 `127.0.0.1:27182`（环境变量 `OMB_DEV_UPSTREAM` 可覆盖，Linux/macOS 上还支持 `unix:/path/to/omb.sock` 形式指向 unix socket 的后端——Windows 的 Node 连不了 AF_UNIX；`/ws` 代理启用 `rewriteWsOrigin` 重写 Origin 以通过服务器校验，见 `client/vite.config.ts`）。
 
-直接访问 `http://127.0.0.1:8080/` 时，若二进制内未嵌前端（仅占位文件），会显示「前端尚未构建」引导页，API/WS 不受影响；从 `server/` 启动时设置 `OMB_WEB_DIR=../client/dist`，可免重建预览已构建前端。该路径相对服务器进程的工作目录，也可以使用绝对路径。
+直接访问 `http://127.0.0.1:27182/` 时，若二进制内未嵌前端（仅占位文件），会显示「前端尚未构建」引导页，API/WS 不受影响；从 `server/` 启动时设置 `OMB_WEB_DIR=../client/dist`，可免重建预览已构建前端。该路径相对服务器进程的工作目录，也可以使用绝对路径。
 
 ### build.sh 还需要吗？
 
@@ -165,7 +167,7 @@ for line in open(sys.argv[1],encoding='utf-8'):
 import { toBinary, fromBinary, create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, JoinRoomSchema, ServerMsgSchema } from '@omb/protocol'
 import WebSocket from 'ws'
-const ws = new WebSocket('ws://127.0.0.1:8080/ws')
+const ws = new WebSocket('ws://127.0.0.1:27182/ws')
 const send = (m: any) => ws.send(Buffer.concat([Buffer.from([0x02]), Buffer.from(toBinary(ClientMsgSchema, m))]))
 ws.onopen = () => send(create(ClientMsgSchema, { payload: { case: 'join', value: create(JoinRoomSchema, { roomCode: 'DBG1', nick: 'x', color: '#22d3ee' }) } }))
 ws.onmessage = (ev) => {
@@ -190,10 +192,10 @@ go test ./server/internal/snapshot/ -bench . -benchtime 100x
 
 | 症状 | 原因 | 处置 |
 | --- | --- | --- |
-| 直接访问 8080 显示「前端尚未构建」 | 开发二进制未嵌前端（仅占位文件） | 访问 5173；从 `server/` 启动时可设 `OMB_WEB_DIR=../client/dist`，或跑 `bash build.sh` |
+| 直接访问 27182 显示「前端尚未构建」 | 开发二进制未嵌前端（仅占位文件） | 访问 5173；从 `server/` 启动时可设 `OMB_WEB_DIR=../client/dist`，或跑 `bash build.sh` |
 | 进房后"等待房主"且无按钮 | 你不是房主（正常视角） | 首位进房者即房主 |
 | 对局中对方消失 | AOI 裁剪（20m 出视野） | 设计行为；搭档除外 |
-| WS 连不上（dev 模式） | upstream 端口不符或后端未启动 | 核对 `OMB_DEV_UPSTREAM`（默认 `127.0.0.1:8080`）与后端进程 |
+| WS 连不上（dev 模式） | upstream 不符或后端未启动 | 核对 `OMB_DEV_UPSTREAM`（默认 `127.0.0.1:27182`）与后端进程 |
 | 手册 tab 不显示 | md 围栏语法错 | 首块语言标注须为 `ts\|py\|java` 形式 |
 | AI 提示 "not configured" | 当前房间链路尚未接入 AI 组件 | 设置 key 也不会启用；接入状态见 [AI Agent](manual/start/ai-agent.md) |
 | 日志目录无新对局 | 热身场不落盘 | 设计行为；正式局才有 |

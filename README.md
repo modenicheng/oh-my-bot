@@ -10,7 +10,7 @@
 pnpm install          # 首次构建先安装依赖
 bash build.sh          # 一键构建：类型检查 → 前端打包 → 内嵌 → 编译出 server/omb.exe
 cd server
-./omb.exe -addr :8080   # 启动，浏览器打开 http://localhost:8080/ 即玩
+./omb.exe              # 启动（默认监听 127.0.0.1:27182）；浏览器打开 http://127.0.0.1:27182/ 即玩
 ```
 
 详细说明（本地调试、开发循环、常见问题）：[docs/runbook.md](docs/runbook.md)。内网部署与常驻运行：[docs/deploy.md](docs/deploy.md)。

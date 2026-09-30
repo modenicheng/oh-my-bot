@@ -3,21 +3,27 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
+	"github.com/modenicheng/oh-my-bot/server/internal/listen"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
@@ -71,7 +77,7 @@ const frontendMissingHTML = `<!doctype html>
 `
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
+	addr := flag.String("addr", envAddr(), "listen address: host:port, :port (all interfaces), unix:/path/to.sock, or unix:@name (Linux abstract socket)")
 	flag.Parse()
 
 	hub := glue.NewHub()
@@ -160,10 +166,44 @@ func main() {
 		http.FileServer(http.FS(webRoot)).ServeHTTP(w, r)
 	})
 
-	log.Printf("oh-my-bot server listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil && err != http.ErrServerClosed {
+	ln, err := listen.Listen(*addr)
+	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Graceful shutdown: listeners close first (unlinking a unix socket file),
+	// then in-flight requests get 10s to finish. Hijacked WebSocket sessions
+	// end with the process, unchanged from the previous hard-exit behavior.
+	srv := &http.Server{Handler: mux}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	log.Printf("oh-my-bot server listening on %s (%s)", ln.Addr(), ln.Addr().Network())
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			_ = ln.Close() // best-effort socket file cleanup before dying
+			log.Fatal(err)
+		}
+	case <-ctx.Done():
+		log.Print("shutting down, waiting up to 10s for in-flight requests")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}
+}
+
+// envAddr lets OMB_ADDR supply the default listen address; an explicit -addr
+// flag still wins because the env only fills the flag's default.
+func envAddr() string {
+	if v := os.Getenv("OMB_ADDR"); v != "" {
+		return v
+	}
+	return listen.Default
 }
 
 // copyCompleteRecords exposes only newline-terminated records. A partial tail
