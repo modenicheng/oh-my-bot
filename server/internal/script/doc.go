@@ -5,7 +5,7 @@
 //
 // 与 @omb/bot-api（packages/bot-api/src/index.ts + runtime.ts）对齐：
 // TickContext { self, game, scan(), api }，api = L0 原语 + L1 便利层。
-// 手册 docs/manual/bot-scripting.md 是行为基准。
+// 手册 docs/manual/code/bot-scripting.md 是行为基准。
 //
 // 配额：单 tick wall-clock（默认 10ms，Config 可调）。到期通过 goja
 // interrupt 强制中断，返回 ErrQuotaExceeded，该 tick 脚本轴全清（idle）。

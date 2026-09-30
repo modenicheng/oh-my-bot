@@ -1,7 +1,7 @@
 // 输入采样：keydown/keyup WASD + 鼠标 aim/fire + Shift dash + Q shield + E/F interact
 // （v1 协议只有一个 interact 位，E 与 F 等效）+ Space assist 开关。
 // 60Hz 定时采样打包 ClientInput：seq 递增、axis_mask 只在人类操作对应轴时置位
-// （未置位轴不抢占脚本控制 —— 见 docs/manual/controls.md 仲裁语义）。
+// （未置位轴不抢占脚本控制 —— 见 docs/manual/rules/controls.md 仲裁语义）。
 import { create } from '@bufbuild/protobuf'
 import { ClientInputSchema, type ClientInput } from '@omb/protocol'
 import type { Camera } from './camera'

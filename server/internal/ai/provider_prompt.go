@@ -5,7 +5,7 @@ import "strings"
 // buildSystemPrompt 的静态组成部分（provider_deepseek.go 组装）。
 //
 // 语料来源：packages/bot-api/src/index.ts + runtime.ts 的 Go 侧精简镜像，
-// 以及 docs/manual/bot-scripting.md 的 tick 模型要点。手册章节本身由
+// 以及 docs/manual/code/bot-scripting.md 的 tick 模型要点。手册章节本身由
 // PromptContext.Manual 在运行时注入（audience=both 章节由 glue 层挑选），
 // 不在此硬编码。
 

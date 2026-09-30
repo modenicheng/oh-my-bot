@@ -109,12 +109,10 @@ try {
   // Open through visible controls, then reload the recorded document route.
   await page.click('#btn-game-manual')
   await page.locator('#manual-content h1').first().waitFor()
-  const currentManual = await page.locator('[data-path="reference"]').count() > 0
-  const section = currentManual ? 'reference' : 'library'
-  const tabPage = currentManual ? 'reference/actions' : 'library/tab-demo'
-  await page.locator(`[data-path="${section}"]`).click()
-  await until(() => page.url().includes(`doc=${section}%2Findex.md`), 'directory index navigation')
-  await page.locator(`[data-path="${currentManual ? 'reference/data' : 'library/api'}"]`).click()
+  const tabPage = 'reference/actions'
+  await page.locator('[data-path="reference"]').click()
+  await until(() => page.url().includes('doc=reference%2Findex.md'), 'directory index navigation')
+  await page.locator('[data-path="reference/data"]').click()
   await page.locator('#manual-content h1').first().waitFor()
   await page.locator(`[data-path="${tabPage}"]`).click()
   await page.getByRole('tab', { name: 'PY', exact: true }).first().click()

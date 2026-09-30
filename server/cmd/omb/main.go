@@ -62,7 +62,7 @@ const frontendMissingHTML = `<!doctype html>
 <p>当前二进制内没有嵌入前端产物（仅含占位文件），API 与 WebSocket 不受影响。</p>
 <ul>
 <li><b>本地开发</b>：仓库根目录运行 <code>pnpm dev</code>，通过 <code>http://127.0.0.1:5173</code> 访问（前端热重载 + 后端 API 代理）。</li>
-<li><b>免重建预览</b>：设置 <code>OMB_WEB_DIR</code> 指向 <code>client/dist</code> 后重启，直接从磁盘读取已构建前端。</li>
+<li><b>免重建预览</b>：从 <code>server/</code> 启动时设置 <code>OMB_WEB_DIR=../client/dist</code> 后重启，直接从磁盘读取已构建前端；也可使用绝对路径。</li>
 <li><b>完整构建</b>：运行 <code>bash build.sh</code> 将前端重新嵌入单二进制。</li>
 </ul>
 <p>探活：<code>/healthz</code>；数据接口：<code>/api/matches</code>、<code>/api/manual</code>、<code>/api/replay/&lt;id&gt;</code>。</p>
@@ -287,7 +287,7 @@ type manualNode struct {
 }
 
 // buildManualTreeFS 递归构建手册目录树。root 为 embed 根（"manual"）或磁盘根
-//（"."）。文件 path 为**全路径**（含父目录，如 "library/api"）——客户端
+// （"."）。文件 path 为**全路径**（含父目录，如 "reference/actions"）——客户端
 // navigate 直接拼 .md 后 fetch，不再拼装。title 取文件名去扩展名。
 func buildManualTreeFS(fsys fs.FS, root string) []manualNode {
 	entries, err := fs.ReadDir(fsys, root)

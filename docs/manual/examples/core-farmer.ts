@@ -1,7 +1,7 @@
 // 教学点：cores 恒全量可见 → nearestCore 做全局导航；路过敌人顺手还击。
 // - 拾取无需 API：走到 Core 0.6m 内自动得分（普通 +10 / Mega +25）
 // - fire() 一旦调用即锁存：farmer 从此进入全自动还击（直到死亡清轴）
-// - 锁存的 fire 与黑桩永久互斥：farmer 别再去抢 Uplink
+// - 最终 fire 意图会阻止黑入：本例持续射击，不尝试抢 Uplink
 import type { BotModule } from '@omb/bot-api'
 
 const bot = {

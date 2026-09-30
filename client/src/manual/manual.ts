@@ -3,8 +3,8 @@ import { icon } from '../icons'
 // 手册阅读器视图：目录侧栏（两级）+ 面包屑 + markdown 正文。
 //
 // 数据源：GET /api/manual（目录树）+ GET /api/manual/<path>（原始 markdown）。
-// 服务器侧并行开发中：404 时回退内置 mock 树（标注 TODO 联调），不阻塞 UI 开发。
-// frontmatter：docs/manual/*.md 带 YAML frontmatter（title/audience），渲染前
+// 目录请求失败时回退内置离线示例，并在状态行标明数据来源。
+// frontmatter：docs/manual 下的 Markdown 带 YAML frontmatter（title/audience），渲染前
 // 剥离，title 显示为页标题，audience 显示为面包屑尾部的小标签。
 
 import { renderMarkdown, bindTabInteractions } from './render'
@@ -12,9 +12,9 @@ import { renderMarkdown, bindTabInteractions } from './render'
 // ---- API 契约（与主线服务器侧对齐） -----------------------------------------
 
 export interface ManualNode {
-  /** 相对 docs/manual/ 的路径，如 "index.md"、"library/api-tick.md"。 */
+  /** 相对 docs/manual/ 的路径，如 "index.md"、"reference/actions.md"。 */
   path: string
-  /** frontmatter title；无 frontmatter 时服务器应回退为文件名。 */
+  /** 目录显示名；服务端使用文件名，页面标题另从 frontmatter 读取。 */
   title: string
   children: ManualNode[]
 }
@@ -33,25 +33,49 @@ async function fetchDoc(path: string): Promise<string> {
   return res.text()
 }
 
-// ---- mock 回退（TODO 联调：服务器 /api/manual 上线后改为报错提示） ----------------
+// ---- 离线示例回退 -----------------------------------------------------------
 
 const MOCK_TREE: ManualNode[] = [
   { path: 'index.md', title: 'oh-my-bot 玩家手册', children: [] },
-  { path: 'prepare.md', title: '进房前准备', children: [] },
-  { path: 'controls.md', title: '操作与控制仲裁', children: [] },
-  { path: 'game-rules.md', title: '游戏规则', children: [] },
-  { path: 'bot-scripting.md', title: 'Bot Script 编程指南', children: [] },
-  { path: 'ai-agent.md', title: 'AI Agent 攻略', children: [] },
   {
-    path: 'library',
-    title: 'API 库',
-    children: [{ path: 'library/tab-demo.md', title: '多语言 Tab 示例', children: [] }],
+    path: 'start',
+    title: 'start',
+    children: [
+      { path: 'start/prepare.md', title: '进房前准备', children: [] },
+      { path: 'start/first-match.md', title: '你的第一局', children: [] },
+      { path: 'start/snippet.md', title: 'Snippet 驾驶辅助（规划）', children: [] },
+      { path: 'start/ai-agent.md', title: 'AI Agent（接入状态与规划）', children: [] },
+    ],
+  },
+  {
+    path: 'rules',
+    title: 'rules',
+    children: [
+      { path: 'rules/game-rules.md', title: '游戏规则', children: [] },
+      { path: 'rules/controls.md', title: '操作与控制仲裁', children: [] },
+    ],
+  },
+  {
+    path: 'code',
+    title: 'code',
+    children: [{ path: 'code/bot-scripting.md', title: '写第一个 Bot', children: [] }],
+  },
+  {
+    path: 'reference',
+    title: 'reference',
+    children: [
+      { path: 'reference/index.md', title: 'API 总览', children: [] },
+      { path: 'reference/actions.md', title: '动作参考（L0 原语）', children: [] },
+      { path: 'reference/helpers.md', title: '便利层参考（L1）', children: [] },
+      { path: 'reference/data.md', title: '数据结构参考', children: [] },
+      { path: 'reference/modules.md', title: '模块语义与陷阱', children: [] },
+    ],
   },
 ]
 
 const MOCK_DOCS: Record<string, string> = {
-  'library/tab-demo.md': [
-    '---\ntitle: 多语言 Tab 示例\naudience: coder\n---\n\n# 多语言 Tab 示例\n\n同一段逻辑的三种语言实现：\n\n```ts|py|java\n三个语言实现如下。\n```\n\n```ts\nexport function tick(ctx) {\n  const core = ctx.api.nearestCore()\n  if (core) ctx.api.moveTo(core)\n}\n```\n\n```py\ndef tick(ctx):\n    core = ctx.api.nearest_core()\n    if core:\n        ctx.api.move_to(core)\n```\n\n```java\nvoid tick(Context ctx) {\n    Core core = ctx.api.nearestCore();\n    if (core != null) ctx.api.moveTo(core);\n}\n```\n\n普通代码块（无 tab）：\n\n```ts\nconst x: number = 1\n```\n',
+  'reference/actions.md': [
+    '---\ntitle: 动作参考（L0 原语）\naudience: coder\n---\n\n# 动作参考（L0 原语）\n\nmock 回退示例页：多语言 tab 组渲染。\n\n```ts|py|java\n三个语言实现如下。\n```\n\n```ts\nconst bot = {\n  tick(ctx) {\n    const core = ctx.api.nearestCore()\n    if (core) ctx.api.moveTo(core)\n  },\n}\nexport default bot\n```\n\n```py\ndef tick(ctx):\n    core = ctx.api.nearest_core()\n    if core:\n        ctx.api.move_to(core)\n```\n\n```java\nvoid tick(Context ctx) {\n    Vec2 core = ctx.api.nearestCore();\n    if (core != null) ctx.api.moveTo(core);\n}\n```\n\n普通代码块（无 tab）：\n\n```ts\nconst x: number = 1\n```\n',
   ].join(''),
 }
 
@@ -140,7 +164,7 @@ export class ManualView {
       normalizeTree(this.tree)
       this.usingMock = false
     } catch {
-      // TODO 联调：服务器 /api/manual 上线后此回退应报错而非 mock
+      // 目录不可用时显示离线示例，并明确标注，避免误认为服务端内容。
       this.tree = MOCK_TREE
       this.usingMock = true
     }
