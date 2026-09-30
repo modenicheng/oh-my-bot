@@ -397,6 +397,41 @@
       .rp-controls { width: calc(100vw - 24px); bottom: 12px; }
       .end-list { min-width: 0; width: calc(100vw - 32px); padding: 12px; }
     }
+    /* 独立只读观战：复用回放器，地图占据自己的网格区域，不被工具栏遮挡。 */
+    #view-replay-player[data-spectator] { display: grid; grid-template-rows: auto auto minmax(160px, 1fr) auto;
+      background: var(--bg); overflow-y: auto; font-family: var(--mono); }
+    [data-spectator] .spectator-heading { grid-row: 1; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .spectator-heading h1 { font: 24px var(--pixel); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .spectator-heading h1 span { font: 11px var(--mono); color: var(--amber); letter-spacing: .08em; }
+    .spectator-heading p { margin: 6px 0 0; color: var(--fg-dim); font-size: 11px; overflow-wrap: anywhere; }
+    [data-spectator] .spectator-camera { grid-row: 2; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    .spectator-camera select { font: 12px var(--mono); padding: 8px; min-width: 120px; max-width: 220px;
+      border: 1px solid var(--line); border-radius: 0; color: var(--fg); background: var(--panel); }
+    .spectator-camera select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #sp-zoom { min-width: 5ch; color: var(--accent); text-align: center; font-size: 12px; }
+    #spectator-help { margin: 0; font-size: 11px; color: var(--fg-dim); flex-basis: 100%; }
+    #view-replay-player[data-spectator] #replay-canvas { grid-row: 3; min-height: 0; min-width: 0; cursor: grab; touch-action: none; }
+    [data-spectator] #replay-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+    [data-spectator] #replay-canvas.dragging { cursor: grabbing; }
+    [data-spectator] #rp-hud { position: static; grid-row: 4; padding: 8px 16px 12px; border-top: 1px solid var(--line);
+      background: var(--panel); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    [data-spectator] .rp-top { position: static; transform: none; gap: 6px; }
+    [data-spectator] .rp-clock { font: 24px var(--pixel); }
+    [data-spectator] .rp-controls { position: static; transform: none; width: auto; flex: 1; min-width: 200px; padding: 0; }
+    [data-spectator] .rp-buttons { flex-wrap: wrap; }
+    [data-spectator] .rp-score, [data-spectator] .rp-follow { display: none; }
+    [data-spectator] #rp-status { position: static; transform: none; }
+    [data-spectator] .rp-mark { border-radius: 0; }
+    [data-spectator] .rp-btn:hover { box-shadow: none; background: #1c3340; }
+    [data-spectator] .rp-btn { min-height: 36px; }
+    @media (max-width: 480px) {
+      [data-spectator] .spectator-heading, [data-spectator] .spectator-camera, [data-spectator] #rp-hud { padding: 8px; }
+      .spectator-camera label { flex-basis: 100%; }
+      .spectator-camera select { max-width: 160px; flex: 1; }
+      .spectator-camera .rp-btn { padding: 8px; }
+      [data-spectator] .rp-top, [data-spectator] .rp-controls { width: 100%; }
+    }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
     }
@@ -421,6 +456,7 @@
       <div id="swatches"></div>
       <button type="button" class="act" id="btn-join"><span data-icon="forward"></span><span>进入房间</span></button>
       <div class="error-line" id="form-error"></div>
+      <button type="button" class="act" id="btn-spectator"><span data-icon="spectator"></span><span>只读观战 · 录像</span></button>
     </section>
     <!-- 房间大厅 -->
     <section id="view-room" hidden>
@@ -433,6 +469,7 @@
         <button type="button" class="act" id="btn-warmup" hidden><span data-icon="target"></span><span>热身场</span></button>
         <button type="button" class="act" id="btn-manual" aria-keyshortcuts="m"><span data-icon="book"></span><span>手册</span> <kbd>M</kbd></button>
         <button type="button" class="act" id="btn-replay"><span data-icon="replay"></span><span>回放库</span></button>
+        <button type="button" class="act" id="btn-room-spectator"><span data-icon="spectator"></span><span>只读观战 · 录像</span></button>
         <div class="room-notice" id="room-notice" hidden></div>
       </div>
       <div id="room-state">—</div>
@@ -532,14 +569,29 @@
     <!-- 回放库（对局列表） -->
     <section id="view-replays" hidden>
       <h1>OH-MY-BOT</h1>
-      <div class="sub">回放库</div>
+      <div class="sub" id="replay-library-title">回放库</div>
+      <p class="hint" id="spectator-library-note" hidden>只读观战使用已录制的对局，不是实时直播；无需加入房间。选择录像后可自由拖动、缩放或跟随任意机器人。</p>
       <div id="replay-list" aria-label="对局列表"><div class="placeholder">载入中…</div></div>
-      <div class="error-line" id="replay-error"></div>
+      <div class="error-line" id="replay-error" role="alert"></div>
       <button type="button" class="act" id="btn-replays-back"><span data-icon="back"></span><span>返回</span></button>
     </section>
     <!-- 回放器（全屏 canvas + 控制条） -->
     <section id="view-replay-player" hidden>
-      <canvas id="replay-canvas"></canvas>
+      <canvas id="replay-canvas" tabindex="0" aria-label="录像战场"></canvas>
+      <header class="spectator-heading" hidden>
+        <h1><span data-icon="spectator"></span> 只读观战 <span>RECORDED · 非实时</span></h1>
+        <p id="spectator-source">数据来自对局录像；画面按已有回放记录重建，不连接实时观战流。</p>
+      </header>
+      <nav class="spectator-camera" aria-label="观战相机" hidden>
+        <label for="sp-follow">跟随机器人</label>
+        <select id="sp-follow" disabled><option value="">自由视角</option></select>
+        <button type="button" class="rp-btn" id="sp-free" title="停止跟随，保留视角"><span data-icon="pan"></span><span>自由</span></button>
+        <button type="button" class="rp-btn" id="sp-out" aria-label="缩小" title="缩小 (-)"><span data-icon="zoomOut"></span></button>
+        <output id="sp-zoom" aria-label="缩放倍率">1.0×</output>
+        <button type="button" class="rp-btn" id="sp-in" aria-label="放大" title="放大 (+)"><span data-icon="zoomIn"></span></button>
+        <button type="button" class="rp-btn" id="sp-fit" title="全图 (Home)"><span data-icon="fit"></span><span>全图</span></button>
+        <p id="spectator-help">拖动平移 · 滚轮缩放 · 聚焦地图后用方向键、+ / −、Home · Esc 返回</p>
+      </nav>
       <div id="rp-hud">
         <div class="rp-top">
           <button type="button" class="rp-btn" id="rp-return"><span data-icon="back"></span><span>返回</span></button>

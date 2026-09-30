@@ -10,9 +10,10 @@ export interface ReplayLibraryDeps {
   errorEl: HTMLElement
   playerRoot: HTMLElement
   canvas: HTMLCanvasElement
+  spectator?: boolean
   onExitToList: () => void
   /** 视图切换（列表 ⇄ 播放器）由外部宿主控制。 */
-  showPlayer: () => void
+  showPlayer: (matchId: string) => void
   showList: () => void
 }
 
@@ -21,11 +22,16 @@ export class ReplayLibrary {
   private player: ReplayPlayer | null = null
   private loading = false
   private disposed = false
+  private lastMatchId: string | undefined
 
   constructor(private deps: ReplayLibraryDeps) {}
 
   /** 进入回放库：拉取列表并渲染。 */
   async open(matchId?: string): Promise<void> {
+    if (matchId && this.deps.spectator) {
+      await this.openPlayer(matchId)
+      return
+    }
     this.deps.showList()
     await this.refresh()
     if (matchId && !this.disposed) await this.openPlayer(matchId)
@@ -36,6 +42,10 @@ export class ReplayLibrary {
     this.player?.dispose()
     this.player = null
     this.deps.showList()
+    if (this.deps.spectator) {
+      if (this.entries.length === 0) void this.refresh()
+      else this.focusEntry()
+    }
   }
 
   exit(): void {
@@ -51,7 +61,10 @@ export class ReplayLibrary {
     this.renderLoading()
     try {
       this.entries = await fetchMatches()
-      if (!this.disposed) this.renderList()
+      if (!this.disposed) {
+        this.renderList()
+        if (this.deps.spectator) this.focusEntry()
+      }
     } catch (e) {
       if (this.disposed) return
       this.entries = []
@@ -81,6 +94,7 @@ export class ReplayLibrary {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'replay-item'
+      btn.dataset.matchId = entry.id
       // 房间码 + 局序：id 形如 ROOMCODE-SEQ
       const meta = entry.seq > 0 ? `#${entry.seq}` : ''
       btn.innerHTML =
@@ -91,12 +105,21 @@ export class ReplayLibrary {
     }
   }
 
+  private focusEntry(): void {
+    const buttons = [...this.deps.listRoot.querySelectorAll<HTMLButtonElement>('button[data-match-id]')]
+    const target = buttons.find(btn => btn.dataset.matchId === this.lastMatchId) ?? buttons[0]
+    target?.focus({ preventScroll: true })
+  }
+
   private async openPlayer(matchId: string): Promise<void> {
-    this.deps.showPlayer()
+    if (this.disposed) return
+    this.lastMatchId = matchId
+    this.deps.showPlayer(matchId)
     if (!this.player) {
       this.player = new ReplayPlayer({
         root: this.deps.playerRoot,
         canvas: this.deps.canvas,
+        spectator: this.deps.spectator,
         onExit: () => this.backToList(),
         onError: (msg) => {
           this.setError(msg)
@@ -105,7 +128,7 @@ export class ReplayLibrary {
       })
     }
     const player = this.player
-    writeRoute('replay-player', readRoute().roomCode, { replay: matchId })
+    writeRoute(this.deps.spectator ? 'spectator' : 'replay-player', readRoute().roomCode, { replay: matchId })
     const ok = await player.load(matchId)
     if (!ok && this.player === player && !this.disposed) this.backToList()
   }

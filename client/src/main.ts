@@ -118,12 +118,13 @@ function showView(view: View, extra?: RouteExtra): void {
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
   viewManual.hidden = view !== 'manual'
-  viewReplays.hidden = view !== 'replays'
-  viewReplayPlayer.hidden = view !== 'replay-player'
+  const spectatorPlayer = view === 'spectator' && !!extra?.replay
+  viewReplays.hidden = view !== 'replays' && !(view === 'spectator' && !spectatorPlayer)
+  viewReplayPlayer.hidden = view !== 'replay-player' && !spectatorPlayer
   const audioHost = view === 'game' ? viewGame.querySelector('.game-tools')!
     : view === 'manual' ? viewManual.querySelector('.manual-top')!
-    : view === 'replay-player' ? viewReplayPlayer.querySelector('.rp-buttons')!
-    : view === 'room' ? viewRoom : view === 'replays' ? viewReplays : viewJoin
+    : view === 'replay-player' || spectatorPlayer ? viewReplayPlayer.querySelector('.rp-buttons')!
+    : view === 'room' ? viewRoom : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin
   if (audioSettings.parentElement !== audioHost) { audioSettings.open = false; audioHost.appendChild(audioSettings) }
   if (enteringGame) {
     if (workbench.isOpen && matchMedia('(max-width: 760px)').matches) workbench.activate()
@@ -259,20 +260,41 @@ $('btn-game-start').addEventListener('click', () => sendRoomAction(RoomAction_Ki
 // ---- 回放库（对局列表 ⇄ 回放器；同源 HTTP，不依赖 WS） --------------------
 
 let replayLibrary: ReplayLibrary | null = null
+let spectatorMode = false
 
-function openReplays(replayId?: string): void {
+function openReplays(replayId?: string, spectator = false): void {
+  if (spectatorMode !== spectator) {
+    replayLibrary?.exit()
+    replayLibrary = null
+  }
+  spectatorMode = spectator
+  viewReplayPlayer.toggleAttribute('data-spectator', spectator)
+  for (const element of viewReplayPlayer.querySelectorAll<HTMLElement>('.spectator-heading, .spectator-camera')) element.hidden = !spectator
+  $('spectator-library-note').hidden = !spectator
+  $('replay-library-title').textContent = spectator ? '只读观战 · 选择录像' : '回放库'
+  replayCanvas.setAttribute('aria-label', spectator ? '只读录像地图；方向键平移，加减缩放，Home 全图' : '录像战场')
+  if (spectator) replayCanvas.setAttribute('aria-describedby', 'spectator-help spectator-source')
+  else replayCanvas.removeAttribute('aria-describedby')
   if (!replayLibrary) {
     replayLibrary = new ReplayLibrary({
       listRoot: replayListEl,
       errorEl: replayErrorEl,
       playerRoot: viewReplayPlayer,
       canvas: replayCanvas,
-      onExitToList: () => showView('replays'),
-      showPlayer: () => showView('replay-player'),
-      showList: () => showView('replays'),
+      spectator,
+      onExitToList: () => showView(spectator ? 'spectator' : 'replays'),
+      showPlayer: matchId => {
+        $('spectator-source').textContent = `录像 ${matchId} · 按已有回放记录重建，非实时；不发送游戏输入。`
+        showView(spectator ? 'spectator' : 'replay-player', { replay: matchId })
+        if (spectator) $('rp-return').focus({ preventScroll: true })
+      },
+      showList: () => {
+        showView(spectator ? 'spectator' : 'replays')
+        if (spectator) btnReplaysBack.focus({ preventScroll: true })
+      },
     })
   }
-  showView('replays')
+  showView(spectator ? 'spectator' : 'replays')
   void replayLibrary.open(replayId)
 }
 
@@ -280,8 +302,14 @@ function closeReplays(): void {
   replayLibrary?.exit()
   replayLibrary = null
   showView(game ? 'game' : session || lastJoin ? 'room' : 'join')
+  if (spectatorMode && !game) $(session || lastJoin ? 'btn-room-spectator' : 'btn-spectator').focus({ preventScroll: true })
 }
 
+$('btn-spectator').addEventListener('click', () => openReplays(undefined, true))
+$('btn-room-spectator').addEventListener('click', () => openReplays(undefined, true))
+viewReplays.addEventListener('keydown', e => {
+  if (spectatorMode && e.key === 'Escape') { e.preventDefault(); closeReplays() }
+})
 btnReplay.addEventListener('click', () => openReplays())
 $('btn-game-replay').addEventListener('click', () => openReplays())
 btnReplaysBack.addEventListener('click', closeReplays)
@@ -461,7 +489,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'mapBootstrap') {
       workbench.resetMatch()
       // 服务器下发地图：切游戏视图（解析失败留在大厅）
-      const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? 'replays' : !viewReplayPlayer.hidden ? 'replay-player' : null
+      const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? (spectatorMode ? 'spectator' : 'replays')
+        : !viewReplayPlayer.hidden ? (spectatorMode ? 'spectator' : 'replay-player') : null
       const utilityRoute = readRoute()
       if (!game) enterGame()
       awaitingFull = true
@@ -584,7 +613,10 @@ window.addEventListener('pageshow', e => {
 })
 
 const profile = loadProfile(initialRoute.roomCode)
-if (profile) {
+// A direct spectator URL must never restore a player session or join a room.
+if (initialRoute.view === 'spectator') {
+  openReplays(initialRoute.replay, true)
+} else if (profile) {
   inRoom.value = profile.roomCode
   inNick.value = profile.nick
   selectedColor = profile.color
