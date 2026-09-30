@@ -29,13 +29,46 @@ var webFS embed.FS
 var manualFS embed.FS
 
 // webRoot strips the embed "web/" prefix so the site root maps web/ content.
+// OMB_WEB_DIR redirects it to a frontend build on disk (client/dist), so the
+// dev loop never needs a rebuild to refresh the embed snapshot.
 var webRoot = func() fs.FS {
+	if dir := os.Getenv("OMB_WEB_DIR"); dir != "" {
+		return os.DirFS(dir)
+	}
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
 		panic(err)
 	}
 	return sub
 }()
+
+// manualSource backs /api/manual*: the embed by default, or a directory on
+// disk via OMB_MANUAL_DIR (repo docs/manual) so markdown edits show up on
+// refresh without a rebuild. manualRoot is the in-FS prefix for each case.
+var manualSource, manualRoot = func() (fs.FS, string) {
+	if dir := os.Getenv("OMB_MANUAL_DIR"); dir != "" {
+		return os.DirFS(dir), "."
+	}
+	return fs.FS(manualFS), "manual"
+}()
+
+// frontendMissingHTML explains an empty embed (fresh checkout without a
+// frontend build) instead of serving a blank page.
+const frontendMissingHTML = `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>oh-my-bot · 前端未构建</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; line-height: 1.7">
+<h1>前端尚未构建</h1>
+<p>当前二进制内没有嵌入前端产物（仅含占位文件），API 与 WebSocket 不受影响。</p>
+<ul>
+<li><b>本地开发</b>：仓库根目录运行 <code>pnpm dev</code>，通过 <code>http://127.0.0.1:5173</code> 访问（前端热重载 + 后端 API 代理）。</li>
+<li><b>免重建预览</b>：设置 <code>OMB_WEB_DIR</code> 指向 <code>client/dist</code> 后重启，直接从磁盘读取已构建前端。</li>
+<li><b>完整构建</b>：运行 <code>bash build.sh</code> 将前端重新嵌入单二进制。</li>
+</ul>
+<p>探活：<code>/healthz</code>；数据接口：<code>/api/matches</code>、<code>/api/manual</code>、<code>/api/replay/&lt;id&gt;</code>。</p>
+</body>
+</html>
+`
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
@@ -68,7 +101,7 @@ func main() {
 	// 手册 API：目录树 + 原始 markdown（ADR-0011 客户端阅读器数据源）
 	mux.HandleFunc("/api/manual", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(buildManualTreeFS(manualFS, "manual"))
+		_ = json.NewEncoder(w).Encode(buildManualTreeFS(manualSource, manualRoot))
 	})
 	mux.HandleFunc("/api/manual/", func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, "/api/manual/")
@@ -76,12 +109,11 @@ func main() {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
-		full := path.Join("manual", rel)
-		if !strings.HasSuffix(full, ".md") {
+		if !strings.HasSuffix(rel, ".md") {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
-		data, err := manualFS.ReadFile(full)
+		data, err := fs.ReadFile(manualSource, path.Join(manualRoot, rel))
 		if err != nil {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -115,7 +147,18 @@ func main() {
 		}
 	})
 	mux.Handle("/ws", sessionHandler(hub))
-	mux.Handle("/", http.FileServer(http.FS(webRoot)))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// 引导页：embed 里只有占位文件（未跑 build.sh 的开发二进制）时，
+		// 别返回白屏/404，直接告诉开发者怎么把前端跑起来。
+		if r.URL.Path == "/" {
+			if _, err := fs.Stat(webRoot, "index.html"); err != nil {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(frontendMissingHTML))
+				return
+			}
+		}
+		http.FileServer(http.FS(webRoot)).ServeHTTP(w, r)
+	})
 
 	log.Printf("oh-my-bot server listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, mux); err != nil && err != http.ErrServerClosed {
@@ -239,15 +282,15 @@ type manualNode struct {
 	Children []manualNode `json:"children,omitempty"`
 }
 
-// buildManualTreeFS 递归构建 manual/ 目录树。path 为**全路径**（含父目录，
-// 如 "library/api"）——客户端 navigate 直接拼 .md 后 fetch，不再拼装。
-// title 取文件名去扩展名。
-func buildManualTreeFS(fsys embed.FS, root string) []manualNode {
-	entries, err := fsys.ReadDir(root)
+// buildManualTreeFS 递归构建手册目录树。root 为 embed 根（"manual"）或磁盘根
+//（"."）。文件 path 为**全路径**（含父目录，如 "library/api"）——客户端
+// navigate 直接拼 .md 后 fetch，不再拼装。title 取文件名去扩展名。
+func buildManualTreeFS(fsys fs.FS, root string) []manualNode {
+	entries, err := fs.ReadDir(fsys, root)
 	if err != nil {
-		return nil
+		return []manualNode{}
 	}
-	var out []manualNode
+	out := []manualNode{}
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
