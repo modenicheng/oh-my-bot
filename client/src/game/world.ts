@@ -20,6 +20,7 @@ export interface UplinkEnt extends UplinkState { seenAt: number }
 
 export interface WorldState {
   tick: number
+  initialized: boolean
   phase: number
   timeLeftS: number
   self?: SelfState
@@ -33,36 +34,31 @@ export interface WorldState {
 
 export function emptyWorld(): WorldState {
   return {
-    tick: 0, phase: 0, timeLeftS: 0,
+    tick: 0, initialized: false, phase: 0, timeLeftS: 0,
     robots: new Map(), projectiles: new Map(), cores: new Map(), uplinks: new Map(),
     ackSeq: 0,
   }
 }
 
-export type SnapshotResult = 'applied' | 'resync-needed'
+export type SnapshotResult = 'applied' | 'resync-needed' | 'stale'
 
 /**
  * 应用一帧快照到 world。
- * 返回 'resync-needed' 表示 base_tick 断链（非 full 帧且 base_tick ≠ 本地表 tick），
- * 此时仍会用该帧 full 重建之外的数据尽力合并，但调用方应立刻发送 ResyncRequest。
+ * 断链时保留最后一份完整状态，等待 full；旧帧不能回退时钟或实体。
  */
 export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotResult {
   const now = performance.now()
 
-  if (snap.full || world.tick === 0) {
+  if (world.initialized && snap.tick < world.tick) return 'stale'
+  if (!snap.full && (!world.initialized || snap.baseTick !== world.tick)) return 'resync-needed'
+  if (snap.full) {
     world.robots.clear()
     world.projectiles.clear()
     world.cores.clear()
     world.uplinks.clear()
-  } else if (snap.baseTick !== 0 && snap.baseTick !== world.tick) {
-    // 断链：本帧不可靠，等服务器 full 重发。仍记录 meta，实体表不动。
-    world.tick = snap.tick
-    world.phase = snap.phase
-    world.timeLeftS = snap.timeLeftS
-    if (snap.self) world.self = snap.self
-    return 'resync-needed'
   }
 
+  world.initialized = true
   world.tick = snap.tick
   world.phase = snap.phase
   world.timeLeftS = snap.timeLeftS

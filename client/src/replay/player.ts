@@ -3,6 +3,8 @@
 // 时间轴：拖动条（0→endTick）+ 播放/暂停/倍速（0.5/1/2/4×）+ 步进（±1s）。
 // 事件叠加层：kill/core/uplink/phase 标记点，hover 显示详情。
 import { Camera } from '../game/camera'
+import { artReady } from '../game/art'
+import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
 import { ReplayIndex, type ReplayFrame, phaseName, numOr } from './index'
 import { parseReplayNDJSON } from './model'
@@ -36,7 +38,11 @@ export class ReplayPlayer {
   /** 播放累计（浮点 tick，避免 0.5× 时整数截断） */
   private tickF = 0
   private lastFrameTime = 0
-  private followRobotId = 0
+  private followRobotId: number | null = null
+  private events = new AbortController()
+  private resizeObserver?: ResizeObserver
+  private pixelRatio = 0
+  private scoreMarkup = ''
 
   // DOM 引用
   private el: Record<string, HTMLElement> = {}
@@ -53,7 +59,8 @@ export class ReplayPlayer {
     if (this.disposed) return false
     this.setBusy(true)
     try {
-      const text = await fetchReplayText(matchId)
+      const [text] = await Promise.all([fetchReplayText(matchId), artReady])
+      if (this.disposed) return false
       const data = parseReplayNDJSON(text)
       this.index = new ReplayIndex(data)
       // 地图来自 checkpoint.map（全量快照自带 MapDef）
@@ -65,7 +72,7 @@ export class ReplayPlayer {
       }
       this.tick = 0
       this.tickF = 0
-      this.followRobotId = 0
+      this.followRobotId = null
       this.buildTimeline(data)
       this.updateSpeedUi()
       this.resize()
@@ -73,10 +80,10 @@ export class ReplayPlayer {
       return true
     } catch (e) {
       const msg = e instanceof ReplayApiError || e instanceof Error ? e.message : String(e)
-      this.deps.onError(`回放载入失败: ${msg}`)
+      if (!this.disposed) this.deps.onError(`回放载入失败: ${msg}`)
       return false
     } finally {
-      this.setBusy(false)
+      if (!this.disposed) this.setBusy(false)
     }
   }
 
@@ -94,45 +101,50 @@ export class ReplayPlayer {
       if (el instanceof HTMLElement) this.el[id] = el
     }
     const btnPlay = this.el['rp-play']
-    if (btnPlay) btnPlay.textContent = '▶'
+    if (btnPlay) iconButton(btnPlay, 'play', '播放')
   }
 
   private bindEvents(): void {
+    const listen = (target: EventTarget | undefined, type: string, handler: (e: any) => void) => {
+      target?.addEventListener(type, handler, { signal: this.events.signal })
+    }
     const play = this.el['rp-play']
-    play?.addEventListener('click', () => this.togglePlay())
+    listen(play, 'click', () => this.togglePlay())
 
     const speed = this.el['rp-speed']
-    speed?.addEventListener('click', () => {
+    listen(speed, 'click', () => {
       const i = SPEEDS.indexOf(this.speed as (typeof SPEEDS)[number])
       this.speed = SPEEDS[(i + 1) % SPEEDS.length] ?? 1
       this.updateSpeedUi()
     })
 
-    this.el['rp-back']?.addEventListener('click', () => this.step(-TICK_HZ))
-    this.el['rp-fwd']?.addEventListener('click', () => this.step(TICK_HZ))
-    this.el['rp-return']?.addEventListener('click', () => this.deps.onExit())
+    listen(this.el['rp-back'], 'click', () => this.step(-TICK_HZ))
+    listen(this.el['rp-fwd'], 'click', () => this.step(TICK_HZ))
+    listen(this.el['rp-return'], 'click', () => this.deps.onExit())
 
     const tl = this.el['rp-timeline'] as HTMLInputElement | undefined
-    tl?.addEventListener('input', () => {
-      this.seekTo(numOr(tl.value, 0))
+    listen(tl, 'input', () => {
+      this.seekTo(numOr(tl?.value, 0))
     })
-    tl?.addEventListener('pointerdown', () => this.pause())
+    listen(tl, 'pointerdown', () => this.pause())
 
     // 时间轴标记 hover 详情
     const marks = this.el['rp-marks']
-    marks?.addEventListener('pointermove', (e) => this.onMarksHover(e))
-    marks?.addEventListener('pointerleave', () => this.setMarkTip(-1))
+    listen(marks, 'pointermove', (e) => this.onMarksHover(e))
+    listen(marks, 'pointerleave', () => this.setMarkTip(-1))
 
     // 机器人跟随：点击 canvas 命中机器人
-    this.deps.canvas.addEventListener('pointerdown', (e) => this.onCanvasClick(e))
+    listen(this.deps.canvas, 'pointerdown', (e) => this.onCanvasClick(e))
 
     const follow = this.el['rp-follow']
-    follow?.addEventListener('click', () => {
-      this.followRobotId = 0
-      this.updateFollowUi()
+    listen(follow, 'click', () => {
+      this.followRobotId = null
+      this.drawFrame()
     })
 
-    window.addEventListener('resize', this.onResize)
+    listen(window, 'resize', this.onResize)
+    this.resizeObserver = new ResizeObserver(this.onResize)
+    this.resizeObserver.observe(this.deps.canvas)
     this.onResize()
   }
 
@@ -149,17 +161,19 @@ export class ReplayPlayer {
 
   private play(): void {
     if (!this.index) return
+    if (this.tick >= this.index.endTick) this.seekTo(0)
     this.playing = true
     this.lastFrameTime = performance.now()
     const btn = this.el['rp-play']
-    if (btn) btn.textContent = '⏸'
+    if (btn) iconButton(btn, 'pause', '暂停')
     this.startRaf()
   }
 
   private pause(): void {
     this.playing = false
+    cancelAnimationFrame(this.raf)
     const btn = this.el['rp-play']
-    if (btn) btn.textContent = '▶'
+    if (btn) iconButton(btn, 'play', '播放')
   }
 
   private togglePlay(): void {
@@ -187,7 +201,7 @@ export class ReplayPlayer {
   private updateFollowUi(): void {
     const el = this.el['rp-follow']
     if (!el || !this.index) return
-    const r = this.index.robots.get(this.followRobotId)
+    const r = this.followRobotId === null ? undefined : this.index.robots.get(this.followRobotId)
     el.textContent = r ? `跟随: ${r.nick}` : '视角: 全景'
     el.hidden = false
   }
@@ -269,7 +283,7 @@ export class ReplayPlayer {
         this.tick = Math.round(this.tickF)
         this.drawFrame()
       }
-      this.raf = requestAnimationFrame(loop)
+      if (this.playing) this.raf = requestAnimationFrame(loop)
     }
     this.raf = requestAnimationFrame(loop)
   }
@@ -279,21 +293,31 @@ export class ReplayPlayer {
     this.bindRenderer()
     const frame = this.index.frameAt(this.tick)
     // 相机：跟随或全景（地图中心）
-    if (this.followRobotId) {
+    if (this.pixelRatio !== (window.devicePixelRatio || 1)) { this.resize(); return }
+    if (this.followRobotId !== null) {
+      this.cam.scale = Math.min(this.cam.cw / 40, this.cam.ch / 25)
       const r = frame.robots.find((x) => x.id === this.followRobotId)
       if (r && r.alive) this.cam.follow(r.pos.x, r.pos.y)
       else this.cam.follow(0, 0)
     } else {
-      this.cam.follow(0, 0)
+      // Keep the entire arena between the heading and transport controls.
+      const top = this.cam.cw <= 760 ? 106 : 72
+      const bottom = 132
+      const height = Math.max(80, this.cam.ch - top - bottom)
+      this.cam.scale = Math.min(Math.max(80, this.cam.cw - 40), height) / (this.map.extent * 2 + 10)
+      this.cam.cx = 0
+      this.cam.cy = (this.cam.ch / 2 - (top + height / 2)) / this.cam.scale
     }
-    this.renderer!.render(frame, this.map, this.cam, this.followRobotId)
+    this.renderer!.render(frame, this.map, this.cam, this.followRobotId ?? -1)
     this.updateHud(frame)
   }
 
   private resize(): void {
     const canvas = this.deps.canvas
     const rect = canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
     const dpr = window.devicePixelRatio || 1
+    this.pixelRatio = dpr
     this.bindRenderer()
     this.renderer?.resize(rect.width, rect.height, dpr)
     this.cam.resize(rect.width, rect.height, this.map?.extent ?? 100)
@@ -318,7 +342,7 @@ export class ReplayPlayer {
           return { nick: r?.nick ?? `#${s.id}`, color: r?.color ?? '#d8dee9', total: s.total, kill: s.kill, hit: s.hit, core: s.core, uplink: s.uplink, assist: s.assist }
         })
         .sort((a, b) => b.total - a.total)
-      scoreEl.innerHTML = rows
+      const markup = rows
         .map(
           (r) =>
             `<div class="rp-score-row"><span class="rp-score-dot" style="--c:${r.color}"></span>` +
@@ -327,12 +351,16 @@ export class ReplayPlayer {
             `<span class="rp-score-total">${r.total}</span></div>`,
         )
         .join('')
+      if (markup !== this.scoreMarkup) {
+        scoreEl.innerHTML = markup
+        this.scoreMarkup = markup
+      }
     }
     // 时间轴滑块同步
     const tl = this.el['rp-timeline'] as HTMLInputElement | undefined
-    if (tl && this.index && document.activeElement !== tl) {
+    if (tl && this.index) {
       tl.value = String(frame.tick)
-      tl.max = String(this.index.endTick)
+      if (tl.max !== String(this.index.endTick)) tl.max = String(this.index.endTick)
     }
     // 跟随目标死亡时保持 UI
     this.updateFollowUi()
@@ -345,9 +373,9 @@ export class ReplayPlayer {
     const rect = this.deps.canvas.getBoundingClientRect()
     const wx = this.cam.toWorldX(e.clientX - rect.left)
     const wy = this.cam.toWorldY(e.clientY - rect.top)
-    // 命中半径：机器人半径 + 0.5m 容差
-    const hitR = 0.6 + 0.5
-    let bestId = 0
+    // Full-map targets retain a 12px hit area at small viewport scales.
+    const hitR = Math.max(1.1, 12 / this.cam.scale)
+    let bestId: number | null = null
     let bestDist = Infinity
     const frame = this.index.frameAt(this.tick)
     for (const r of frame.robots) {
@@ -359,7 +387,7 @@ export class ReplayPlayer {
       }
     }
     this.followRobotId = bestId
-    this.updateFollowUi()
+    this.drawFrame()
   }
 
   // ---- 杂项 ---------------------------------------------------------------
@@ -372,15 +400,12 @@ export class ReplayPlayer {
     }
   }
 
-  private thisdepsGuard(): void {
-    if (this.disposed) throw new Error('ReplayPlayer disposed')
-  }
-
   dispose(): void {
     this.disposed = true
     this.pause()
     cancelAnimationFrame(this.raf)
-    window.removeEventListener('resize', this.onResize)
+    this.events.abort()
+    this.resizeObserver?.disconnect()
   }
 }
 

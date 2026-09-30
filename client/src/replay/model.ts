@@ -84,6 +84,7 @@ export class ReplayParseError extends Error {}
 export function parseReplayNDJSON(text: string): ReplayData {
   const records: ReplayRecord[] = []
   let initCheckpoint: ReplayCheckpoint | null = null
+  let endTick = 0
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = (lines[i] ?? '').trim()
@@ -96,6 +97,11 @@ export function parseReplayNDJSON(text: string): ReplayData {
     }
     if (obj && typeof obj.schema_version === 'number') continue // 头行
     if (!obj || typeof obj.type !== 'string') continue
+    // Input-only stretches still occupy time, even though this visual index
+    // does not execute the authoritative server simulation.
+    if (['match_start', 'checkpoint', 'event', 'input', 'control'].includes(obj.type)) {
+      endTick = Math.max(endTick, num(obj.tick, 0))
+    }
     switch (obj.type) {
       case 'match_start':
       case 'checkpoint': {
@@ -125,7 +131,6 @@ export function parseReplayNDJSON(text: string): ReplayData {
   }
   // 记录按 tick 稳定排序（文件内同 tick 保持出现顺序）
   const sorted = records.slice().sort((a, b) => a.tick - b.tick)
-  let endTick = 0
   for (const r of sorted) endTick = Math.max(endTick, r.tick)
   return { records: sorted, initCheckpoint, endTick, robots }
 }

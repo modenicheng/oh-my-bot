@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+/.artifacts/
 # protocol 生成物（由 schema 源再生成）
 packages/protocol/gen/
 # 运行时产物

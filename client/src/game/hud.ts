@@ -3,6 +3,7 @@
 import type { WorldState, RobotEnt } from './world'
 import { phaseName, titleName } from './render'
 import type { ScoreRow } from '@omb/protocol'
+import { icon } from '../icons'
 
 const MAX_HP = 1000  // hp_x10（×10）
 const MAX_EN = 1000  // energy_x10（×10）
@@ -35,8 +36,7 @@ export class Hud {
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
 
-    // HP / 能量：HP 固定 neon-red 实色（STYLE.md：neon-red=生命/危险），能量 neon-amber；
-    // 深色底条 #10141a 不透明，移动中对比度可读（原 var(--lime) 未定义导致填充不可见）
+    // 常态机体用低饱和绿，能量用青色；数值与颜色共同标识状态。
     if (self) {
       const hp = clamp01(self.hpX10 / MAX_HP)
       const en = clamp01(self.energyX10 / MAX_EN)
@@ -51,26 +51,28 @@ export class Hud {
     const t = Math.max(0, world.timeLeftS)
     const m = Math.floor(t / 60)
     const s = Math.floor(t % 60)
-    this.timeEl.textContent = `${m}:${String(s).padStart(2, '0')}`
+    const clock = world.initialized ? `${m}:${String(s).padStart(2, '0')}` : '—:—'
+    if (this.timeEl.textContent !== clock) this.timeEl.textContent = clock
 
     // 比分简表：行 = nick + hp（分数服务器未透出，用状态占位；每秒查重重建）
-    const rows: string[] = []
-    for (const r of sortedRobots(world.robots)) {
-      const tag = r.base?.id === selfId ? '›' : ' '
-      const hp = Math.max(0, Math.round(r.hpX10 / 10))
-      const partner = r.isPartner ? ' ◆搭档' : ''
-      rows.push(`${tag}${r.nick || `robot-${r.base?.id ?? '?'}`}${partner} · ${r.dead ? '重生中' : `${hp}hp`}`)
-    }
-    const sig = rows.join('\n')
+    const rows = [...sortedRobots(world.robots)].slice(0, 8).map(r => ({
+      self: r.base?.id === selfId,
+      partner: r.isPartner,
+      nick: r.nick || `robot-${r.base?.id ?? '?'}`,
+      health: r.dead ? '重生中' : `${Math.max(0, Math.round(r.hpX10 / 10))}hp`,
+    }))
+    const sig = JSON.stringify(rows)
     if (sig !== this.lastRowsSig) {
       this.lastRowsSig = sig
-      this.scoreRows.innerHTML = ''
-      for (const line of rows.slice(0, 8)) {
+      this.scoreRows.replaceChildren(...rows.map(row => {
         const div = document.createElement('div')
         div.className = 'hud-score-row'
-        div.textContent = line
-        this.scoreRows.appendChild(div)
-      }
+        if (row.self) { div.append(icon('target')); div.title = '自己' }
+        div.append(document.createTextNode(row.nick))
+        if (row.partner) div.append(icon('partner'), document.createTextNode('搭档'))
+        div.append(document.createTextNode(` · ${row.health}`))
+        return div
+      }))
     }
   }
 
@@ -150,7 +152,9 @@ export function showMatchEnd(
     const back = document.createElement('button')
     back.type = 'button'
     back.className = 'end-back'
-    back.textContent = '回到房间'
+    const label = document.createElement('span')
+    label.textContent = '回到房间'
+    back.append(icon('back'), label)
     back.addEventListener('click', onBack)
     overlay.appendChild(back)
   }

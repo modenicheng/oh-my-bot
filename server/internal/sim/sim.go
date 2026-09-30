@@ -220,6 +220,9 @@ func (s *Sim) SetSpawn(robotID uint32, pos Vec2, sector uint32) error {
 	if s.tick != 0 || !ok || !pos.finite() || sector >= 8 {
 		return fmt.Errorf("sim: invalid spawn configuration for robot %d", robotID)
 	}
+	if !s.insideArena(pos) {
+		return fmt.Errorf("sim: spawn outside arena")
+	}
 	for _, wall := range s.walls {
 		if overlapsWall(pos, wall) {
 			return fmt.Errorf("sim: spawn overlaps wall %d", wall.ID)
@@ -350,8 +353,12 @@ func (s *Sim) moveAndCollide() {
 				fraction, hit = t, true
 			}
 		}
+		if t, ok := s.sweepArena(r.Position, delta); ok && t <= fraction {
+			fraction, hit = t, true
+		}
 		r.Position.X += delta.X * fraction
 		r.Position.Y += delta.Y * fraction
+		r.Position = s.containInArena(r.Position)
 		if hit {
 			impact := math.Hypot(r.Velocity.X, r.Velocity.Y)
 			r.Velocity = Vec2{}

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -38,6 +39,14 @@ const (
 	reliableQueueLn = 1024 // 可靠通道大缓冲：满即断
 )
 
+// queuedFrame keeps superseded match snapshots out of the new map's timeline.
+// Epochs are transport-local; the protobuf contract remains unchanged.
+type queuedFrame struct {
+	data      []byte
+	epoch     uint64
+	bootstrap bool
+}
+
 // Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
 // 专属的 onUp（闭包可捕获每连接状态）；sendReliable/sendLossy 为该连接的下行通道。
 // 后续上行 ClientMsg 帧路由到返回的 onUp。
@@ -52,8 +61,9 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		ctx := r.Context()
 
 		// 下行队列：reliable 优先投递（事件先于快照，避免旧快照覆盖新事件后的状态）。
-		reliableCh := make(chan []byte, reliableQueueLn)
-		lossyCh := make(chan []byte, lossyQueueLen)
+		reliableCh := make(chan queuedFrame, reliableQueueLn)
+		lossyCh := make(chan queuedFrame, lossyQueueLen)
+		var epoch atomic.Uint64
 		dead := make(chan struct{})
 		var deadOnce sync.Once
 		kill := func() { deadOnce.Do(func() { close(dead) }) }
@@ -71,8 +81,13 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 			if b == nil {
 				return
 			}
+			frame := queuedFrame{data: b}
+			if msg.GetEvent().GetMapBootstrap() != nil {
+				frame.bootstrap = true
+				frame.epoch = epoch.Add(1)
+			}
 			select {
-			case reliableCh <- b:
+			case reliableCh <- frame:
 			default:
 				kill() // 可靠通道满 = 一致性已破坏，断开由客户端重连+Resync 恢复
 			}
@@ -83,7 +98,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 				return
 			}
 			select {
-			case lossyCh <- b:
+			case lossyCh <- queuedFrame{data: b, epoch: epoch.Load()}:
 			default: // 慢消费者：丢 delta，客户端 base_tick 检测后重同步
 			}
 		}
@@ -125,12 +140,19 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 			return c.Write(wctx, websocket.MessageBinary, b)
 		}
 
+		var deliveredEpoch uint64
+		writeReliable := func(frame queuedFrame) error {
+			if frame.bootstrap {
+				deliveredEpoch = frame.epoch
+			}
+			return write(frame.data)
+		}
 		for {
 			// 优先级：reliable > lossy。先非阻塞排空 reliable，再阻塞等待任意通道。
 			// 注意：阻塞分支必须再含 reliableCh（排空与新帧间的竞态窗口）。
 			select {
 			case b := <-reliableCh:
-				if err := write(b); err != nil {
+				if err := writeReliable(b); err != nil {
 					return
 				}
 				continue
@@ -145,11 +167,16 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 				_ = err
 				return
 			case b := <-reliableCh:
-				if err := write(b); err != nil {
+				if err := writeReliable(b); err != nil {
 					return
 				}
 			case b := <-lossyCh:
-				if err := write(b); err != nil {
+				// A queued old delta can have a larger tick than the new match.
+				// New deltas selected before their bootstrap are also droppable.
+				if b.epoch != deliveredEpoch {
+					continue
+				}
+				if err := write(b.data); err != nil {
 					return
 				}
 			case <-pingTicker.C:
@@ -165,9 +192,9 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 }
 
 // sendLossyRaw 以可靠通道回 pong（ping/pong 属控制帧，不参与 lossy 丢弃）。
-func sendLossyRaw(ch chan []byte, b []byte) {
+func sendLossyRaw(ch chan queuedFrame, b []byte) {
 	select {
-	case ch <- b:
+	case ch <- queuedFrame{data: b}:
 	default:
 	}
 }

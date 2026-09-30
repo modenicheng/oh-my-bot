@@ -193,11 +193,15 @@ func (r *Room) TransferHost(playerID uint64) {
 }
 
 func (r *Room) HostID() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.host
 }
 
 // IsHost reports whether playerID is the host.
 func (r *Room) IsHost(playerID uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return playerID == r.host
 }
 
@@ -242,9 +246,8 @@ func (r *Room) Join(playerID uint64, nick, color string) error {
 	return nil
 }
 
-// Leave removes a player. The host leaving does not destroy the room nor
-// transfer host rights (single-org rooms, v1: the room dies with its host's
-// connection at the WS layer).
+// Leave explicitly releases a seat. Transport disconnects must not call Leave.
+// When the host explicitly leaves, the next seated player inherits host rights.
 func (r *Room) Leave(playerID uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -252,10 +255,17 @@ func (r *Room) Leave(playerID uint64) error {
 		return ErrNotMember
 	}
 	delete(r.members, playerID)
+	delete(r.pendingNicks, playerID)
 	for i, id := range r.joinOrder {
 		if id == playerID {
 			r.joinOrder = append(r.joinOrder[:i], r.joinOrder[i+1:]...)
 			break
+		}
+	}
+	if r.host == playerID {
+		r.host = 0
+		if len(r.joinOrder) > 0 {
+			r.host = r.joinOrder[0]
 		}
 	}
 	return nil
@@ -288,12 +298,11 @@ func (r *Room) SessionSeq() int {
 // seated player ids (join order) to SimLauncher.Launch, and stores the
 // returned handle. ABORT aborts the active handle.
 func (r *Room) HostCommand(playerID uint64, action Action) error {
-	if !r.IsHost(playerID) {
-		return ErrNotHost
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if playerID != r.host {
+		return ErrNotHost
+	}
 
 	switch action {
 	case ActionWarmup:
@@ -339,6 +348,9 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		// transition atomic (no ABORT can interleave between the state check
 		// and storing the handle). Contract: Launch must be quick and must not
 		// call back into this Room, or it will deadlock.
+		if r.match != nil {
+			r.match.Abort()
+		}
 		handle := r.launcher.Launch(seed, playerIDs)
 		r.seed = seed
 		r.match = handle
@@ -394,6 +406,9 @@ func (r *Room) EndMatch() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state == Running {
+		if r.match != nil {
+			r.match.Abort()
+		}
 		r.state = Ended
 		r.match = nil
 	}

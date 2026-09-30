@@ -23,6 +23,15 @@ describe('parseReplayNDJSON', () => {
     expect(data.initCheckpoint.mapJson).toBeTruthy()
   })
 
+  it('仅有输入的短局保留时间轴长度', () => {
+    const data = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'input', tick: 210, robot_id: 1, input: {} }),
+    ].join('\n'))
+    expect(data.endTick).toBe(210)
+    expect(new ReplayIndex(data).frameAt(120).tick).toBe(120)
+  })
+
   it('空 stub（无 checkpoint）抛 ReplayParseError', () => {
     expect(() => parseReplayNDJSON('{"schema_version":1}\n')).toThrow(ReplayParseError)
   })

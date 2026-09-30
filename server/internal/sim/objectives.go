@@ -121,6 +121,9 @@ func (s *Sim) zoneLocked() bool {
 	return s.mapDef != nil && s.mapDef.CoreZone.Radius > 0 && Phase(s.phase) < s.mapDef.CoreZone.UnlockPhase
 }
 func (s *Sim) freePosition(p Vec2) bool {
+	if !s.insideArena(p) {
+		return false
+	}
 	if s.zoneLocked() && p.Len() < s.mapDef.CoreZone.Radius+RobotRadius-collisionEpsilon {
 		return false
 	}

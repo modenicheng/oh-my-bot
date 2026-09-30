@@ -13,10 +13,10 @@
 | `text` | `#d8dee9` | 正文 |
 | `dim` | `#8b98a9` | 次级文字 |
 | `neon-cyan` | `#22d3ee` | 主强调：链接、选中态、自机指示 |
-| `neon-lime` | `#a3e635` | 成功 / 我方 / 上行 |
-| `neon-magenta` | `#f472b6` | 搭档 / 强调 |
-| `neon-red` | `#ff5c5c` | 敌方 / 危险 / 受击 |
-| `neon-amber` | `#fbbf24` | 能量 / 警告 |
+| `neon-lime` | `#a3e635` | 成功 / 上行 |
+| `health` | `#b9d985` | 常态生命条 / 搭档指示（低饱和） |
+| `neon-red` | `#ff5c5c` | 危险 / 受击 |
+| `neon-amber` | `#fbbf24` | 警告；能量条统一使用 cyan |
 
 ## 形状
 
@@ -33,6 +33,14 @@
 
 - UI：`Inter, system-ui, sans-serif`
 - 数据/代码/时序：`ui-monospace, "JetBrains Mono", monospace`（HUD、计分板、日志、编辑器）
+
+## 图形与入口
+
+- UI 图标使用 `src/icons.ts` 的自绘 16×16 像素 SVG，同一几何路径可由 Canvas 绘制；不用 emoji、箭头字符或平台字体充当图标。仅图标按钮必须有中文 `aria-label`。
+- `src/assets/` 的机器人、炮塔、核心和上传桩 SVG 供实战/回放共用；金属材质用中性色明暗，状态圈提供阵营色。
+- `src/game/art.ts` 共用竞技场、掩体与实体绘制。画布采用偏蓝的深色层次（底 `#070d14`、地面 `#101b25`、掩体 `#293e4c`），低对比地面衬托实体；危险线条用 `#ff756d`。80m 围栏必须清楚，出生平台不代表可碰撞障碍。
+- 手册始终保留可点击的“手册 M”按钮，`M` 开关手册，`Tab` 保留原生焦点导航。输入文字或使用输入法时不触发快捷键。
+- 动效随模拟 tick 推进并尊重 `prefers-reduced-motion`。全景相机需留出标题和时间轴的空间。
 
 ## 背景纹理
 

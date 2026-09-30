@@ -1,3 +1,5 @@
+import { writeRoute, readRoute } from '../route'
+import { icon } from '../icons'
 // 手册阅读器视图：目录侧栏（两级）+ 面包屑 + markdown 正文。
 //
 // 数据源：GET /api/manual（目录树）+ GET /api/manual/<path>（原始 markdown）。
@@ -106,6 +108,7 @@ export class ManualView {
   private readonly opts: ManualViewOpts
   private tree: ManualNode[] = []
   private currentPath = ''
+  private navigationVersion = 0
   /** 目录树查找：path → 节点（含父链，用于侧栏高亮与面包屑）。 */
   private nodeIndex = new Map<string, { node: ManualNode; parent: ManualNode | null }>()
   private usingMock = false
@@ -118,8 +121,14 @@ export class ManualView {
 
   /** 进入手册视图：拉目录树并打开首页（或指定页）。 */
   async open(path = 'index.md'): Promise<void> {
+    const version = ++this.navigationVersion
     await this.loadTree()
-    await this.navigate(path)
+    if (version === this.navigationVersion && !this.opts.root.hidden) await this.navigate(path)
+  }
+
+  close(): void {
+    this.navigationVersion++
+    this.currentPath = ''
   }
 
   private async loadTree(): Promise<void> {
@@ -142,24 +151,24 @@ export class ManualView {
 
   /** 拉取并渲染一篇文档。 */
   async navigate(path: string): Promise<void> {
-    // 树节点 path 无 .md 后缀；navigate 接受两种形式（index 或 index.md）
-    let entry = this.nodeIndex.get(path)
-    if (!entry) {
-      const base = path.replace(/\.md$/, '')
-      entry = this.nodeIndex.get(base)
-      if (entry) path = entry.node.path.includes('.') ? path : `${base}.md`
-      // 树若无后缀而 fetchDoc 需要 .md：统一补后缀
-      if (entry && !path.endsWith('.md')) path = `${path}.md`
+    const base = path.replace(/\.md$/, '')
+    const entry = this.nodeIndex.get(base) ?? this.nodeIndex.get(`${base}.md`)
+    if (entry?.node.children.length) {
+      const indexPath = `${base}/index`
+      const first = this.nodeIndex.get(indexPath) ?? this.nodeIndex.get(`${indexPath}.md`)
+      return this.navigate(first?.node.path ?? entry.node.children[0]!.path)
     }
     if (!entry && this.tree.length > 0) {
       this.opts.status.textContent = `未找到文档：${path}`
       return
     }
-    // 统一 .md 后缀：树键无后缀、服务器路由要求 .md 结尾
-    if (!path.endsWith('.md')) path = `${path}.md`
+    if (this.opts.root.hidden) return
+    const version = ++this.navigationVersion
+    path = `${base}.md`
     this.currentPath = path
     this.highlightSidebar(path)
-    this.renderBreadcrumb(path)
+    this.renderBreadcrumb(entry?.node.path ?? path)
+    writeRoute('manual', readRoute().roomCode, { doc: path })
 
     this.opts.content.innerHTML = ''
     this.opts.status.textContent = '加载中…'
@@ -167,13 +176,19 @@ export class ManualView {
     try {
       raw = this.usingMock ? (MOCK_DOCS[path] ?? '') : await fetchDoc(path)
     } catch (err) {
+      if (version !== this.navigationVersion) return
       this.opts.status.textContent = `文档加载失败：${err instanceof Error ? err.message : path}`
       return
     }
-    if (this.currentPath !== path) return // 已切走
+    if (version !== this.navigationVersion || this.opts.root.hidden) return // 已切走
 
     const { body, fm } = splitFrontmatter(raw)
-    const title = fm.title ?? entry?.node.title ?? path
+    const bodyEl = document.createElement('div')
+    bodyEl.className = 'manual-body'
+    bodyEl.innerHTML = renderMarkdown(body)
+    const leadingHeading = bodyEl.firstElementChild?.tagName === 'H1' ? bodyEl.firstElementChild : null
+    const title = fm.title ?? leadingHeading?.textContent ?? entry?.node.title ?? path
+    leadingHeading?.remove()
     const audience = fm.audience ? AUDIENCE_LABEL[fm.audience] ?? fm.audience : null
 
     const doc = document.createElement('article')
@@ -188,9 +203,6 @@ export class ManualView {
       h.appendChild(document.createTextNode(' '))
       h.appendChild(tag)
     }
-    const bodyEl = document.createElement('div')
-    bodyEl.className = 'manual-body'
-    bodyEl.innerHTML = renderMarkdown(body)
     doc.appendChild(bodyEl)
 
     // 手册内相对链接 → 阅读器内导航
@@ -199,8 +211,8 @@ export class ManualView {
       if (/^https?:|^#|^mailto:/.test(href)) return
       a.addEventListener('click', (e) => {
         e.preventDefault()
-        const clean = href.replace(/^\.\//, '').split('#')[0]!
-        void this.navigate(clean)
+        const target = new URL(href, `https://manual.local/${path}`)
+        void this.navigate(target.pathname.slice(1))
       })
     })
 
@@ -255,7 +267,7 @@ export class ManualView {
 
   private highlightSidebar(path: string): void {
     this.opts.sidebar.querySelectorAll<HTMLAnchorElement>('a[data-path]').forEach((a) => {
-      a.classList.toggle('active', a.dataset.path === path)
+      a.classList.toggle('active', a.dataset.path?.replace(/\.md$/, '') === path.replace(/\.md$/, ''))
     })
   }
 
@@ -274,7 +286,7 @@ export class ManualView {
     const sep = () => {
       const s = document.createElement('span')
       s.className = 'crumb-sep'
-      s.textContent = '/'
+      s.append(icon('chevron'))
       el.appendChild(s)
     }
     chain.forEach((n, i) => {

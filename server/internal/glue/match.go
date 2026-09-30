@@ -7,7 +7,10 @@
 package glue
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"sync"
 	"time"
@@ -41,15 +44,16 @@ type Match struct {
 	scriptPool *script.RunPool
 	runtimes   map[uint32]*script.GojaRuntime // robotID -> runtime（脚本装载/热更）
 
-	robotOf  map[uint64]uint32 // playerID -> robotID
-	playerOf map[uint32]uint64 // robotID -> playerID
-	lastSeq  map[uint64]uint32
+	robotOf      map[uint64]uint32 // playerID -> robotID
+	playerOf     map[uint32]uint64 // robotID -> playerID
+	reliableFull map[uint64]bool
+	handle       *asyncHandle
+	startOnce    sync.Once
 
 	tick       uint32
 	warmup     bool
 	stopOnce   sync.Once
 	finishOnce sync.Once
-	mu         sync.Mutex // 保护 lastSeq/encoders/runtimes 等跨 goroutine 可变状态
 	stop       chan struct{}
 	done       chan struct{}
 }
@@ -61,19 +65,20 @@ type SessionInfo struct {
 	Color    string
 }
 
-// NewMatch 装配并启动（独立 goroutine 60Hz 驱动）。
+// NewMatch only assembles. Publication sends bootstrap before start runs the clock.
 // seed/matchSeq 必须由调用方传入：room.HostCommand 持 room.mu 调 Launch，
 // 此处反查 Room.Seed()/SessionSeq() 会非重入死锁。
 func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo, warmup bool) (*Match, error) {
 	m := &Match{
-		rc:       rc,
-		proj:     stats.NewProjector(),
-		robotOf:  map[uint64]uint32{},
-		playerOf: map[uint32]uint64{},
-		lastSeq:  map[uint64]uint32{},
-		encoders: map[uint32]*snapshot.DeltaEncoder{},
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
+		rc:           rc,
+		proj:         stats.NewProjector(),
+		robotOf:      map[uint64]uint32{},
+		playerOf:     map[uint32]uint64{},
+		reliableFull: map[uint64]bool{},
+		warmup:       warmup,
+		encoders:     map[uint32]*snapshot.DeltaEncoder{},
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 
 	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
@@ -107,6 +112,9 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	}
 	m.sim = sim.NewSim(seed, ids, sinkAll)
 	if err := m.sim.SetMap(def); err != nil {
+		if m.log != nil {
+			_ = m.log.Close()
+		}
 		return nil, fmt.Errorf("setmap: %w", err)
 	}
 	for pid, info := range players {
@@ -117,7 +125,6 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
 
-	go m.run()
 	return m, nil
 }
 
@@ -126,7 +133,10 @@ type glueSink struct{ m *Match }
 
 func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	g.m.proj.OnEvent(tick, ev)
-	g.m.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}})
+	// Sim emits under rc.mu; never reacquire it from the sink.
+	if g.m.activeLocked() {
+		g.m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}})
+	}
 }
 
 func (m *Match) newSink() sim.EventSink { return glueSink{m: m} }
@@ -169,8 +179,14 @@ func (m *Match) HandleAiPrompt(pid uint64, text string) {
 
 // ForceResync 下 tick 全量快照。
 func (m *Match) ForceResync(pid uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.rc.mu.Lock()
+	defer m.rc.mu.Unlock()
+	if m.activeLocked() {
+		m.forceResyncLocked(pid)
+	}
+}
+func (m *Match) forceResyncLocked(pid uint64) {
+	m.reliableFull[pid] = true
 	if rid, ok := m.robotOf[pid]; ok {
 		if enc := m.encoders[rid]; enc != nil {
 			enc.ForceFull()
@@ -180,33 +196,40 @@ func (m *Match) ForceResync(pid uint64) {
 
 // SubmitScript 玩家脚本提交（编译失败保旧版——Hot Swap 语义）。
 func (m *Match) SubmitScript(pid uint64, src string) (ok bool, errMsg string, rev uint32) {
+	m.rc.mu.Lock()
+	defer m.rc.mu.Unlock()
+	if !m.activeLocked() {
+		return false, "match stopped", 0
+	}
+	return m.submitScriptLocked(pid, src)
+}
+func (m *Match) submitScriptLocked(pid uint64, src string) (ok bool, errMsg string, rev uint32) {
 	rid, ok := m.robotOf[pid]
 	if !ok {
 		return false, "not in match", 0
 	}
-	m.mu.Lock()
 	rt := m.scriptPool.RuntimeOf(rid)
 	if rt == nil {
 		rt = script.NewGojaRuntime(script.Config{})
 		m.scriptPool.Register(rid, rt)
 		m.runtimes[rid] = rt
 	}
-	m.mu.Unlock()
 	if err := rt.Load(src); err != nil {
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
 	return true, "", rt.Rev()
 }
 
-// ApplyClientInput 连接层收到输入帧转投模拟（带 seq 缓存供 ack）。
+// ApplyClientInput serializes pending inputs with Tick; ack comes from consumed sim input.
 func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
-	m.mu.Lock()
-	rid, ok := m.robotOf[pid]
-	if ok {
-		m.lastSeq[pid] = in.GetSeq()
+	m.rc.mu.Lock()
+	defer m.rc.mu.Unlock()
+	if m.activeLocked() {
+		m.applyInputLocked(pid, in)
 	}
-	m.mu.Unlock()
-	if ok {
+}
+func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
+	if rid, ok := m.robotOf[pid]; ok {
 		m.sim.ApplyInput(rid, in)
 	}
 }
@@ -214,11 +237,41 @@ func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
 // Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
 func (m *Match) Abort() { m.Stop() }
 
-func (m *Match) Stop()                 { m.stopOnce.Do(func() { close(m.stop) }) }
+func (m *Match) Stop() {
+	m.stopOnce.Do(func() { close(m.stop) })
+	// Also dispose assembled matches cancelled before publication.
+	m.start()
+}
 func (m *Match) Done() <-chan struct{} { return m.done }
 
+func (m *Match) start() { m.startOnce.Do(func() { go m.run() }) }
+func (m *Match) activeLocked() bool {
+	select {
+	case <-m.stop:
+		return false
+	default:
+	}
+	return m.rc.match == m && (m.handle == nil || (!m.handle.cancelled.Load() && m.rc.launch.Load() == m.handle))
+}
+func (m *Match) bootstrapLocked(s *Session) {
+	data, _ := json.Marshal(m.mapDef)
+	h := fnv.New128a()
+	_, _ = h.Write(data)
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer)}}}}})
+	m.forceResyncLocked(s.playerID)
+}
 func (m *Match) run() {
 	defer close(m.done)
+	defer func() {
+		m.rc.mu.Lock()
+		defer m.rc.mu.Unlock()
+		m.scriptPool.Close()
+		if m.log != nil {
+			if err := m.log.Close(); err != nil {
+				log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
+			}
+		}
+	}()
 	ticker := time.NewTicker(time.Second / tickHz)
 	defer ticker.Stop()
 	for {
@@ -228,11 +281,20 @@ func (m *Match) run() {
 		default:
 		}
 		m.step()
-		<-ticker.C
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
 func (m *Match) step() {
+	m.rc.mu.Lock()
+	defer m.rc.mu.Unlock()
+	if !m.activeLocked() {
+		return
+	}
 	m.tick++
 	m.sim.Tick()
 
@@ -241,32 +303,20 @@ func (m *Match) step() {
 	_ = wv // 快照循环在下方使用
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
-	m.mu.Lock()
-	seqSnap := make(map[uint64]uint32, len(m.lastSeq))
-	for k, v := range m.lastSeq {
-		seqSnap[k] = v
-	}
-	encodersSnap := make(map[uint32]*snapshot.DeltaEncoder, len(m.encoders))
-	for k, v := range m.encoders {
-		encodersSnap[k] = v
-	}
-	m.mu.Unlock()
 	for _, rv := range wv.Robots {
 		pid, ok := m.playerOf[rv.ID]
 		if !ok {
 			continue
 		}
-		s := m.rc.sessionOf(pid)
+		s := m.rc.sessions[pid]
 		if s == nil {
 			continue
 		}
-		enc := encodersSnap[rv.ID]
+		enc := m.encoders[rv.ID]
 		if enc == nil {
 			enc = snapshot.NewEncoder()
 			enc.ForceFull()
-			m.mu.Lock()
 			m.encoders[rv.ID] = enc
-			m.mu.Unlock()
 		}
 		obs := snapshot.BuildObservation(snapshot.World{
 			FrameView:   wv.Frame,
@@ -282,12 +332,18 @@ func (m *Match) step() {
 			TurretSrc: ctrl.TurretSrc,
 		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
-		_ = seqSnap
-		s.SendLossy(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+		msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}
+		if m.reliableFull[pid] {
+			s.SendReliable(msg)
+			delete(m.reliableFull, pid)
+		} else {
+			s.SendLossy(msg)
+		}
 	}
 
 	if m.tick >= matchTicks && !m.warmup {
 		m.finish(wv)
+		m.Stop()
 		return
 	}
 }
@@ -346,13 +402,9 @@ func (m *Match) finishLocked(wv sim.WorldView) {
 		Tick: m.tick,
 		Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: finalRowsOf(rows)},
 	}
-	m.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
-	if m.log != nil {
-		if err := m.log.Close(); err != nil {
-			// 日志失败不推翻对局结果，但要可见（运维排查）
-			log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
-		}
-	}
+	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
+	m.rc.Room.EndMatch()
+	m.rc.broadcastRoomStateLocked()
 }
 
 func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {

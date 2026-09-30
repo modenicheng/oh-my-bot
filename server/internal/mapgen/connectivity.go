@@ -42,15 +42,15 @@ func gridFor(walls []sim.Wall, coreOpen bool) ([]bool, int) {
 			}
 		}
 	}
-	if !coreOpen {
-		rr := (coreZoneR + agentR) * (coreZoneR + agentR)
-		for gx := 1; gx < n-1; gx++ {
-			cx := float64(gx) - 0.5 - gridExtent
-			for gy := 1; gy < n-1; gy++ {
-				cy := float64(gy) - 0.5 - gridExtent
-				if cx*cx+cy*cy <= rr {
-					set(gx, gy)
-				}
+	inner2 := (coreZoneR + agentR) * (coreZoneR + agentR)
+	outer2 := (outerMaxR - agentR) * (outerMaxR - agentR)
+	for gx := 1; gx < n-1; gx++ {
+		cx := float64(gx) - 0.5 - gridExtent
+		for gy := 1; gy < n-1; gy++ {
+			cy := float64(gy) - 0.5 - gridExtent
+			r2 := cx*cx + cy*cy
+			if r2 > outer2 || (!coreOpen && r2 <= inner2) {
+				set(gx, gy)
 			}
 		}
 	}

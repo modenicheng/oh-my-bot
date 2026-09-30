@@ -1,4 +1,4 @@
-// 输入采样：keydown/keyup WASD + 鼠标 aim/fire + Shift dash + E shield + E/F interact
+// 输入采样：keydown/keyup WASD + 鼠标 aim/fire + Shift dash + Q shield + E/F interact
 // （v1 协议只有一个 interact 位，E 与 F 等效）+ Space assist 开关。
 // 60Hz 定时采样打包 ClientInput：seq 递增、axis_mask 只在人类操作对应轴时置位
 // （未置位轴不抢占脚本控制 —— 见 docs/manual/controls.md 仲裁语义）。
@@ -27,8 +27,9 @@ export class InputSampler {
   private mousePx = { x: 0, y: 0 }
   /** 人类操作轴的粘性：某轴一旦被人类操作，就一直发该轴（人优先，直到脚本重新接管？不——
    * 语义按 controls.md：人类输入逐轴抢占且不自动归还。客户端实现：人类按下后轴位持续置 1，
-   * 直到本地窗口失焦/断线。简化：一旦操作过某轴就一直置位。 */
+   * 失焦时只发送一次停止帧；恢复脚本控制仍需显式切换辅助。 */
   private stickyAxes = 0
+  private releaseAxes = 0
   private seq = 0
   private cam: Camera | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -48,18 +49,18 @@ export class InputSampler {
     const onKeyDown = (e: KeyboardEvent) => {
       // 输入框聚焦时不动游戏输入（大厅/聊天场景）
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || t?.closest('input, textarea, select, [contenteditable]')) return
       const k = e.code
       if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD') {
         this.keys.add(k)
         this.stickyAxes |= AXIS_MOVE
         e.preventDefault()
       } else if (k === 'KeyE' || k === 'KeyF') {
-        this.interactEdge = true
+        if (!e.repeat) this.interactEdge = true
         this.stickyAxes |= AXIS_ABILITY
         e.preventDefault()
       } else if (k === 'ShiftLeft' || k === 'ShiftRight') {
-        this.dashEdge = true
+        if (!e.repeat) this.dashEdge = true
         this.stickyAxes |= AXIS_ABILITY
         e.preventDefault()
       } else if (k === 'KeyQ') {
@@ -90,8 +91,9 @@ export class InputSampler {
       if (e.button === 0) this.mouseDown = false
     }
     const onBlur = () => {
-      this.keys.clear()
-      this.mouseDown = false
+      this.release()
+      this.releaseAxes = this.stickyAxes
+      this.stickyAxes = 0
     }
 
     window.addEventListener('keydown', onKeyDown, { passive: false })
@@ -111,12 +113,23 @@ export class InputSampler {
     )
   }
 
+  acknowledge(seq: number): void {
+    this.seq = Math.max(this.seq, seq)
+  }
+
+  release(): void {
+    this.keys.clear()
+    this.mouseDown = false
+    this.dashEdge = false
+    this.interactEdge = false
+  }
+
   detach(): void {
     for (const d of this.disposers) d()
     this.disposers = []
-    this.keys.clear()
-    this.mouseDown = false
+    this.release()
     this.stickyAxes = 0
+    this.releaseAxes = 0
     this.canvas = null
     this.cam = null
   }
@@ -124,6 +137,7 @@ export class InputSampler {
   /** Space 切换 assist：返回是否需要发 assistToggle 上行 */
   toggleAssist(): boolean {
     this.assistOn = !this.assistOn
+    if (this.assistOn) { this.stickyAxes = 0; this.releaseAxes = 0; this.release() }
     return true
   }
 
@@ -161,14 +175,16 @@ export class InputSampler {
     this.dashEdge = false
     this.interactEdge = false
 
-    // shield：E/Q 语义 —— 协议 shield 位（Q shield per controls.md 是 E；v1 客户端：Shift=dash、E/F=interact、Q=shield）
+    // Q 为持续护盾；E/F 为交互按下沿。
     const shield = this.keys.has('KeyQ')
 
+    const heldAxes = this.stickyAxes | this.releaseAxes
+    this.releaseAxes = 0
     const axisMask =
-      (this.stickyAxes & AXIS_MOVE ? AXIS_MOVE : 0) |
-      (this.stickyAxes & AXIS_AIM ? AXIS_AIM : 0) |
-      (this.stickyAxes & AXIS_FIRE ? AXIS_FIRE : 0) |
-      (this.stickyAxes & AXIS_ABILITY ? AXIS_ABILITY : 0)
+      (heldAxes & AXIS_MOVE ? AXIS_MOVE : 0) |
+      (heldAxes & AXIS_AIM ? AXIS_AIM : 0) |
+      (heldAxes & AXIS_FIRE ? AXIS_FIRE : 0) |
+      (heldAxes & AXIS_ABILITY ? AXIS_ABILITY : 0)
 
     const msg = create(ClientInputSchema, {
       seq: ++this.seq,

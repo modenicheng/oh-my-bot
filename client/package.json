@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "tsx scripts/round2-check.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "playwright": "^1.63.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.0",
     "vite": "^6.2.0",
     "ws": "^8.22.0"

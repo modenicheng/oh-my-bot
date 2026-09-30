@@ -43,6 +43,9 @@ export class GameController {
   private send: (data: Uint8Array) => void
   private onExitToRoom?: () => void
   private resizeObserver?: ResizeObserver
+  private pixelRatio = 0
+  private active = true
+  private resyncAt = -Infinity
 
   constructor(deps: GameDeps) {
     this.canvas = deps.canvas
@@ -61,14 +64,17 @@ export class GameController {
       console.error('[game] 地图解析失败:', err)
       return false
     }
+    this.stopLoops()
     this.ended = false
+    this.resyncAt = -Infinity
     this.endShown = false
     this.matchEndRows = []
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
     this.world = emptyWorld()
+    this.hud.update(this.world)
     this.setupCanvas()
-    this.input.attach(this.canvas, this.cam)
+    if (this.active) this.input.attach(this.canvas, this.cam)
     this.startLoops()
     return true
   }
@@ -112,8 +118,13 @@ export class GameController {
     if (!this.map) return
     const snap = extractSnapshot(msg)
     if (snap) {
-      if (applySnapshot(this.world, snap) === 'resync-needed') {
+      const result = applySnapshot(this.world, snap)
+      if (result === 'resync-needed' && performance.now() - this.resyncAt > 500) {
+        this.resyncAt = performance.now()
         this.send(buildResync())
+      } else if (result === 'applied') {
+        this.input.acknowledge(snap.ackSeq)
+        if (snap.full) this.resyncAt = -Infinity
       }
       return
     }
@@ -150,6 +161,18 @@ export class GameController {
     }
   }
 
+  /** 隐藏视图时释放控制，避免阅读手册仍在驾驶。 */
+  setActive(active: boolean): void {
+    if (this.active === active) return
+    if (!active && this.map) {
+      this.input.release()
+      this.sampleAndSend()
+      this.input.detach()
+    }
+    this.active = active
+    if (active && this.map) this.input.attach(this.canvas, this.cam)
+  }
+
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
     if (this.input.toggleAssist()) {
@@ -165,19 +188,22 @@ export class GameController {
 
   private setupCanvas(): void {
     if (!this.map) return
-    const dpr = window.devicePixelRatio || 1
-    const doResize = () => {
-      const rect = this.canvas.getBoundingClientRect()
-      this.renderer.resize(rect.width, rect.height, dpr)
-      this.cam.resize(rect.width, rect.height, this.map!.extent)
-    }
-    doResize()
-    this.resizeObserver = new ResizeObserver(doResize)
+    this.resizeCanvas()
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = new ResizeObserver(() => this.resizeCanvas())
     this.resizeObserver.observe(this.canvas)
   }
 
+  private resizeCanvas(): void {
+    if (!this.map) return
+    const rect = this.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    this.pixelRatio = window.devicePixelRatio || 1
+    this.renderer.resize(rect.width, rect.height, this.pixelRatio)
+    this.cam.resize(rect.width, rect.height, this.map.extent)
+  }
+
   private startLoops(): void {
-    this.stopLoops()
 
     // 渲染循环：rAF
     const draw = () => {
@@ -200,7 +226,8 @@ export class GameController {
   }
 
   private drawFrame(): void {
-    if (!this.map) return
+    if (!this.map || !this.active) return
+    if (this.pixelRatio !== (window.devicePixelRatio || 1)) this.resizeCanvas()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     const pos = self?.base?.pos
@@ -212,7 +239,7 @@ export class GameController {
   }
 
   private sampleAndSend(): void {
-    if (!this.map) return
+    if (!this.map || !this.active || this.ended || !this.world.initialized) return
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     const pos = self?.base?.pos

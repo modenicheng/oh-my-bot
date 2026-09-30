@@ -1,6 +1,9 @@
 package mapgen
 
-import "github.com/modenicheng/oh-my-bot/server/internal/sim"
+import (
+	"github.com/modenicheng/oh-my-bot/server/internal/sim"
+	"math"
+)
 
 // dirCount 为方向表分辨率：48 步 × 7.5° = 360°。扇区轴（k*45° = 6k 步）
 // 与 Uplink 错位角（k*45°+22.5° = 6k+3 步）都是表上精确点——生成路径零
@@ -28,6 +31,15 @@ var dirTable = [dirCount]struct{ x, y float64 }{
 func dirAt(step int) sim.Vec2 {
 	d := dirTable[((step%dirCount)+dirCount)%dirCount]
 	return sim.Vec2{X: d.x, Y: d.y}
+}
+
+// slotDirection interpolates the literal table and normalizes the chord.
+// Bounded slot jitter uses no platform-dependent trigonometric functions.
+func slotDirection(step float64) sim.Vec2 {
+	base := int(math.Floor(step))
+	f := step - float64(base)
+	p := dirAt(base).Scale(1 - f).Add(dirAt(base + 1).Scale(f))
+	return p.Scale(1 / math.Sqrt(p.X*p.X+p.Y*p.Y))
 }
 
 // r2 = √2/2（45° 旋转系数）。用字面量而非 math.Sqrt2/2，与 rot45 的

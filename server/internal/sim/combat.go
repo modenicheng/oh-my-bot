@@ -223,7 +223,10 @@ func (s *Sim) pushRobot(r *Robot, delta Vec2) {
 			fraction = t
 		}
 	}
-	r.Position = r.Position.Add(delta.Scale(fraction))
+	if t, hit := s.sweepArena(r.Position, delta); hit && t < fraction {
+		fraction = t
+	}
+	r.Position = s.containInArena(r.Position.Add(delta.Scale(fraction)))
 }
 
 func (s *Sim) softCollide() {

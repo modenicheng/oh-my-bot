@@ -3,15 +3,14 @@
 // 骨架拓扑固定（v0.3 §3）：8 个 45° 出生扇区（轴角 k*45°，SpawnArea 为外环
 // 55–80m 内的轴对齐方块）、三环（外 55–80 / 中 30–55 / 中央 <30m）、6 个普通
 // Uplink 位于中环且角度 = k*45°+22.5°、1 个中央主 Uplink（CORE_OPEN 激活）、
-// 外 16 + 中 12 + 中央 6 个 CorePad。骨架内的掩体布局按种子随机：中环密、
-// 外环疏。全部墙体为 AABB。
+// 外 16 + 中 12 + 中央 6 个 CorePad。gen2 资源按环带和角度槽位抖动；
+// 短掩体按分层候选生成，中环密、外环疏。全部墙体为 AABB。
 //
-// 墙体八分对称：骨架墙在每个 45° 楔内形状完全一致；每个掩体原型落在 0°楔
-// 内，经 k·45° 旋转（k=0..7）同时盖 8 块——任何 45° 楔拥有相同的掩体数、
-// 面积与朝向分布（八辐公平性）。掩体整批接受或整批丢弃（净空/连通检查），
-// 保证对称性不被局部拒绝破坏。
+// 墙体八楔统计对称、90° 几何对称：每个掩体原型同时盖 8 块，
+// 各楔拥有相同的数量、面积和尺寸。候选整批接受或重选（净空/连通检查），
+// 分层槽位不得省略；候选耗尽时返回错误。
 //
-// 确定性：生成路径只用整数与浮点乘加运算 + 字面量方向表（零三角函数、零
+// 确定性：生成路径使用整数、浮点算术/平方根及字面量方向表（零三角函数、零
 // map 遍历序依赖），同 seed 必产出同 MapHash = SHA256(canonical JSON)。
 package mapgen
 
@@ -50,7 +49,7 @@ const (
 )
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
-const GeneratorVer = 1
+const GeneratorVer = 2
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
@@ -63,10 +62,9 @@ const (
 // 规则）+ seed 驱动的 Uplink 半径、CorePad 与掩体布局。产出前经双模式 BFS
 // 连通性验证（1m 网格：OUTER_RING 锁区封闭、CORE_OPEN 全图连通）。
 func Generate(seed uint64) (*sim.MapDef, error) {
-	skeleton := skeletonWalls()
 	uplinks := genUplinks(newRng(seed ^ saltUplinks))
-	pads := genCorePads(newRng(seed^saltPads), skeleton, uplinks)
-	walls, err := genWalls(newRng(seed^saltWalls), skeleton, uplinks, pads)
+	pads := genCorePads(newRng(seed ^ saltPads))
+	walls, err := genWalls(newRng(seed^saltWalls), uplinks, pads)
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: walls: %w", err)
 	}
@@ -170,63 +168,29 @@ func genUplinks(r *rng) []sim.UplinkDef {
 	return out
 }
 
-// genCorePads 生成外 16 + 中 12 + 中央 6 个刷新点（seed 驱动）。外/中环组
-// 用中心对称对采样（8 楔均衡），与骨架墙保持 ≥2.5m、与 Uplink 保持 ≥3m
-// 净空；组内按 (x,y) 字典序排序后顺序分配 ID（canonical 顺序）。中央组
-// 坐标序前两个为 Mega Core（+25）。
-func genCorePads(r *rng, skeleton []sim.Wall, uplinks []sim.UplinkDef) []sim.CorePadDef {
+// genCorePads fills every angular slot, with bounded jitter of ±10% of its
+// width. Outer/mid slots alternate inner and outer radial tracks. Antipodal
+// pairs share jitter, preserving central fairness without rejection holes.
+// Track separation also keeps pads at least 3m from the 40–45m Uplink band.
+func genCorePads(r *rng) []sim.CorePadDef {
 	pads := make([]sim.CorePadDef, 0, padOuterN+padMidN+padCenterN)
-	id := uint32(1)
-	place := func(group, count int, lo, hi, gap float64) {
+	for group, count := range []int{padOuterN, padMidN, padCenterN} {
 		placed := make([]sim.Vec2, 0, count)
-		for tries := 0; len(placed) < count && tries < 5000; tries++ {
-			x, y := r.rangeF(-hi, hi), r.rangeF(-hi, hi)
-			if d2 := x*x + y*y; d2 < lo*lo || d2 > hi*hi {
-				continue
-			}
-			p := sim.Vec2{X: x, Y: y}
-			mirror := sim.Vec2{X: -x, Y: -y}
-			if !padOK(p, gap, placed, skeleton, uplinks) ||
-				!padOK(mirror, gap, append(placed, p), skeleton, uplinks) {
-				continue
-			}
-			placed = append(placed, p, mirror)
+		for i := 0; i < count/2; i++ {
+			bands := [3][2][2]float64{{{60, 63}, {72, 75}}, {{33, 36}, {49, 52}}, {{10, 14}, {10, 14}}}
+			band := bands[group][i%2]
+			step := (float64(i) + 0.5 + r.rangeF(-0.1, 0.1)) * dirCount / float64(count)
+			p := slotDirection(step).Scale(r.rangeF(band[0], band[1]))
+			placed = append(placed, p, p.Scale(-1))
 		}
 		sortVec2(placed)
 		for _, p := range placed {
-			pads = append(pads, sim.CorePadDef{ID: id, Pos: p, Group: group, Value: 10})
-			id++
+			pads = append(pads, sim.CorePadDef{ID: uint32(len(pads) + 1), Pos: p, Group: group, Value: 10})
 		}
 	}
-	place(0, padOuterN, 57, 77, 5.0)
-	place(1, padMidN, 32, 53, 5.0)
-	place(2, padCenterN, 6, 15, 3.5)
 	pads[len(pads)-padCenterN].Value = 25
 	pads[len(pads)-padCenterN+1].Value = 25
 	return pads
-}
-
-// padOK 校验候选刷新点：距同组已放点 ≥ gap，距骨架墙 ≥ 2.5m，距任意
-// Uplink ≥ 3m（含原点主桩）。
-func padOK(p sim.Vec2, gap float64, placed []sim.Vec2, skeleton []sim.Wall, uplinks []sim.UplinkDef) bool {
-	for _, q := range placed {
-		dx, dy := p.X-q.X, p.Y-q.Y
-		if dx*dx+dy*dy < gap*gap {
-			return false
-		}
-	}
-	for _, w := range skeleton {
-		if nearestDist2(wallRect(w), p) < 2.5*2.5 {
-			return false
-		}
-	}
-	for _, u := range uplinks {
-		dx, dy := p.X-u.Pos.X, p.Y-u.Pos.Y
-		if dx*dx+dy*dy < 3.0*3.0 {
-			return false
-		}
-	}
-	return true
 }
 
 // sortVec2 按 (x,y) 字典序原址排序（插入排序，n ≤ 34）。

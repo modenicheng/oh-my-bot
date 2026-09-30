@@ -328,7 +328,7 @@ function applyEvent(
         tick: ev.tick,
         kind: 'phase',
         color: KIND_COLOR.phase,
-        detail: `阶段切换 → ${phaseName(ev.payload?.to)}`,
+        detail: `阶段切换：${phaseName(ev.payload?.to)}`,
       })
       break
     case 'respawn': {

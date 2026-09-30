@@ -160,6 +160,11 @@ func TestLegalTransitions(t *testing.T) {
 		if r.State() != Running {
 			t.Fatalf("state = %v, want Running", r.State())
 		}
+		select {
+		case <-l.handles[0].aborted:
+		default:
+			t.Error("START left the warmup loop alive")
+		}
 		if l.launches != 2 { // warmup 实例 + 正式赛各 launch 一次
 			t.Fatalf("launches = %d, want 2 (warmup + start)", l.launches)
 		}

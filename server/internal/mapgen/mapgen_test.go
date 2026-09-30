@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 1 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 2 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -188,9 +188,9 @@ func TestTopologyInvariants(t *testing.T) {
 		if mega != 2 {
 			t.Fatalf("seed %d: mega pads = %d, want 2", seed, mega)
 		}
-		// 墙体：ID 1..N 全序，AABB 合法，全图边界内，含 16 段骨架。
-		if len(def.Walls) < 16 {
-			t.Fatalf("seed %d: walls = %d, want >= 16", seed, len(def.Walls))
+		// Gen2 has six complete batches of eight short covers.
+		if len(def.Walls) != 48 {
+			t.Fatalf("seed %d: walls = %d, want 48", seed, len(def.Walls))
 		}
 		for i, w := range def.Walls {
 			if w.ID != uint32(i+1) {

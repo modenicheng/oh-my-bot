@@ -5,7 +5,7 @@
 ## 前置依赖
 
 | 工具 | 最低版本 | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | Go | 1.24 | 服务器编译 |
 | Node | 22 | 前端工具链 |
 | pnpm | 10 | workspace 管理 |
@@ -38,7 +38,9 @@ curl http://localhost:8080/api/manual   # 手册树 JSON
 curl http://localhost:8080/api/matches  # 历史对局列表
 ```
 
-开两个浏览器窗口（或普通+隐私）：同房间码进房 → 房主「开始对局」→ WASD 移动、鼠标开火。
+开两个浏览器窗口（或普通+隐私）：使用不同昵称加入同一房间 → 房主「开始对局」→ WASD 移动、鼠标开火。大厅和游戏右上角均有「手册 M」按钮，也可按 `M` 打开手册、再次按 `M` 返回；输入框内不触发游戏快捷键。
+
+页面地址记录房间与当前视图，例如 `?room=ABCD&view=game`；手册与回放还记录 `doc` / `replay`。同一标签页刷新会从 `sessionStorage` 恢复昵称和颜色，自动加入原房间。服务器在进程内按房间码与精确昵称恢复机器人身份、位置和房主权；同名新连接会替换旧连接。服务器重启后不保留进行中的房间，新标签页仍需要填写昵称。
 
 ## 本地开发循环
 
@@ -76,8 +78,29 @@ pnpm -r typecheck                 # 两侧类型即时校验
 ```
 
 黄金契约测试（TS/Go 同 hex 断言）在：
+
 - `packages/protocol/test/golden.test.ts`（vitest）
 - `server/internal/protocol/protocol_test.go`（go test）
+
+## 浏览器回归
+
+先运行 `bash build.sh`，再执行：
+
+```bash
+pnpm --filter client exec playwright install chromium  # 首次使用时安装浏览器
+pnpm --filter client test:e2e
+```
+
+脚本自动在 `127.0.0.1:18420` 启动构建产物，使用临时对局目录并在退出时关闭服务。覆盖热身转正式局的倒计时、刷新保留身份与位置、M 手册及按钮入口、输入释放、动态 resize / DPR 2、手册语言标签页、回放播放/暂停/拖动与重复进入。截图写入 `.artifacts/round2/`（不纳入 Git）。`OMB_BINARY` 可指定二进制路径，`OMB_SHOTS` 可指定截图目录；相对路径以 `client/` 为基准。
+
+地图生成与越界行为另由服务端验证：
+
+```bash
+# 在仓库根执行
+go test ./server/internal/mapgen -count=1
+go test ./server/internal/sim -run 'TestArena|TestGen1' -count=1
+go test -race ./server/internal/glue ./server/internal/room ./server/internal/netws -count=1
+```
 
 ## 调试工具箱
 
@@ -130,7 +153,7 @@ go test ./internal/snapshot/ -bench . -benchtime 100x
 ## 常见问题
 
 | 症状 | 原因 | 处置 |
-|---|---|---|
+| --- | --- | --- |
 | 页面 200 但白屏 | embed 前端过期 | 重跑 `bash build.sh` |
 | 进房后"等待房主"且无按钮 | 非房主视角 | 首位进房者即房主 |
 | 对局中对方消失 | AOI 裁剪（>20m 出视野） | 设计行为；搭档除外 |

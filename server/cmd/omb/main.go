@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
@@ -99,16 +101,20 @@ func main() {
 			return
 		}
 		defer f.Close()
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = io.Copy(w, f)
-	})
-	mux.Handle("/ws", netws.Handler(func(sendReliable, sendLossy func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
-		// 每连接一份会话上下文（工厂返回的 onUp 闭包捕获——多连接隔离）
-		var sess *glue.Session
-		return func(up *ombv1.ClientMsg) {
-			handleUpstream(hub, up, sendReliable, sendLossy, &sess)
+		info, err := f.Stat()
+		if err != nil {
+			http.Error(w, "unavailable", http.StatusInternalServerError)
+			return
 		}
-	}))
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-store")
+		// Fix the read boundary while the active match continues appending.
+		// The buffered log writer may have flushed only part of its last record.
+		if err := copyCompleteRecords(w, io.NewSectionReader(f, 0, info.Size())); err != nil {
+			log.Printf("replay %s: %v", id, err)
+		}
+	})
+	mux.Handle("/ws", sessionHandler(hub))
 	mux.Handle("/", http.FileServer(http.FS(webRoot)))
 
 	log.Printf("oh-my-bot server listening on %s", *addr)
@@ -117,8 +123,56 @@ func main() {
 	}
 }
 
+// copyCompleteRecords exposes only newline-terminated records. A partial tail
+// is still being written; malformed complete lines remain visible to the parser.
+func copyCompleteRecords(w io.Writer, r io.Reader) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+	}
+}
+
+// sessionHandler owns close cleanup without changing netws's transport contract.
+// The reader can outlive ServeHTTP briefly; fence late upstream calls as well.
+func sessionHandler(hub *glue.Hub) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var mu sync.Mutex
+		var sess *glue.Session
+		closed := false
+		defer func() {
+			mu.Lock()
+			defer mu.Unlock()
+			closed = true
+			if sess != nil {
+				hub.Unregister(sess)
+			}
+		}()
+		netws.Handler(func(reliable, lossy func(*ombv1.ServerMsg)) func(*ombv1.ClientMsg) {
+			return func(up *ombv1.ClientMsg) {
+				mu.Lock()
+				defer mu.Unlock()
+				if !closed {
+					handleUpstream(hub, up, reliable, lossy, &sess)
+				}
+			}
+		}).ServeHTTP(w, r)
+	})
+}
+
 // handleUpstream 全量上行路由（Phase D glue：join/leave/room_action/input/…）。
 func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), sess **glue.Session) {
+	if up == nil {
+		return
+	}
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
 		handleJoin(hub, p.Join, sendReliable, sendLossy, sess)
@@ -133,6 +187,8 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	case *ombv1.ClientMsg_Leave:
 		if cur := (*sess); cur != nil {
 			cur.LeaveRoom()
+			hub.Unregister(cur)
+			*sess = nil
 		}
 	case *ombv1.ClientMsg_RoomAction:
 		if cur := (*sess); cur != nil {
@@ -156,17 +212,23 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 }
 
 func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
+	if join == nil {
+		return
+	}
 	rc := hub.EnsureRoom(join.GetRoomCode())
 	rc.EnsureLauncher()
 	sess := glue.NewSession(sendReliable, sendLossy)
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
+		hub.Unregister(sess)
 		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
 		}}})
 		return
 	}
-	sess.BindRoom(rc)
+	if old := *sessOut; old != nil {
+		hub.Unregister(old)
+	}
 	*sessOut = sess
 	rc.BroadcastRoomState()
 }

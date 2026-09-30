@@ -32,7 +32,7 @@ export class RoomSession {
       await this.transport.connect(wsUrl())
     } catch (err) {
       this.state = 'disconnected'
-      throw new Error('无法连接服务器（端口 8080）', { cause: err })
+      throw new Error('无法连接服务器，请检查网络后重试', { cause: err })
     }
 
     // 心跳看门狗：WsTransport 的 ping/pong 每 2s 一轮，4s 无回包视为断线
@@ -63,7 +63,13 @@ export class RoomSession {
       nick: opts.nick,
       color: opts.color,
     })
-    this.transport.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'join', value: join } })))
+    try {
+      this.transport.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'join', value: join } })))
+    } catch (err) {
+      this.close()
+      this.state = 'disconnected'
+      throw new Error('连接已中断，请重新加入房间', { cause: err })
+    }
   }
 
   private fail(opts: JoinOptions, reason: string): void {

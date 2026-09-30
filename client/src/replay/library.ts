@@ -3,6 +3,7 @@
 // 由 endTick 得出（列表页保持轻量，不预下载每局 JSONL）。
 import { fetchMatches, type MatchEntry } from './api'
 import { ReplayPlayer } from './player'
+import { writeRoute, readRoute } from '../route'
 
 export interface ReplayLibraryDeps {
   listRoot: HTMLElement
@@ -19,13 +20,15 @@ export class ReplayLibrary {
   private entries: MatchEntry[] = []
   private player: ReplayPlayer | null = null
   private loading = false
+  private disposed = false
 
   constructor(private deps: ReplayLibraryDeps) {}
 
   /** 进入回放库：拉取列表并渲染。 */
-  async open(): Promise<void> {
+  async open(matchId?: string): Promise<void> {
     this.deps.showList()
     await this.refresh()
+    if (matchId && !this.disposed) await this.openPlayer(matchId)
   }
 
   /** 返回列表（从播放器退出时调用）。 */
@@ -36,6 +39,7 @@ export class ReplayLibrary {
   }
 
   exit(): void {
+    this.disposed = true
     this.player?.dispose()
     this.player = null
   }
@@ -47,8 +51,9 @@ export class ReplayLibrary {
     this.renderLoading()
     try {
       this.entries = await fetchMatches()
-      this.renderList()
+      if (!this.disposed) this.renderList()
     } catch (e) {
+      if (this.disposed) return
       this.entries = []
       this.renderEmpty()
       this.setError(e instanceof Error ? e.message : String(e))
@@ -99,11 +104,10 @@ export class ReplayLibrary {
         },
       })
     }
-    const ok = await this.player.load(matchId)
-    if (!ok) {
-      // onError 已设置错误信息；回列表
-      this.backToList()
-    }
+    const player = this.player
+    writeRoute('replay-player', readRoute().roomCode, { replay: matchId })
+    const ok = await player.load(matchId)
+    if (!ok && this.player === player && !this.disposed) this.backToList()
   }
 
   private setError(msg: string): void {

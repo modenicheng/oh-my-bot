@@ -1,7 +1,7 @@
 // 房间页主流程：进房表单 → WS 连接 + JoinRoom → 房间大厅；mapBootstrap 后切游戏视图。
 // 样式令牌见 client/STYLE.md；连接层见 client/src/net.ts；游戏视图见 client/src/game/。
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, LeaveRoomSchema, RoomActionSchema,
+import { ClientMsgSchema, RoomActionSchema,
          RoomAction_Kind, EvRoomState_State,
          type ServerMsg } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
@@ -10,6 +10,10 @@ import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { ManualView } from './manual/manual'
 import { ReplayLibrary } from './replay/library'
+import { readRoute, saveProfile, loadProfile, writeRoute, type View } from './route'
+import { mountIcons } from './icons'
+
+mountIcons(document)
 
 // ---- 常量 ---------------------------------------------------------------
 
@@ -72,7 +76,8 @@ for (const color of PRESET_COLORS) {
   swatches.appendChild(b)
 }
 
-// ?room=CODE 完整链接解析（自动大写、截断到 6 位）
+// ?room=CODE 完整链接解析（自动大写、最多 8 位）
+const initialRoute = readRoute()
 const params = new URLSearchParams(location.search)
 const fromLink = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
 if (fromLink) inRoom.value = fromLink
@@ -89,7 +94,7 @@ inRoom.addEventListener('input', () => { normalize(); showFormError('') })
 inNick.addEventListener('input', () => { normalize(); showFormError('') })
 
 function validate(): string | null {
-  if (!ROOM_CODE_RE.test(inRoom.value)) return '房间码需为 6 位字母/数字'
+  if (!ROOM_CODE_RE.test(inRoom.value)) return '房间码需为 4–8 位字母/数字'
   const nick = inNick.value.trim()
   if (!NICK_RE.test(nick)) return '昵称需为 1-16 个字符'
   return null
@@ -97,7 +102,9 @@ function validate(): string | null {
 
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
-function showView(view: 'join' | 'room' | 'game' | 'manual' | 'replays' | 'replay-player'): void {
+function showView(view: View, extra?: { doc?: string; replay?: string }): void {
+  game?.setActive(view === 'game')
+  writeRoute(view, lastJoin?.roomCode, extra)
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
@@ -149,6 +156,7 @@ function onRoomState(state: number, hostNick: string, robotsOnline: number): voi
   roomStateEl.textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 机器人 ${robotsOnline}`
 
   const isHost = hostNick !== '' && hostNick === selfNick()
+  $('btn-game-start').hidden = !(isHost && state === EvRoomState_State.R_WARMUP)
   const idleLike = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP
   btnStart.hidden = !(isHost && idleLike && !isInGame())
   // 热身场：Idle（开局前练习）与 Ended（下局前重整）都可用（room 状态机两态均合法）
@@ -176,8 +184,11 @@ function renderMembers(): void {
     me && me !== room.hostNick ? `你：${me}` : '',
     n > 0 ? `在线：${n} 人` : '',
   ]
-  const el = document.getElementById('room-members')
-  if (el) el.innerHTML = items.filter(Boolean).map((t) => `<div>${t}</div>`).join('')
+  membersEl.replaceChildren(...items.filter(Boolean).map((text) => {
+    const li = document.createElement('li')
+    li.textContent = text
+    return li
+  }))
 }
 
 function resetLobby(): void {
@@ -195,8 +206,19 @@ function resetLobby(): void {
 // ---- 手册视图（v1 手册基建：不依赖 WS，大厅随时可进） -------------------------
 
 let manualView: ManualView | null = null
+let manualReturnView: View = 'join'
+let lastManualPath = 'index.md'
 
-function openManual(): void {
+function closeManual(): void {
+  lastManualPath = readRoute().doc ?? 'index.md'
+  manualView?.close()
+  showView(game ? 'game' : manualReturnView === 'game' ? 'room' : manualReturnView)
+  if (session || lastJoin) onRoomState(room.state, room.hostNick, room.robotsOnline)
+}
+
+function openManual(path = lastManualPath): void {
+  if (!viewManual.hidden) return
+  manualReturnView = !viewGame.hidden ? 'game' : !viewRoom.hidden ? 'room' : 'join'
   if (!manualView) {
     manualView = new ManualView({
       root: viewManual,
@@ -204,24 +226,22 @@ function openManual(): void {
       sidebar: $<HTMLElement>('manual-sidebar'),
       content: $<HTMLElement>('manual-content'),
       status: $<HTMLElement>('manual-status'),
-      onExit: () => {
-        showView(session || lastJoin ? 'room' : 'join')
-        // 返回后用缓存状态刷新操作栏
-        if (session || lastJoin) onRoomState(room.state, room.hostNick, room.robotsOnline)
-      },
+      onExit: closeManual,
     })
   }
-  showView('manual')
-  void manualView.open()
+  showView('manual', { doc: path })
+  void manualView.open(path)
 }
 
-btnManual.addEventListener('click', openManual)
+btnManual.addEventListener('click', () => openManual())
+$('btn-game-manual').addEventListener('click', () => openManual())
+$('btn-game-start').addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
 
 // ---- 回放库（对局列表 ⇄ 回放器；同源 HTTP，不依赖 WS） --------------------
 
 let replayLibrary: ReplayLibrary | null = null
 
-function openReplays(): void {
+function openReplays(replayId?: string): void {
   if (!replayLibrary) {
     replayLibrary = new ReplayLibrary({
       listRoot: replayListEl,
@@ -234,16 +254,17 @@ function openReplays(): void {
     })
   }
   showView('replays')
-  void replayLibrary.open()
+  void replayLibrary.open(replayId)
 }
 
 function closeReplays(): void {
   replayLibrary?.exit()
   replayLibrary = null
-  showView(session || lastJoin ? 'room' : 'join')
+  showView(game ? 'game' : session || lastJoin ? 'room' : 'join')
 }
 
-btnReplay.addEventListener('click', openReplays)
+btnReplay.addEventListener('click', () => openReplays())
+$('btn-game-replay').addEventListener('click', () => openReplays())
 btnReplaysBack.addEventListener('click', closeReplays)
 
 // ---- 连接会话 ---------------------------------------------------------------
@@ -260,8 +281,14 @@ async function join(): Promise<void> {
 }
 
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
+  if (session?.state === 'connecting') return
   btnJoin.disabled = true
-  setStatus('off', 'connecting…')
+  lastJoin = { roomCode, nick, color }
+  saveProfile(lastJoin)
+  roomCodeEl.textContent = roomCode
+  resetLobby()
+  showView('room')
+  setStatus('off', '连接中…')
 
   session?.close()
   const s = new RoomSession()
@@ -272,23 +299,22 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
       roomCode,
       nick,
       color,
-      onMessage: (msg) => onServerMsg(roomCode, msg),
-      onDisconnect: (reason) => onDisconnected(reason),
+      onMessage: (msg) => { if (session === s) onServerMsg(roomCode, msg) },
+      onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
     })
-    lastJoin = { roomCode, nick, color }
+    if (session !== s) { s.close(); return }
   } catch (err) {
     s.close()
+    if (session !== s) return
     session = null
     btnJoin.disabled = false
     setStatus('down', '连接失败')
     showFormError(err instanceof Error ? err.message : '连接失败，请重试')
+    btnReconnect.hidden = false
+    showView('join')
     return
   }
 
-  // 连接 + JoinRoom 已发出；进入大厅，等服务器首帧回包确认
-  roomCodeEl.textContent = roomCode
-  resetLobby()
-  showView('room')
   startRttLoop(s)
 }
 
@@ -312,6 +338,7 @@ function onDisconnected(reason: string): void {
 // ---- 游戏态切换 -------------------------------------------------------------
 
 let game: GameController | null = null
+let restoredView = false
 
 function enterGame(): void {
   if (!session) return
@@ -337,10 +364,24 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (session && roomCode) setStatus('ok', 'connected')
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
+    if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
+      session?.close()
+      session = null
+      game?.exit()
+      game = null
+      setStatus('down', '进房失败')
+      showView('join')
+      showFormError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
+      btnJoin.disabled = false
+      return
+    }
     if (ev.kind.case === 'mapBootstrap') {
       // 服务器下发地图：切游戏视图（解析失败留在大厅）
+      const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? 'replays' : !viewReplayPlayer.hidden ? 'replay-player' : null
+      const utilityRoute = readRoute()
       if (!game) enterGame()
       const ok = game?.onMapBootstrap(ev.kind.value.mapJson) ?? false
+      if (ok && utilityView) showView(utilityView, utilityRoute)
       if (!ok) {
         game?.exit()
         game = null
@@ -352,11 +393,16 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'roomState') {
       const rs = ev.kind.value
       // 对局结束回大厅（服务器状态机回 idle/warmup）；结算覆盖层在场时保留游戏视图
-      if ((rs.state === EvRoomState_State.R_IDLE || rs.state === EvRoomState_State.R_WARMUP)
+      if (rs.state === EvRoomState_State.R_IDLE
           && !viewGame.hidden && !game?.isMatchEndShown()) {
         exitGame()
       }
       onRoomState(rs.state, rs.hostNick, rs.robotsOnline)
+      if (!restoredView) {
+        restoredView = true
+        if (initialRoute.view === 'manual') openManual(initialRoute.doc)
+        else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') openReplays(initialRoute.replay)
+      }
       return
     }
     // 其余事件转给游戏视图（say/kill/phaseChange/matchEnd…）
@@ -409,22 +455,37 @@ function stopRttLoop(): void {
   rttTimer = undefined
 }
 
+// M 始终是手册入口；Tab 保留浏览器的焦点导航。
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyM' || e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, [contenteditable]')) return
+  if (!viewManual.hidden) { e.preventDefault(); closeManual() }
+  else if (!viewGame.hidden || !viewRoom.hidden) { e.preventDefault(); openManual() }
+})
+
 // Space assist 开关（游戏态下全局拦截，避免页面滚动）
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && game && !e.repeat) {
+  if ((e.code === 'Space' || e.code === 'Enter') && game && !viewGame.hidden && !e.repeat) {
     const t = e.target as HTMLElement | null
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+    if (t?.closest('input, textarea, button, a, select, [contenteditable]')) return
     e.preventDefault()
     game.toggleAssist()
   }
 })
 
-// 离开页面时通知服务器
-window.addEventListener('beforeunload', () => {
-  if (session?.state === 'online') {
-    try {
-      session.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'leave', value: create(LeaveRoomSchema, {}) } })))
-    } catch { /* socket 已关则忽略 */ }
-  }
-  session?.close()
-})
+// 刷新仅断开传输；保留房间身份以恢复原机器人。
+window.addEventListener('pagehide', () => session?.close())
+
+const profile = loadProfile(initialRoute.roomCode)
+if (profile) {
+  inRoom.value = profile.roomCode
+  inNick.value = profile.nick
+  selectedColor = profile.color
+  for (const el of swatches.children) el.classList.toggle('sel', (el as HTMLElement).style.getPropertyValue('--sw') === selectedColor)
+  void joinWith(profile.roomCode, profile.nick, profile.color)
+} else if (initialRoute.view === 'manual') {
+  openManual(initialRoute.doc)
+} else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') {
+  openReplays(initialRoute.replay)
+}
