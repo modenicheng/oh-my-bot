@@ -48,6 +48,7 @@ export class GameController {
   private resizeObserver?: ResizeObserver
   private pixelRatio = 0
   private active = true
+  private inputEnabled = true
   private resyncAt = -Infinity
   private startCuePending = false
   private readonly releaseOnBlur = () => {
@@ -90,7 +91,7 @@ export class GameController {
     this.hud.update(this.world, this.map)
     this.hud.setAssist(false)
     this.setupCanvas()
-    if (this.active) this.input.attach(this.canvas, this.cam)
+    if (this.active && this.inputEnabled) this.input.attach(this.canvas, this.cam)
     this.startLoops()
     return true
   }
@@ -199,12 +200,24 @@ export class GameController {
     this.active = active
     if (!active) this.feedback.pause()
     if (active && this.map) {
-      this.input.attach(this.canvas, this.cam)
+      if (this.inputEnabled) this.input.attach(this.canvas, this.cam)
       if (this.startCuePending && this.world.initialized && !this.ended) {
         this.startCuePending = false
         audio.play('matchStart')
       }
     }
+  }
+
+  /** 侧栏只暂停手操采样；画面、快照和脚本继续运行。 */
+  setInputEnabled(enabled: boolean): void {
+    if (this.inputEnabled === enabled) return
+    if (!enabled) {
+      this.input.release()
+      this.sampleAndSend()
+      this.input.detach()
+    }
+    this.inputEnabled = enabled
+    if (enabled && this.active && this.map) this.input.attach(this.canvas, this.cam)
   }
 
   /** Space assist 开关：转发给服务器 */
@@ -278,7 +291,7 @@ export class GameController {
   }
 
   private sampleAndSend(): void {
-    if (!this.map || !this.active || this.ended || !this.world.initialized) return
+    if (!this.map || !this.active || !this.inputEnabled || this.ended || !this.world.initialized) return
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     const pos = self?.base?.pos

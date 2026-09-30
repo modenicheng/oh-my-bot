@@ -50,7 +50,20 @@ export interface L1 {
   nearestEnemy(): RobotRef | null
   nearestCore(): Vec2 | null
   nearestUplink(): Vec2 | null
-  /** 本局搭档；奇数局末位玩家为 null。 */
+  /** 本局搭档；无搭档或当前感知中不存在搭档时为 null。 */
   partner(): RobotRef | null
-  pulseScan(): Observation | null
+  /** 请求脉冲扫描，始终返回当前感知快照。 */
+  pulseScan(): Observation
+}
+
+/** 每帧重建的信息与动作接口。 */
+export interface TickContext {
+  self: Self
+  game: GameInfo
+  scan(): Observation
+  api: L0 & L1
+}
+
+export interface BotModule {
+  tick(ctx: TickContext): void
 }

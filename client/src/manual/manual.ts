@@ -126,6 +126,8 @@ export interface ManualViewOpts {
   status: HTMLElement
   /** 返回大厅回调。 */
   onExit: () => void
+  /** 嵌入对局侧栏时由宿主管理路由。 */
+  onNavigate?: (path: string) => void
 }
 
 export class ManualView {
@@ -192,7 +194,8 @@ export class ManualView {
     this.currentPath = path
     this.highlightSidebar(path)
     this.renderBreadcrumb(entry?.node.path ?? path)
-    writeRoute('manual', readRoute().roomCode, { doc: path })
+    if (this.opts.onNavigate) this.opts.onNavigate(path)
+    else writeRoute('manual', readRoute().roomCode, { doc: path })
 
     this.opts.content.innerHTML = ''
     this.opts.status.textContent = '加载中…'

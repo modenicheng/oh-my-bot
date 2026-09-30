@@ -9,8 +9,9 @@ import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { ManualView } from './manual/manual'
+import { Workbench } from './workbench/workbench'
 import { ReplayLibrary } from './replay/library'
-import { readRoute, saveProfile, loadProfile, writeRoute, type View } from './route'
+import { readRoute, saveProfile, loadProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
 
@@ -107,9 +108,10 @@ function validate(): string | null {
 
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
-function showView(view: View, extra?: { doc?: string; replay?: string }): void {
+function showView(view: View, extra?: RouteExtra): void {
+  game?.setInputEnabled(!workbench.isOpen)
   game?.setActive(view === 'game' && session?.state === 'online' && !awaitingFull)
-  writeRoute(view, lastJoin?.roomCode, extra)
+  writeRoute(view, lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
@@ -173,6 +175,7 @@ function onRoomState(state: number, hostNick: string, robotsOnline: number): voi
     roomNotice.hidden = true
   }
 
+  syncWorkbench()
   renderMembers()
 }
 
@@ -239,7 +242,6 @@ function openManual(path = lastManualPath): void {
 }
 
 btnManual.addEventListener('click', () => openManual())
-$('btn-game-manual').addEventListener('click', () => openManual())
 $('btn-game-start').addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
 
 // ---- 回放库（对局列表 ⇄ 回放器；同源 HTTP，不依赖 WS） --------------------
@@ -291,6 +293,7 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
   btnJoin.disabled = true
   lastJoin = { roomCode, nick, color }
   saveProfile(lastJoin)
+  workbench.setIdentity(roomCode, nick)
   roomCodeEl.textContent = roomCode
   resetLobby()
   showView('room')
@@ -326,6 +329,7 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
 }
 
 function onDisconnected(reason: string): void {
+  workbench.setAvailability(false, false)
   awaitingFull = game !== null
   game?.setActive(false)
   setStatus('down', reason)
@@ -337,6 +341,7 @@ function onDisconnected(reason: string): void {
 }
 
 function onConnectionState(state: SessionState, retryInMs = 0): void {
+  syncWorkbench()
   const online = state === 'online'
   connectionNotice.hidden = online && !awaitingFull || state === 'idle'
   connectionRetry.disabled = state === 'connecting' || online
@@ -356,6 +361,8 @@ function onConnectionState(state: SessionState, retryInMs = 0): void {
 function cancelConnection(): void {
   session?.close(); session = null
   stopRttLoop(); game?.exit(); game = null; awaitingFull = false
+  workbench.resetMatch()
+  syncWorkbench()
   connectionNotice.hidden = true; btnJoin.disabled = false; btnReconnect.hidden = false
   setStatus('off', '连接已取消'); showView('join')
 }
@@ -367,6 +374,23 @@ connectionRetry.addEventListener('click', () => session?.retryNow())
 let game: GameController | null = null
 let restoredView = false
 
+const workbench = new Workbench({
+  root: $('workbench'),
+  gameView: viewGame,
+  docsButton: $<HTMLButtonElement>('btn-game-manual'),
+  editorButton: $<HTMLButtonElement>('btn-game-editor'),
+  initial: initialRoute,
+  onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
+  onInputBlocked: blocked => game?.setInputEnabled(!blocked),
+  send: frame => { if (session?.state === 'online') session.send(frame) },
+  toggleAssist: () => game?.toggleAssist(),
+})
+
+function syncWorkbench(): void {
+  workbench.setAvailability(session?.state === 'online', game !== null && !game.isMatchEndShown() && !awaitingFull &&
+    (room.state === EvRoomState_State.R_WARMUP || room.state === EvRoomState_State.R_RUNNING))
+}
+
 function enterGame(): void {
   if (!session) return
   game?.exit()
@@ -377,11 +401,13 @@ function enterGame(): void {
     onExitToRoom: exitGame,
   })
   showView('game')
+  workbench.activate()
 }
 
 function exitGame(): void {
   game?.exit()
   game = null
+  workbench.resetMatch()
   showView('room')
   // 用缓存状态立即刷新操作栏，下一次 roomState 会覆盖
   onRoomState(room.state, room.hostNick, room.robotsOnline)
@@ -391,6 +417,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (session && roomCode) setStatus('ok', 'connected')
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
+    if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
+    if (ev.kind.case === 'matchEnd') workbench.resetMatch()
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
       connectionNotice.hidden = true
       awaitingFull = false
@@ -399,6 +427,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       session = null
       game?.exit()
       game = null
+      workbench.resetMatch()
+      syncWorkbench()
       setStatus('down', '进房失败')
       showView('join')
       showFormError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
@@ -406,6 +436,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       return
     }
     if (ev.kind.case === 'mapBootstrap') {
+      workbench.resetMatch()
       // 服务器下发地图：切游戏视图（解析失败留在大厅）
       const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? 'replays' : !viewReplayPlayer.hidden ? 'replay-player' : null
       const utilityRoute = readRoute()
@@ -413,6 +444,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       awaitingFull = true
       game?.setActive(false)
       const ok = game?.onMapBootstrap(ev.kind.value.mapJson) ?? false
+      syncWorkbench()
       if (ok && !utilityView) showView('game')
       if (ok && utilityView) showView(utilityView, utilityRoute)
       if (!ok) {
@@ -433,7 +465,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
         connectionNotice.hidden = true
         if (game && !game.isMatchEndShown()) {
           if (!viewGame.hidden) exitGame()
-          else { game.exit(); game = null }
+          else { game.exit(); game = null; workbench.resetMatch() }
         }
       }
       onRoomState(rs.state, rs.hostNick, rs.robotsOnline)
@@ -450,10 +482,13 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     // 快照帧转给游戏视图；full 帧落地后同步大厅成员名单（真实数据源）
     game?.onMessage(msg)
     const snap = extractSnapshot(msg)
+    if (snap?.self?.assistOn !== undefined) workbench.setAssist(snap.self.assistOn)
     if (snap?.full && game) {
       awaitingFull = false
       connectionNotice.hidden = true
+      game.setInputEnabled(!workbench.isOpen)
       game.setActive(!viewGame.hidden && session?.state === 'online')
+      syncWorkbench()
       room.lastRoster = game.lastRoster()
       if (!viewGame.hidden) renderMembers()
     }
@@ -502,16 +537,17 @@ function stopRttLoop(): void {
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyM' || e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
-  if (target?.closest('input, textarea, select, [contenteditable]')) return
+  if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return
   if (!viewManual.hidden) { e.preventDefault(); closeManual() }
-  else if (!viewGame.hidden || !viewRoom.hidden) { e.preventDefault(); openManual() }
+  else if (!viewGame.hidden) { e.preventDefault(); workbench.toggle('docs') }
+  else if (!viewRoom.hidden) { e.preventDefault(); openManual() }
 })
 
 // Space assist 开关（游戏态下全局拦截，避免页面滚动）
 window.addEventListener('keydown', (e) => {
   if ((e.code === 'Space' || e.code === 'Enter') && game && !viewGame.hidden && !e.repeat && !e.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey) {
     const t = e.target as HTMLElement | null
-    if (t?.closest('input, textarea, button, a, summary, select, [contenteditable]')) return
+    if (workbench.isOpen || t?.closest('input, textarea, button, a, summary, select, [contenteditable]')) return
     e.preventDefault()
     game.toggleAssist()
   }
@@ -520,6 +556,7 @@ window.addEventListener('keydown', (e) => {
 // 刷新仅断开传输；保留房间身份以恢复原机器人。
 window.addEventListener('pagehide', () => {
   game?.setActive(false)
+  workbench.setAvailability(false, false)
   session?.close()
 })
 window.addEventListener('pageshow', e => {
