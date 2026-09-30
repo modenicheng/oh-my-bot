@@ -177,7 +177,9 @@ type manualNode struct {
 	Children []manualNode `json:"children,omitempty"`
 }
 
-// buildManualTreeFS 递归构建 manual/ 目录树（title 取文件名去扩展名）。
+// buildManualTreeFS 递归构建 manual/ 目录树。path 为**全路径**（含父目录，
+// 如 "library/api"）——客户端 navigate 直接拼 .md 后 fetch，不再拼装。
+// title 取文件名去扩展名。
 func buildManualTreeFS(fsys embed.FS, root string) []manualNode {
 	entries, err := fsys.ReadDir(root)
 	if err != nil {
@@ -197,7 +199,12 @@ func buildManualTreeFS(fsys embed.FS, root string) []manualNode {
 			continue
 		}
 		if strings.HasSuffix(name, ".md") {
-			out = append(out, manualNode{Path: strings.TrimSuffix(name, ".md"), Title: strings.TrimSuffix(name, ".md"), Children: []manualNode{}})
+			full := strings.TrimSuffix(path.Join(root, name), ".md")
+			// 剥离 embed 根前缀（"manual/"）：API 路由以 /api/manual/<rel> 为准
+			if rel, ok := strings.CutPrefix(full, "manual/"); ok {
+				full = rel
+			}
+			out = append(out, manualNode{Path: full, Title: strings.TrimSuffix(name, ".md"), Children: []manualNode{}})
 		}
 	}
 	return out

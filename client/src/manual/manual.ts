@@ -142,8 +142,21 @@ export class ManualView {
 
   /** 拉取并渲染一篇文档。 */
   async navigate(path: string): Promise<void> {
-    const entry = this.nodeIndex.get(path)
-    if (!entry && this.tree.length > 0) return
+    // 树节点 path 无 .md 后缀；navigate 接受两种形式（index 或 index.md）
+    let entry = this.nodeIndex.get(path)
+    if (!entry) {
+      const base = path.replace(/\.md$/, '')
+      entry = this.nodeIndex.get(base)
+      if (entry) path = entry.node.path.includes('.') ? path : `${base}.md`
+      // 树若无后缀而 fetchDoc 需要 .md：统一补后缀
+      if (entry && !path.endsWith('.md')) path = `${path}.md`
+    }
+    if (!entry && this.tree.length > 0) {
+      this.opts.status.textContent = `未找到文档：${path}`
+      return
+    }
+    // 统一 .md 后缀：树键无后缀、服务器路由要求 .md 结尾
+    if (!path.endsWith('.md')) path = `${path}.md`
     this.currentPath = path
     this.highlightSidebar(path)
     this.renderBreadcrumb(path)
