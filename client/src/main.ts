@@ -18,7 +18,7 @@ const PRESET_COLORS = [
   '#fbbf24', '#a78bfa', '#34d399', '#f97316',
 ] as const
 
-const ROOM_CODE_RE = /^[A-Z0-9]{6}$/
+const ROOM_CODE_RE = /^[A-Z0-9]{4,8}$/
 const NICK_RE = /^.{1,16}$/
 
 // ---- DOM ----------------------------------------------------------------
@@ -74,13 +74,13 @@ for (const color of PRESET_COLORS) {
 
 // ?room=CODE 完整链接解析（自动大写、截断到 6 位）
 const params = new URLSearchParams(location.search)
-const fromLink = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+const fromLink = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
 if (fromLink) inRoom.value = fromLink
 
 /** 输入即时规范化：房间码大写、仅 A-Z0-9；昵称截断 16 字。 */
 function normalize(): void {
   const pos = inRoom.selectionStart
-  inRoom.value = inRoom.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+  inRoom.value = inRoom.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
   if (pos !== null) inRoom.setSelectionRange(pos, pos)
   inNick.value = inNick.value.slice(0, 16)
 }

@@ -128,6 +128,7 @@ export class ManualView {
       const root = await fetchTree()
       // 契约：根可能是 {path,title,children} 单节点，也可能是数组——两种都收
       this.tree = Array.isArray(root) ? root : [root]
+      normalizeTree(this.tree)
       this.usingMock = false
     } catch {
       // TODO 联调：服务器 /api/manual 上线后此回退应报错而非 mock
@@ -282,5 +283,12 @@ export class ManualView {
         el.appendChild(a)
       }
     })
+  }
+}
+
+function normalizeTree(nodes: ManualNode[]): void {
+  for (const n of nodes) {
+    if (!n.children) n.children = []
+    normalizeTree(n.children)
   }
 }

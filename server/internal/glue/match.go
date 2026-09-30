@@ -142,6 +142,23 @@ func (ms multiSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	ms.secondary.OnEvent(tick, ev)
 }
 
+// multiSink 转发 ReplaySink/CheckpointSink 可选接口（sim 用类型断言探测——
+// 不转发则 match_start/checkpoint/input 永不落盘，回放缺初始状态）。
+func (ms multiSink) OnMatchInit(state sim.Checkpoint) {
+	ms.primary.OnMatchInit(state)
+	if r, ok := ms.secondary.(sim.ReplaySink); ok {
+		r.OnMatchInit(state)
+	}
+}
+
+func (ms multiSink) OnInput(tick uint32, robotID uint32, input sim.Input) {
+	ms.primary.OnInput(tick, robotID, input)
+}
+
+func (ms multiSink) OnCheckpoint(state sim.Checkpoint) {
+	ms.primary.OnCheckpoint(state)
+}
+
 // HandleAiPrompt v1 最小实现：AI 服务接入前的占位回执（quota 未配 key 时提示）。
 // 完整链（QuotaService→Provider→改码→ScriptSubmit）在 AI 运营配置就绪后启用。
 func (m *Match) HandleAiPrompt(pid uint64, text string) {

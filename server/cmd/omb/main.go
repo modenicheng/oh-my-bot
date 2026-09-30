@@ -197,7 +197,7 @@ func buildManualTreeFS(fsys embed.FS, root string) []manualNode {
 			continue
 		}
 		if strings.HasSuffix(name, ".md") {
-			out = append(out, manualNode{Path: strings.TrimSuffix(name, ".md"), Title: strings.TrimSuffix(name, ".md")})
+			out = append(out, manualNode{Path: strings.TrimSuffix(name, ".md"), Title: strings.TrimSuffix(name, ".md"), Children: []manualNode{}})
 		}
 	}
 	return out
