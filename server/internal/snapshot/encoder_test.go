@@ -115,13 +115,52 @@ func TestDeltaChangeDetection(t *testing.T) {
 		t.Fatalf("无变化帧应空：got %v", robotIDs(d))
 	}
 
-	// Turret 变化不触发重发（契约：仅位置/HP/能量）。chg4 基于 chg2（同能量）只改 turret。
+	// 原地转炮塔必须立即下发，不能等移动或耗能后才更新瞄准线。
 	chg4 := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
 	chg4.Robots[1].EnergyX10 = 500
 	chg4.Robots[1].Turret = 1.5
 	d = enc.Encode(5, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
-	if len(d.Robots) != 0 {
-		t.Fatalf("纯 turret 变化不应重发：got %v", robotIDs(d))
+	if r := robotByID(d, 2); r == nil || r.Base.Heading != 1.5 {
+		t.Fatalf("纯 turret 变化必须下发：got %v", d.Robots)
+	}
+	// 技能的结束帧也必须下发，即使能量已回满。
+	chg4.Robots[1].ShieldOn = true
+	d = enc.Encode(6, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || !r.ShieldOn {
+		t.Fatal("shield start missing")
+	}
+	chg4.Robots[1].ShieldOn = false
+	chg4.Robots[1].Dashing = true
+	d = enc.Encode(7, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || r.ShieldOn || !r.Dashing {
+		t.Fatal("ability transition missing")
+	}
+	chg4.Robots[1].Dashing = false
+	d = enc.Encode(8, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || r.Dashing {
+		t.Fatal("dash end missing")
+	}
+}
+
+// Private state is sent on every snapshot, including reconnect/full while a CD is active.
+func TestPrivateSkillStateSurvivesFullResync(t *testing.T) {
+	enc := NewEncoder()
+	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0)})
+	self := selfIn(1)
+	self.DashReadyTick, self.FireReadyTick = 250, 115
+	first := enc.Encode(100, 0, sim.PhaseOuterRing, 479, obsOf(w, 1, 0, nil), self)
+	if first.Self.AssistOn == nil || first.Self.GetAssistOn() || first.Self.GetDashReadyTick() != 250 || first.Self.GetFireReadyTick() != 115 {
+		t.Fatalf("missing authoritative initial state: %v", first.Self)
+	}
+	self.AssistOn = true
+	enc.ForceFull()
+	next := enc.Encode(120, 0, sim.PhaseOuterRing, 478, obsOf(w, 1, 0, nil), self)
+	if !next.Full || !next.Self.GetAssistOn() || next.Self.GetDashReadyTick() != 250 {
+		t.Fatalf("resync must preserve private state: %v", next.Self)
+	}
+	// Retained frames do not alias caller state.
+	if first.Self.GetAssistOn() {
+		t.Fatal("old frame changed after caller mutation")
 	}
 }
 

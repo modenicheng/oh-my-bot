@@ -181,7 +181,8 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 			panic("sim: robot IDs must be unique and nonzero")
 		}
 		s.index[id] = i
-		s.robots[i] = Robot{ID: id, HP: MaxHP, Energy: MaxEnergy, State: Alive, Sector: uint32(i % 8), Control: ControlState{Assist: true}}
+		// Assist defaults off: script arbitration is opt-in per player/room.
+		s.robots[i] = Robot{ID: id, HP: MaxHP, Energy: MaxEnergy, State: Alive, Sector: uint32(i % 8), Control: ControlState{}}
 		if id >= s.nextProjectile {
 			s.nextProjectile = id + 1
 		}
@@ -341,33 +342,62 @@ func (s *Sim) moveAndCollide() {
 		if r.Combat.DashUntil > s.tick {
 			r.Velocity = r.Combat.DashDirection.Scale(DashSpeed)
 		}
-		delta := Vec2{r.Velocity.X * DT, r.Velocity.Y * DT}
-		fraction, hit := 1.0, false
-		for _, wall := range s.walls {
-			if t, ok := sweepWall(r.Position, delta, wall); ok && t <= fraction {
-				fraction, hit = t, true
+		s.slideRobot(r)
+	}
+}
+
+// slideRobot advances one tick by sweeping the whole displacement against every
+// obstacle: at each contact it cancels only the inward velocity and remaining
+// displacement components, then re-sweeps the tangential remainder. Wall
+// slides, rounded corners, crevices, dashes and the gen>=2 arena disk keep
+// their tangential motion without penetration; bounded iterations keep a tick
+// deterministic. WallHit keeps the first contact point and its normal impact.
+func (s *Sim) slideRobot(r *Robot) {
+	const maxContacts = 4
+	remaining := Vec2{r.Velocity.X * DT, r.Velocity.Y * DT}
+	firstContact, contactAt, impact := false, r.Position, 0.0
+	for i := 0; i < maxContacts && remaining.Len() > collisionEpsilon; i++ {
+		c := s.sweepContact(r.Position, remaining)
+		t, normal, hit := c.t, c.normal, c.hit
+		r.Position.X += remaining.X * t
+		r.Position.Y += remaining.Y * t
+		if !hit {
+			break // free motion consumed the whole remainder (t == 1)
+		}
+		if n := normal.Len(); n <= collisionEpsilon {
+			r.Velocity = Vec2{} // degenerate contact already inside a solid
+			break
+		} else {
+			normal = normal.Scale(1 / n)
+		}
+		if !firstContact {
+			firstContact, contactAt = true, r.Position
+			if into := r.Velocity.X*normal.X + r.Velocity.Y*normal.Y; into < 0 {
+				impact = -into
 			}
 		}
-		if s.zoneLocked() {
-			if t, ok := sweepCircle(r.Position, delta, Vec2{}, s.mapDef.CoreZone.Radius+RobotRadius); ok && t <= fraction {
-				fraction, hit = t, true
-			}
+		remaining.X, remaining.Y = remaining.X*(1-t), remaining.Y*(1-t)
+		into := remaining.X*normal.X + remaining.Y*normal.Y
+		if into < 0 {
+			remaining.X -= into * normal.X
+			remaining.Y -= into * normal.Y
 		}
-		if t, ok := s.sweepArena(r.Position, delta); ok && t <= fraction {
-			fraction, hit = t, true
+		if into := r.Velocity.X*normal.X + r.Velocity.Y*normal.Y; into < 0 {
+			r.Velocity.X -= into * normal.X
+			r.Velocity.Y -= into * normal.Y
 		}
-		r.Position.X += delta.X * fraction
-		r.Position.Y += delta.Y * fraction
-		r.Position = s.containInArena(r.Position)
-		if hit {
-			impact := math.Hypot(r.Velocity.X, r.Velocity.Y)
-			r.Velocity = Vec2{}
-			if !r.HasWallHit || s.tick-r.LastWallHitTick >= WallHitInterval {
-				r.LastWallHitTick, r.HasWallHit = s.tick, true
-				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_WallHit{
-					WallHit: &ombv1.EvWallHit{Robot: r.ID, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Impact: float32(impact)}}})
-			}
+		if s.boundedArena() && r.Position.Len() >= arenaCenterRadius-collisionEpsilon {
+			// A straight tangent immediately exits a disk. Project its destination
+			// into the disk, then sweep that interior chord against ALL obstacles.
+			// The correction never moves the robot without a collision check.
+			remaining = s.containInArena(r.Position.Add(remaining)).Sub(r.Position)
 		}
+	}
+	r.Position = s.containInArena(r.Position)
+	if firstContact && (!r.HasWallHit || s.tick-r.LastWallHitTick >= WallHitInterval) {
+		r.LastWallHitTick, r.HasWallHit = s.tick, true
+		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_WallHit{
+			WallHit: &ombv1.EvWallHit{Robot: r.ID, At: &ombv1.Vec2{X: contactAt.X, Y: contactAt.Y}, Impact: float32(impact)}}})
 	}
 }
 

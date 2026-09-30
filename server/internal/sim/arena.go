@@ -14,6 +14,7 @@ func (s *Sim) insideArena(p Vec2) bool {
 
 // sweepArena returns the exit from the playable disk, the opposite root from
 // sweepCircle's entrance into a solid. A chord may move inward then exit again.
+// The caller treats the boundary as a wall: slide along it or stop, never leave.
 func (s *Sim) sweepArena(p, d Vec2) (float64, bool) {
 	if !s.boundedArena() {
 		return 0, false
@@ -41,8 +42,9 @@ func (s *Sim) sweepArena(p, d Vec2) (float64, bool) {
 	return math.Max(0, math.Min(1, t)), true
 }
 
-// Only removes rounding overshoot after an arena sweep; all geometry is swept
-// before this correction, so a normal move never teleports through a wall.
+// containInArena projects a point into the playable disk. The mover sweeps
+// projected destinations before using them; the final correction only handles
+// rounding overshoot after that sweep.
 func (s *Sim) containInArena(p Vec2) Vec2 {
 	if s.boundedArena() {
 		if n := p.Len(); n > arenaCenterRadius {

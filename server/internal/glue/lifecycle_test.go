@@ -126,6 +126,98 @@ func TestReconnectPreservesRobotAndConsumedSequence(t *testing.T) {
 	}
 }
 
+func TestDisconnectReleasesOnlyCurrentHumanControls(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("release")
+	old, oldLog := bindLogged(t, h, rc, "pilot")
+	m := assembledTestMatch(t, rc, old)
+	rc.mu.Lock()
+	rc.match = m
+	m.bootstrapLocked(old)
+	rc.mu.Unlock()
+	m.step()
+	rid := lastSnapshot(t, oldLog.take()).Self.RobotId
+	old.RouteInput(&ombv1.ClientInput{Seq: 5, AxisMask: 13, MoveX: 1000, Fire: true, Interact: true})
+	h.Unregister(old) // Pending controls must be stopped before they can become held.
+	m.step()
+	r, _ := m.sim.Robot(rid)
+	if r.Control.Output.Move.X != 0 || r.Control.Output.Fire || r.Control.Output.Interact || r.ConsumedSeq != 6 {
+		t.Fatalf("disconnected input remained held: %+v", r.Control.Output)
+	}
+	current, log := bindLogged(t, h, rc, "pilot")
+	m.step()
+	full := lastSnapshot(t, log.take())
+	if !full.Full || full.AckSeq != 6 {
+		t.Fatalf("stop sequence not acknowledged: %v", full)
+	}
+	current.RouteInput(&ombv1.ClientInput{Seq: 7, AxisMask: 1, MoveY: 1000})
+	h.Unregister(old) // A late close from the old transport cannot stop its replacement.
+	m.step()
+	r, _ = m.sim.Robot(rid)
+	if r.Control.Output.Move.Y != 1 || r.ConsumedSeq != 7 {
+		t.Fatal("stale transport stopped replacement")
+	}
+	current.LeaveRoom()
+	m.step()
+	r, _ = m.sim.Robot(rid)
+	if r.Control.Output.Move.Y != 0 {
+		t.Fatal("explicit leave left movement held")
+	}
+}
+
+func TestSkillStateAndConfirmedShotSurviveReconnect(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("skills")
+	s, log := bindLogged(t, h, rc, "pilot")
+	m := assembledTestMatch(t, rc, s)
+	rc.mu.Lock()
+	rc.match = m
+	m.bootstrapLocked(s)
+	rc.mu.Unlock()
+	m.step()
+	initial := lastSnapshot(t, log.take())
+	if initial.Self.AssistOn == nil || initial.Self.GetAssistOn() {
+		t.Fatal("new matches must start with assistance off")
+	}
+	rid := initial.Self.RobotId
+	s.RouteInput(&ombv1.ClientInput{Seq: 1, AxisMask: 15, Aim: 1.25, Fire: true, Dash: true})
+	m.step()
+	msgs := log.take()
+	snap := lastSnapshot(t, msgs)
+	if snap.Self.GetDashReadyTick() <= snap.Tick || snap.Self.GetFireReadyTick() <= snap.Tick {
+		t.Fatalf("accepted skills missing authoritative cooldown: %v", snap.Self)
+	}
+	shot := false
+	for _, msg := range msgs {
+		if ev := msg.msg.GetEvent().GetShot(); ev != nil && ev.Owner == rid {
+			shot = true
+		}
+	}
+	if !shot {
+		t.Fatal("accepted shot missing reliable feedback event")
+	}
+	s.ToggleAssist()
+	m.step()
+	replacement, restoredLog := bindLogged(t, h, rc, "pilot")
+	m.step()
+	restored := lastSnapshot(t, restoredLog.take())
+	if !restored.Full || !restored.Self.GetAssistOn() || restored.Self.GetDashReadyTick() != snap.Self.GetDashReadyTick() {
+		t.Fatalf("reconnect lost private skill state: %v", restored.Self)
+	}
+	s.ToggleAssist() // superseded sessions cannot change current controls
+	m.step()
+	if !lastSnapshot(t, restoredLog.take()).Self.GetAssistOn() {
+		t.Fatal("superseded session changed assist state")
+	}
+	replacement.ToggleAssist()
+	m.step()
+	if lastSnapshot(t, restoredLog.take()).Self.GetAssistOn() {
+		t.Fatal("current session could not disable assist")
+	}
+	h.Unregister(s)
+	h.Unregister(replacement)
+}
+
 func TestCancelledAndSupersededLaunchCannotPublish(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "superseded", true: "aborted"}[cancelled], func(t *testing.T) {

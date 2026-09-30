@@ -13,11 +13,14 @@ import (
 // SelfInput 是 Encode 的自机参数：自机 RobotView + 分轴仲裁结果（ADR-0009，
 // 下发 SelfState.move_src/turret_src 供 UI 显示）。
 type SelfInput struct {
-	Robot     sim.RobotView
-	MoveSrc   byte // 'H' human / 'S' script / '-' none
-	TurretSrc byte
-	AiRounds  uint32
-	AiTokensK uint32
+	Robot         sim.RobotView
+	MoveSrc       byte // 'H' human / 'S' script / '-' none
+	TurretSrc     byte
+	AiRounds      uint32
+	AiTokensK     uint32
+	AssistOn      bool
+	DashReadyTick uint32
+	FireReadyTick uint32
 }
 
 // DeltaEncoder 把某观察者的逐 tick Observation 编成 SnapshotDelta。
@@ -34,13 +37,20 @@ type DeltaEncoder struct {
 	forceFull   bool
 }
 
-// robotStamp：参与变化判定的 RobotView 子集。设计契约：delta 只在
-// 位置/HP/能量任一变化时重发实体；shield/dash/dead/respawn/invuln/turret
-// 等表现态随同帧捎带（dead 必然伴随 HP 归零帧捕获；respawn 由客户端按
-// 倒计时表现）。nick/color 只在 full 与新入 AOI 时携带。
+// Every wire-visible gameplay state participates in delta detection. In particular,
+// idle turret turns and ability end frames must not wait for position/energy changes.
 type robotStamp struct {
-	pos              sim.Vec2
-	hpX10, energyX10 int32
+	pos                   sim.Vec2
+	heading               float32
+	hpX10, energyX10      int32
+	shield, dashing, dead bool
+	respawn               uint32
+}
+
+func stampRobot(r *sim.RobotView) robotStamp {
+	return robotStamp{pos: r.Pos, heading: float32(r.Turret), hpX10: r.HpX10,
+		energyX10: r.EnergyX10, shield: r.ShieldOn, dashing: r.Dashing,
+		dead: r.Dead, respawn: r.RespawnInS}
 }
 
 // projStamp / coreStamp / uplinkStamp：各类别的变化子集。
@@ -93,7 +103,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	nextRobots := make(map[uint32]robotStamp, len(obs.Robots))
 	for i := range obs.Robots {
 		r := &obs.Robots[i]
-		nextRobots[r.ID] = robotStamp{pos: r.Pos, hpX10: r.HpX10, energyX10: r.EnergyX10}
+		nextRobots[r.ID] = stampRobot(r)
 		if full {
 			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true))
 			continue
@@ -103,7 +113,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true)) // 新入 AOI：完整元数据
 			continue
 		}
-		if prev.pos != r.Pos || prev.hpX10 != r.HpX10 || prev.energyX10 != r.EnergyX10 {
+		if prev != nextRobots[r.ID] {
 			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), false))
 		}
 	}
@@ -272,12 +282,16 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 	if s == nil {
 		return nil
 	}
+	assist, dashReady, fireReady := s.AssistOn, s.DashReadyTick, s.FireReadyTick
 	return &ombv1.SelfState{
 		RobotId:       s.Robot.ID,
 		MoveSrc:       ctrlSrc(s.MoveSrc),
 		TurretSrc:     ctrlSrc(s.TurretSrc),
 		AiRoundsLeft:  s.AiRounds,
 		AiTokensLeftK: s.AiTokensK,
+		AssistOn:      &assist,
+		DashReadyTick: &dashReady,
+		FireReadyTick: &fireReady,
 	}
 }
 

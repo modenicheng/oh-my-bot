@@ -8,6 +8,30 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+func TestWallSlideRetainsTangentialMotion(t *testing.T) {
+	sink := &recordingSink{}
+	s := NewSim(42, []uint32{1}, sink)
+	if err := s.SetWalls([]Wall{{ID: 10, Min: Vec2{1, -10}, Max: Vec2{2, 10}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSpawn(1, Vec2{.38, 0}, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.robots[0].Velocity = Vec2{3, 4}
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 375, MoveY: 500})
+	s.Tick()
+	r := mustRobot(t, s, 1)
+	closeFloat(t, r.Position.X, 1-RobotRadius)
+	closeFloat(t, r.Position.Y, 4*DT)
+	closeFloat(t, r.Velocity.X, 0)
+	closeFloat(t, r.Velocity.Y, 4)
+	if len(sink.events) != 2 || sink.events[1].GetWallHit() == nil {
+		t.Fatal("missing wall contact event")
+	}
+	closeFloat(t, float64(sink.events[1].GetWallHit().Impact), 3)
+	closeFloat(t, sink.events[1].GetWallHit().At.Y, 4*.02/3)
+}
+
 func TestWallHitThrottlePerRobot(t *testing.T) {
 	sink := &recordingSink{}
 	s := NewSim(42, []uint32{2, 1}, sink)
@@ -173,5 +197,47 @@ func TestWallAndSpawnConfiguration(t *testing.T) {
 	}
 	if err := s.SetSpawn(1, Vec2{}, 0); err == nil {
 		t.Fatal("running spawn mutated")
+	}
+}
+
+func TestSweepToleranceDoesNotPermitInwardPenetration(t *testing.T) {
+	w := Wall{ID: 1, Min: Vec2{}, Max: Vec2{1, 1}}
+	for _, tc := range []struct {
+		name string
+		p, d Vec2
+	}{
+		{"face", Vec2{-.6 + 5e-11, .5}, Vec2{.1, 0}},
+		{"corner", Vec2{-1, -1}.Scale((.6 - 5e-11) / math.Sqrt2), Vec2{1, 1}.Scale(.1 / math.Sqrt2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if overlapsWall(tc.p, w) {
+				t.Fatal("fixture must be accepted by overlap tolerance")
+			}
+			fraction, normal, hit := sweepWallNormal(tc.p, tc.d, w)
+			if !hit || fraction != 0 || math.Abs(normal.Len()-1) > 1e-12 {
+				t.Fatalf("inward tolerance contact missed: t=%g n=%v hit=%v", fraction, normal, hit)
+			}
+			if _, _, hit := sweepWallNormal(tc.p, tc.d.Scale(-1), w); hit {
+				t.Fatal("outward escape blocked")
+			}
+		})
+	}
+	if fraction, hit := sweepCircle(Vec2{10.6 - 4e-12, 0}, Vec2{-.001, 0}, Vec2{}, 10.6); !hit || fraction != 0 {
+		t.Fatalf("circle tolerance contact missed: t=%g hit=%v", fraction, hit)
+	}
+}
+
+func TestSweepEpsilonTieKeepsEarliestFraction(t *testing.T) {
+	w := Wall{ID: 1, Min: Vec2{}, Max: Vec2{1, 1}}
+	p := Vec2{-1.6 + 5e-11, .5}
+	want := -RobotRadius - p.X
+	if got, _, hit := sweepWallNormal(p, Vec2{1, 0}, w); !hit || math.Abs(got-want) > 1e-14 {
+		t.Fatalf("late single contact: got %.15f want %.15f", got, want)
+	}
+	s := NewSim(0, []uint32{1}, nil)
+	s.walls = []Wall{{ID: 1, Min: Vec2{1.1, -1}, Max: Vec2{2, 1}}, {ID: 2, Min: Vec2{1.1 - 5e-11, -1}, Max: Vec2{2, 1}}}
+	want = s.walls[1].Min.X - RobotRadius
+	if got := s.sweepContact(Vec2{}, Vec2{1, 0}); !got.hit || math.Abs(got.t-want) > 1e-14 {
+		t.Fatalf("late multi-wall contact: got %.15f want %.15f", got.t, want)
 	}
 }

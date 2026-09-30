@@ -237,6 +237,28 @@ func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
 // Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
 func (m *Match) Abort() { m.Stop() }
 
+// Release held human controls through the ordinary input/log path. Script-owned
+// axes and assist state survive; the next full snapshot acknowledges this sequence.
+func (m *Match) releaseHumanLocked(pid uint64) {
+	rid, ok := m.robotOf[pid]
+	if !ok {
+		return
+	}
+	r, ok := m.sim.Robot(rid)
+	if !ok {
+		return
+	}
+	axes := r.Control.HumanAxes
+	if r.InputPending {
+		axes |= r.PendingInput.AxisMask
+	}
+	axes &= sim.AxisMove | sim.AxisFire | sim.AxisAbility
+	if axes == 0 {
+		return
+	}
+	m.sim.ApplyInput(rid, &ombv1.ClientInput{Seq: r.LatestSeq + 1, AxisMask: uint32(axes), Aim: r.Heading})
+}
+
 func (m *Match) Stop() {
 	m.stopOnce.Do(func() { close(m.stop) })
 	// Also dispose assembled matches cancelled before publication.
@@ -326,10 +348,15 @@ func (m *Match) step() {
 			Uplinks:     wv.Uplinks,
 		}, m.wallIX, rv.ID, wv.Partners[rv.ID])
 		ctrl := wv.Controls[rv.ID]
+		// Owner-locked private state is projected without changing the frozen RobotView API.
+		robot, _ := m.sim.Robot(rv.ID)
 		self := snapshot.SelfInput{
-			Robot:     rv,
-			MoveSrc:   ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
-			TurretSrc: ctrl.TurretSrc,
+			Robot:         rv,
+			MoveSrc:       ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
+			TurretSrc:     ctrl.TurretSrc,
+			AssistOn:      robot.Control.Assist,
+			DashReadyTick: robot.Combat.DashReady,
+			FireReadyTick: robot.Combat.FireReady,
 		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
 		msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}

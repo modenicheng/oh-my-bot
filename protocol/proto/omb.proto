@@ -108,6 +108,9 @@ message SelfState {
   ControlSource turret_src = 3;
   uint32 ai_rounds_left = 4;
   uint32 ai_tokens_left_k = 5;  // 千 token
+  optional bool assist_on = 6; // 权威辅助状态；缺失表示旧服务器
+  optional uint32 dash_ready_tick = 7; // 绝对 60Hz tick，重连后仍准确
+  optional uint32 fire_ready_tick = 8;
 }
 
 message SnapshotDelta {
@@ -136,6 +139,12 @@ message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
 message EvSay { uint32 robot = 1; string text = 2; }
 message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
+// 表现事件只报告已发生的攻击，客户端不从弹丸消失推断命中。
+message EvShot { uint32 projectile = 1; uint32 owner = 2; Vec2 at = 3; float heading = 4; }
+message EvProjectileImpact {
+  uint32 projectile = 1; uint32 owner = 2; uint32 target = 3; // 0 = 掩体/锁区
+  Vec2 at = 4; bool shield = 5; bool invulnerable = 6;
+}
 message EvMatchStart { uint64 map_seed = 1; uint32 players = 2; } // 开局：种子随事件落盘（回放可复现）
 message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/robot 节流（铁头娃埋点）
 message EvScriptError { uint32 robot = 1; string error = 2; uint32 script_rev = 3; } // 人工智障埋点
@@ -211,6 +220,8 @@ message ServerEvent {
     EvScriptError script_error = 23;
     EvMapBootstrap map_bootstrap = 24;
     EvAiUsage ai_usage = 25;
+    EvShot shot = 26;
+    EvProjectileImpact projectile_impact = 27;
   }
 }
 

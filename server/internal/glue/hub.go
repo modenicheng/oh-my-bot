@@ -48,6 +48,9 @@ func (h *Hub) Unregister(s *Session) {
 	if rc := s.rc; rc != nil {
 		rc.mu.Lock()
 		if rc.sessions[s.playerID] == s {
+			if m := rc.match; m != nil && m.activeLocked() {
+				m.releaseHumanLocked(s.playerID)
+			}
 			delete(rc.sessions, s.playerID)
 		}
 		rc.mu.Unlock()
@@ -122,6 +125,11 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 		s.playerID = info.PlayerID
 	}
 	s.nick, s.color, s.rc = info.Nick, info.Color, rc
+	if rc.sessions[s.playerID] != nil {
+		if m := rc.match; m != nil && m.activeLocked() {
+			m.releaseHumanLocked(s.playerID)
+		}
+	}
 	rc.sessions[s.playerID] = s
 	if m := rc.match; m != nil && m.activeLocked() {
 		m.bootstrapLocked(s)
@@ -146,6 +154,15 @@ func (s *Session) RouteInput(in *ombv1.ClientInput) {
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {
 			m.applyInputLocked(s.playerID, in)
+		}
+	})
+}
+func (s *Session) ToggleAssist() {
+	s.withRoom(func(rc *RoomConn) {
+		if m := rc.match; m != nil && m.activeLocked() {
+			if rid, ok := m.robotOf[s.playerID]; ok {
+				m.sim.AssistToggle(rid)
+			}
 		}
 	})
 }
@@ -196,6 +213,9 @@ func (s *Session) Resync() {
 // Explicit leave frees the seat and nickname; closing a socket uses Unregister instead.
 func (s *Session) LeaveRoom() {
 	s.withRoom(func(rc *RoomConn) {
+		if m := rc.match; m != nil && m.activeLocked() {
+			m.releaseHumanLocked(s.playerID)
+		}
 		delete(rc.sessions, s.playerID)
 		delete(rc.identities, s.nick)
 		_ = rc.Room.Leave(s.playerID)

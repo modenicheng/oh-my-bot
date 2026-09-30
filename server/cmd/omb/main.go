@@ -202,6 +202,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 		if cur := (*sess); cur != nil {
 			cur.AiPrompt(p.AiPrompt)
 		}
+	case *ombv1.ClientMsg_AssistToggle:
+		if cur := (*sess); cur != nil {
+			cur.ToggleAssist()
+		}
 	case *ombv1.ClientMsg_ResyncRequest:
 		if cur := (*sess); cur != nil {
 			cur.Resync()

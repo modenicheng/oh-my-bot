@@ -54,6 +54,9 @@ func (s *Sim) fireProjectiles() {
 		r.Energy = math.Max(0, r.Energy-FireCost)
 		r.Combat.FireReady = s.tick + FireInterval
 		s.projectiles = append(s.projectiles, Projectile{ID: s.nextProjectile, Owner: r.ID, Pos: r.Position, Heading: r.Heading, BaseHeading: r.Heading, Spread: (s.randomUnit()*2 - 1) * MaxSpread})
+		// Telemetry only: announce the attack at the muzzle; impacts follow below.
+		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Shot{Shot: &ombv1.EvShot{
+			Projectile: s.nextProjectile, Owner: r.ID, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Heading: float32(r.Heading)}}})
 		s.nextProjectile++ // zero means exhausted IDs: never wrap and reuse an entity.
 	}
 }
@@ -87,10 +90,22 @@ func (s *Sim) stepProjectiles() {
 		p.Pos = p.Pos.Add(delta.Scale(fraction))
 		p.Distance += length * fraction
 		if victim >= 0 {
-			s.damage(p.Owner, &s.robots[victim], ShotDamage)
+			v := &s.robots[victim]
+			// Impact telemetry precedes damage so observers see the hit even when
+			// protection (invulnerability/partner) means no HP follows.
+			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
+				Projectile: p.ID, Owner: p.Owner, Target: v.ID, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y},
+				Shield: v.Combat.ShieldOn, Invulnerable: v.Combat.Invulnerable}}})
+			s.damage(p.Owner, v, ShotDamage)
 			continue
 		}
 		if blocked || p.Distance >= ProjectileRange-collisionEpsilon {
+			// A projectile dying against a solid (wall/locked core) reports its
+			// stopping point with Target 0; range expiry stays silent.
+			if blocked {
+				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
+					Projectile: p.ID, Owner: p.Owner, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y}}}})
+			}
 			continue
 		}
 		alive = append(alive, p)
@@ -159,6 +174,9 @@ func sweepCircle(p, d, center Vec2, radius float64) (float64, bool) {
 	dot := offset.X*d.X + offset.Y*d.Y
 	if a == 0 || dot >= 0 {
 		return 0, false
+	}
+	if c <= 0 {
+		return 0, true // inward motion from a tolerated boundary overlap
 	}
 	disc := dot*dot - a*c
 	if disc <= 0 {

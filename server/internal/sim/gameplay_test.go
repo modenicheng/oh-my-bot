@@ -70,6 +70,7 @@ func TestArbitrationAxisMaskTable(t *testing.T) {
 }
 func TestScriptPointerSemanticsAndHumanPersistence(t *testing.T) {
 	s := NewSim(1, []uint32{1}, nil)
+	s.AssistToggle(1) // scripts are opt-in: arbitration requires assist on
 	move := Vec2{1, 0}
 	aim := 1.0
 	if !s.ApplyScriptCommands(1, ScriptCommands{Move: &move, Aim: &aim, Fire: ptr(true), Shield: ptr(true)}) {
@@ -245,6 +246,7 @@ func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 	})
 	t.Run("pulse", func(t *testing.T) {
 		s, _ := enemySim(t)
+		s.AssistToggle(1)
 		s.robots[0].Position = Vec2{}
 		s.robots[1].Position = Vec2{31, 0}
 		s.robots[2].Position = Vec2{0, 31}
@@ -347,6 +349,7 @@ func TestInvulnerabilityThreeRulesAndDeathAxes(t *testing.T) {
 		})
 	}
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Fire: ptr(true)})
+	s.robots[0].Control.Assist = true // death-axis behavior is observed with arbitration active
 	s.Tick()
 	s.damage(2, &s.robots[0], 100)
 	if s.robots[0].Control.Output.Fire || s.robots[0].Control.ScriptAxes != 0 || s.robots[0].Control.HumanAxes != 0 {
@@ -388,6 +391,7 @@ func TestPartnersFixedFriendlyFireSoftCollisionAndSay(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	s = NewSim(1, []uint32{1}, sink)
+	s.AssistToggle(1) // Say flows through script arbitration, which is opt-in
 	for i := 0; i < 181; i++ {
 		s.ApplyScriptCommands(1, ScriptCommands{Say: ptr("hello")})
 		s.Tick()

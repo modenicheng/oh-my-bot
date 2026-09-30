@@ -108,7 +108,10 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		readerErr := make(chan error, 1)
 		go func() {
 			for {
-				_, data, err := c.Read(ctx)
+				// A half-open connection must eventually unregister and release held input.
+				readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				_, data, err := c.Read(readCtx)
+				cancel()
 				if err != nil {
 					readerErr <- err
 					return
