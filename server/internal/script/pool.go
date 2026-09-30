@@ -61,21 +61,18 @@ func (s *resultSink) deliver(res TickResult) {
 	s.out = append(s.out, res)
 }
 
-// remaining 未完成 id（Collect 超时收口用）。
-func (s *resultSink) remaining() []uint32 {
+// finish freezes completed and pending IDs in one critical section. Ownership
+// of the result slice transfers to Collect; late workers find no pending ID.
+func (s *resultSink) finish() ([]TickResult, []uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ids := make([]uint32, 0, len(s.pending))
 	for id := range s.pending {
 		ids = append(ids, id)
 	}
-	return ids
-}
-
-func (s *resultSink) results() []TickResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.out
+	results := s.out
+	s.pending, s.out = nil, nil
+	return results, ids
 }
 
 func (s *resultSink) isEmpty() bool {
@@ -246,8 +243,8 @@ func (p *RunPool) Collect(deadline time.Time) []TickResult {
 		<-wait.C
 	}
 
-	results := sink.results()
-	for _, id := range sink.remaining() {
+	results, pending := sink.finish()
+	for _, id := range pending {
 		rev := uint32(0)
 		if rt := p.RuntimeOf(id); rt != nil {
 			rev = rt.Rev()

@@ -252,3 +252,50 @@ func TestNumWorkersBounds(t *testing.T) {
 		t.Fatalf("NumWorkers out of bounds: %d", n)
 	}
 }
+
+func TestCollectTimeoutFreezesResultSet(t *testing.T) {
+	sink := newResultSink([]uint32{1, 2})
+	sink.out = make([]TickResult, 0, 4)
+	sink.deliver(TickResult{ID: 1, Rev: 7})
+	p := &RunPool{batch: sink}
+	results := p.Collect(time.Now().Add(-time.Second))
+	if len(results) != 2 || results[1].ID != 2 || !results[1].Deferred {
+		t.Fatalf("missing deferred result: %+v", results)
+	}
+	sink.deliver(TickResult{ID: 2, Rev: 99})
+	if !results[1].Deferred || results[1].Rev != 0 {
+		t.Fatalf("late worker rewrote returned frame: %+v", results)
+	}
+}
+
+func TestCollectConcurrentDeadlineKeepsEveryID(t *testing.T) {
+	const n = 64
+	ids := make([]uint32, n)
+	for i := range ids {
+		ids[i] = uint32(i + 1)
+	}
+	for i := 0; i < 100; i++ {
+		sink := newResultSink(ids)
+		p := &RunPool{batch: sink}
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, id := range ids {
+				sink.deliver(TickResult{ID: id})
+			}
+		}()
+		results := p.Collect(time.Now().Add(-time.Second))
+		seen := make(map[uint32]bool, n)
+		for _, r := range results {
+			if seen[r.ID] {
+				t.Fatalf("duplicate result %d", r.ID)
+			}
+			seen[r.ID] = true
+		}
+		wg.Wait()
+		if len(seen) != n {
+			t.Fatalf("deadline lost results: %d/%d", len(seen), n)
+		}
+	}
+}
