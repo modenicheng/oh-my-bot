@@ -15,7 +15,7 @@ audience: both
 4. **开 Snippet**：按 `Tab` 打开编辑器，在 Snippet 面板启用"自动瞄准""自动拾取"等驾驶辅助，按你手感留几根轴自己控。
 5. **打完**：结算页看总分和 13 个称号。局散房不散，房主开下一局，累计 Session 积分。
 
-想更进一步时再看：[进房前准备](prepare.md) · [操作与仲裁](controls.md) · [游戏规则](game-rules.md) · [写代码](bot-scripting.md) · [AI 改码](ai-agent.md)
+想更进一步时再看：[进房前准备](prepare.md) · [操作与仲裁](controls.md) · [游戏规则](game-rules.md) · [写代码](bot-scripting.md) · [库手册](library/index.md) · [AI 改码](ai-agent.md)
 
 ## 手册目录
 
@@ -25,6 +25,7 @@ audience: both
 | [controls.md](controls.md) | 手操、驾驶辅助、分轴仲裁、Space 开关、快捷键 | 所有人 |
 | [game-rules.md](game-rules.md) | 地图三环八扇区、得分、Uplink、搭档、复活、称号 | 所有人 |
 | [bot-scripting.md](bot-scripting.md) | 从五行代码开始写 Bot Script：tick 模型、scan()、API 表 | 想写代码的人 |
+| [library/](library/index.md) | Bot Script 库手册：全部 API 真实语义、服务端强制行为、可跑示例库 | 写复杂 Bot / AI 语料 |
 | [ai-agent.md](ai-agent.md) | 让 AI Agent 用自然语言帮你改码、配额与称号 | 不想手写代码的人 |
 
 ## 核心概念速查（与官方术语表一致）
