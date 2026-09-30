@@ -35,7 +35,10 @@ export function phaseName(p: number): string {
 }
 
 
-export interface SayBubble { robotId: number; text: string; at: number }
+export interface SayBubble {
+  robotId: number; text: string; at: number
+  layout?: { maxWidth: number; lines: string[]; width: number }
+}
 export interface RenderExtras { bubbles: SayBubble[]; localAim?: number; feedback?: GameFeedback }
 
 export class Renderer {
@@ -93,34 +96,57 @@ export class Renderer {
     this.drawBubbles(world, cam, extras)
   }
 
-  /** say 气泡：机器人头顶文字，4s 淡出 */
+  /** say 气泡：随机器人移动的像素框，长消息换行，4s 后消失。 */
   private drawBubbles(world: WorldState, cam: Camera, extras: RenderExtras): void {
     const { ctx } = this
     const now = performance.now()
     for (const bub of extras.bubbles) {
       const r = world.robots.get(bub.robotId)
       const pos = r?.base?.pos
-      if (!pos) continue
+      if (!pos || r?.dead) continue
       const age = (now - bub.at) / 1000
       if (age > 4) continue
-      const alpha = age < 3 ? 1 : 1 - (age - 3)
       const x = cam.toPxX(pos.x)
       const radius = Math.max(6, ROBOT_R * cam.scale)
-      const y = cam.toPxY(pos.y) - (r!.shieldOn ? radius * 1.65 + 9 : radius) - 34
+      const anchorY = cam.toPxY(pos.y) - (r.shieldOn ? radius * 1.65 + 9 : radius) - 38
+      if (x < -radius || x > cam.cw + radius || anchorY > cam.ch) continue
       ctx.save()
-      ctx.globalAlpha = alpha
-      ctx.font = `12px ${mono}`
+      ctx.font = `14px ${mono}`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      const text = bub.text.slice(0, 40)
-      const tw = ctx.measureText(text).width
-      ctx.fillStyle = '#10141acc'
-      ctx.fillRect(x - tw / 2 - 6, y - 9, tw + 12, 18)
-      ctx.strokeStyle = ink.line
-      ctx.lineWidth = 1
-      ctx.strokeRect(x - tw / 2 - 6, y - 9, tw + 12, 18)
+      const maxWidth = Math.max(80, Math.min(240, cam.cw - 40))
+      if (!bub.layout || bub.layout.maxWidth !== maxWidth) {
+        const lines: string[] = []
+        let line = ''
+        for (const char of [...bub.text].slice(0, 160)) {
+          if (line && ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = '' }
+          line += char
+        }
+        if (line) lines.push(line)
+        bub.layout = { maxWidth, lines, width: Math.ceil(Math.max(0, ...lines.map(text => ctx.measureText(text).width))) + 20 }
+      }
+      const { lines, width } = bub.layout
+      if (!lines.length) { ctx.restore(); continue }
+      const height = lines.length * 18 + 16
+      const left = Math.round(Math.max(8, Math.min(cam.cw - width - 8, x - width / 2)))
+      const right = left + width
+      const bottom = Math.round(Math.max(height + 8, anchorY))
+      const top = bottom - height
+      const tail = Math.round(Math.max(left + 10, Math.min(right - 10, x)))
+      ctx.beginPath()
+      ctx.moveTo(left + 4, top); ctx.lineTo(right - 4, top)
+      ctx.lineTo(right - 4, top + 4); ctx.lineTo(right, top + 4)
+      ctx.lineTo(right, bottom - 4); ctx.lineTo(right - 4, bottom - 4)
+      ctx.lineTo(right - 4, bottom); ctx.lineTo(tail + 4, bottom)
+      ctx.lineTo(tail + 4, bottom + 4); ctx.lineTo(tail, bottom + 4)
+      ctx.lineTo(tail, bottom + 8); ctx.lineTo(tail - 4, bottom + 8)
+      ctx.lineTo(tail - 4, bottom); ctx.lineTo(left + 4, bottom)
+      ctx.lineTo(left + 4, bottom - 4); ctx.lineTo(left, bottom - 4)
+      ctx.lineTo(left, top + 4); ctx.lineTo(left + 4, top + 4); ctx.closePath()
+      ctx.fillStyle = '#10141af5'; ctx.fill()
+      ctx.strokeStyle = r.color || ink.cyan; ctx.lineWidth = 1; ctx.stroke()
       ctx.fillStyle = ink.text
-      ctx.fillText(text, x, y)
+      lines.forEach((text, i) => ctx.fillText(text, left + width / 2, top + 17 + i * 18))
       ctx.restore()
     }
   }

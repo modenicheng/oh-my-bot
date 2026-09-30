@@ -29,6 +29,9 @@ try {
   let latest, id, map
   const submissions = []
   const receipts = []
+  const says = []
+  const messages = []
+  const inputs = []
   const robots = new Map()
   page.on('pageerror', e => errors.push(String(e)))
   page.on('websocket', socket => {
@@ -36,6 +39,8 @@ try {
       if (!Buffer.isBuffer(payload) || payload[0] !== 2) return
       const msg = fromBinary(ClientMsgSchema, payload.subarray(1))
       if (msg.payload.case === 'scriptSubmit') submissions.push(msg.payload.value)
+      if (msg.payload.case === 'say') says.push(msg.payload.value.text)
+      if (msg.payload.case === 'input') inputs.push(msg.payload.value)
     })
     socket.on('framereceived', ({ payload }) => {
       if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
@@ -43,6 +48,7 @@ try {
       if (msg.payload.case === 'snapshot') { latest = msg.payload.value; if (latest.full) robots.clear(); for (const r of latest.robots) robots.set(r.base.id, r); for (const id of latest.robotGone) robots.delete(id); if (latest.self) id = latest.self.robotId }
       if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'mapBootstrap') { map = JSON.parse(msg.payload.value.kind.value.mapJson); latest = undefined; robots.clear() }
       if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'scriptResult') receipts.push(msg.payload.value.kind.value)
+      if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'say') messages.push(msg.payload.value.kind.value)
     })
   })
   await page.goto(base)
@@ -56,6 +62,17 @@ try {
   await page.locator('#btn-start').waitFor({ state: 'visible' })
   await page.keyboard.press('m')
   await page.locator('#manual-content h1').first().waitFor()
+  for (const width of [1280, 480]) {
+    await page.setViewportSize({ width, height: 800 })
+    const back = await page.locator('#btn-manual-back').boundingBox()
+    const sound = await page.locator('#audio-settings').boundingBox()
+    assert.ok(back.x + back.width <= sound.x || sound.y >= back.y + back.height, 'sound entry never covers manual back button')
+    await page.locator('#audio-settings summary').click()
+    assert.equal(await page.locator('#audio-volume').isVisible(), true)
+    await page.locator('#audio-settings summary').click()
+    await page.screenshot({ path: join(shots, `manual-toolbar-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
   await page.keyboard.press('m')
   await page.locator('#btn-start').waitFor({ state: 'visible' })
   assert.match(page.url(), /room=ROUND2/)
@@ -104,6 +121,31 @@ try {
   }
   const seconds = clock.map(t => t.split(':').reduce((m, s) => m * 60 + Number(s), 0))
   assert.ok(seconds.every((s, i) => Number.isFinite(s) && s > 470 && (i === 0 || s <= seconds[i - 1])), `countdown reversed or cleared: ${clock}`)
+  // Enter opens IME-safe chat, shares the server Say path and restores canvas focus.
+  await page.locator('#game-canvas').focus()
+  await page.keyboard.press('Enter')
+  await page.locator('#game-chat-input').waitFor({ state: 'visible' })
+  const chatPosition = { ...robots.get(id).base.pos }
+  await page.fill('#game-chat-input', 'wasd中文发言')
+  await page.locator('#game-chat-input').dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true })
+  assert.equal(says.length, 0, 'composition confirmation never sends chat')
+  assert.equal(await page.locator('#game-chat').isVisible(), true)
+  await sleep(100)
+  assert.ok(Math.hypot(robots.get(id).base.pos.x - chatPosition.x, robots.get(id).base.pos.y - chatPosition.y) < 0.1, 'chat input never drives robot')
+  await page.keyboard.press('Enter')
+  await until(() => messages.some(m => m.robot === id && m.text === 'wasd中文发言'), 'manual say broadcast')
+  assert.equal(says.length, 1)
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'game-canvas', 'send restores battlefield focus')
+  await page.keyboard.press('Enter')
+  assert.equal(await page.locator('#game-chat').isHidden(), true, 'shared say cooldown blocks repeated chat')
+  const cooldownTick = latest.tick + 181
+  await until(() => latest.tick >= cooldownTick, 'say cooldown expires on server tick')
+  await page.keyboard.press('Enter')
+  await page.locator('#game-chat-input').waitFor({ state: 'visible' })
+  await page.fill('#game-chat-input', '取消不发送')
+  await page.keyboard.press('Escape')
+  assert.equal(says.length, 1, 'Escape cancels without sending')
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'game-canvas')
   // M releases movement, toggles back to the same game, and the visible button also works.
   await page.keyboard.down('w')
   await sleep(100)
@@ -143,7 +185,8 @@ try {
   await page.screenshot({ path: join(shots, 'manual.png') })
   // Two panes stack vertically, either can fill the column on its own.
   const docsOnly = await page.locator('#workbench-docs').boundingBox()
-  await page.click('#btn-game-editor')
+  await page.locator('#workbench-doc-content').focus()
+  await page.keyboard.press('c')
   const editorInput = page.getByRole('textbox', { name: '机器人脚本编辑器', exact: true })
   await editorInput.waitFor({ timeout: 20000 })
   const docsHalf = await page.locator('#workbench-docs').boundingBox()
@@ -154,6 +197,49 @@ try {
   for (const box of await page.locator('#game-stage .skill').evaluateAll(els => els.map(el => {
     const r = el.getBoundingClientRect(); return { right: r.right, left: r.left }
   }))) assert.ok(box.left >= stage.x && box.right <= stage.x + stage.width, 'skill cards stay within resized battlefield')
+  // Focus the battlefield while both panes remain visible: keys and fire must work.
+  await page.locator('#game-canvas').click({ position: { x: 250, y: 330 } })
+  const focusedAt = inputs.length
+  await page.keyboard.down('d')
+  await until(() => inputs.slice(focusedAt).some(i => i.moveX > 0), 'movement with both panels open')
+  await page.mouse.down()
+  await page.keyboard.down('e')
+  await until(() => inputs.slice(focusedAt).some(i => i.fire && i.interact), 'fire and interact with both panels open')
+  await editorInput.focus()
+  await until(() => inputs.slice(focusedAt).some(i => !i.fire && !i.interact && i.moveX === 0 && (i.axisMask & 13) === 13), 'focus change sends complete stop frame')
+  await page.mouse.up()
+  await page.keyboard.up('d')
+  await page.keyboard.up('e')
+  const stoppedAt = inputs.length
+  await page.keyboard.type('wasd c m ')
+  await sleep(100)
+  assert.equal(inputs.length, stoppedAt, 'typing never leaks control frames or shortcuts')
+  assert.equal(await page.locator('#workbench-docs').isVisible(), true)
+  assert.equal(await page.locator('#workbench-editor').isVisible(), true)
+  const widthHandle = page.locator('#workbench-resize')
+  const oldWidth = (await page.locator('#workbench').boundingBox()).width
+  const grip = await widthHandle.boundingBox()
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x - 90, grip.y + grip.height / 2, { steps: 8 })
+  await page.mouse.up()
+  const resizedWidth = (await page.locator('#workbench').boundingBox()).width
+  assert.ok(resizedWidth >= oldWidth + 80, 'sidebar width resizes by pointer')
+  await widthHandle.focus()
+  await page.keyboard.press('ArrowRight')
+  assert.ok((await page.locator('#workbench').boundingBox()).width < resizedWidth, 'separator arrow resizes sidebar')
+  const splitHandle = page.locator('#workbench-split')
+  await splitHandle.focus()
+  await page.keyboard.press('ArrowDown')
+  assert.ok((await page.locator('#workbench-docs').boundingBox()).height > docsHalf.height, 'split keyboard resizes pane ratio')
+  const split = await splitHandle.boundingBox()
+  await page.mouse.move(split.x + split.width / 2, split.y + split.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(split.x + split.width / 2, split.y - 55, { steps: 8 })
+  await page.mouse.up()
+  assert.ok((await page.locator('#workbench-docs').boundingBox()).height < docsHalf.height, 'split pointer adjusts pane heights')
+  const savedWidth = (await page.locator('#workbench').boundingBox()).width
+  const savedDocsHeight = (await page.locator('#workbench-docs').boundingBox()).height
   await page.screenshot({ path: join(shots, 'workbench-both.png') })
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   const editorOnly = await page.locator('#workbench-editor').boundingBox()
@@ -176,7 +262,7 @@ try {
   await page.locator('.suggest-widget.visible').waitFor()
   await until(() => page.locator('.suggest-widget.visible').textContent().then(t => t.includes('moveTo')), 'Bot API completion')
   await page.keyboard.press('Escape')
-  const validSource = `${prelude}function tick(ctx) { ctx.api.shield(true) }\n`
+  const validSource = `${prelude}function tick(ctx) { ctx.api.shield(true); ctx.api.say('脚本 say 正常') }\n`
   await replaceSource(validSource)
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'valid JS diagnostics', 20000)
   const energyBefore = robots.get(id).energyX10
@@ -187,6 +273,7 @@ try {
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'authoritative assist on')
   await until(() => robots.get(id).energyX10 < energyBefore - 20, 'submitted script runs on server')
+  await until(() => messages.some(m => m.robot === id && m.text === '脚本 say 正常'), 'script say shares public broadcast path')
   await replaceSource('function tick( {')
   await page.click('#workbench-submit')
   await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('加载失败')), 'load failure')
@@ -214,6 +301,8 @@ try {
   assert.equal(submissions.length, submittedCount, 'reload never auto-submits')
   assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), validSource, 'draft survives refresh')
   assert.equal(new URL(page.url()).searchParams.get('panels'), 'docs,editor')
+  assert.ok(Math.abs((await page.locator('#workbench').boundingBox()).width - savedWidth) < 2, 'sidebar width survives reload')
+  assert.ok(Math.abs((await page.locator('#workbench-docs').boundingBox()).height - savedDocsHeight) < 3, 'split ratio survives reload')
   await page.screenshot({ path: join(shots, 'workbench-restored.png') })
   await ctx.setOffline(true)
   await until(() => page.locator('#workbench-submit').isDisabled(), 'offline submission disabled')

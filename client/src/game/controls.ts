@@ -2,7 +2,7 @@
 // main.ts 在收到 mapBootstrap 事件时调用 enterGame()，收到房间回到大厅信号时调用 exitGame()。
 import { create } from '@bufbuild/protobuf'
 import {
-  AssistToggleSchema, ClientMsgSchema,
+  AssistToggleSchema, ClientMsgSchema, SaySchema,
   type ServerMsg, type ScoreRow, type EvMatchEnd,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
@@ -36,6 +36,7 @@ export class GameController {
   private hud: Hud
   private feedback: GameFeedback
   private bubbles: SayBubble[] = []
+  private sayTicks = new Map<number, number>()
   private raf = 0
   private sendTimer: ReturnType<typeof setInterval> | undefined
   private ended = false
@@ -51,6 +52,37 @@ export class GameController {
   private inputEnabled = true
   private resyncAt = -Infinity
   private startCuePending = false
+  private chat = document.getElementById('game-chat') as HTMLFormElement
+  private chatInput = document.getElementById('game-chat-input') as HTMLInputElement
+  private chatCount = document.getElementById('game-chat-count')!
+  private chatReadyTick = 0
+  private readonly submitChat = (event: Event) => {
+    event.preventDefault()
+    if (!this.active || this.ended || this.chat.hidden || this.world.tick < this.chatReadyTick) return
+    const self = this.world.robots.get(this.world.self?.robotId ?? 0)
+    if (!self || self.dead) { this.closeChat(true); return }
+    const text = [...this.chatInput.value.replace(/[\s\p{Cc}]+/gu, ' ').trim()].slice(0, 160).join('')
+    if (!text) { this.chatInput.focus(); return }
+    this.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'say', value: create(SaySchema, { text }) } })))
+    this.chatReadyTick = this.world.tick + 180
+    this.closeChat(true)
+  }
+  private readonly chatKey = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return
+    if (event.code === 'Escape') { event.preventDefault(); this.closeChat(true) }
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+      event.preventDefault()
+      if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) this.submitChat(event)
+    }
+  }
+  private readonly countChat = (event?: Event) => {
+    const chars = [...this.chatInput.value]
+    if (!(event instanceof InputEvent && event.isComposing) && chars.length > 160) this.chatInput.value = chars.slice(0, 160).join('')
+    this.chatCount.textContent = `${Math.min(chars.length, 160)}/160 · Enter 发送 · Esc 取消`
+  }
+  private readonly leaveChat = (event: FocusEvent) => {
+    if (!(event.relatedTarget instanceof Node) || !this.chat.contains(event.relatedTarget)) this.closeChat(false)
+  }
   private readonly releaseOnBlur = () => {
     this.input.release()
     this.sampleAndSend()
@@ -65,6 +97,11 @@ export class GameController {
     this.renderer = new Renderer(deps.canvas)
     this.hud = new Hud(deps.hudRoot)
     this.feedback = new GameFeedback(text => this.hud.flashMsg(text))
+    this.chat.addEventListener('submit', this.submitChat)
+    this.chat.addEventListener('keydown', this.chatKey)
+    this.chat.addEventListener('focusout', this.leaveChat)
+    this.chatInput.addEventListener('input', this.countChat)
+    this.chatInput.addEventListener('compositionend', this.countChat)
     window.addEventListener('blur', this.releaseOnBlur)
     document.addEventListener('visibilitychange', this.releaseWhenHidden)
   }
@@ -79,12 +116,15 @@ export class GameController {
     }
     this.stopLoops()
     this.ended = false
+    this.chatReadyTick = 0
+    this.closeChat(false)
     this.resyncAt = -Infinity
     this.startCuePending = false
     this.endShown = false
     this.matchEndRows = []
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
+    this.sayTicks.clear()
     this.feedback.reset()
     this.input.assistOn = false
     this.world = emptyWorld()
@@ -102,6 +142,12 @@ export class GameController {
     this.input.detach()
     this.feedback.reset()
     this.hud.dispose()
+    this.closeChat(false)
+    this.chat.removeEventListener('submit', this.submitChat)
+    this.chat.removeEventListener('keydown', this.chatKey)
+    this.chat.removeEventListener('focusout', this.leaveChat)
+    this.chatInput.removeEventListener('input', this.countChat)
+    this.chatInput.removeEventListener('compositionend', this.countChat)
     window.removeEventListener('blur', this.releaseOnBlur)
     document.removeEventListener('visibilitychange', this.releaseWhenHidden)
     this.map = null
@@ -160,15 +206,21 @@ export class GameController {
         this.startCuePending = !this.active
         break
       case 'say': {
-        this.bubbles.push({ robotId: ev.kind.value.robot, text: ev.kind.value.text, at: performance.now() })
-        if (this.bubbles.length > 12) this.bubbles.shift()
-        this.hud.flashMsg(`say: ${ev.kind.value.text}`)
+        const { robot, text } = ev.kind.value
+        if (ev.tick <= (this.sayTicks.get(robot) ?? -1)) break
+        this.sayTicks.set(robot, ev.tick)
+        if (robot === this.world.self?.robotId) this.chatReadyTick = ev.tick + 180
+        if (this.active && !document.hidden && !this.ended) {
+          this.bubbles = this.bubbles.filter(bubble => bubble.robotId !== robot)
+          this.bubbles.push({ robotId: robot, text, at: performance.now() })
+        }
         break
       }
       case 'matchEnd': {
         if (this.endShown) break // 事件去重：服务器幂等重发时不再重复渲染
         this.matchEndRows = ev.kind.value.scores
         this.ended = true
+        this.closeChat(false)
         this.endShown = true
         this.showEnd(ev.kind.value)
         break
@@ -189,7 +241,7 @@ export class GameController {
     }
   }
 
-  /** 隐藏视图时释放控制，避免阅读手册仍在驾驶。 */
+  /** 离开游戏或断线时释放控制，不影响服务端模拟。 */
   setActive(active: boolean): void {
     if (this.active === active) return
     if (!active && this.map) {
@@ -198,7 +250,7 @@ export class GameController {
       this.input.detach()
     }
     this.active = active
-    if (!active) this.feedback.pause()
+    if (!active) { this.feedback.pause(); this.closeChat(false); this.bubbles = [] }
     if (active && this.map) {
       if (this.inputEnabled) this.input.attach(this.canvas, this.cam)
       if (this.startCuePending && this.world.initialized && !this.ended) {
@@ -208,7 +260,7 @@ export class GameController {
     }
   }
 
-  /** 侧栏只暂停手操采样；画面、快照和脚本继续运行。 */
+  /** 焦点离开战场时释放手操；画面、快照和脚本继续运行。 */
   setInputEnabled(enabled: boolean): void {
     if (this.inputEnabled === enabled) return
     if (!enabled) {
@@ -231,6 +283,28 @@ export class GameController {
       this.hud.setAssist(this.input.assistOn)
       this.hud.flashMsg(this.input.assistOn ? '驾驶辅助 ON' : '驾驶辅助 OFF')
     }
+  }
+
+  /** Enter 打开全场发言；文本输入获得焦点，手操随之释放。 */
+  openChat(): void {
+    if (!this.active || this.ended || !this.world.initialized) return
+    const self = this.world.robots.get(this.world.self?.robotId ?? 0)
+    if (!self || self.dead) { this.hud.flashMsg('重生后可以发言'); return }
+    if (this.world.tick < this.chatReadyTick) {
+      this.hud.flashMsg(`发言冷却 · ${Math.ceil((this.chatReadyTick - this.world.tick) / 60)} 秒`)
+      return
+    }
+    this.chat.hidden = false
+    this.chatInput.value = ''
+    this.countChat()
+    this.chatInput.focus({ preventScroll: true })
+  }
+
+  private closeChat(returnFocus: boolean): void {
+    const wasOpen = !this.chat.hidden
+    this.chat.hidden = true
+    this.chatInput.value = ''
+    if (wasOpen && returnFocus) this.canvas.focus({ preventScroll: true })
   }
 
   // ---- 内部 ---------------------------------------------------------------
@@ -280,8 +354,10 @@ export class GameController {
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     const pos = self?.base?.pos
+    if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
+    this.bubbles = this.bubbles.filter(bubble => performance.now() - bubble.at < 4000)
     this.renderer.render(this.world, this.map, this.cam, {
       bubbles: this.bubbles, localAim: pos ? this.input.aimAt(pos.x, pos.y) : undefined, feedback: this.feedback,
     })

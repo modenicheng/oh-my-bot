@@ -334,7 +334,7 @@ async function hudMsgText(page) {
 /** pairwise no-overlap of large HUD regions at current viewport */
 async function assertNoHudOverlap(page, label) {
   const boxes = await page.evaluate(() => {
-    const sels = ['.hud-top', '.hud-left', '.hud-right', '.hud-hint', '#connection-notice', '#hud-msg', '#audio-settings', '.game-tools']
+    const sels = ['.hud-top', '.hud-left', '.hud-right', '.hud-hint', '#connection-notice', '#hud-msg', '.game-tools']
     const out = []
     for (const s of sels) for (const el of document.querySelectorAll(s)) {
       const r = el.getBoundingClientRect()

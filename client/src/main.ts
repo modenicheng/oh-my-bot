@@ -63,6 +63,8 @@ const replayErrorEl = $<HTMLElement>('replay-error')
 const btnReplaysBack = $<HTMLButtonElement>('btn-replays-back')
 const viewReplayPlayer = $<HTMLElement>('view-replay-player')
 const replayCanvas = $<HTMLCanvasElement>('replay-canvas')
+const audioSettings = $<HTMLDetailsElement>('audio-settings')
+viewJoin.appendChild(audioSettings)
 
 // ---- 进房表单 ---------------------------------------------------------------
 
@@ -109,7 +111,7 @@ function validate(): string | null {
 // ---- 视图切换与状态行 ----------------------------------------------------------
 
 function showView(view: View, extra?: RouteExtra): void {
-  game?.setInputEnabled(!workbench.isOpen)
+  const enteringGame = view === 'game' && viewGame.hidden
   game?.setActive(view === 'game' && session?.state === 'online' && !awaitingFull)
   writeRoute(view, lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
   viewJoin.hidden = view !== 'join'
@@ -118,6 +120,16 @@ function showView(view: View, extra?: RouteExtra): void {
   viewManual.hidden = view !== 'manual'
   viewReplays.hidden = view !== 'replays'
   viewReplayPlayer.hidden = view !== 'replay-player'
+  const audioHost = view === 'game' ? viewGame.querySelector('.game-tools')!
+    : view === 'manual' ? viewManual.querySelector('.manual-top')!
+    : view === 'replay-player' ? viewReplayPlayer.querySelector('.rp-buttons')!
+    : view === 'room' ? viewRoom : view === 'replays' ? viewReplays : viewJoin
+  if (audioSettings.parentElement !== audioHost) { audioSettings.open = false; audioHost.appendChild(audioSettings) }
+  if (enteringGame) {
+    if (workbench.isOpen && matchMedia('(max-width: 760px)').matches) workbench.activate()
+    else gameCanvas.focus({ preventScroll: true })
+  }
+  syncGameInput()
 }
 
 function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
@@ -381,10 +393,21 @@ const workbench = new Workbench({
   editorButton: $<HTMLButtonElement>('btn-game-editor'),
   initial: initialRoute,
   onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
-  onInputBlocked: blocked => game?.setInputEnabled(!blocked),
   send: frame => { if (session?.state === 'online') session.send(frame) },
   toggleAssist: () => game?.toggleAssist(),
 })
+
+/** 面板可以并排打开，只有战场获得焦点时才接收手操。 */
+function syncGameInput(): void {
+  game?.setInputEnabled(!viewGame.hidden && !document.hidden && document.hasFocus() && document.activeElement === gameCanvas)
+}
+
+gameCanvas.addEventListener('pointerdown', () => gameCanvas.focus({ preventScroll: true }))
+document.addEventListener('focusin', syncGameInput)
+document.addEventListener('focusout', () => queueMicrotask(syncGameInput))
+window.addEventListener('blur', () => game?.setInputEnabled(false))
+window.addEventListener('focus', syncGameInput)
+document.addEventListener('visibilitychange', syncGameInput)
 
 function syncWorkbench(): void {
   workbench.setAvailability(session?.state === 'online', game !== null && !game.isMatchEndShown() && !awaitingFull &&
@@ -486,7 +509,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (snap?.full && game) {
       awaitingFull = false
       connectionNotice.hidden = true
-      game.setInputEnabled(!workbench.isOpen)
+      syncGameInput()
       game.setActive(!viewGame.hidden && session?.state === 'online')
       syncWorkbench()
       room.lastRoster = game.lastRoster()
@@ -533,23 +556,20 @@ function stopRttLoop(): void {
   rttTimer = undefined
 }
 
-// M 始终是手册入口；Tab 保留浏览器的焦点导航。
+// M / C 切换侧栏；编辑、输入法和浏览器组合键保留原行为。
 window.addEventListener('keydown', (e) => {
-  if (e.code !== 'KeyM' || e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
+  if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return
-  if (!viewManual.hidden) { e.preventDefault(); closeManual() }
-  else if (!viewGame.hidden) { e.preventDefault(); workbench.toggle('docs') }
-  else if (!viewRoom.hidden) { e.preventDefault(); openManual() }
-})
-
-// Space assist 开关（游戏态下全局拦截，避免页面滚动）
-window.addEventListener('keydown', (e) => {
-  if ((e.code === 'Space' || e.code === 'Enter') && game && !viewGame.hidden && !e.repeat && !e.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    const t = e.target as HTMLElement | null
-    if (workbench.isOpen || t?.closest('input, textarea, button, a, summary, select, [contenteditable]')) return
-    e.preventDefault()
-    game.toggleAssist()
+  if (e.code === 'KeyC' && !viewGame.hidden) {
+    e.preventDefault(); workbench.toggle('editor')
+  } else if (e.code === 'KeyM') {
+    if (!viewManual.hidden) { e.preventDefault(); closeManual() }
+    else if (!viewGame.hidden) { e.preventDefault(); workbench.toggle('docs') }
+    else if (!viewRoom.hidden) { e.preventDefault(); openManual() }
+  } else if (game && !viewGame.hidden && document.activeElement === gameCanvas) {
+    if (e.code === 'Space') { e.preventDefault(); game.toggleAssist() }
+    else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); game.openChat() }
   }
 })
 
