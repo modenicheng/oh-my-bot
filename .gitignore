@@ -16,3 +16,7 @@ omb.exe*
 /.pi/
 /skills/
 data/
+
+# build artifacts (copied at build time, same as web/)
+server/cmd/omb/manual/
+server/cmd/omb/web/
