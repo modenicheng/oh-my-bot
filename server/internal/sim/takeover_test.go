@@ -84,8 +84,14 @@ func TestTakeoverBranchManualAxesReturnToScriptWithoutAssistOff(t *testing.T) {
 	s, _ := enemySim(t)
 	scriptAll(t, s)
 
-	// 开辅助并接管 move+fire 两轴。
+	// 并辅助（分支1），一个 tick 生效。
 	s.AssistToggle(1)
+	stepAndArbitrate(t, s, 1)
+	if !robotControl(t, s, 1).Assist {
+		t.Fatal("assist must be on")
+	}
+
+	// 接管 move+fire 两轴（真实新 keydown，下一 tick 生效）。
 	sendInput(t, s, 1, AxisMove|AxisFire, 1, func(in *ombv1.ClientInput) { in.MoveX = 1000; in.Fire = true })
 	stepAndArbitrate(t, s, 1)
 
@@ -133,9 +139,14 @@ func TestTakeoverKeyUpZeroInputDoesNotReTakeover(t *testing.T) {
 	s, _ := enemySim(t)
 	scriptAll(t, s)
 
-	s.AssistToggle(1)
+	// 分 tick 时序（真实网络：每事件至少隔一拍）。
+	s.AssistToggle(1) // off→on
+	stepAndArbitrate(t, s, 1)
 	sendInput(t, s, 1, AxisMove, 1, func(in *ombv1.ClientInput) { in.MoveX = 1000 })
 	stepAndArbitrate(t, s, 1) // move 被人工接管
+	if c := s.Arbitrated(1); c.MoveSrc != 'H' {
+		t.Fatalf("setup: MoveSrc=%c want H", c.MoveSrc)
+	}
 
 	// Space 恢复（一次交回脚本）。
 	s.AssistToggle(1)
@@ -169,6 +180,7 @@ func TestTakeoverPerAxisIndependence(t *testing.T) {
 	scriptAll(t, s)
 
 	s.AssistToggle(1)
+	stepAndArbitrate(t, s, 1) // 辅助开、脚本接管
 	sendInput(t, s, 1, AxisFire, 1, func(in *ombv1.ClientInput) { in.Fire = true })
 	stepAndArbitrate(t, s, 1)
 
@@ -181,17 +193,18 @@ func TestTakeoverPerAxisIndependence(t *testing.T) {
 	}
 }
 
-// 恢复时仍按着键：Space 与在途 held 帧（TCP 序在 toggle 之前到达）同 tick 消耗时，
-// 输入先合并、toggle 后清除，不得重新抢占。
+// 恢复时仍按着键：Space 交回后，客户端后续帧（已清 sticky，mask=0）不得重新抢占。
+// toggle 与输入分属不同 tick（真实网络时序：接管帧至少流动一 tick 后玩家才可能按 Space）。
 func TestTakeoverRestoreImmuneToSameTickInFlightFrame(t *testing.T) {
 	s, _ := enemySim(t)
 	scriptAll(t, s)
 
 	s.AssistToggle(1)
+	stepAndArbitrate(t, s, 1) // 辅助开
 	sendInput(t, s, 1, AxisMove, 1, func(in *ombv1.ClientInput) { in.MoveX = 1000 })
 	stepAndArbitrate(t, s, 1) // move 被人工接管
 
-	// 同 tick：toggle 到达后，客户端下一帧已清 sticky（mask=0）。
+	// Space 交回；随后客户端帧已清 sticky（mask=0）。
 	s.AssistToggle(1)
 	sendInput(t, s, 1, 0, 2, nil) // 恢复后的干净帧
 	stepAndArbitrate(t, s, 1)

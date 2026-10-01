@@ -225,17 +225,14 @@ func (s *Sim) consumeInputs() {
 		}
 		// Toggle precedes arbitration; same-tick human input must still win.
 		if c.ToggleCount != 0 {
-			humanThisTick := AxisMask(0)
-			if len(s.consumed) > 0 && s.consumed[len(s.consumed)-1].robotID == r.ID {
-				humanThisTick = r.Input.AxisMask
-			}
 			// Space 三分支（ADR-0009 分轴仲裁，事件可合并）：
 			//  1. assist 关 → 开启并清除人工接管；
 			//  2. assist 开且任一轴被人工接管 → 仅把被接管轴交回脚本（assist 保持开）；
 			//  3. assist 开且全部脚本控制 → 关闭。
-			// 同 tick 在途真实人类输入先合并（上面的 setAxes），随后在此按新状态处理，
-			// 仍优先于脚本仲裁；后续每帧输入是否重新抢占由客户端边沿触发约束（恢复时
-			// 清 sticky 与按键状态）与输入 mask 语义（0=不接管，带轴=接管）共同保证。
+			// 同 tick 在输入合并之后处理（上方 InputPending 块）：同 tick 先到的真实人类
+			// 输入已计入 HumanAxes，随后按分支决定去留；toggle 后到达的输入下一 tick
+		// 正常抢占。恢复后仍按住的键不会重新抢占：客户端在 Space 时清 sticky 与按键
+		// 状态（边沿触发），后续帧不带对应轴 mask。
 			for i := uint32(0); i < c.ToggleCount; i++ {
 				if !c.Assist {
 					c.Assist = true
@@ -249,13 +246,8 @@ func (s *Sim) consumeInputs() {
 					c.Script, c.ScriptAxes = ArbitratedInput{}, 0
 				}
 			}
-			// 同 tick 真实人类输入仍优先：开启/恢复后同帧新接管保留。
-			c.HumanAxes |= humanThisTick
-			if humanThisTick != 0 {
-				setAxes(&c.Human, ArbitratedInput{Move: Vec2{float64(r.Input.MoveX) / 1000, float64(r.Input.MoveY) / 1000}, Aim: r.Input.Aim, Fire: r.Input.Fire, Dash: r.Input.Dash, Shield: r.Input.Shield, Interact: r.Input.Interact}, humanThisTick)
-			}
 			if !c.Assist {
-					c.Script, c.ScriptAxes = ArbitratedInput{}, 0
+				c.Script, c.ScriptAxes = ArbitratedInput{}, 0
 			}
 			s.operated(r, true)
 		}
