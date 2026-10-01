@@ -1,3 +1,4 @@
+import { startClient } from './startup-helpers.mjs'
 // Real-server acceptance for a distinct, read-only live room connection.
 import { chromium } from 'playwright'
 import { fromBinary, create, toBinary } from '@bufbuild/protobuf'
@@ -58,6 +59,7 @@ try {
     }
   }))
   await host.goto(base)
+  await startClient(host)
   await host.fill('#in-room', 'LIVEBOT')
   await host.fill('#in-nick', 'live-host')
   await host.click('#btn-join')
@@ -114,6 +116,7 @@ try {
     })
   })
   await watch.goto(`${base}/?view=live&room=LIVEBOT`)
+  await startClient(watch)
   await watch.locator('#view-live').waitFor({ state: 'visible' })
   await until(() => room?.robotsOnline === 1, 'idle spectator room state')
   assert.equal(connections.length, 1)
@@ -180,6 +183,7 @@ try {
   assert.equal(await watch.locator('#live-match').textContent(), '对局中')
   const beforeReload = connections.length
   await watch.reload()
+  await startClient(watch)
   await until(() => connections.length > beforeReload && connections.at(-1).full && snapshotTick > 30, 'mid-match direct spectator join')
   assert.equal(new URL(watch.url()).searchParams.get('view'), 'live')
   assert.equal(humanOnline, 1)
@@ -278,6 +282,7 @@ try {
     })
   })
   await finalPage.goto(`${base}/?view=live&room=LIVEBOT`)
+  await startClient(finalPage)
   await until(() => finalPage.locator('#view-live').getAttribute('data-tick').then(tick => tick === '200'), 'controlled live frame')
   const target = fixtureRobots[0].base.id
   await finalPage.selectOption('#live-follow', String(target))
@@ -295,7 +300,7 @@ try {
   await until(() => finalPage.locator('#live-scores li').count().then(count => count === fixtureRobots.length), 'final scores')
   assert.equal(await finalPage.locator('#live-match').textContent(), '已结束')
   assert.equal(await finalPage.locator('#live-time').textContent(), '0:00')
-  assert.equal(await finalPage.locator('#live-scores li').first().locator('span').textContent(), fixtureRobots[0].nick)
+  assert.equal(await finalPage.locator('#live-scores li').first().locator('.score-name').textContent(), fixtureRobots[0].nick)
   assert.ok(await pixels(finalPage) > 20, 'final arena stays visible')
   assert.deepEqual(fixtureUp, ['spectate'], 'final view never sends gameplay commands')
   await finalPage.setViewportSize({ width: 360, height: 780 })

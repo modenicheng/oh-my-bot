@@ -1,3 +1,4 @@
+import { startClient } from './startup-helpers.mjs'
 // Real-server acceptance for the optional built-in test opponents.
 import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
@@ -56,6 +57,7 @@ try {
     }
   }))
   await page.goto(base)
+  await startClient(page)
   await page.fill('#in-room', 'SOLOBOT')
   await page.fill('#in-nick', 'solo-host')
   await page.click('#btn-join')
@@ -66,6 +68,7 @@ try {
   assert.equal(await page.locator('#btn-solo-bots').getAttribute('aria-pressed'), 'true')
   assert.equal(await page.locator('#btn-solo-bots svg').count(), 1, 'toggle preserves pixel icon')
   await page.reload()
+  await startClient(page)
   await page.locator('#btn-solo-bots').waitFor({ state: 'visible' })
   await until(async () => await page.locator('#btn-solo-bots').getAttribute('aria-pressed') === 'true', 'restored bot configuration')
   assert.equal(room.robotsOnline, 1, 'bots do not take membership slots')
@@ -96,6 +99,7 @@ try {
   const identity = self.robotId
   self = undefined
   await page.reload()
+  await startClient(page)
   await until(() => self?.robotId === identity && tick > 90, 'formal reconnect identity')
   assert.equal(room.soloBots, 3)
   assert.equal(room.robotsOnline, 1)

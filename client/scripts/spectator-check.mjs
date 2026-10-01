@@ -1,3 +1,4 @@
+import { startClient } from './startup-helpers.mjs'
 // Real-server acceptance for recorded, read-only spectator navigation.
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
@@ -58,6 +59,7 @@ try {
   page.on('pageerror', e => errors.push(String(e)))
   page.on('websocket', () => sockets++)
   await page.goto(`${base}/?view=spectator&replay=${matchId}`)
+  await startClient(page)
   await page.locator('#view-replay-player[data-spectator]').waitFor({ state: 'visible' })
   await until(() => page.locator('#sp-follow option').count().then(n => n === 5), 'robot selection')
   await page.click('#rp-play')
@@ -104,6 +106,7 @@ try {
   assert.ok((await pixels(page)).colors > 20, 'terminal frame remains visible')
 
   await page.reload()
+  await startClient(page)
   await until(() => page.locator('#sp-follow option').count().then(n => n === 5), 'reload spectator')
   assert.equal(new URL(page.url()).searchParams.get('view'), 'spectator')
   assert.equal(new URL(page.url()).searchParams.get('replay'), matchId)

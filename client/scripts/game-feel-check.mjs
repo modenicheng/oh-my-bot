@@ -1,3 +1,4 @@
+import { startClient } from './startup-helpers.mjs'
 // game-feel-check.mjs — focused browser regression for ongoing game-feel UI.
 //
 // Scope: client/scripts/game-feel-check.mjs + package.json "test:feel" only.
@@ -309,6 +310,7 @@ async function joinGame(page, fix, errors) {
   }))
   page.on('pageerror', e => errors.push(String(e)))
   await page.goto(BASE)
+  await startClient(page)
   await page.evaluate(() => document.fonts.ready)
   await page.fill('#in-room', 'FEEL1')
   await page.fill('#in-nick', 'feeltest')
@@ -571,6 +573,7 @@ async function fullPass(browser, fix) {
     // persisted across reload (fixture auto-accepts re-join)
     const joinsBefore = fix.joins
     await page.reload()
+    await startClient(page)
     await page.locator('#view-game').waitFor({ state: 'visible', timeout: 10000 })
     await until(() => fix.joins > joinsBefore, 're-join after reload')
     await page.mouse.move(1200, 600)

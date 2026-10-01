@@ -1,3 +1,4 @@
+import { startClient } from './startup-helpers.mjs'
 import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
 import { ServerMsgSchema, ClientMsgSchema } from '../../packages/protocol/src/index.ts'
@@ -52,6 +53,7 @@ try {
     })
   })
   await page.goto(base)
+  await startClient(page)
   await page.screenshot({ path: join(shots, 'join.png') })
   await page.fill('#in-room', 'ROUND2')
   await page.fill('#in-nick', 'tester')
@@ -96,6 +98,7 @@ try {
   latest = undefined
   robots.clear()
   await page.reload()
+  await startClient(page)
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await until(() => latest?.self && robots.has(id), 'reload snapshot')
   assert.equal(id, firstId, 'refresh must retain robot identity')
@@ -176,6 +179,7 @@ try {
   await page.getByRole('tab', { name: 'PY', exact: true }).first().click()
   assert.equal(new URL(page.url()).searchParams.get('doc'), `${tabPage}.md`)
   await page.reload()
+  await startClient(page)
   await page.locator('#workbench-doc-content h1').first().waitFor()
   const tabs = await page.getByRole('tab').count()
   assert.ok(tabs >= 3 && tabs % 3 === 0, 'manual language groups retain TS/PY/JAVA tabs')
@@ -331,6 +335,7 @@ try {
   const submittedCount = submissions.length
   latest = undefined
   await page.reload()
+  await startClient(page)
   await page.locator('#workbench-doc-content h1').first().waitFor()
   await editorInput.waitFor({ timeout: 20000 })
   await until(() => latest?.self && !latest.self.assistOn, 'reload full state')
@@ -373,6 +378,7 @@ try {
   const other = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 })
   other.on('pageerror', e => errors.push(String(e)))
   await other.goto(base)
+  await startClient(other)
   await other.fill('#in-room', 'LOGS2')
   await other.fill('#in-nick', 'recorder')
   await other.click('#btn-join')
@@ -413,6 +419,7 @@ try {
   assert.match(page.url(), /view=replay-player/)
   assert.ok(page.url().includes(`replay=${replayId}`))
   await page.reload()
+  await startClient(page)
   await page.locator('#view-replay-player').waitFor({ state: 'visible' })
   await until(() => page.locator('#rp-status').isHidden(), 'replay route restore')
   assert.equal(await page.locator('#rp-play svg.pixel-icon').count(), 1, 'play control uses SVG')
