@@ -4,18 +4,24 @@ import { icon } from '../icons'
 //
 // 数据源：GET /api/manual（目录树）+ GET /api/manual/<path>（原始 markdown）。
 // 目录请求失败时回退内置离线示例，并在状态行标明数据来源。
-// frontmatter：docs/manual 下的 Markdown 带 YAML frontmatter（title/audience），渲染前
-// 剥离，title 显示为页标题，audience 显示为面包屑尾部的小标签。
+// frontmatter：docs/manual 下的 Markdown 带 YAML frontmatter（title/audience/
+// tag/tags/order），渲染前剥离；title 覆盖文件名为页标题，audience/tag 显示为
+// 页标题旁的小标签，order 仅供服务端目录排序（客户端信服务端顺序）。
 
 import { renderMarkdown, bindTabInteractions } from './render'
+import { normalizeManualTree } from './manual-order'
 
 // ---- API 契约（与主线服务器侧对齐） -----------------------------------------
 
 export interface ManualNode {
   /** 相对 docs/manual/ 的路径，如 "index.md"、"reference/actions.md"。 */
   path: string
-  /** 目录显示名；服务端使用文件名，页面标题另从 frontmatter 读取。 */
+  /** 目录显示名；优先来自 frontmatter title，否则文件名。 */
   title: string
+  /** frontmatter tags（含标量 tag），仅服务端排序/展示用，可缺省。 */
+  tags?: string[]
+  /** frontmatter order，缺省时排在有序章节之后。 */
+  order?: number
   children: ManualNode[]
 }
 
@@ -36,39 +42,48 @@ async function fetchDoc(path: string): Promise<string> {
 // ---- 离线示例回退 -----------------------------------------------------------
 
 const MOCK_TREE: ManualNode[] = [
-  { path: 'index.md', title: 'oh-my-bot 玩家手册', children: [] },
+  { path: 'index.md', title: 'oh-my-bot 玩家手册', order: 0, children: [] },
   {
     path: 'start',
-    title: 'start',
+    title: '快速上手',
+    order: 1,
     children: [
-      { path: 'start/prepare.md', title: '进房前准备', children: [] },
-      { path: 'start/first-match.md', title: '你的第一局', children: [] },
-      { path: 'start/snippet.md', title: 'Snippet 驾驶辅助（规划）', children: [] },
-      { path: 'start/ai-agent.md', title: 'AI Agent（接入状态与规划）', children: [] },
+      { path: 'start/index.md', title: '快速上手', order: 1, children: [] },
+      { path: 'start/prepare.md', title: '进房前准备', order: 11, children: [] },
+      { path: 'start/first-match.md', title: '你的第一局', order: 12, children: [] },
+      { path: 'start/snippet.md', title: 'Snippet 驾驶辅助（规划）', order: 13, children: [] },
+      { path: 'start/ai-agent.md', title: 'AI Agent（接入状态与规划）', order: 14, children: [] },
     ],
   },
   {
     path: 'rules',
-    title: 'rules',
+    title: '游戏规则',
+    order: 2,
     children: [
-      { path: 'rules/game-rules.md', title: '游戏规则', children: [] },
-      { path: 'rules/controls.md', title: '操作与控制仲裁', children: [] },
+      { path: 'rules/index.md', title: '游戏规则', order: 2, children: [] },
+      { path: 'rules/game-rules.md', title: '游戏规则', order: 21, children: [] },
+      { path: 'rules/controls.md', title: '操作与控制仲裁', order: 22, children: [] },
     ],
   },
   {
     path: 'code',
-    title: 'code',
-    children: [{ path: 'code/bot-scripting.md', title: '写第一个 Bot', children: [] }],
+    title: '写自己的 Bot',
+    order: 3,
+    children: [
+      { path: 'code/index.md', title: '写自己的 Bot', order: 3, children: [] },
+      { path: 'code/bot-scripting.md', title: '写第一个 Bot', order: 31, children: [] },
+    ],
   },
   {
     path: 'reference',
-    title: 'reference',
+    title: 'API 参考',
+    order: 4,
     children: [
-      { path: 'reference/index.md', title: 'API 总览', children: [] },
-      { path: 'reference/actions.md', title: '动作参考（L0 原语）', children: [] },
-      { path: 'reference/helpers.md', title: '便利层参考（L1）', children: [] },
-      { path: 'reference/data.md', title: '数据结构参考', children: [] },
-      { path: 'reference/modules.md', title: '模块语义与陷阱', children: [] },
+      { path: 'reference/index.md', title: 'API 总览', order: 4, children: [] },
+      { path: 'reference/actions.md', title: '动作参考（L0 原语）', order: 41, children: [] },
+      { path: 'reference/helpers.md', title: '便利层参考（L1）', order: 42, children: [] },
+      { path: 'reference/data.md', title: '数据结构参考', order: 43, children: [] },
+      { path: 'reference/modules.md', title: '模块语义与陷阱', order: 44, children: [] },
     ],
   },
 ]
@@ -84,10 +99,14 @@ const MOCK_DOCS: Record<string, string> = {
 export interface Frontmatter {
   title?: string
   audience?: string
+  /** 标签（tag 标量与 tags 数组合并去重后的结果）。 */
+  tags?: string[]
+  /** 目录排序权重；仅有限数值有效，非法值不产生该键。 */
+  order?: number
 }
 
 /** 剥离 YAML frontmatter，返回正文与元数据（仅顶层平铺 key: value）。 */
-function splitFrontmatter(src: string): { body: string; fm: Frontmatter } {
+export function splitFrontmatter(src: string): { body: string; fm: Frontmatter } {
   if (!src.startsWith('---')) return { body: src, fm: {} }
   const end = src.indexOf('\n---', 3)
   if (end < 0) return { body: src, fm: {} }
@@ -95,15 +114,117 @@ function splitFrontmatter(src: string): { body: string; fm: Frontmatter } {
   // 结束符必须独占一行（避免误吞正文里的 --- 分隔线）
   const rest = src.slice(end + 4)
   if (rest.startsWith('\n') || rest.startsWith('\r\n') || rest === '') {
-    const fm: Frontmatter = {}
-    for (const line of block.split(/\r?\n/)) {
-      const m = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
-      if (m && m[1] === 'title') fm.title = m[2]!.trim()
-      if (m && m[1] === 'audience') fm.audience = m[2]!.trim()
-    }
+    const fm = parseFrontmatterBlock(block)
     return { body: rest.replace(/^\r?\n/, ''), fm }
   }
   return { body: src, fm: {} }
+}
+
+/**
+ * 解析 frontmatter 块（不含首尾 `---`）为平铺键值。
+ *
+ * 与服务端 manual_index.go 保持同一套语义：
+ * - 仅顶层 `key: value`；未知键忽略；重复键后者覆盖前者。
+ * - 值支持单/双引号（含中文、逗号、冒号），双引号内 `\\"` 转义，单引号内 `''` 转义。
+ * - `tags` 支持行内数组与破折号列表两式；标量 `tag` 是单标签。
+ * - `order` 仅接受有限十进制数（含 0/负数）；非法值忽略。
+ */
+export function parseFrontmatterBlock(block: string): Frontmatter {
+  const fm: Frontmatter = {}
+  const lines = block.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([A-Za-z0-9_-]+):[ \t]*(.*)$/.exec(lines[i]!)
+    if (!m) continue
+    const key = m[1]!
+    const inline = m[2]!.trim()
+    if (inline === '') {
+      // 破折号列表（仅 tags）：后续缩进的 `- 项` 行。每项是一个完整标量，
+      // 不再做逗号拆分（含逗号的引号值保持为一个标签）。
+      const items: string[] = []
+      let j = i + 1
+      for (; j < lines.length; j++) {
+        const lm = /^[ \t]+-[ \t]*(.*)$/.exec(lines[j]!)
+        if (!lm) break
+        items.push(unquoteScalar(lm[1]!.trim()))
+      }
+      if (items.length > 0) i = j - 1
+      if (key === 'tags') fm.tags = mergeTags(fm.tags, items.filter((t) => t !== ''))
+      continue
+    }
+    if (inline === '|' || inline === '>') continue // 块标量不用于导航元数据
+    const value = unquoteScalar(inline)
+    if (key === 'title') fm.title = value
+    else if (key === 'audience') fm.audience = value
+    else if (key === 'order') {
+      const n = Number(value)
+      if (value !== '' && Number.isFinite(n)) fm.order = n
+    } else if (key === 'tag' || key === 'tags') {
+      fm.tags = mergeTags(fm.tags, splitTagList(inline))
+    }
+  }
+  return fm
+}
+
+/** 去除引号并还原转义；无引号时去掉行内 ` #` 之后的内容。 */
+function unquoteScalar(s: string): string {
+  if (s.startsWith('"')) {
+    const m = /^"((?:[^"\\]|\\.)*)"(?:[ \t]+#.*)?$/.exec(s)
+    if (!m) return s
+    return m[1]!.replace(/\\(.)/g, '$1')
+  }
+  if (s.startsWith("'")) {
+    const m = /^'((?:[^']|'')*)'(?:[ \t]+#.*)?$/.exec(s)
+    if (!m) return s
+    return m[1]!.replace(/''/g, "'")
+  }
+  const hash = s.indexOf(' #')
+  return (hash >= 0 ? s.slice(0, hash) : s).trim()
+}
+
+/**
+ * 逗号分隔 → 标签数组；引号包裹的含逗号值保持为一个标签。
+ * 入参是原始行内值（未去引号），先按引号感知切分再去引号。
+ */
+function splitTagList(s: string): string[] {
+  if (s.startsWith('[') && s.endsWith(']')) s = s.slice(1, -1)
+  const out: string[] = []
+  let cur = ''
+  let quote: '"' | "'" | null = null
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!
+    if (quote) {
+      if (ch === quote) quote = null
+      else cur += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      continue
+    }
+    if (ch === ',') {
+      if (cur) out.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+    .map((t) => unquoteScalar(t.trim()))
+    .filter((t) => t !== '' && t !== 'null' && t !== '~')
+}
+
+/** 合并去重（保序）。 */
+function mergeTags(existing: string[] | undefined, add: string[]): string[] {
+  const seen = new Set(existing ?? [])
+  const out = [...(existing ?? [])]
+  for (const t of add) {
+    if (!seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out
 }
 
 // ---- 阅读器 ---------------------------------------------------------------
@@ -161,13 +282,14 @@ export class ManualView {
     this.opts.status.textContent = '加载目录…'
     try {
       const root = await fetchTree()
-      // 契约：根可能是 {path,title,children} 单节点，也可能是数组——两种都收
-      this.tree = Array.isArray(root) ? root : [root]
-      normalizeTree(this.tree)
+      // 契约：根可能是 {path,title,children} 单节点，也可能是数组——两种都收。
+      // 服务端已按 order 排序；normalizeManualTree 仅作兑底（补 children + 同规则排序）。
+      const list = Array.isArray(root) ? root : [root]
+      this.tree = normalizeManualTree(list)
       this.usingMock = false
     } catch {
       // 目录不可用时显示离线示例，并明确标注，避免误认为服务端内容。
-      this.tree = MOCK_TREE
+      this.tree = normalizeManualTree(MOCK_TREE)
       this.usingMock = true
     }
     this.indexTree()
@@ -217,18 +339,31 @@ export class ManualView {
     const title = fm.title ?? leadingHeading?.textContent ?? entry?.node.title ?? path
     leadingHeading?.remove()
     const audience = fm.audience ? AUDIENCE_LABEL[fm.audience] ?? fm.audience : null
+    // 页内 frontmatter 标签（tag/tags）优先；否则退回目录树节点的 tags。
+    const tags = fm.tags?.length ? fm.tags : entry?.node.tags
 
     const doc = document.createElement('article')
     doc.className = 'manual-doc'
     const h = document.createElement('h1')
     h.textContent = title
     doc.appendChild(h)
+    const chips = document.createElement('span')
+    chips.className = 'manual-chips'
     if (audience) {
       const tag = document.createElement('span')
       tag.className = 'manual-audience'
       tag.textContent = audience
+      chips.appendChild(tag)
+    }
+    for (const t of tags ?? []) {
+      const tag = document.createElement('span')
+      tag.className = 'manual-tag'
+      tag.textContent = t
+      chips.appendChild(tag)
+    }
+    if (chips.childElementCount > 0) {
       h.appendChild(document.createTextNode(' '))
-      h.appendChild(tag)
+      h.appendChild(chips)
     }
     doc.appendChild(bodyEl)
 
@@ -335,12 +470,5 @@ export class ManualView {
         el.appendChild(a)
       }
     })
-  }
-}
-
-function normalizeTree(nodes: ManualNode[]): void {
-  for (const n of nodes) {
-    if (!n.children) n.children = []
-    normalizeTree(n.children)
   }
 }

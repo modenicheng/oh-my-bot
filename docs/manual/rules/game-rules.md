@@ -1,6 +1,8 @@
 ---
 title: 游戏规则
 audience: human
+order: 21
+tags: [规则]
 ---
 
 # 游戏规则

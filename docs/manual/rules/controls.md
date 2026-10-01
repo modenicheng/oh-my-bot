@@ -1,6 +1,8 @@
 ---
 title: 操作与控制仲裁
 audience: human
+order: 22
+tags: [规则, 手操]
 ---
 
 # 操作与控制仲裁

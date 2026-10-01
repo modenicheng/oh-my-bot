@@ -1,6 +1,7 @@
 ---
 title: oh-my-bot 玩家手册
 audience: both
+order: 0
 ---
 
 # oh-my-bot 玩家手册

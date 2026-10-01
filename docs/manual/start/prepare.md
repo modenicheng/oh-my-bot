@@ -1,6 +1,8 @@
 ---
 title: 进房前准备
 audience: both
+order: 11
+tags: [新手, 进房]
 ---
 
 # 进房前准备

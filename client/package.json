@@ -13,6 +13,8 @@
     "test:reconnect": "tsx scripts/reconnect-check.mjs",
     "test:bots": "tsx scripts/solo-bots-check.mjs",
     "test:spectator": "tsx scripts/spectator-check.mjs",
+    "test:manual": "tsx scripts/manual-check.mjs",
+    "test:manual-live": "tsx scripts/manual-live-check.mjs",
     "test:live-spectator": "tsx scripts/live-spectator-check.mjs"
   },
   "dependencies": {
