@@ -49,11 +49,6 @@ try {
     if (msg.payload.case === 'snapshot') {
       tick = msg.payload.value.tick
       if (msg.payload.value.self) self = msg.payload.value.self
-      for (const r of msg.payload.value.robots) if (r.nick.startsWith('TEST-BOT-') || seenBots.has(r.base.id)) {
-        const old = seenBots.get(r.base.id)
-        const pos = r.base.pos
-        seenBots.set(r.base.id, { first: old?.first || pos, last: pos, moved: old?.moved || (old && Math.hypot(pos.x-old.first.x,pos.y-old.first.y) > 0.5) })
-      }
     }
   }))
   await page.goto(base)
@@ -76,12 +71,34 @@ try {
   await page.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await until(() => tick > 90 && self, 'warmup simulation')
-  assert.equal(map.generator_ver, 4)
+  assert.equal(map.generator_ver, 5)
   assert.equal(map.core_rules.period_ticks, 1200)
+  assert.equal(map.health_packs.length, 4, 'generated map contains four public health-pack locations')
+  assert.ok(map.health_packs.every(pack => Number.isFinite(pack.pos.X) && Number.isFinite(pack.pos.Y)), 'health-pack coordinates are finite')
   assert.ok(map.walls.some(w => Math.hypot((w.min.X+w.max.X)/2, (w.min.Y+w.max.Y)/2) < 28), 'map includes inner cover')
   assert.equal(self.assistOn, false, 'human assist remains opt-in')
-  await until(() => [...seenBots.values()].some(r => r.moved), 'visible bot movement')
-  assert.equal(room.robotsOnline, 1)
+  // FFA players have no shared vision. Observe movement through the real,
+  // read-only spectator connection instead of requiring enemies in player AOI.
+  const watch = await browser.newPage({ viewport: { width: 960, height: 700 } })
+  watch.on('pageerror', e => errors.push(String(e)))
+  watch.on('websocket', socket => socket.on('framereceived', ({ payload }) => {
+    if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
+    const msg = fromBinary(ServerMsgSchema, payload.subarray(1))
+    if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'mapBootstrap') seenBots.clear()
+    if (msg.payload.case !== 'snapshot') return
+    const snapshot = msg.payload.value
+    assert.equal(snapshot.self, undefined, 'movement observer is read-only')
+    for (const r of snapshot.robots) if (r.nick.startsWith('TEST-BOT-') || seenBots.has(r.base.id)) {
+      const old = seenBots.get(r.base.id), pos = r.base.pos
+      seenBots.set(r.base.id, { first: old?.first || pos, last: pos,
+        moved: old?.moved || !!old && Math.hypot(pos.x-old.first.x, pos.y-old.first.y) > 0.5 })
+    }
+  }))
+  await watch.goto(`${base}?view=live&room=SOLOBOT`)
+  await startClient(watch)
+  await until(() => seenBots.size === 3 && [...seenBots.values()].some(r => r.moved), 'spectator-observed bot movement')
+  await watch.close()
+  assert.equal(room.robotsOnline, 1, 'read-only movement observer does not take a membership slot')
   await page.screenshot({ path: join(shots, 'warmup.png') })
   const warmMap = map
   await page.click('#btn-game-start')

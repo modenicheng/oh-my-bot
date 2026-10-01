@@ -36,8 +36,13 @@ try {
   await context.addInitScript(() => {
     const Native = window.WebSocket
     window.__sockets = []
+    window.__socketClosures = []
     window.WebSocket = class extends Native {
-      constructor(...args) { super(...args); window.__sockets.push(this) }
+      constructor(...args) {
+        super(...args)
+        window.__sockets.push(this)
+        this.addEventListener('close', event => window.__socketClosures.push({ code: event.code, reason: event.reason }))
+      }
     }
   })
   const page = await context.newPage()
@@ -90,11 +95,16 @@ try {
   const interruptedTransport = activeTransport
   const oldTick = latest.tick, oldFull = fullCount
   const oldConnections = connections, oldBootstrap = bootstraps, oldInputSeq = inputs.at(-1)?.seq
-  await context.setOffline(true)
+  // Finish the native closing handshake before blocking network traffic.
+  // Offline Chromium can leave a graceful close in CLOSING until its timeout.
   await page.evaluate(() => window.__sockets.at(-1).close(4001, 'network test'))
+  await until(() => interruptedTransport.closed, 'old transport closed').catch(async error => {
+    const native = await page.evaluate(() => ({ states: window.__sockets.map(socket => socket.readyState), closures: window.__socketClosures, online: navigator.onLine }))
+    throw new Error(`${error.message}: ${JSON.stringify({ native, oldTick, lastTick: interruptedTransport.lastSelf?.tick, connections })}`)
+  })
+  await context.setOffline(true)
   await page.keyboard.up('s')
   await page.locator('#connection-notice').waitFor({ state: 'visible' })
-  await until(() => interruptedTransport.closed, 'old transport closed')
   assert.ok(interruptedTransport.lastSelf, 'old transport supplied a self snapshot')
   // setOffline/close are asynchronous. Anchor to the last old-transport frame,
   // not a sample taken before those browser operations while movement was valid.
@@ -126,8 +136,10 @@ try {
   await page.locator('#connection-notice').waitFor({ state: 'hidden' })
   assert.equal(await page.locator('#view-game').isHidden(), true, 'restart must discard stale game')
   // Cancel must invalidate both online listeners and scheduled retries.
-  await context.setOffline(true)
+  const cancelledTransport = activeTransport
   await page.evaluate(() => window.__sockets.at(-1).close(4001, 'cancel test'))
+  await until(() => cancelledTransport.closed, 'cancel transport closed')
+  await context.setOffline(true)
   await page.locator('#connection-notice').waitFor({ state: 'visible' })
   await page.click('#connection-cancel')
   const cancelledConnections = connections
