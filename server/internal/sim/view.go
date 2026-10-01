@@ -10,6 +10,7 @@ type WorldView struct {
 	Robots      []RobotView
 	Projectiles []ProjView
 	Cores       []CoreView
+	HealthPacks []HealthPackView
 	Uplinks     []UplinkView
 	Partners    map[uint32]uint32
 	Controls    map[uint32]ArbitratedInput
@@ -42,7 +43,7 @@ func cloneUplinks(src []Uplink) []Uplink {
 func (s *Sim) publishView() {
 	v := &WorldView{Frame: FrameView{Tick: s.tick, Phase: Phase(s.phase), TimeLeftS: secondsLeft(s.tick, MatchTicks), Map: s.mapDef},
 		Robots: make([]RobotView, len(s.robots)), Projectiles: make([]ProjView, len(s.projectiles)), Cores: append([]CoreView{}, s.cores...),
-		Uplinks: make([]UplinkView, len(s.uplinks)), Partners: make(map[uint32]uint32), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
+		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)), Partners: make(map[uint32]uint32), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
 	if v.Frame.Map == nil && len(s.walls) != 0 {
 		v.Frame.Map = &MapDef{Walls: s.walls}
 	}
@@ -68,6 +69,9 @@ func (s *Sim) publishView() {
 			v.Projectiles[i].Color = s.robots[owner].Color
 		}
 	}
+	for i, pack := range s.healthPacks {
+		v.HealthPacks[i] = HealthPackView{ID: pack.ID, Pos: pack.Pos, Available: pack.ReadyAt <= s.tick, RespawnInS: secondsLeft(s.tick, pack.ReadyAt)}
+	}
 	for i, u := range s.uplinks {
 		cds := make(map[uint32]uint32, len(u.ReadyAt))
 		for id, tick := range u.ReadyAt {
@@ -92,6 +96,9 @@ func (s *Sim) View() FrameView {
 func (s *Sim) RobotViews() []RobotView     { return append([]RobotView{}, s.view.Load().Robots...) }
 func (s *Sim) ProjectileViews() []ProjView { return append([]ProjView{}, s.view.Load().Projectiles...) }
 func (s *Sim) CoreViews() []CoreView       { return append([]CoreView{}, s.view.Load().Cores...) }
+func (s *Sim) HealthPackViews() []HealthPackView {
+	return append([]HealthPackView{}, s.view.Load().HealthPacks...)
+}
 func cloneUplinkViews(in []UplinkView) []UplinkView {
 	out := make([]UplinkView, len(in))
 	for i, u := range in {
@@ -116,6 +123,7 @@ func (s *Sim) WorldView() WorldView {
 	out.Robots = append([]RobotView{}, src.Robots...)
 	out.Projectiles = append([]ProjView{}, src.Projectiles...)
 	out.Cores = append([]CoreView{}, src.Cores...)
+	out.HealthPacks = append([]HealthPackView{}, src.HealthPacks...)
 	out.Uplinks = cloneUplinkViews(src.Uplinks)
 	out.Partners = make(map[uint32]uint32, len(src.Partners))
 	for id, p := range src.Partners {
@@ -182,7 +190,7 @@ func (v WorldView) Observe(id uint32) (Observation, bool) {
 	}
 	frame := v.Frame
 	frame.Map = cloneMap(frame.Map)
-	obs := Observation{Frame: frame, Cores: append([]CoreView{}, v.Cores...), Uplinks: cloneUplinkViews(v.Uplinks)}
+	obs := Observation{Frame: frame, Cores: append([]CoreView{}, v.Cores...), HealthPacks: append([]HealthPackView{}, v.HealthPacks...), Uplinks: cloneUplinkViews(v.Uplinks)}
 	for _, r := range v.Robots {
 		if r.ID == id || (self.Pos.Sub(r.Pos).Len() <= v.ScanRadius(id) && v.LineOfSight(self.Pos, r.Pos)) {
 			obs.Robots = append(obs.Robots, r)

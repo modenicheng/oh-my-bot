@@ -22,6 +22,12 @@ func gameMap() *MapDef {
 	}
 	return m
 }
+func healthPackMap() *MapDef {
+	m := gameMap()
+	m.HealthPacks = []HealthPackDef{{ID: 1, Pos: Vec2{X: 10, Y: 10}}}
+	return m
+}
+
 func enemySim(t *testing.T) (*Sim, *recordingSink) {
 	t.Helper()
 	sink := &recordingSink{}
@@ -34,6 +40,73 @@ func enemySim(t *testing.T) (*Sim, *recordingSink) {
 	}
 	return s, sink
 }
+func TestHealthPackPickupRules(t *testing.T) {
+	s := NewSim(7, []uint32{2, 1}, nil)
+	if err := s.SetMap(healthPackMap()); err != nil {
+		t.Fatal(err)
+	}
+	pack := &s.healthPacks[0]
+	for i := range s.robots {
+		s.robots[i].Position = pack.Pos
+		s.robots[i].HP = MaxHP
+	}
+	s.stepHealthPacks()
+	if pack.ReadyAt != 0 || len(s.events) != 0 {
+		t.Fatalf("full health consumed pack: ready=%d events=%d", pack.ReadyAt, len(s.events))
+	}
+
+	first := &s.robots[s.index[1]]
+	second := &s.robots[s.index[2]]
+	first.HP = 95
+	second.HP = 40
+	s.stepHealthPacks()
+	if first.HP != MaxHP || second.HP != 40 || pack.ReadyAt != HealthPackCooldown {
+		t.Fatalf("bad single-consumer pickup: first=%.1f second=%.1f ready=%d", first.HP, second.HP, pack.ReadyAt)
+	}
+	heal := s.events[len(s.events)-1].GetHeal()
+	if heal == nil || heal.By != 1 || heal.Id != 1 || heal.HealX10 != 50 {
+		t.Fatalf("bad heal event: %+v", heal)
+	}
+
+	first.HP = 50
+	s.tick = HealthPackCooldown - 1
+	s.stepHealthPacks()
+	if first.HP != 50 {
+		t.Fatal("pack respawned early")
+	}
+	s.tick = HealthPackCooldown
+	first.State = Dead
+	second.HP = 80
+	s.stepHealthPacks()
+	if first.HP != 50 || second.HP != MaxHP || pack.ReadyAt != 2*HealthPackCooldown {
+		t.Fatalf("dead pickup or cooldown failure: first=%.1f second=%.1f ready=%d", first.HP, second.HP, pack.ReadyAt)
+	}
+}
+
+func TestHealthPackCheckpointRestoresCooldown(t *testing.T) {
+	s := NewSim(9, []uint32{1}, nil)
+	m := healthPackMap()
+	if err := s.SetMap(m); err != nil {
+		t.Fatal(err)
+	}
+	r := &s.robots[s.index[1]]
+	r.Position = s.healthPacks[0].Pos
+	r.HP = 60
+	s.stepHealthPacks()
+	cp := s.Snapshot()
+	if len(cp.HealthPacks) != 1 || cp.HealthPacks[0].ReadyAt != HealthPackCooldown {
+		t.Fatalf("checkpoint missing health cooldown: %+v", cp.HealthPacks)
+	}
+	restored, err := RestoreCheckpoint(cp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := restored.WorldView().HealthPacks
+	if len(view) != 1 || view[0].Available || view[0].RespawnInS != 30 {
+		t.Fatalf("restored health view mismatch: %+v", view)
+	}
+}
+
 func TestArbitrationAxisMaskTable(t *testing.T) {
 	script := ArbitratedInput{Move: Vec2{1, 0}, Aim: 1.2, Fire: true, Dash: true, Shield: true, Interact: true}
 	human := ArbitratedInput{Move: Vec2{}, Aim: 0, Fire: false, Dash: false, Shield: false, Interact: false}

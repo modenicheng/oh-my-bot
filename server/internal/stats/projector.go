@@ -32,6 +32,7 @@ type robotStats struct {
 	deaths       int32
 	assists      int32
 	killSteals   int32
+	healedX10    int32
 	hitsLanded   int32 // EvHit `from` count — v1 BARRAGE proxy for shots
 	cores        int32
 	uplinks      int32
@@ -46,6 +47,7 @@ type robotStats struct {
 
 	killsAt        uint32
 	killStealsAt   uint32
+	healedAt       uint32
 	deathsAt       uint32
 	hitsAt         uint32
 	coresAt        uint32
@@ -182,6 +184,12 @@ func (p *ProjectorImpl) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 			r.score += ScoreHit
 			r.hitsLanded++
 			r.hitsAt = tick
+		}
+	case *ombv1.ServerEvent_Heal:
+		if e := k.Heal; e != nil && e.HealX10 > 0 {
+			r := p.robot(e.By)
+			r.healedX10 += e.HealX10
+			r.healedAt = tick
 		}
 	case *ombv1.ServerEvent_Respawn:
 		if e := k.Respawn; e != nil {
@@ -422,6 +430,10 @@ func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
 	case *ombv1.ServerEvent_Hit:
 		if e := k.Hit; e != nil {
 			return fmt.Sprintf("%d|h|%d|%d|%d", tick, e.From, e.To, e.Dmg)
+		}
+	case *ombv1.ServerEvent_Heal:
+		if e := k.Heal; e != nil {
+			return fmt.Sprintf("%d|heal|%d|%d|%d", tick, e.By, e.Id, e.HealX10)
 		}
 	case *ombv1.ServerEvent_Respawn:
 		if e := k.Respawn; e != nil {

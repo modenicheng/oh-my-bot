@@ -39,16 +39,17 @@ const (
 // MapDef 是地图的唯一权威描述，序列化 JSON 后经 EvMapBootstrap 下发客户端。
 // 同 seed + generator_version 必产出 map_hash 一致的 MapDef（确定性契约）。
 type MapDef struct {
-	Version      int          `json:"version"`       // MapDef 结构版本（当前 1）
-	GeneratorVer int          `json:"generator_ver"` // mapgen 算法版本
-	Seed         uint64       `json:"seed"`
-	MapHash      string       `json:"map_hash"`   // 内容哈希（一致性校验）
-	Walls        []Wall       `json:"walls"`      // 实体墙：挡移动+弹丸+视线
-	Sectors      [8]Sector    `json:"sectors"`    // 出生扇区
-	Uplinks      []UplinkDef  `json:"uplinks"`    // 含中央主桩
-	CorePads     []CorePadDef `json:"core_pads"`  // 确定性刷新点
-	CoreZone     CoreZoneDef  `json:"core_zone"`  // 中央锁区
-	CoreRules    CoreRulesDef `json:"core_rules"` // 刷新规则唯一 owner
+	Version      int             `json:"version"`       // MapDef 结构版本（当前 1）
+	GeneratorVer int             `json:"generator_ver"` // mapgen 算法版本
+	Seed         uint64          `json:"seed"`
+	MapHash      string          `json:"map_hash"` // 内容哈希（一致性校验）
+	Walls        []Wall          `json:"walls"`    // 实体墙：挡移动+弹丸+视线
+	Sectors      [8]Sector       `json:"sectors"`  // 出生扇区
+	Uplinks      []UplinkDef     `json:"uplinks"`  // 含中央主桩
+	HealthPacks  []HealthPackDef `json:"health_packs"`
+	CorePads     []CorePadDef    `json:"core_pads"`  // 确定性刷新点
+	CoreZone     CoreZoneDef     `json:"core_zone"`  // 中央锁区
+	CoreRules    CoreRulesDef    `json:"core_rules"` // 刷新规则唯一 owner
 }
 
 // Wall 复用 collision.go 的定义（ID + Min + Max，AABB 语义与 Rect 同构）。
@@ -72,6 +73,11 @@ type CorePadDef struct {
 	Pos   Vec2   `json:"pos"`
 	Group int    `json:"group"` // 刷新组（权重调度单位）
 	Value int32  `json:"value"` // +10 普通 / +25 Mega
+}
+
+type HealthPackDef struct {
+	ID  uint32 `json:"id"`
+	Pos Vec2   `json:"pos"`
 }
 
 type CoreZoneDef struct {
@@ -123,6 +129,13 @@ type CoreView struct {
 	Alive bool
 }
 
+type HealthPackView struct {
+	ID         uint32
+	Pos        Vec2
+	Available  bool
+	RespawnInS uint32
+}
+
 // UplinkView：桩公开状态。PersonalCDs 为观察者参数化数据（每玩家每桩 30s CD）。
 type UplinkView struct {
 	ID          uint32
@@ -143,6 +156,7 @@ type Observation struct {
 	Robots      []RobotView // 按扫描半径与视线裁剪
 	PartnerID   uint32      // deprecated compatibility; live observations keep zero
 	Cores       []CoreView
+	HealthPacks []HealthPackView
 	Uplinks     []UplinkView
 	Projectiles []ProjView
 }

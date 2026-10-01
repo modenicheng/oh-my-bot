@@ -147,7 +147,7 @@ func overlapDims(a, b rect) (float64, float64) {
 // Candidates are a seeded cyclic traversal of a bounded 7×7 local lattice,
 // with small shared radial/angular jitter. Rejection only relocates cover
 // inside its assigned cell, never into an already crowded part of the ring.
-func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef) ([]sim.Wall, error) {
+func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPacks []sim.HealthPackDef) ([]sim.Wall, error) {
 	walls := make([]sim.Wall, 0, 8*(innerCoverCells+midCoverCells+outerCoverCells)*2)
 	// Every cell is snapped to a 7.5-degree direction slot and a half-meter
 	// radial lattice. The lShape stratum additionally stamps a perpendicular
@@ -178,6 +178,11 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef) ([]sim.Wal
 		for _, p := range pads {
 			if nearestDist2(q, p.Pos) < poiClearance*poiClearance {
 				return 4
+			}
+		}
+		for _, h := range healthPacks {
+			if nearestDist2(q, h.Pos) < poiClearance*poiClearance {
+				return 5
 			}
 		}
 		for _, u := range uplinks {

@@ -37,6 +37,7 @@ func selfIn(id uint32) *SelfInput {
 
 func TestFirstFrameFull(t *testing.T) {
 	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
+	w.HealthPacks = []sim.HealthPackView{{ID: 7, Pos: sim.Vec2{X: 3, Y: 4}, Available: false, RespawnInS: 12}}
 	enc := NewEncoder()
 	d1 := enc.Encode(100, 5, sim.PhaseOuterRing, 480, obsOf(w, 1, 2, nil), selfIn(1))
 	if !d1.Full {
@@ -50,11 +51,14 @@ func TestFirstFrameFull(t *testing.T) {
 	}
 	// full 携带元数据。
 	r2 := robotByID(d1, 2)
-	if r2 == nil || r2.Nick != "r" || r2.Color != "#fff" || !r2.IsPartner {
+	if r2 == nil || r2.Nick != "r" || r2.Color != "#fff" || r2.IsPartner {
 		t.Fatalf("full 应含元数据与 partner 标记：%+v", r2)
 	}
 	if d1.Self == nil || d1.Self.RobotId != 1 || d1.Self.MoveSrc != ombv1.ControlSource_CS_HUMAN {
 		t.Fatalf("Self 编码错误：%+v", d1.Self)
+	}
+	if len(d1.HealthPacks) != 1 || d1.HealthPacks[0].Base.Id != 7 || d1.HealthPacks[0].Available || d1.HealthPacks[0].RespawnInS != 12 {
+		t.Fatalf("full health pack state missing: %+v", d1.HealthPacks)
 	}
 
 	// 第二帧：无变化 → delta 空。
@@ -67,6 +71,9 @@ func TestFirstFrameFull(t *testing.T) {
 	}
 	if len(d2.Robots) != 0 || len(d2.RobotGone) != 0 {
 		t.Fatalf("无变化帧应全空：robots=%v gone=%v", d2.Robots, d2.RobotGone)
+	}
+	if len(d2.HealthPacks) != 1 || d2.HealthPacks[0].RespawnInS != 12 {
+		t.Fatalf("delta must carry full health pack state: %+v", d2.HealthPacks)
 	}
 
 	// 第三帧 base_tick 链到 101。

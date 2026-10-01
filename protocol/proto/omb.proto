@@ -85,7 +85,7 @@ message RobotState {
   uint32 respawn_in_s = 7; // dead=true 时有效
   string nick = 8;         // 仅 full 快照携带
   string color = 9;        // 仅 full 快照携带
-  bool is_partner = 10;    // 本机搭档（AOI 豁免，恒在场）
+  bool is_partner = 10 [deprecated = true]; // 旧客户端兼容；新对局恒 false
 }
 
 message ProjectileState {
@@ -105,6 +105,12 @@ message UplinkState {
   uint32 hacking_id = 3;     // 正在引导的 robot id（0=无人）
   sint32 progress_x10 = 4;   // 引导进度 0–8.0s ×10
   uint32 my_cooldown_s = 5;  // 本机玩家对该桩的剩余个人 CD（每玩家每桩独立 30s）
+}
+
+message HealthPackState {
+  EntityBase base = 1;
+  bool available = 2;
+  uint32 respawn_in_s = 3;
 }
 
 // 自机私有状态（不下发他机）
@@ -134,6 +140,7 @@ message SnapshotDelta {
   repeated uint32 core_gone = 12;
   repeated UplinkState uplinks = 13;
   SelfState self = 14;
+  repeated HealthPackState health_packs = 15;
 }
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
@@ -150,6 +157,7 @@ message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
 message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
+message EvHeal { uint32 by = 1; uint32 id = 2; sint32 heal_x10 = 3; Vec2 at = 4; }
 message EvSay { uint32 robot = 1; string text = 2; }
 message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
 // 表现事件只报告已发生的攻击，客户端不从弹丸消失推断命中。
@@ -243,6 +251,8 @@ message ServerEvent {
     EvShot shot = 26;
     EvProjectileImpact projectile_impact = 27;
     EvScoreboard scoreboard = 28; // 观战/回放可见；玩家同样可收（延迟 1s 内不影响作弊面）
+    // tag 29 is reserved by the console/script-log workstream.
+    EvHeal heal = 30;
   }
 }
 

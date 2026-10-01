@@ -47,6 +47,8 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 		ombv1.Title_BARRAGE, award)
 	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.killSteals, r.killStealsAt },
 		ombv1.Title_KILL_STEAL, award)
+	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.healedX10, r.healedAt },
+		ombv1.Title_HEALER, award)
 
 	// ---- RUNNER: max cumulative checkpoint distance, first achiever wins.
 	p.awardMaxDist(sorted, ombv1.Title_RUNNER, award)

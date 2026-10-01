@@ -81,26 +81,30 @@ func TestWallGapVisible(t *testing.T) {
 	}
 }
 
-// ---- Partner 豁免 ----
+// ---- Deprecated partner IDs do not change visibility ----
 
-func TestPartnerExemption(t *testing.T) {
-	// 搭档在墙后 + 60m 外，仍恒在。
+func TestDeprecatedPartnerDoesNotBypassVision(t *testing.T) {
 	walls := []sim.Wall{mkWall(1, 4, -10, 5, 10)}
 	w := mkWorld(walls, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 60, 0)})
 	obs := BuildObservation(w, NewWallIndex(walls, 0), 1, 2)
-	if got := idsOf(obs.Robots); !slices.Equal(got, []uint32{1, 2}) {
-		t.Fatalf("Partner 应豁免（隔墙+超距恒在）：got %v", got)
+	if got := idsOf(obs.Robots); !slices.Equal(got, []uint32{1}) {
+		t.Fatalf("deprecated partner ID bypassed wall/range: got %v", got)
 	}
-	if !obs.IsPartner(2) {
-		t.Fatal("IsPartner(2) 应为 true")
+	if obs.PartnerID != 0 || obs.IsPartner(2) {
+		t.Fatalf("deprecated partner marker remains live: %+v", obs)
 	}
-	if obs.IsPartner(1) {
-		t.Fatal("IsPartner(1) 应为 false")
+}
+
+func TestHealthPacksArePublicMapObjects(t *testing.T) {
+	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0)})
+	w.HealthPacks = []sim.HealthPackView{{ID: 3, Pos: sim.Vec2{X: 60, Y: 60}, Available: false, RespawnInS: 12}}
+	obs := BuildObservation(w, nil, 1, 0)
+	if len(obs.HealthPacks) != 1 || obs.HealthPacks[0] != w.HealthPacks[0] {
+		t.Fatalf("health packs missing from player observation: %+v", obs.HealthPacks)
 	}
-	// partnerID=0（无搭档）时不豁免任何人。
-	obs2 := BuildObservation(w, NewWallIndex(walls, 0), 1, 0)
-	if got := idsOf(obs2.Robots); !slices.Equal(got, []uint32{1}) {
-		t.Fatalf("无搭档时墙后目标应不可见：got %v", got)
+	spec := BuildSpectatorObservation(w)
+	if len(spec.HealthPacks) != 1 || spec.HealthPacks[0] != w.HealthPacks[0] {
+		t.Fatalf("health packs missing from spectator observation: %+v", spec.HealthPacks)
 	}
 }
 

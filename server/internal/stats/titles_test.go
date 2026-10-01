@@ -209,6 +209,39 @@ func TestDeprecatedBestPartnerNeverAwards(t *testing.T) {
 	}
 }
 
+func heal(tick, by, id uint32, amountX10 int32) *ombv1.ServerEvent {
+	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_Heal{Heal: &ombv1.EvHeal{By: by, Id: id, HealX10: amountX10}}}
+}
+
+func TestTitleHealerFirstAchieverAndZeroSuppression(t *testing.T) {
+	zero := NewProjector()
+	zero.OnEvent(10, matchEnd(10))
+	if rows := feedFinal(zero); len(rows) != 0 {
+		for id, row := range rows {
+			if titlesOf(t, row)[ombv1.Title_HEALER] {
+				t.Fatalf("robot %d received zero-value HEALER", id)
+			}
+		}
+	}
+
+	p := NewProjector()
+	p.OnEvent(10, heal(10, 2, 1, 300))
+	p.OnEvent(20, heal(20, 1, 2, 200))
+	p.OnEvent(30, heal(30, 1, 3, 100))
+	p.OnEvent(30, heal(30, 1, 3, 100)) // replay duplicate must not count twice
+	p.OnEvent(40, matchEnd(40))
+	rows := feedFinal(p)
+	if !titlesOf(t, rows[2])[ombv1.Title_HEALER] {
+		t.Fatalf("first achiever missing HEALER: %v", rows[2].Titles)
+	}
+	if titlesOf(t, rows[1])[ombv1.Title_HEALER] {
+		t.Fatal("later tied robot received HEALER")
+	}
+	if rows[1].Score != 0 || rows[2].Score != 0 {
+		t.Fatalf("healing invented score rewards: %+v", rows)
+	}
+}
+
 func TestTitleKillStealFirstAchiever(t *testing.T) {
 	p := NewProjector()
 	p.OnEvent(10, attributedKill(10, 2, 4, nil, true))

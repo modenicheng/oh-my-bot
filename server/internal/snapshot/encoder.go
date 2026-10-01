@@ -98,6 +98,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		Projectiles: make([]*ombv1.ProjectileState, 0, len(obs.Projectiles)),
 		Cores:       make([]*ombv1.CoreState, 0, len(obs.Cores)),
 		Uplinks:     make([]*ombv1.UplinkState, 0, len(obs.Uplinks)),
+		HealthPacks: make([]*ombv1.HealthPackState, 0, len(obs.HealthPacks)),
 	}
 	delta.Phase = phaseToProto(phase)
 	delta.TimeLeftS = timeLeftS
@@ -174,6 +175,12 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		}
 	}
 	// Uplink 恒全量（地图对象）——proto 无 uplink_gone 字段。
+
+	// Health packs are four public map objects. Send the complete state every frame
+	// so reconnect and resync never depend on a missing tombstone.
+	for i := range obs.HealthPacks {
+		delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(&obs.HealthPacks[i]))
+	}
 
 	delta.Self = encodeSelf(self)
 
@@ -262,6 +269,13 @@ func encodeCore(c *sim.CoreView) *ombv1.CoreState {
 			Pos: &ombv1.Vec2{X: c.Pos.X, Y: c.Pos.Y},
 		},
 		Value: c.Value,
+	}
+}
+
+func encodeHealthPack(pack *sim.HealthPackView) *ombv1.HealthPackState {
+	return &ombv1.HealthPackState{
+		Base:      &ombv1.EntityBase{Id: pack.ID, Pos: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y}},
+		Available: pack.Available, RespawnInS: pack.RespawnInS,
 	}
 }
 
