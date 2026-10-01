@@ -387,6 +387,70 @@ func TestReadReplayErrors(t *testing.T) {
 	}
 }
 
+// TestReplaySameTickIdenticalHitsCountsBoth writes a REAL sim.MatchEventLog
+// containing two identical-payload EvHit lines in the same tick and verifies
+// ReadReplay (sequence identity, one per JSONL event line) equals the live
+// ordered-source projection: both hits score, BARRAGE sees both shots. The
+// legacy content path would merge them to one.
+func TestReplaySameTickIdenticalHitsCountsBoth(t *testing.T) {
+	const tick = 500
+	live := NewProjector()
+	live.OnEventRecord(1, tick, hit(tick, 1, 2, 5))
+	live.OnEventRecord(2, tick, hit(tick, 1, 2, 5))
+	live.OnEventRecord(3, tick, matchEnd(tick))
+	liveFinal := rowsByRobot(live.Final())
+	if liveFinal[1].Score != 2*ScoreHit || live.robots[1].hitsLanded != 2 {
+		t.Fatalf("live ordered path: score=%d hits=%d, want %d/2",
+			liveFinal[1].Score, live.robots[1].hitsLanded, 2*ScoreHit)
+	}
+
+	// Real on-disk log: header, match_start, two identical hits, match_end.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "double-hit.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := sim.NewMatchEventLogWriter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.SetPlayers([]sim.MatchPlayer{
+		{RobotID: 1, PlayerID: 101, Nick: "alice"},
+		{RobotID: 2, PlayerID: 102, Nick: "bob"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	log.OnMatchInit(sim.Checkpoint{Robots: []sim.Robot{
+		{ID: 1, Position: sim.Vec2{}, State: sim.Alive},
+		{ID: 2, Position: sim.Vec2{}, State: sim.Alive},
+	}, Walls: goldenWalls()})
+	log.OnEvent(1, matchStart(1))
+	log.OnEvent(tick, hit(tick, 1, 2, 5))
+	log.OnEvent(tick, hit(tick, 1, 2, 5)) // distinct line: distinct event
+	log.OnEvent(tick, matchEnd(tick))
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	replayed, err := ReadReplay(path, ReadReplayOptions{})
+	if err != nil {
+		t.Fatalf("ReadReplay: %v", err)
+	}
+	replayFinal := rowsByRobot(replayed.Final())
+	if replayFinal[1].Score != liveFinal[1].Score {
+		t.Errorf("replay score %d != live %d (want both hits)",
+			replayFinal[1].Score, liveFinal[1].Score)
+	}
+	if replayed.robots[1].hitsLanded != 2 {
+		t.Errorf("replay hitsLanded = %d, want 2", replayed.robots[1].hitsLanded)
+	}
+	if !titlesOf(t, replayFinal[1])[ombv1.Title_BARRAGE] {
+		t.Errorf("replay r1 missing BARRAGE: %+v", replayFinal[1].Titles)
+	}
+}
+
 // TestReplayDuplicateFeedIdempotent writes a log, replays it, then replays the
 // same records into the SAME projector a second time — totals must not move.
 func TestReplayDuplicateFeedIdempotent(t *testing.T) {

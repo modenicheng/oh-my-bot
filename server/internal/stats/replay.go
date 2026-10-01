@@ -49,6 +49,11 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 	if opts.Partners != nil {
 		p.SetPartnerMap(opts.Partners)
 	}
+	// Sequence numbers mirror glue's live assignment (one per projected event
+	// in stream order); each JSONL event line is a distinct event, never
+	// content-merged, so replay == live even for identical-payload same-tick
+	// events.
+	seq := uint64(0)
 	for {
 		rec, err := reader.Read()
 		if err != nil {
@@ -79,7 +84,8 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 			}
 		case "event":
 			if rec.Event != nil {
-				p.OnEvent(rec.Tick, rec.Event)
+				seq++
+				p.OnEventRecord(seq, rec.Tick, rec.Event)
 			}
 		case "input", "control":
 			// Inputs and controls drive deterministic sim replay, not stats

@@ -26,10 +26,17 @@ type LiveSnapshot struct {
 	Rows []ScoreRow // 按 Score 降序
 }
 
-// Projector 从事件流投影统计。幂等消费：同一事件重放不产生重复计数
-// （内部按事件序列号/内容去重）——这是"JSONL 回放重算 = 实时投影"验收门的基础。
+// Projector 从事件流投影统计。幂等消费：同一事件重放不产生重复计数。
+// 事件身份有两种（不可冲突）：
+//   - OnEventRecord(sequence,…)：有序源身份（glue 实时流、JSONL 回放按行序
+//     分配），序号即去重键——同 tick 同 payload 的两条独立事件（如同 tick 两枚
+//     弹丸对同目标等伤 EvHit）各自计分，不丢 ScoreHit/BARRAGE。
+//   - OnEvent(tick,…)：legacy 内容身份（tick+kind+payload），供无序/旧调用方；
+//     内容重复即合并，同 tick 同 payload 的真实双事件会计一次。
+//
+// 这是"JSONL 回放重算 = 实时投影"验收门的基础。
 type Projector interface {
-	// OnEvent 消费一条事件（与 EventSink 同序）。
+	// OnEvent 消费一条事件（与 EventSink 同序，内容去重——legacy 路径）。
 	OnEvent(tick uint32, ev *ombv1.ServerEvent)
 	// Live 当前实时榜快照。
 	Live() LiveSnapshot

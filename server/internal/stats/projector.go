@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	sim "github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -81,7 +82,10 @@ type ProjectorImpl struct {
 	players map[uint32]uint64
 	nicks   map[uint32]string
 
-	seen map[string]struct{} // event dedup (tick + kind + payload)
+	// seen holds dedup keys for both identity schemes: content keys
+	// ("tick|kind|payload", legacy OnEvent) and record keys ("r|seq",
+	// OnEventRecord). The prefixes cannot collide.
+	seen map[string]struct{}
 
 	lastTick   uint32
 	hasCp      bool
@@ -140,9 +144,15 @@ func (p *ProjectorImpl) robot(id uint32) *robotStats {
 	return r
 }
 
-// OnEvent consumes one event (same order as EventSink). Replaying an already
-// seen event is a no-op (tick+kind+payload dedup); events after EvMatchEnd are
-// ignored so a double-fed stream tail cannot skew the result.
+// OnEvent consumes one event (same order as EventSink) under CONTENT
+// identity: replaying an already seen tick+kind+payload is a no-op. This is
+// the legacy/unordered-source entry point (old callers, content-dedup tests).
+// Ordered sources (glue live feed, JSONL replay) must use OnEventRecord,
+// which distinguishes genuinely distinct same-tick identical-payload events
+// (e.g. two projectiles hitting the same target with equal damage in one
+// tick) that content dedup would wrongly merge — dropping ScoreHit and the
+// BARRAGE proxy. Events after EvMatchEnd are ignored so a double-fed stream
+// tail cannot skew the result.
 func (p *ProjectorImpl) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	if ev == nil || ev.Kind == nil || p.matchEnded {
 		return
@@ -155,6 +165,36 @@ func (p *ProjectorImpl) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 		return
 	}
 	p.seen[key] = struct{}{}
+	p.applyEvent(tick, ev)
+}
+
+// OnEventRecord consumes one event under ORDERED-SOURCE identity: the
+// caller-assigned sequence is the dedup key, so every logically distinct
+// event counts exactly once regardless of payload equality, and re-feeding
+// the same sequence is a no-op. Glue assigns one sequence per projected event
+// (sim loop order); replay assigns one per JSONL event line — line order is a
+// reliable identity, so nothing is added to the wire. sequence 0 carries no
+// ordered identity and falls back to OnEvent content dedup. Defenses match
+// OnEvent: nil event, nil kind, and nil oneof payloads never project.
+func (p *ProjectorImpl) OnEventRecord(sequence uint64, tick uint32, ev *ombv1.ServerEvent) {
+	if sequence == 0 {
+		p.OnEvent(tick, ev)
+		return
+	}
+	if ev == nil || ev.Kind == nil || p.matchEnded {
+		return
+	}
+	key := "r|" + strconv.FormatUint(sequence, 10)
+	if _, dup := p.seen[key]; dup {
+		return
+	}
+	p.seen[key] = struct{}{}
+	p.applyEvent(tick, ev)
+}
+
+// applyEvent is the shared projection body for both entry points: dedup has
+// already happened and the sequence/content key is already recorded.
+func (p *ProjectorImpl) applyEvent(tick uint32, ev *ombv1.ServerEvent) {
 	if tick > p.lastTick {
 		p.lastTick = tick
 	}

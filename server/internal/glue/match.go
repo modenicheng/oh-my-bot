@@ -68,6 +68,7 @@ type Match struct {
 	startOnce        sync.Once
 
 	tick       uint32
+	eventSeq   uint64 // projected-event identity for OnEventRecord dedup
 	warmup     bool
 	stopOnce   sync.Once
 	finishOnce sync.Once
@@ -198,7 +199,8 @@ func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 		// Settle only then so RUNNER includes the last checkpoint interval.
 		return
 	}
-	g.m.proj.OnEvent(tick, ev)
+	g.m.eventSeq++
+	g.m.proj.OnEventRecord(g.m.eventSeq, tick, ev)
 	// Sim emits under rc.mu; never reacquire it from the sink.
 	if g.m.activeLocked() {
 		g.m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}})
@@ -213,7 +215,8 @@ func (g glueSink) OnCheckpoint(state sim.Checkpoint) {
 		return
 	}
 	end := settledMatchEnd(state.Tick, nil)
-	g.m.proj.OnEvent(state.Tick, end)
+	g.m.eventSeq++
+	g.m.proj.OnEventRecord(g.m.eventSeq, state.Tick, end)
 	end = settledMatchEnd(state.Tick, g.m.proj.Final())
 	g.m.finalEnd = end // frozen settlement for late spectator joiners
 	if g.m.log != nil {

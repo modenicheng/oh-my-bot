@@ -193,6 +193,31 @@ func TestOnEventIdempotentOnReplay(t *testing.T) {
 	}
 }
 
+// TestOnEventRecordSameTickIdenticalHitsCountsBoth pins the ordered-source
+// identity: two genuinely distinct EvHit events (two projectiles, same tick,
+// same from/to/dmg) must BOTH count — the content-dedup bug dropped the
+// second one, losing ScoreHit and a BARRAGE shot. Same sequence re-feed is
+// still idempotent.
+func TestOnEventRecordSameTickIdenticalHitsCountsBoth(t *testing.T) {
+	p := NewProjector()
+	const tick = 500
+	p.OnEventRecord(1, tick, hit(tick, 1, 2, 5))
+	p.OnEventRecord(2, tick, hit(tick, 1, 2, 5)) // distinct sequence: distinct event
+	p.OnEventRecord(2, tick, hit(tick, 1, 2, 5)) // same sequence replay: no-op
+	p.OnEventRecord(3, tick, matchEnd(tick))
+	got := rowsByRobot(p.Final())
+	if got[1].Score != 2*ScoreHit {
+		t.Errorf("r1 score = %d, want %d (both hits counted)", got[1].Score, 2*ScoreHit)
+	}
+	r := p.robots[1]
+	if r.hitsLanded != 2 {
+		t.Errorf("hitsLanded = %d, want 2 (BARRAGE proxy)", r.hitsLanded)
+	}
+	if !titlesOf(t, got[1])[ombv1.Title_BARRAGE] {
+		t.Errorf("r1 missing BARRAGE: %+v", got[1].Titles)
+	}
+}
+
 func TestEventsAfterMatchEndIgnored(t *testing.T) {
 	p := NewProjector()
 	p.OnEvent(100, core(100, 1, 10))
