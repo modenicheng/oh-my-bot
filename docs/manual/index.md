@@ -37,7 +37,7 @@ oh-my-bot 是一场最多 **64 人的机器人大乱斗**：每个人操控一�
 | [你的第一局](start/first-match.md) | 手操移动、抢资源与战斗 | 所有人 |
 | [Snippet 驾驶辅助](start/snippet.md) | 当前辅助开关和六条辅助的规划 | 所有人 |
 | [AI Agent](start/ai-agent.md) | 接入状态、配额组件与改码限制 | 所有人 |
-| [游戏规则](rules/game-rules.md) | 地图、得分、Uplink、搭档与复活 | 所有人 |
+| [游戏规则](rules/game-rules.md) | 地图、得分、Uplink、血包与复活 | 所有人 |
 | [操作与控制仲裁](rules/controls.md) | 快捷键、技能状态、音效与重连 | 所有人 |
 | [写第一个 Bot](code/bot-scripting.md) | 网页编辑器、脚本提交、感知和运行规则 | 写代码的人 |
 | [API 总览](reference/index.md) | 动作、数据结构和示例库 | 写代码的人 |
@@ -55,7 +55,6 @@ oh-my-bot 是一场最多 **64 人的机器人大乱斗**：每个人操控一�
 | Ring / Sector | 地图三个同心环 / 外环八个出生扇区 |
 | Core | 靠近后自动拾取的得分资源，同时回复能量；Mega Core 价值更高 |
 | Uplink | 持续引导 8 秒后得分的设备，每个人对每根桩单独冷却 |
-| Partner | 随机搭档：双方弹丸互免、隔墙可见；击毁敌人时搭档获得助攻分 |
 | Phase | OUTER_RING（0:00–4:00）与 CORE_OPEN（4:00–8:00） |
 | Driving Assist | 允许已加载脚本控制未被玩家接管的动作轴，默认关闭 |
 | Hot Swap | 提交新代码后更新脚本；加载失败保留旧版，运行异常不自动回滚 |

@@ -7,7 +7,7 @@ tags: [脚本, L1]
 
 # 便利层参考（L1）
 
-L1 是 7 个常用组合动作，帮你省掉重复样板代码。它们最终都落到 [L0 原语](actions.md)上——比如 `moveTo` 内部就是归一化的 `move`。
+L1 是 6 个常用组合动作，帮你省掉重复样板代码。它们最终都落到 [L0 原语](actions.md)上——比如 `moveTo` 内部就是归一化的 `move`。
 
 ## moveTo(pos)
 
@@ -60,13 +60,13 @@ void tick(Context bot) {
 
 完整语义（弧度约定、非法值处理）见[动作参考 aimAt](actions.md)。
 
-**游戏规则**：传**不可见**的机器人（被墙挡住、超出视野，搭档除外）会当场抛异常 `aimAt: entity not visible`；当帧没接住的话，该帧全部脚本动作作废。
+**游戏规则**：传**不可见**的机器人（被墙挡住、超出视野）会当场抛异常 `aimAt: entity not visible`；当帧没接住的话，该帧全部脚本动作作废。
 
-**常见坑**：先确认目标在 `bot.scan().robots` 里再传，搭档不用确认。
+**常见坑**：先确认目标在 `bot.scan().robots` 里再传。
 
 ## nearestEnemy()
 
-**做什么**：找视野内最近的敌人。**只搜 20m 视野内**——不含搭档、不含自己、不含死者。一个都看不见时返回 `null`。
+**做什么**：找视野内最近的敌人。**只搜 20m 视野内**——不含自己、不含死者。一个都看不见时返回 `null`。
 
 ```ts|py|java
 看到敌人才转向开火。
@@ -190,46 +190,6 @@ void tick(Context bot) {
 ```
 
 **常见坑**：只看 `nearestUplink()` 就冲过去——它不含"这桩现在能不能黑"的信息。`ready`、你的个人冷却都要另查另记。
-
-## partner()
-
-**做什么**：拿本局搭档的引用。搭档恒可见（隔墙、无限距）、弹丸互免，是唯一可靠的"全图信标"——可以拿他的位置当集合点或导航参照。
-
-奇数人数时会有一名玩家没有搭档；未配对时返回 `null`。
-
-```ts|py|java
-没接敌就跟上搭档——先判空再使用。
-```
-```ts
-const bot = {
-  tick(bot) {
-    const partner = bot.partner()
-    if (!partner) return // 没搭档（奇数局末位）：退化为普通策略
-    const enemy = bot.nearestEnemy()
-    if (!enemy) bot.moveTo(partner.position)
-  },
-}
-export default bot
-```
-```py
-def tick(bot):
-    partner = bot.partner()
-    if not partner:
-        return  # 没搭档（奇数局末位）：退化为普通策略
-    enemy = bot.nearest_enemy()
-    if not enemy:
-        bot.move_to(partner.position)
-```
-```java
-void tick(Context bot) {
-    RobotRef partner = bot.partner();
-    if (partner == null) return; // 没搭档（奇数局末位）：退化为普通策略
-    RobotRef enemy = bot.nearestEnemy();
-    if (enemy == null) bot.moveTo(partner.position);
-}
-```
-
-**常见坑**：不判空直接 `.position`——奇数局末位玩家会当场抛异常，该帧全部脚本动作作废。先判 `null`。
 
 ## pulseScan()
 
