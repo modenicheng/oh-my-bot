@@ -73,9 +73,6 @@ export class BackgroundMusic {
 
   setVisible(visible: boolean): void { this.visible = visible; this.sync() }
 
-  /** 播放器实例，供浏览器端观测调度状态（仅测试/诊断用）。 */
-  get musicPlayer(): ChipMusic | null { return this.player }
-
   private setScene(scene: StageId): void {
     if (this.scene === scene) return
     this.scene = scene

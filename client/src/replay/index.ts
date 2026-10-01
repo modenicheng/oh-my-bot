@@ -211,7 +211,11 @@ export class ReplayIndex {
         nextSample += KEYFRAME_EVERY
       }
     }
-    // 末尾补帧，保证 endTick 可查
+    // 输入记录可能比最后一个事件更晚；尾段也要保留固定采样间隔。
+    while (nextSample <= this.endTick) {
+      commit(snapshot(nextSample))
+      nextSample += KEYFRAME_EVERY
+    }
     commit(snapshot(this.endTick))
     this.keyTicks.push(...this.keyframes.keys())
     this.keyTicks.sort((a, b) => a - b)

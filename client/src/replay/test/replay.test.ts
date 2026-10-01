@@ -107,6 +107,23 @@ describe('ReplayIndex', () => {
     expect(replay.frameAt(59).healthPacks[0]?.readyAt).toBe(0)
   })
 
+  it('事件后只有输入的尾段仍有每秒关键帧', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: {
+        tick: 0, robots: [{ id: 1, hp: 50, state: 'alive' }],
+        health_packs: [{ id: 7, pos: { X: 4, Y: 5 }, ready_at: 0 }],
+      } },
+      { type: 'event', tick: 58, event: { heal: { by: 1, id: 7, heal_x10: 300 } } },
+      { type: 'input', tick: 185 },
+    ].map(record => JSON.stringify(record)).join('\n'))
+    const replay = new ReplayIndex(data)
+    expect(replay.frameAt(57).robots[0]?.hp).toBe(50)
+    for (const tick of [60, 120, 180, 185]) {
+      expect(replay.frameAt(tick).robots[0]?.hp).toBe(80)
+      expect(replay.frameAt(tick).healthPacks[0]?.readyAt).toBe(1858)
+    }
+  })
+
   it('uplink_hack 计分', () => {
     const f = idx.frameAt(330 * 60)
     expect(f.scores.get(4)?.uplink).toBe(1)

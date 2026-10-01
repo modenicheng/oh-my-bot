@@ -10,6 +10,7 @@
     "test:e2e": "tsx scripts/round2-check.mjs",
     "test:startup": "tsx scripts/startup-check.mjs",
     "test:feel": "tsx scripts/game-feel-check.mjs",
+    "test:health": "tsx scripts/health-check.mjs",
     "test:reconnect": "tsx scripts/reconnect-check.mjs",
     "test:bots": "tsx scripts/solo-bots-check.mjs",
     "test:spectator": "tsx scripts/spectator-check.mjs",

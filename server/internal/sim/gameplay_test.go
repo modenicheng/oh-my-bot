@@ -461,6 +461,23 @@ func TestDamageShareAttributionAndThreeSecondRespawn(t *testing.T) {
 	}
 }
 
+func TestDamageShareStableAtFloatingHalfBoundary(t *testing.T) {
+	// The three additions round differently in map iteration orders 1,3,2
+	// and 1,2,3. Contributor ID order must produce the same strict 50% result.
+	for attempt := 0; attempt < 128; attempt++ {
+		s := NewSim(7, []uint32{1, 2, 3, 4}, nil)
+		victim := &s.robots[3]
+		victim.HP = 0.007857810392822667
+		s.damage(1, victim, 0.003928830466832963)
+		s.damage(2, victim, 0.00000007472957837013148)
+		s.damage(3, victim, 0.003928905196411333)
+		kill := s.events[len(s.events)-1].GetKill()
+		if kill == nil || kill.KillSteal || !reflect.DeepEqual(kill.Assists, []uint32{1, 2}) {
+			t.Fatalf("attempt %d: unstable half-damage attribution: %+v", attempt, kill)
+		}
+	}
+}
+
 func TestDamageLedgerCountsOnlyEffectiveEnemyDamage(t *testing.T) {
 	s := NewSim(0, []uint32{1, 2}, nil)
 	victim := &s.robots[1]

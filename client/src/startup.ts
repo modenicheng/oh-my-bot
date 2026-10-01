@@ -47,7 +47,7 @@ function enter(): void {
   target?.focus({ preventScroll: true })
 }
 function activate(event: MouseEvent | KeyboardEvent): void {
-  if (!event.isTrusted || root.hidden) return
+  if (!event.isTrusted || document.hidden || root.hidden) return
   if ((event.target as Element | null)?.closest('a')) return
   if (starting) {
     // 退出动画期间仍隔离输入，避免连按触发游戏快捷键。

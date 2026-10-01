@@ -79,6 +79,17 @@ func TestMapValidationCopiesAndTransactionalSpawns(t *testing.T) {
 		{"bad_wall", func(m *MapDef) { m.Walls = []Wall{{ID: 50, Min: Vec2{5, 5}, Max: Vec2{4, 4}}} }},
 		{"blocked_spawn", func(m *MapDef) { m.Sectors[0].SpawnArea = Rect{Min: Vec2{-1, -1}, Max: Vec2{1, 1}} }},
 		{"bad_uplink", func(m *MapDef) { m.Uplinks = []UplinkDef{{ID: 99, InteractR: 0, ActivePhase: PhaseOuterRing}} }},
+		{"health_outside_arena", func(m *MapDef) {
+			m.GeneratorVer = 5
+			m.HealthPacks = []HealthPackDef{{ID: 90, Pos: Vec2{X: 1000}}}
+		}},
+		{"health_center_without_robot_clearance", func(m *MapDef) {
+			m.GeneratorVer = 5
+			m.HealthPacks = []HealthPackDef{{ID: 90, Pos: Vec2{X: 80 - RobotRadius/2}}}
+		}},
+		{"health_nonfinite", func(m *MapDef) {
+			m.HealthPacks = []HealthPackDef{{ID: 90, Pos: Vec2{X: math.Inf(1)}}}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bad := cloneMap(before.Map)
