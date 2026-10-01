@@ -1,4 +1,6 @@
 import { startClient } from './startup-helpers.mjs'
+import { parseReplayNDJSON } from '../src/replay/model.ts'
+import { ReplayIndex } from '../src/replay/index.ts'
 import { chromium } from 'playwright'
 import WebSocket from 'ws'
 import { create, fromBinary } from '@bufbuild/protobuf'
@@ -339,13 +341,15 @@ try {
   const healRecord = healRecords[0]
   assert.equal(healRecord.event.heal.by, hostId, 'JSONL heal owner')
   assert.equal(healRecord.event.heal.id, pack.id, 'JSONL heal pack')
-  const initialState = records.find(record => record.type === 'match_start')?.state
-  const initialRobot = initialState?.robots?.find(robot => robot.id === hostId)
-  assert.ok(initialRobot, 'JSONL match_start contains owner state')
-  const replayHP = Math.min(100, Number(initialRobot.hp) + heal.healX10 / 10)
-  const replayReadyAt = healRecord.tick + 30 * 60
-  assert.equal(replayHP, 100, 'replay HP projection respects cap 100')
-  assert.equal(replayReadyAt, healRecord.tick + 1800, 'replay cooldown projection matches 30s')
+  const replayIndex = new ReplayIndex(parseReplayNDJSON(logText))
+  // The visual reader samples once per second; query the first sample after
+  // the heal (or the final frame for a short aborted match).
+  const replayFrame = replayIndex.frameAt(Math.min(replayIndex.endTick, Math.ceil(healRecord.tick / 60) * 60))
+  const replayRobot = replayFrame.robots.find(robot => robot.id === hostId)
+  const replayPack = replayFrame.healthPacks.find(item => item.id === pack.id)
+  assert.ok(replayRobot && replayPack, 'actual replay index contains owner and health pack')
+  assert.equal(replayRobot.hp, observed.robot.hpX10 / 10, 'actual replay reader matches healed HP')
+  assert.equal(replayPack.readyAt, healRecord.tick + 1800, 'actual replay reader preserves 30s cooldown')
 
   const matches = await fetch(`${base}/api/matches`).then(response => response.json())
   const replayId = matches.find(item => typeof item === 'string' && item.startsWith('HEALTH-')) ?? matches.at(-1)
