@@ -55,17 +55,20 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
-		counts := [8][2]int{}
+		counts := [8][3]int{}
 		for i, w := range def.Walls {
 			center := w.Min.Add(w.Max).Scale(0.5)
 			band := 0
 			if center.Len() >= 55 {
+				band = 2
+			} else if center.Len() >= coreZoneR {
 				band = 1
 			}
 			counts[int(angleDeg(center.X, center.Y)/45)][band]++
 			width, height := w.Max.X-w.Min.X, w.Max.Y-w.Min.Y
-			if math.Abs(math.Max(width, height)-4) > 1e-9 || math.Abs(math.Min(width, height)-0.7) > 1e-9 {
-				t.Fatalf("seed %d invalid cover size", seed)
+			long, short := math.Max(width, height), math.Min(width, height)
+			if math.Abs(short-0.7) > 1e-9 || (math.Abs(long-4) > 1e-9 && math.Abs(long-3) > 1e-9 && math.Abs(long-2) > 1e-9) {
+				t.Fatalf("seed %d invalid grid cover size %.2fx%.2f", seed, width, height)
 			}
 			for _, p := range []sim.Vec2{w.Min, w.Max, {X: w.Min.X, Y: w.Max.Y}, {X: w.Max.X, Y: w.Min.Y}} {
 				if p.Len() > 79.4 {
@@ -89,7 +92,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			}
 		}
 		for k, c := range counts {
-			if c != [2]int{4, 2} {
+			if c != [3]int{1, 4, 2} {
 				t.Fatalf("seed %d wedge %d cover counts %v", seed, k, c)
 			}
 		}

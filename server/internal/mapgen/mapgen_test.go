@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 2 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 3 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -132,7 +132,7 @@ func TestTopologyInvariants(t *testing.T) {
 		if def.CoreZone.UnlockPhase != sim.PhaseCoreOpen {
 			t.Fatalf("seed %d: core zone unlock phase %d", seed, def.CoreZone.UnlockPhase)
 		}
-		if def.CoreRules.PeriodTicks != 1800 {
+		if def.CoreRules.PeriodTicks != 1200 {
 			t.Fatalf("seed %d: period %d", seed, def.CoreRules.PeriodTicks)
 		}
 		wantW := map[sim.Phase][]float64{
@@ -188,9 +188,10 @@ func TestTopologyInvariants(t *testing.T) {
 		if mega != 2 {
 			t.Fatalf("seed %d: mega pads = %d, want 2", seed, mega)
 		}
-		// Gen2 has six complete batches of eight short covers.
-		if len(def.Walls) != 48 {
-			t.Fatalf("seed %d: walls = %d, want 48", seed, len(def.Walls))
+		// Gen3 has seven complete batches of eight AABB covers, including one
+		// short inner-ring stratum with a different grid footprint.
+		if len(def.Walls) != 56 {
+			t.Fatalf("seed %d: walls = %d, want 56", seed, len(def.Walls))
 		}
 		for i, w := range def.Walls {
 			if w.ID != uint32(i+1) {

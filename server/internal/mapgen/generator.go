@@ -38,7 +38,7 @@ const (
 	uplinkRHi      = 45.0 // 普通 Uplink 半径抖动上界
 	normInteractR  = 2.5  // 普通 Uplink 交互半径（v0.3 §6）
 	mainInteractR  = 3.0  // 主 Uplink 交互半径
-	corePeriodTick = 1800 // Core 刷新周期：30s @ 60Hz
+	corePeriodTick = 1200 // Core 刷新周期：20s @ 60Hz，降低单人空场等待
 )
 
 // CorePad 数量（Group 0=outer / 1=mid / 2=center）。
@@ -49,7 +49,7 @@ const (
 )
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
-const GeneratorVer = 2
+const GeneratorVer = 3
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
