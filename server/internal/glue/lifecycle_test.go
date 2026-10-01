@@ -1,12 +1,15 @@
 package glue
 
 import (
+	"bytes"
 	"sync"
 	"testing"
 	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
+	"github.com/modenicheng/oh-my-bot/server/internal/sim"
+	"github.com/modenicheng/oh-my-bot/server/internal/stats"
 )
 
 type sentMessage struct {
@@ -69,6 +72,39 @@ func lastSnapshot(t *testing.T, msgs []sentMessage) *ombv1.SnapshotDelta {
 	}
 	t.Fatal("no snapshot")
 	return nil
+}
+
+func TestMultiSinkForwardsControlsAndCheckpoints(t *testing.T) {
+	var buf bytes.Buffer
+	primary, err := sim.NewMatchEventLogWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projector := stats.NewProjector()
+	sink := multiSink{primary: primary, secondary: projector}
+	initial := sim.Checkpoint{Tick: 0, Robots: []sim.Robot{{ID: 1}}, Walls: []sim.Wall{}}
+	sink.OnMatchInit(initial)
+	sink.OnControl(1, 1, sim.ControlRecord{Toggles: 1, Say: "hello"})
+	sink.OnCheckpoint(sim.Checkpoint{Tick: sim.CheckpointInterval, Robots: []sim.Robot{{ID: 1, Position: sim.Vec2{X: 4}}}, Walls: []sim.Wall{}})
+	if err := primary.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := sim.ReadMatchEventLog(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundControl := false
+	for _, record := range records {
+		if record.Type == "control" && record.Control != nil && record.Control.Say == "hello" {
+			foundControl = true
+		}
+	}
+	if !foundControl {
+		t.Fatal("production multiSink dropped control record")
+	}
+	if projector.Live().Tick != sim.CheckpointInterval {
+		t.Fatalf("projector did not receive checkpoint: tick=%d", projector.Live().Tick)
+	}
 }
 
 func TestReconnectPreservesRobotAndConsumedSequence(t *testing.T) {

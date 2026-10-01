@@ -68,9 +68,9 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 			if rec.Event != nil {
 				p.OnEvent(rec.Tick, rec.Event)
 			}
-		case "input":
-			// Control inputs are replay data for sim reconstruction, not
-			// stats projection; consumed (skipped) for completeness.
+		case "input", "control":
+			// Inputs and controls drive deterministic sim replay, not stats
+			// projection; consume both for complete log compatibility.
 		default:
 			return nil, fmt.Errorf("stats: unknown replay record type %q", rec.Type)
 		}

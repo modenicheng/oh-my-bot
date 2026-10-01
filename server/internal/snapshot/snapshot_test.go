@@ -46,6 +46,10 @@ func TestVisionRadius(t *testing.T) {
 	if got := idsOf(obs.Robots); !slices.Equal(got, want) {
 		t.Fatalf("visible robots = %v, want %v", got, want)
 	}
+	pulse := BuildObservation(w, nil, 1, 0, 32)
+	if got := idsOf(pulse.Robots); !slices.Equal(got, []uint32{1, 2, 3, 4}) {
+		t.Fatalf("pulse vision = %v, want all robots within 32m", got)
+	}
 }
 
 // ---- 墙体遮挡 ----

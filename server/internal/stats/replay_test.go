@@ -151,8 +151,9 @@ func writeGoldenLog(t *testing.T, events []goldenEvent, checkpoints []sim.Checkp
 			log.OnCheckpoint(checkpoints[cpIdx])
 			cpIdx++
 		}
-		if ge.tick == 7 { // one input record mid-stream
+		if ge.tick == 7 { // input and control records are both replay data
 			log.OnInput(7, 1, sim.Input{Seq: 1, MoveX: 500, MoveY: 0})
+			log.OnControl(7, 1, sim.ControlRecord{Toggles: 1})
 		}
 		log.OnEvent(ge.tick, ge.ev)
 	}

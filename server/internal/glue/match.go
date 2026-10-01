@@ -121,6 +121,17 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		m.sim.SetRobotMeta(m.robotOf[pid], info.Nick, info.Color)
 	}
 	m.proj.SetPlayerMap(playerMap)
+	nicks := make(map[uint32]string, len(players))
+	partners := make(map[uint32]uint32, len(players))
+	for pid, info := range players {
+		rid := m.robotOf[pid]
+		nicks[rid] = info.Nick
+		if robot, ok := m.sim.Robot(rid); ok && robot.Combat.Partner != 0 {
+			partners[rid] = robot.Combat.Partner
+		}
+	}
+	m.proj.SetNickMap(nicks)
+	m.proj.SetPartnerMap(partners)
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
 	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
@@ -140,6 +151,13 @@ func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 }
 
 func (m *Match) newSink() sim.EventSink { return glueSink{m: m} }
+
+func (g glueSink) OnCheckpoint(state sim.Checkpoint) { g.m.proj.OnCheckpoint(state) }
+func (g glueSink) OnMatchInit(state sim.Checkpoint)  { g.m.proj.OnMatchInit(state) }
+func (g glueSink) OnInput(uint32, uint32, sim.Input) {}
+
+var _ sim.CheckpointSink = glueSink{}
+var _ sim.ReplaySink = glueSink{}
 
 // multiSink：事件先落盘再投影广播（日志失败不阻断模拟——Err 由 Close 报告）。
 type multiSink struct {
@@ -167,7 +185,16 @@ func (ms multiSink) OnInput(tick uint32, robotID uint32, input sim.Input) {
 
 func (ms multiSink) OnCheckpoint(state sim.Checkpoint) {
 	ms.primary.OnCheckpoint(state)
+	if cp, ok := ms.secondary.(sim.CheckpointSink); ok {
+		cp.OnCheckpoint(state)
+	}
 }
+
+func (ms multiSink) OnControl(tick, robotID uint32, control sim.ControlRecord) {
+	ms.primary.OnControl(tick, robotID, control)
+}
+
+var _ sim.GameplayReplaySink = multiSink{}
 
 // HandleAiPrompt v1 最小实现：AI 服务接入前的占位回执（quota 未配 key 时提示）。
 // 完整链（QuotaService→Provider→改码→ScriptSubmit）在 AI 运营配置就绪后启用。
@@ -346,7 +373,7 @@ func (m *Match) step() {
 			Projectiles: wv.Projectiles,
 			Cores:       wv.Cores,
 			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rv.ID, wv.Partners[rv.ID])
+		}, m.wallIX, rv.ID, wv.Partners[rv.ID], wv.ScanRadius(rv.ID))
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
 		robot, _ := m.sim.Robot(rv.ID)
@@ -392,7 +419,7 @@ func (m *Match) runScripts(wv sim.WorldView) {
 			Projectiles: wv.Projectiles,
 			Cores:       wv.Cores,
 			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rid, wv.Partners[rid])
+		}, m.wallIX, rid, wv.Partners[rid], wv.ScanRadius(rid))
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
