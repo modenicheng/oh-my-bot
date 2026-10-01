@@ -9,13 +9,24 @@ export interface RobotRef { readonly id: number; readonly position: Vec2; readon
 /** 静态墙 AABB（公开地图结构，不随视野/遮挡裁剪；与碰撞几何一致，只读）。 */
 export interface WallRef { readonly id: number; readonly min: Vec2; readonly max: Vec2 }
 
-/** scan() 返回的感知快照：动态实体按视野+墙体遮挡裁剪；walls 为静态公开全量。 */
+/** 健康包（公开静态点；触碰后自动回血，冷却状态随快照更新）。 */
+export interface HealthPackRef {
+  readonly id: number
+  readonly x: number
+  readonly y: number
+  readonly available: boolean
+  readonly respawnInS: number
+}
+
+/** scan() 返回的感知快照：动态实体按视野+墙体遮挡裁剪；地图对象为静态公开全量。 */
 export interface Observation {
   readonly tick: number
   readonly robots: readonly RobotRef[]
   readonly cores: readonly (Vec2 & { readonly id: number })[]
   readonly uplinks: readonly (Vec2 & { readonly id: number; readonly ready: boolean; readonly holder?: number })[]
   readonly projectiles: readonly (Vec2 & { readonly id: number })[]
+  /** 四个公开健康包点（可能为空数组，不会为 undefined）。触碰可用点自动回血。 */
+  readonly healthPacks: readonly HealthPackRef[]
   /** 静态墙列表（可能为空数组，不会为 undefined）。修改返回值不影响地图。 */
   readonly walls: readonly WallRef[]
 }

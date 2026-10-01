@@ -59,6 +59,7 @@ const OBSERVATION_MEMBERS: CompletionSeed[] = [
   { label: 'cores', insert: 'cores', kind: 'property', detail: 'cores: readonly Vec2[] — 可见核心' },
   { label: 'uplinks', insert: 'uplinks', kind: 'property', detail: 'uplinks — 可见上行桩（ready/holder）' },
   { label: 'projectiles', insert: 'projectiles', kind: 'property', detail: 'projectiles: readonly Vec2[] — 可见弹体' },
+  { label: 'healthPacks', insert: 'healthPacks', kind: 'property', detail: 'healthPacks: readonly HealthPackRef[] — 公开健康包（id/x/y/available/respawnInS，触碰自动回血）' },
   { label: 'walls', insert: 'walls', kind: 'property', detail: 'walls: readonly WallRef[] — 静态墙 AABB（公开全量）' },
 ]
 

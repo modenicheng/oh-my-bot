@@ -25,11 +25,14 @@ describe('seedsForContext', () => {
     expect(labels).not.toContain('partner')
   })
 
-  it('bot.scan(). 给出 walls 等 Observation 成员', () => {
-    const labels = seedsForContext(completionContext('bot.scan().')).map(s => s.label)
+  it('bot.scan(). 给出 healthPacks、walls 等 Observation 成员', () => {
+    const seeds = seedsForContext(completionContext('bot.scan().'))
+    const labels = seeds.map(s => s.label)
     expect(labels).toContain('robots')
     expect(labels).toContain('uplinks')
+    expect(labels).toContain('healthPacks')
     expect(labels).toContain('walls')
+    expect(seeds.find(s => s.label === 'healthPacks')?.detail).toContain('id/x/y/available/respawnInS')
   })
 
   it('词前缀只推荐 canonical bot 入口', () => {

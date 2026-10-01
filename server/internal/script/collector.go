@@ -70,13 +70,12 @@ func toJSVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {
 	return o
 }
 
-// toJSRobotRef RobotView → RobotRef { id, position, hp, isPartner }。
-func toJSRobotRef(vm *goja.Runtime, ro sim.RobotView, isPartner bool) *goja.Object {
+// toJSRobotRef RobotView → RobotRef { id, position, hp }。
+func toJSRobotRef(vm *goja.Runtime, ro sim.RobotView) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("id", float64(ro.ID))
 	_ = o.Set("position", toJSVec2(vm, ro.Pos))
 	_ = o.Set("hp", x10ToFloat(ro.HpX10))
-	_ = o.Set("isPartner", isPartner)
 	return o
 }
 
