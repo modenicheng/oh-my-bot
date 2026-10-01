@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
@@ -21,8 +22,12 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	if err := json.Unmarshal(raw, &cp); err != nil {
 		return nil, fmt.Errorf("sim: checkpoint: %w", err)
 	}
+	wantPhase := ombv1.Phase_OUTER_RING
+	if cp.Tick >= CoreOpenTick {
+		wantPhase = ombv1.Phase_CORE_OPEN
+	}
 	if cp.SimulationVersion < 0 || cp.SimulationVersion > SimulationVersion || cp.Tick > MatchTicks ||
-		(cp.Phase != ombv1.Phase_OUTER_RING && cp.Phase != ombv1.Phase_CORE_OPEN) ||
+		cp.Phase != wantPhase ||
 		cp.Ended != (cp.Tick == MatchTicks) || cp.Robots == nil || cp.Walls == nil {
 		return nil, fmt.Errorf("sim: invalid checkpoint lifecycle")
 	}
@@ -67,7 +72,8 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 			}
 		}
 		for i, uplink := range cp.Uplinks {
-			if uplink.Def != check.uplinks[i].Def || (uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
+			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil ||
+				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
 				return nil, fmt.Errorf("sim: invalid checkpoint uplink")
 			}
 		}
@@ -98,6 +104,9 @@ func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error)
 	}
 	if len(records) == 0 || records[0].Type != "match_start" || records[len(records)-1].Tick < targetTick {
 		return nil, fmt.Errorf("sim: replay missing start or target coverage")
+	}
+	if err := validateReplayContinuity(records); err != nil {
+		return nil, err
 	}
 	checkpoint := records[0].State
 	for i := 1; i < len(records); i++ {
@@ -132,6 +141,68 @@ func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error)
 	return s, nil
 }
 
+func validateReplayContinuity(records []LogRecord) error {
+	initial := records[0].State
+	if _, err := RestoreCheckpoint(*initial, nil); err != nil {
+		return err
+	}
+	type sequence struct {
+		latest  uint32
+		has     bool
+		pending *Input
+	}
+	sequences := make(map[uint32]sequence, len(initial.Robots))
+	for _, robot := range initial.Robots {
+		seq := sequence{latest: robot.LatestSeq, has: robot.HasSeq}
+		if robot.InputPending {
+			pending := robot.PendingInput
+			seq.pending = &pending
+		}
+		sequences[robot.ID] = seq
+	}
+	for i := 1; i < len(records); i++ {
+		record := records[i]
+		switch record.Type {
+		case "match_start":
+			return fmt.Errorf("sim: duplicate replay start")
+		case "checkpoint":
+			cp := record.State
+			if cp.Seed != initial.Seed || cp.SimulationVersion != initial.SimulationVersion ||
+				!reflect.DeepEqual(cp.Map, initial.Map) || !reflect.DeepEqual(cp.Walls, initial.Walls) || len(cp.Robots) != len(initial.Robots) {
+				return fmt.Errorf("sim: replay checkpoint changed match identity or rules")
+			}
+			for j, robot := range cp.Robots {
+				want := initial.Robots[j]
+				if robot.ID != want.ID || robot.Nick != want.Nick || robot.Color != want.Color || robot.Sector != want.Sector || robot.Combat.Partner != want.Combat.Partner {
+					return fmt.Errorf("sim: replay checkpoint changed robot identity")
+				}
+				seq := sequences[robot.ID]
+				if robot.HasSeq != seq.has || robot.LatestSeq != seq.latest || (robot.HasSeq && robot.ConsumedSeq > robot.LatestSeq) {
+					return fmt.Errorf("sim: replay checkpoint changed input sequence")
+				}
+			}
+			if _, err := RestoreCheckpoint(*cp, nil); err != nil {
+				return err
+			}
+		case "input", "control":
+			seq, ok := sequences[record.RobotID]
+			if !ok {
+				return fmt.Errorf("sim: replay control for unknown robot %d", record.RobotID)
+			}
+			if record.Type == "input" {
+				input := record.Input
+				pendingCopy := seq.pending != nil && record.Tick == initial.Tick+1 && *input == *seq.pending
+				if seq.has && (input.Seq < seq.latest || (input.Seq == seq.latest && !pendingCopy)) {
+					return fmt.Errorf("sim: replay input sequence did not advance")
+				}
+				seq.latest, seq.has, seq.pending = input.Seq, true, nil
+				sequences[record.RobotID] = seq
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Sim) applyReplayRecord(record LogRecord) error {
 	i, ok := s.index[record.RobotID]
 	if !ok {
@@ -140,6 +211,10 @@ func (s *Sim) applyReplayRecord(record LogRecord) error {
 	r := &s.robots[i]
 	switch record.Type {
 	case "input":
+		if record.Input == nil || (r.HasSeq && (record.Input.Seq < r.LatestSeq ||
+			(record.Input.Seq == r.LatestSeq && (!r.InputPending || *record.Input != r.PendingInput)))) {
+			return fmt.Errorf("sim: replay input sequence did not advance")
+		}
 		// Records contain consumed/coalesced input, not another upstream
 		// packet. Overwrite pending state already captured by match_start.
 		r.PendingInput, r.LatestSeq, r.HasSeq, r.InputPending = *record.Input, record.Input.Seq, true, true

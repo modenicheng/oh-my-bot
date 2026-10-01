@@ -103,6 +103,119 @@ func TestRestoreCheckpointDetachesAndRejectsInvalidState(t *testing.T) {
 	}
 }
 
+func TestRestoreCheckpointRejectsNilUplinkCooldownMap(t *testing.T) {
+	s, _ := uplinkSim(t)
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
+	stepTicks(s, HackDuration-1)
+	cp := s.Snapshot()
+	cp.Uplinks[0].ReadyAt = nil
+	if _, err := RestoreCheckpoint(cp, nil); err == nil {
+		t.Fatal("nil cooldown map accepted before hack completion")
+	}
+}
+
+func TestRestoreCheckpointRejectsPhaseTickMismatch(t *testing.T) {
+	for _, tick := range []uint32{0, CoreOpenTick - 1, CoreOpenTick, MatchTicks} {
+		cp := NewSim(1, []uint32{1}, nil).Snapshot()
+		cp.Tick, cp.Ended = tick, tick == MatchTicks
+		cp.Phase = ombv1.Phase_CORE_OPEN
+		if tick >= CoreOpenTick {
+			cp.Phase = ombv1.Phase_OUTER_RING
+		}
+		if _, err := RestoreCheckpoint(cp, nil); err == nil {
+			t.Fatalf("incorrect phase accepted at tick %d", tick)
+		}
+	}
+}
+
+func TestReplayToRejectsDiscontinuousCheckpointAndSkippedControls(t *testing.T) {
+	for name, corrupt := range map[string]func(*Checkpoint){
+		"seed":     func(cp *Checkpoint) { cp.Seed++ },
+		"physics":  func(cp *Checkpoint) { cp.SimulationVersion = 0 },
+		"roster":   func(cp *Checkpoint) { cp.Robots[0].ID = 2 },
+		"identity": func(cp *Checkpoint) { cp.Robots[0].Nick = "different" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log, _ := NewMatchEventLogWriter(&buf)
+			s := NewSim(1, []uint32{1}, nil)
+			log.OnMatchInit(s.Snapshot())
+			stepTicks(s, CheckpointInterval)
+			cp := s.Snapshot()
+			corrupt(&cp)
+			log.OnCheckpoint(cp)
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReplayTo(bytes.NewReader(buf.Bytes()), CheckpointInterval, nil); err == nil {
+				t.Fatal("unrelated checkpoint accepted")
+			}
+		})
+	}
+	var buf bytes.Buffer
+	log, _ := NewMatchEventLogWriter(&buf)
+	s := NewSim(1, []uint32{1}, nil)
+	log.OnMatchInit(s.Snapshot())
+	log.OnInput(1, 99, Input{})
+	stepTicks(s, CheckpointInterval)
+	log.OnCheckpoint(s.Snapshot())
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReplayTo(bytes.NewReader(buf.Bytes()), CheckpointInterval, nil); err == nil {
+		t.Fatal("checkpoint seeking hid unknown earlier robot")
+	}
+}
+
+func TestReplayToPreservesInitialPendingInput(t *testing.T) {
+	var buf bytes.Buffer
+	log, _ := NewMatchEventLogWriter(&buf)
+	s := NewSim(1, []uint32{1}, log)
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 10, AxisMask: uint32(AxisMove), MoveX: 1000})
+	s.Tick()
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := ReplayTo(bytes.NewReader(buf.Bytes()), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s.Snapshot(), r.Snapshot()) {
+		t.Fatal("matching pending input was rejected or applied twice")
+	}
+}
+
+func TestReplayToRejectsInputSequenceRegression(t *testing.T) {
+	for _, next := range []uint32{9, 10} {
+		var buf bytes.Buffer
+		log, _ := NewMatchEventLogWriter(&buf)
+		log.OnMatchInit(NewSim(1, []uint32{1}, nil).Snapshot())
+		log.OnInput(1, 1, Input{Seq: 10, AxisMask: AxisMove, MoveX: 1000})
+		log.OnInput(2, 1, Input{Seq: next, AxisMask: AxisMove, MoveX: -1000})
+		if err := log.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReplayTo(bytes.NewReader(buf.Bytes()), 2, nil); err == nil {
+			t.Fatalf("sequence %d accepted after 10", next)
+		}
+		var seek bytes.Buffer
+		seekLog, _ := NewMatchEventLogWriter(&seek)
+		s := NewSim(1, []uint32{1}, nil)
+		seekLog.OnMatchInit(s.Snapshot())
+		seekLog.OnInput(1, 1, Input{Seq: 10})
+		seekLog.OnInput(2, 1, Input{Seq: next})
+		stepTicks(s, CheckpointInterval)
+		s.robots[0].HasSeq, s.robots[0].LatestSeq, s.robots[0].ConsumedSeq = true, next, next
+		seekLog.OnCheckpoint(s.Snapshot())
+		if err := seekLog.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReplayTo(bytes.NewReader(seek.Bytes()), CheckpointInterval, nil); err == nil {
+			t.Fatalf("checkpoint seeking hid sequence %d after 10", next)
+		}
+	}
+}
+
 func TestReplayToRejectsUnknownRobotsAndMissingCoverage(t *testing.T) {
 	var buf bytes.Buffer
 	log, err := NewMatchEventLogWriter(&buf)
