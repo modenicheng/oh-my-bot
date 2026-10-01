@@ -245,12 +245,13 @@ try {
   const editorOnly = await page.locator('#workbench-editor').boundingBox()
   assert.ok(editorOnly.height > editorHalf.height * 1.8, 'editor alone fills column')
   const draftKey = `omb.bot.draft:${JSON.stringify(['ROUND2', 'tester'])}`
-  async function replaceSource(source) {
+  const tsDraftKey = `omb.bot.draft:${JSON.stringify(['ROUND2', 'tester', 'ts'])}`
+  async function replaceSource(source, key = draftKey) {
     await editorInput.focus()
     await page.keyboard.press('ControlOrMeta+a')
     await page.evaluate(source => navigator.clipboard.writeText(source), source)
     await page.keyboard.press('ControlOrMeta+v')
-    await until(() => page.evaluate(key => localStorage.getItem(key), draftKey).then(s => s === source), 'draft saved')
+    await until(() => page.evaluate(k => localStorage.getItem(k), key).then(s => s === source), 'draft saved')
   }
   const prelude = "/** @param {import('@omb/bot-api').TickContext} ctx */\n"
   // Completion is supplied by the real TypeScript worker using canonical Bot API declarations.
@@ -290,6 +291,42 @@ try {
   assert.equal(submissions.length, beforeOversize, 'oversized source never reaches websocket')
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)
+  // TypeScript 模式：开关、注解补全、编译提交、编译失败保留旧脚本。
+  const tsSource = `import type { TickContext } from '@omb/bot-api'\n\nexport function tick(ctx: TickContext) {\n  const heading: number = ctx.self.position.x + ctx.self.position.y\n  ctx.api.shield(heading > 0)\n  ctx.api.say('TS 脚本运行正常')\n}\n`
+  await page.click('#workbench-lang-switch [data-lang="ts"]')
+  assert.equal(await page.locator('#workbench-lang-switch [data-lang="ts"]').getAttribute('aria-pressed'), 'true', 'TS switch toggles pressed state')
+  assert.equal(await page.locator('#workbench-lang-switch [data-lang="js"]').getAttribute('aria-pressed'), 'false', 'JS switch released')
+  await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'TS diagnostics', 20000)
+  await replaceSource(tsSource, tsDraftKey)
+  await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'TS annotations diagnostics', 20000)
+  await page.screenshot({ path: join(shots, 'workbench-ts.png') })
+  const jsBeforeTs = submissions.length
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r2')), 'TS compiles and submits JS', 20000)
+  assert.equal(submissions.length, jsBeforeTs + 1, 'TS submit sends exactly one message')
+  const tsPayload = submissions.at(-1).source
+  assert.ok(!tsPayload.includes(': TickContext'), 'submitted source is compiled, not TS')
+  assert.ok(tsPayload.includes('function tick'), 'compiled JS keeps tick entrypoint')
+  await page.click('#workbench-assist')
+  await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'assist on for TS script')
+  await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'compiled TS script runs on server')
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), tsDraftKey), tsSource, 'TS draft saved under language-scoped key')
+  // 编译失败：不发送任何帧，旧脚本继续运行。
+  await replaceSource('function tick(ctx: { api: { moveTo(p: { x: number, y: number }): void } }) { ctx.api.moveTo() }\n', tsDraftKey)
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('TypeScript 编译失败')), 'compile failure surfaces TS errors', 20000)
+  assert.ok(await page.locator('#workbench-result').textContent().then(t => t.includes('第 1 行')), 'compile errors carry original TS line numbers')
+  assert.equal(submissions.length, jsBeforeTs + 1, 'compile failure sends nothing')
+  await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'old compiled script keeps running', 100)
+  assert.equal(receipts.at(-1).scriptRev, 2, 'compile failure leaves server revision untouched')
+  assert.ok(await page.locator('#workbench-submit').isEnabled(), 'compile failure keeps submit usable')
+  await page.screenshot({ path: join(shots, 'workbench-ts-error.png') })
+  await page.click('#workbench-assist')
+  await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'false'), 'assist off after TS checks')
+  await replaceSource(tsSource, tsDraftKey)
+  await page.click('#workbench-lang-switch [data-lang="js"]')
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), validSource, 'switching back restores the JS draft')
+  await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'JS diagnostics after switching back', 20000)
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   const submittedCount = submissions.length
   latest = undefined
