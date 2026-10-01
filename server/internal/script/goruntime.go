@@ -27,6 +27,7 @@ type GojaRuntime struct {
 	rev    uint32
 
 	interruptVal any // 配额中断哨兵载荷（闭包类型，脚本无法伪造）
+	console      *consoleState
 	closed       bool
 }
 
@@ -42,10 +43,13 @@ func NewGojaRuntime(cfg Config) *GojaRuntime {
 	if cfg.PoolSize <= 0 {
 		cfg.PoolSize = NumWorkers()
 	}
-	return &GojaRuntime{
+	r := &GojaRuntime{
 		cfg:          cfg,
 		interruptVal: quotaInterrupt{},
 	}
+	r.console = &consoleState{}
+	r.console.reset(0)
+	return r
 }
 
 // ---- 手册入口兼容（§五行代码起步） ----
@@ -91,12 +95,23 @@ func (r *GojaRuntime) Load(source string) error {
 
 	// 候选 VM 全链路成功才替换现役 VM——原子 Hot Swap。
 	vm := goja.New()
+	nextRevision := r.rev + 1
+	candidateConsole := &consoleState{}
+	candidateConsole.reset(nextRevision)
+	candidateConsole.beginTick(0)
+	if err := installConsole(vm, candidateConsole); err != nil {
+		return fmt.Errorf("install console: %w", err)
+	}
 	prog, err := goja.Compile("", stripModuleSyntax(source), false)
 	if err != nil {
 		return fmt.Errorf("compile: %w", err)
 	}
-	if _, err := vm.RunProgram(prog); err != nil {
-		return fmt.Errorf("evaluate: %w", err)
+	timer := time.AfterFunc(r.cfg.TickTimeout, func() { vm.Interrupt(r.interruptVal) })
+	_, runErr := vm.RunProgram(prog)
+	timer.Stop()
+	vm.ClearInterrupt()
+	if runErr != nil {
+		return fmt.Errorf("evaluate: %w", classifyErr(runErr, r.interruptVal))
 	}
 	tickFn, err := resolveTick(vm)
 	if err != nil {
@@ -105,7 +120,8 @@ func (r *GojaRuntime) Load(source string) error {
 
 	r.vm = vm
 	r.tickFn = tickFn
-	r.rev++
+	r.rev = nextRevision
+	r.console = candidateConsole
 	return nil
 }
 
@@ -140,6 +156,13 @@ func (r *GojaRuntime) Rev() uint32 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.rev
+}
+
+// DrainLogs returns bounded console output since the previous drain.
+func (r *GojaRuntime) DrainLogs() []ScriptLog {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.console.drain()
 }
 
 // Close 关闭运行时。后续 Load/Tick 返回 ErrClosed / ErrNoModule。
@@ -179,6 +202,7 @@ func (r *GojaRuntime) tickLocked(frame sim.ScriptFrame, quota time.Duration) (si
 		return sim.ScriptCommands{}, ErrNoModule
 	}
 	vm := r.vm
+	r.console.beginTick(frame.Obs.Frame.Tick)
 
 	cmd := newCommandCollector()
 	ctxObj := buildTickContext(vm, frame, cmd)

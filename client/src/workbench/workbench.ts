@@ -1,23 +1,24 @@
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, encodeClient, type EvScriptResult } from '@omb/protocol'
+import { ClientMsgSchema, encodeClient, type EvScriptLog, type EvScriptResult } from '@omb/protocol'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
+import { ScriptConsoleView } from './script-console'
 import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from './ts-submit'
 import './workbench.css'
 
-const INITIAL_SOURCE_TS = `import type { TickContext } from '@omb/bot-api'
+const INITIAL_SOURCE_TS = `import type { BotContext } from '@omb/bot-api'
 
-export function tick(ctx: TickContext) {
-  const core = ctx.api.nearestCore()
-  if (core) ctx.api.moveTo(core)
+export function tick(bot: BotContext) {
+  const core = bot.nearestCore()
+  if (core) bot.moveTo(core)
 }
 `
-const INITIAL_SOURCE = `/** @param {import('@omb/bot-api').TickContext} ctx */
-function tick(ctx) {
-  const core = ctx.api.nearestCore()
-  if (core) ctx.api.moveTo(core)
+const INITIAL_SOURCE = `/** @param {import('@omb/bot-api').BotContext} bot */
+function tick(bot) {
+  const core = bot.nearestCore()
+  if (core) bot.moveTo(core)
 }
 `
 
@@ -68,6 +69,7 @@ export class Workbench {
   private readonly result: HTMLElement
   private readonly draftStatus: HTMLElement
   private readonly languageButtons: HTMLButtonElement[]
+  private readonly scriptConsole: ScriptConsoleView
 
   constructor(private readonly deps: WorkbenchDeps) {
     this.docPath = deps.initial.doc ?? 'index.md'
@@ -117,6 +119,7 @@ export class Workbench {
           <button type="button" id="workbench-assist" aria-pressed="false" disabled>辅助 OFF</button>
         </div>
         <div id="workbench-result" class="workbench-status" role="status" aria-live="polite">提交后开启辅助，让脚本驾驶机器人。</div>
+        <section id="workbench-console" class="script-console" aria-label="脚本 Console"></section>
       </section>`
     mountIcons(deps.root)
     this.docsPane = this.el('workbench-docs')
@@ -128,6 +131,7 @@ export class Workbench {
     this.result = this.el('workbench-result')
     this.draftStatus = this.el('workbench-draft')
     this.languageButtons = Array.from(this.deps.root.querySelectorAll<HTMLButtonElement>('#workbench-lang-switch [data-lang]'))
+    this.scriptConsole = new ScriptConsoleView(this.el('workbench-console'))
     for (const button of this.languageButtons) {
       button.addEventListener('click', () => this.setLanguage((button.dataset.lang as BotLanguage) === 'ts' ? 'ts' : 'js'))
     }
@@ -454,6 +458,7 @@ export class Workbench {
     if (this.online && !online) {
       if (this.pending) this.setResult('连接中断，提交结果未知；重连后可重新提交。', 'error')
       this.clearPending()
+      this.scriptConsole.clear()
     }
     this.online = online
     this.inMatch = inMatch
@@ -466,6 +471,7 @@ export class Workbench {
     this.loaded = undefined
     this.assistOn = false
     this.inMatch = false
+    this.scriptConsole.clear()
     this.setResult(wasPending ? '对局已切换，请重新提交草稿。' : '草稿已保留。提交后开启辅助，让脚本驾驶机器人。')
     this.renderButtons()
   }
@@ -532,6 +538,17 @@ export class Workbench {
     this.setResult('正在提交，等待服务器回执…')
     this.renderButtons()
     this.deps.send(frame)
+  }
+
+  acceptScriptLog(log: EvScriptLog): void {
+    this.scriptConsole.append({
+      robotId: log.robotId,
+      scriptRev: log.scriptRev,
+      tick: log.tick,
+      level: log.level,
+      text: log.text,
+      truncated: log.truncated,
+    })
   }
 
   acceptResult(result: EvScriptResult): void {

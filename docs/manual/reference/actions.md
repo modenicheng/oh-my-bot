@@ -44,28 +44,28 @@ L0 是 7 个最基础的动作指令：`move`、`aimAt`、`fire`、`dash`、`shi
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    ctx.api.move(1, 0) // 每帧都喊"向右满速"
+  tick(bot) {
+    bot.move(1, 0) // 每帧都喊"向右满速"
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    ctx.api.move(1, 0)  # 每帧都喊"向右满速"
+def tick(bot):
+    bot.move(1, 0)  # 每帧都喊"向右满速"
 ```
 ```java
-void tick(Context ctx) {
-    ctx.api.move(1, 0); // 每帧都喊"向右满速"
+void tick(Context bot) {
+    bot.move(1, 0); // 每帧都喊"向右满速"
 }
 ```
 
 追踪目标点：把"我到目标的连线"当作方向：
 
 ```ts
-const dx = target.position.x - ctx.self.position.x
-const dy = target.position.y - ctx.self.position.y
-ctx.api.move(dx, dy) // 向量长度 >1 时归一为满速，否则按比例减速
+const dx = target.position.x - bot.self.position.x
+const dy = target.position.y - bot.self.position.y
+bot.move(dx, dy) // 向量长度 >1 时归一为满速，否则按比例减速
 ```
 
 **游戏规则**：`vx` 或 `vy` 不是正常数字（NaN、Infinity）时，这一帧你的脚本发出的**所有**动作全部作废——这是防作弊阀门，人类的手操不受影响。
@@ -87,26 +87,26 @@ ctx.api.move(dx, dy) // 向量长度 >1 时归一为满速，否则按比例减�
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    ctx.api.aimAt(Math.PI / 2) // 炮口转到 π/2 方向
-    const enemy = ctx.api.nearestEnemy()
-    if (enemy) ctx.api.aimAt(enemy) // 传实体：直接瞄它
+  tick(bot) {
+    bot.aimAt(Math.PI / 2) // 炮口转到 π/2 方向
+    const enemy = bot.nearestEnemy()
+    if (enemy) bot.aimAt(enemy) // 传实体：直接瞄它
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    ctx.api.aim_at(math.pi / 2)   # 炮口转到 π/2 方向
-    enemy = ctx.api.nearest_enemy()
+def tick(bot):
+    bot.aim_at(math.pi / 2)   # 炮口转到 π/2 方向
+    enemy = bot.nearest_enemy()
     if enemy:
-        ctx.api.aim_at(enemy)     # 传实体：直接瞄它
+        bot.aim_at(enemy)     # 传实体：直接瞄它
 ```
 ```java
-void tick(Context ctx) {
-    ctx.api.aimAt(Math.PI / 2);   // 炮口转到 π/2 方向
-    RobotRef enemy = ctx.api.nearestEnemy();
-    if (enemy != null) ctx.api.aimAt(enemy); // 传实体：直接瞄它
+void tick(Context bot) {
+    bot.aimAt(Math.PI / 2);   // 炮口转到 π/2 方向
+    RobotRef enemy = bot.nearestEnemy();
+    if (enemy != null) bot.aimAt(enemy); // 传实体：直接瞄它
 }
 ```
 
@@ -118,7 +118,7 @@ void tick(Context ctx) {
 **常见坑**：
 
 - 度数弧度混用：想转 90° 结果转了 90 弧度。全部用弧度。
-- 对墙后的敌人用实体瞄准：先确认它在 `ctx.scan().robots` 里（搭档不用确认）。
+- 对墙后的敌人用实体瞄准：先确认它在 `bot.scan().robots` 里（搭档不用确认）。
 
 ## fire()
 
@@ -142,29 +142,29 @@ void tick(Context ctx) {
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const enemy = ctx.api.nearestEnemy()
+  tick(bot) {
+    const enemy = bot.nearestEnemy()
     if (enemy) {
-      ctx.api.aimAt(enemy)
-      ctx.api.fire() // 调一次即可，之后每 250ms 自动一发
+      bot.aimAt(enemy)
+      bot.fire() // 调一次即可，之后每 250ms 自动一发
     }
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    enemy = ctx.api.nearest_enemy()
+def tick(bot):
+    enemy = bot.nearest_enemy()
     if enemy:
-        ctx.api.aim_at(enemy)
-        ctx.api.fire()  # 调一次即可，之后每 250ms 自动一发
+        bot.aim_at(enemy)
+        bot.fire()  # 调一次即可，之后每 250ms 自动一发
 ```
 ```java
-void tick(Context ctx) {
-    RobotRef enemy = ctx.api.nearestEnemy();
+void tick(Context bot) {
+    RobotRef enemy = bot.nearestEnemy();
     if (enemy != null) {
-        ctx.api.aimAt(enemy);
-        ctx.api.fire(); // 调一次即可，之后每 250ms 自动一发
+        bot.aimAt(enemy);
+        bot.fire(); // 调一次即可，之后每 250ms 自动一发
     }
 }
 ```
@@ -192,23 +192,23 @@ void tick(Context ctx) {
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    ctx.api.move(-1, 0) // 这帧的移动方向 = 冲刺方向
-    if (ctx.self.hp < 30) ctx.api.dash() // 首次残血时锁存，后续仍可能自动连冲
+  tick(bot) {
+    bot.move(-1, 0) // 这帧的移动方向 = 冲刺方向
+    if (bot.self.hp < 30) bot.dash() // 首次残血时锁存，后续仍可能自动连冲
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    ctx.api.move(-1, 0)  # 这帧的移动方向 = 冲刺方向
-    if ctx.self.hp < 30:
-        ctx.api.dash()   # 首次残血时锁存，后续仍可能自动连冲
+def tick(bot):
+    bot.move(-1, 0)  # 这帧的移动方向 = 冲刺方向
+    if bot.self.hp < 30:
+        bot.dash()   # 首次残血时锁存，后续仍可能自动连冲
 ```
 ```java
-void tick(Context ctx) {
-    ctx.api.move(-1, 0);              // 这帧的移动方向 = 冲刺方向
-    if (ctx.self.hp < 30) ctx.api.dash(); // 首次残血时锁存，后续仍可能自动连冲
+void tick(Context bot) {
+    bot.move(-1, 0);              // 这帧的移动方向 = 冲刺方向
+    if (bot.self.hp < 30) bot.dash(); // 首次残血时锁存，后续仍可能自动连冲
 }
 ```
 
@@ -228,26 +228,26 @@ void tick(Context ctx) {
 
 **游戏规则**：护盾每帧按"当前开关 + 剩余能量"重新结算——能量见底的那一帧盾自动熄灭；死亡强制熄盾；复活时重置。
 
-**建议写法**：每帧显式给值，比如 `ctx.api.shield(ctx.self.hp < 30)`——状态一目了然，也不会残留。它是唯一能传 `false` 主动关闭的动作。
+**建议写法**：每帧显式给值，比如 `bot.shield(bot.self.hp < 30)`——状态一目了然，也不会残留。它是唯一能传 `false` 主动关闭的动作。
 
 ```ts|py|java
 条件开盾：血量低于 30 就举盾，否则省着能量。
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    ctx.api.shield(ctx.self.hp < 30)
+  tick(bot) {
+    bot.shield(bot.self.hp < 30)
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    ctx.api.shield(ctx.self.hp < 30)
+def tick(bot):
+    bot.shield(bot.self.hp < 30)
 ```
 ```java
-void tick(Context ctx) {
-    ctx.api.shield(ctx.self.hp < 30);
+void tick(Context bot) {
+    bot.shield(bot.self.hp < 30);
 }
 ```
 
@@ -275,45 +275,45 @@ void tick(Context ctx) {
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const uplink = ctx.api.nearestUplink()
+  tick(bot) {
+    const uplink = bot.nearestUplink()
     if (!uplink) return
-    const me = ctx.self.position
+    const me = bot.self.position
     const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
     if (dist > 1) {
-      ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+      bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
     } else {
-      ctx.api.move(0, 0) // 刹车，避免旧移动意图把自己带出引导圈
-      ctx.api.interact() // 按住引导（调一次即锁存）
+      bot.move(0, 0) // 刹车，避免旧移动意图把自己带出引导圈
+      bot.interact() // 按住引导（调一次即锁存）
     }
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    uplink = ctx.api.nearest_uplink()
+def tick(bot):
+    uplink = bot.nearest_uplink()
     if not uplink:
         return
-    me = ctx.self.position
+    me = bot.self.position
     dist = math.hypot(uplink.x - me.x, uplink.y - me.y)
     if dist > 1:
-        ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+        bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
     else:
-        ctx.api.move(0, 0)       # 刹车，避免沿旧方向冲出圈
-        ctx.api.interact()       # 按住引导（调一次即锁存）
+        bot.move(0, 0)       # 刹车，避免沿旧方向冲出圈
+        bot.interact()       # 按住引导（调一次即锁存）
 ```
 ```java
-void tick(Context ctx) {
-    Vec2 uplink = ctx.api.nearestUplink();
+void tick(Context bot) {
+    Vec2 uplink = bot.nearestUplink();
     if (uplink == null) return;
-    Vec2 me = ctx.self.position;
+    Vec2 me = bot.self.position;
     double dist = Math.hypot(uplink.x - me.x, uplink.y - me.y);
     if (dist > 1) {
-        ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3);
+        bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3);
     } else {
-        ctx.api.move(0, 0);     // 刹车，避免沿旧方向冲出圈
-        ctx.api.interact();     // 按住引导（调一次即锁存）
+        bot.move(0, 0);     // 刹车，避免沿旧方向冲出圈
+        bot.interact();     // 按住引导（调一次即锁存）
     }
 }
 ```
@@ -345,11 +345,11 @@ void tick(Context ctx) {
 let lastSay = -99 // 上次喊话时间（秒）
 
 const bot = {
-  tick(ctx) {
-    const enemy = ctx.api.nearestEnemy()
-    if (enemy && ctx.game.time - lastSay > 3.5) {
-      ctx.api.say('enemies near core ' + enemy.id)
-      lastSay = ctx.game.time
+  tick(bot) {
+    const enemy = bot.nearestEnemy()
+    if (enemy && bot.game.time - lastSay > 3.5) {
+      bot.say('enemies near core ' + enemy.id)
+      lastSay = bot.game.time
     }
   },
 }
@@ -358,20 +358,20 @@ export default bot
 ```py
 last_say = -99  # 上次喊话时间（秒）
 
-def tick(ctx):
-    enemy = ctx.api.nearest_enemy()
-    if enemy and ctx.game.time - last_say > 3.5:
-        ctx.api.say('enemies near core ' + str(enemy.id))
-        last_say = ctx.game.time
+def tick(bot):
+    enemy = bot.nearest_enemy()
+    if enemy and bot.game.time - last_say > 3.5:
+        bot.say('enemies near core ' + str(enemy.id))
+        last_say = bot.game.time
 ```
 ```java
 double lastSay = -99; // 上次喊话时间（秒）
 
-void tick(Context ctx) {
-    RobotRef enemy = ctx.api.nearestEnemy();
-    if (enemy != null && ctx.game.time - lastSay > 3.5) {
-        ctx.api.say("enemies near core " + enemy.id);
-        lastSay = ctx.game.time;
+void tick(Context bot) {
+    RobotRef enemy = bot.nearestEnemy();
+    if (enemy != null && bot.game.time - lastSay > 3.5) {
+        bot.say("enemies near core " + enemy.id);
+        lastSay = bot.game.time;
     }
 }
 ```

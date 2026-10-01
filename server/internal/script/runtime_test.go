@@ -378,6 +378,90 @@ func TestTypeScriptRejection(t *testing.T) {
 
 // ---- 脚本异常 ----
 
+func TestBotMetadataIsReadonlySnapshot(t *testing.T) {
+	cmds, err := loadAndTick(t, `function tick(bot) {
+  bot.self.hp = 999; bot.self.position.x = 999; bot.game.time = 999; bot.self = null; bot.api = null;
+  if (bot.self.id === 1 && bot.self.hp === 10 && bot.self.position.x === 10 && bot.game.time === 2 && bot.api === bot) bot.say("readonly");
+}`, testFrame())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if cmds.Say == nil || *cmds.Say != "readonly" {
+		t.Fatalf("metadata mutation escaped readonly snapshot: %+v", cmds)
+	}
+}
+
+func TestFlatBotAPIAndLegacyCtxAPI(t *testing.T) {
+	rt := NewGojaRuntime(Config{})
+	defer rt.Close()
+	if err := rt.Load(`function tick(bot){ bot.move(1, 0.25); bot.api.say("legacy-ok"); if (!bot.scan().walls) throw new Error("walls missing"); }`); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmds, err := rt.Tick(testFrame())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if cmds.Move == nil || cmds.Say == nil || *cmds.Say != "legacy-ok" {
+		t.Fatalf("flat/legacy commands missing: %+v", cmds)
+	}
+}
+
+func TestConsoleCapturesLoadAndTickSafely(t *testing.T) {
+	rt := NewGojaRuntime(Config{})
+	defer rt.Close()
+	source := `
+console.info("loaded", 7);
+function tick(bot) {
+  const cycle = {}; cycle.self = cycle;
+  const hostile = {}; Object.defineProperty(hostile, "boom", { get(){ throw new Error("getter ran") } });
+  hostile.toString = function(){ throw new Error("toString ran") };
+  console.log("tick", cycle, hostile);
+  console.error("x".repeat(5000));
+  bot.say("alive");
+}`
+	if err := rt.Load(source); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	loadLogs := rt.DrainLogs()
+	if len(loadLogs) != 1 || loadLogs[0].Level != "info" || loadLogs[0].Text != "loaded 7" || loadLogs[0].Revision != 1 {
+		t.Fatalf("unexpected load logs: %+v", loadLogs)
+	}
+	cmds, err := rt.Tick(testFrame())
+	if err != nil || cmds.Say == nil || *cmds.Say != "alive" {
+		t.Fatalf("logging broke tick: cmds=%+v err=%v", cmds, err)
+	}
+	logs := rt.DrainLogs()
+	if len(logs) != 2 {
+		t.Fatalf("want 2 tick logs, got %+v", logs)
+	}
+	if logs[0].Text != "tick [object] [object]" || logs[0].Tick != testFrame().Obs.Frame.Tick {
+		t.Fatalf("unsafe object formatting: %+v", logs[0])
+	}
+	if !logs[1].Truncated || len(logs[1].Text) > maxConsoleMessageBytes {
+		t.Fatalf("long message not bounded: len=%d log=%+v", len(logs[1].Text), logs[1])
+	}
+}
+
+func TestConsoleFloodIsBoundedAndReportsDrops(t *testing.T) {
+	rt := NewGojaRuntime(Config{})
+	defer rt.Close()
+	if err := rt.Load(`function tick(bot){ for (let i=0; i<1000; i++) console.debug("m"+i); bot.fire(); }`); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cmds, err := rt.Tick(testFrame())
+	if err != nil || cmds.Fire == nil {
+		t.Fatalf("flood must not break commands: cmds=%+v err=%v", cmds, err)
+	}
+	logs := rt.DrainLogs()
+	if len(logs) != maxConsoleMessagesTick+1 {
+		t.Fatalf("want %d bounded entries plus notice, got %d", maxConsoleMessagesTick, len(logs))
+	}
+	last := logs[len(logs)-1]
+	if !last.Truncated || last.Level != "warn" || !strings.Contains(last.Text, "dropped 988 message(s)") {
+		t.Fatalf("missing drop notice: %+v", last)
+	}
+}
+
 func TestScriptRuntimeErrorClearsCommands(t *testing.T) {
 	rt := NewGojaRuntime(Config{})
 	defer rt.Close()

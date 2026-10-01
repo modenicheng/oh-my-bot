@@ -22,10 +22,10 @@ Bot Script 是你为机器人写的 **JS/TS 控制程序**。进入热身或正�
 ## 五行代码起步
 
 ```js
-/** @param {import('@omb/bot-api').TickContext} ctx */
-function tick(ctx) {
-  const core = ctx.api.nearestCore()
-  if (core) ctx.api.moveTo(core)
+/** @param {import('@omb/bot-api').BotContext} bot */
+function tick(bot) {
+  const core = bot.nearestCore()
+  if (core) bot.moveTo(core)
 }
 ```
 
@@ -33,11 +33,11 @@ function tick(ctx) {
 
 | 代码 | 人话 |
 |---|---|
-| `/** @param {import('@omb/bot-api').TickContext} ctx */` | 用 JSDoc 注释告诉编辑器 `ctx` 的类型，获得检查和补全；这不会在运行时导入模块 |
-| `function tick(ctx) {` | 每帧游戏会调用这个叫 tick 的函数，`ctx` 是它递给你的**当帧信息包** |
-| `ctx.api.nearestCore()` | 问信息包："离我最近的 Core 在哪？"（找不到返回 null，即"没有"） |
+| `/** @param {import('@omb/bot-api').BotContext} bot */` | 用 JSDoc 注释告诉编辑器 `bot` 的类型，获得检查和补全；这不会在运行时导入模块 |
+| `function tick(bot) {` | 每帧游戏会调用这个叫 tick 的函数，`bot` 是唯一、清晰的当帧控制对象 |
+| `bot.nearestCore()` | 问 `bot`："离我最近的 Core 在哪？"（找不到返回 null，即"没有"） |
 | `if (core) ...` | "如果找到了（core 不是 null），就……" |
-| `ctx.api.moveTo(core)` | "……朝它走。" |
+| `bot.moveTo(core)` | "……朝它走。" |
 
 ## 在网页编辑和提交
 
@@ -46,7 +46,8 @@ function tick(ctx) {
 3. **编辑代码**：Monaco 编辑器提供语法检查、类型检查（JS 用 JSDoc，TS 直接注解）和 Bot API 补全。检查结果仅供参考，不会代替服务器加载或实际行为验证。
 4. **提交到机器人**：点击同名按钮，或在编辑器内按 `Ctrl+Enter`（macOS 为 `Cmd+Enter`）。TS 模式下提交前先在浏览器内把 TS 编译成 JS（见下文提交契约），再把生成的 JS 发给服务器；编译失败时不发送任何内容，旧脚本继续运行，错误按 TS 源码的原始行列展示。JS 模式照原样提交。页面通过当前房间连接发送真实的 `ScriptSubmit`；只有已连接并完成同步的热身或正式对局允许提交，重连、同步和对局结束时禁用，等待回执期间也不能重复提交。
 5. **等服务器回执**：编辑器只接受与当前提交请求对应的回执。成功时显示“服务器已加载 rN”（`N` 是版本号）；新脚本从后续 tick 开始执行，动作仍遵循下文的一拍延迟。服务器加载失败时显示原因并保留旧脚本；断线或回执超时表示结果未知，不能当作加载失败。
-6. **单独开启辅助**：使用旁边的 **辅助 ON/OFF** 按钮，状态随服务器快照同步。提交成功不会自动开启辅助。已开启辅助时，新版沿用该状态；手操仍按轴优先。
+6. **看 Console**：加载期与每帧里的 `console.log/info/warn/error/debug` 会显示在编辑器下方，带脚本版本和 tick。面板可折叠、清空；新日志只在你原本位于底部时跟随滚动，不会抢走编辑器焦点。超长或洪泛日志会显示截断/丢弃提示。
+7. **单独开启辅助**：使用旁边的 **辅助 ON/OFF** 按钮，状态随服务器快照同步。提交成功不会自动开启辅助。已开启辅助时，新版沿用该状态；手操仍按轴优先。
 
 焦点进入文档、编辑器或聊天时释放手操，但游戏画面、服务器模拟和已加载脚本继续运行；点击战场（或用 `Tab` 聚焦画布）即可恢复手操，面板开着也一样，关闭全部面板后焦点自动回到战场。**返回战场** 会一次关闭文档和编辑器。浏览器宽度不超过 760px 时侧栏覆盖战场，返回按钮仍可用。
 
@@ -54,14 +55,16 @@ function tick(ctx) {
 
 发送前会检查编码后的整条消息，大小不得超过 **32768 字节（32 KiB）**，其中包含源码的 UTF-8 字节和 protobuf 消息开销，不能只按源码字符数计算。超限会在本地提示，不发送。
 
-## `ctx` 信息包：每帧递给你的东西
+## `bot` 控制对象：每帧递给你的东西
 
 ```js
-ctx.self    // 你自己：血量、能量、位置、速度
-ctx.game    // 对局：已进行时间、剩余时间、当前阶段、地图种子
-ctx.scan()  // 感知：你现在能看到的一切（下节详讲）
-ctx.api     // 全部动作指令（速查表见下）
+bot.self    // 你自己：血量、能量、位置、速度（只读快照）
+bot.game    // 对局：已进行时间、剩余时间、当前阶段、地图种子（只读快照）
+bot.scan()  // 感知：你现在能看到的一切（下节详讲）
+bot.move()  // 动作与便利方法直接挂在同一个 bot 对象上
 ```
+
+旧脚本的 `tick(ctx)` 与 `ctx.api.xxx()` 仍能运行，但新代码、示例和补全统一使用 `bot.xxx()`。
 
 三条重要的运行规则：
 
@@ -74,8 +77,8 @@ ctx.api     // 全部动作指令（速查表见下）
 服务器每帧都替你算好一份感知快照：**半径 20m 内、不被墙挡**的机器人和炮弹，加上**全图所有**的 Core 和 Uplink。`scan()` 就是读这份快照——零能量、零动作成本、每帧随便读。
 
 ```js
-const obs = ctx.scan()
-obs.robots       // 看得见的机器人：{ id, position, hp, isPartner }
+const obs = bot.scan()
+obs.robots       // 看得见的机器人：{ id, position, hp }
 obs.cores        // 全图 Core：{ id, x, y }
 obs.uplinks      // 全图 Uplink：{ id, x, y, ready, holder? }
 obs.projectiles  // 看得见的炮弹：{ id, x, y }
@@ -83,9 +86,8 @@ obs.tick         // 快照对应的帧号
 ```
 
 - 看不见的敌人不在这份列表里——被墙挡住或超出 20m 的机器人不会出现。看不见 ≠ 不存在。
-- 自己不在 `robots` 里（用 `ctx.self`），已死亡的被过滤掉。
-- 搭档是唯一例外：恒可见，带 `isPartner: true` 标记。
-- `ctx.api.pulseScan()` 提交脉冲请求：成功执行耗 12 能量、冷却 2s，调用始终返回当前快照；成功执行后的有效扫描半径为 32m，普通扫描仍为 20m。
+- 自己不在 `robots` 里（用 `bot.self`），已死亡的被过滤掉。
+- `bot.pulseScan()` 提交脉冲请求：成功执行耗 12 能量、冷却 2s，调用始终返回当前快照；成功执行后的有效扫描半径为 32m，普通扫描仍为 20m。
 
 逐字段说明见 [数据结构参考](../reference/data.md)。
 
@@ -112,7 +114,6 @@ obs.tick         // 快照对应的帧号
 | `nearestEnemy()` | 视野内最近的敌人，没有则 `null` |
 | `nearestCore()` | 全图最近的存活 Core 坐标 |
 | `nearestUplink()` | 全图最近的**激活** Uplink 坐标 |
-| `partner()` | 本局搭档（没有则 `null`） |
 | `pulseScan()` | 花能量的主动感知（见上文注意事项） |
 
 每个 API 的完整参数、游戏裁定规则和常见坑：见 [动作参考](../reference/actions.md) 和 [便利层参考](../reference/helpers.md)。
@@ -147,12 +148,12 @@ obs.tick         // 快照对应的帧号
 
 服务器只接受能由其 JS 运行时加载的脚本，**永远不会收到 TypeScript**：
 
-- **JS 模式**：源码照原样提交，可用上例的 `TickContext` 注释获得类型提示；对象入口可在 `const bot = { tick(ctx) {} }` 上方写 `/** @type {import('@omb/bot-api').BotModule} */`。
+- **JS 模式**：源码照原样提交，可用上例的 `BotContext` 注释获得类型提示；对象入口可在 `const bot = { tick(bot) {} }` 上方写 `/** @type {import('@omb/bot-api').BotModule} */`。
 - **TS 模式**：编辑器直接支持类型注解、`type` / `interface` / `enum` 等 TS 语法；提交时在浏览器内用 TypeScript 编译器把源码编译成 ES2020 脚本 JS 再发送，你看到的回执（版本号、失败原因）与 JS 模式完全一致。编译错误会按 TS 源码的原始行号列号展示，且不会发送任何内容，旧脚本继续运行。
 
 两种模式都遵守以下入口与模块约束：
 
-- **入口二选一**：顶层 `function tick(ctx) {}`，或名为 `bot` 的对象，包含 `tick(ctx)` 方法。对象之后可另起一行写 `export default bot`。
+- **入口二选一**：顶层 `function tick(bot) {}`，或全局 `const bot = { tick(bot) {} }` 对象。对象之后可另起一行写 `export default bot`。
 - **有限的 import/export 兼容**：服务器会剥掉单行 `import type ...`、无绑定的 `import '模块名'` 和单行 `export default ...`，也会去掉行首命名变量、函数或类声明前的 `export`。这些处理不会加载依赖，也不是完整的模块支持；不要使用普通绑定导入或依赖默认导出来定义入口。尤其不要写 `export default { tick(ctx) {} }`，该行会被整行移除。
 - **不接受 TS 语法（JS 模式）**：JS 模式提交的源码不能含类型注解（`const bot: BotModule`、`tick(ctx: TickContext)`）、`type` / `interface` / `enum` 声明、`as const`、`Array<number>` 等；要写 TS 就切到 TS 模式，编译后提交的是纯 JS。拒收时旧脚本继续运行。
 
@@ -171,6 +172,6 @@ obs.tick         // 快照对应的帧号
 4. **加状态机**：巡逻点序列、残血撤退（`self.hp < 30` 开盾跑路）。
 5. **精细弹道**：自己算提前量预测（游戏不给你，乐趣也在这）。
 
-完整可跑的成品在示例库（仓库 `docs/manual/examples/`，共 6 个、每个不超过 60 行、带教学点注释）：hello-bot 最小闭环、patrol 巡逻、core-farmer 捡分、uplink-rusher 抢桩、shield-brawler 近战、partner-duo 搭档配合。关键片段已内嵌在[模块语义与陷阱](../reference/modules.md)各节里。
+完整可跑的成品在示例库（仓库 `docs/manual/examples/`，每个不超过 60 行、带教学点注释）：hello-bot 最小闭环、patrol 巡逻、core-farmer 捡分、uplink-rusher 抢桩、shield-brawler 近战。关键片段已内嵌在[模块语义与陷阱](../reference/modules.md)各节里。
 
 游戏内改码助手的接入状态见 [AI Agent](../start/ai-agent.md)。

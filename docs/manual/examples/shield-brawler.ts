@@ -7,40 +7,40 @@ import type { BotModule } from '@omb/bot-api'
 let dashing = 0 // 撤离状态剩余时间（秒），>0 期间只逃不打
 
 const bot = {
-  tick(ctx) {
-    const enemy = ctx.api.nearestEnemy()
+  tick(bot) {
+    const enemy = bot.nearestEnemy()
     if (!enemy) {
-      ctx.api.shield(false)
-      ctx.api.move(0, 0)
+      bot.shield(false)
+      bot.move(0, 0)
       dashing = 0
       return // 没敌人：关盾并刹车；已锁存的 fire/dash 仍可能触发
     }
 
-    const me = ctx.self.position
+    const me = bot.self.position
     const dist = Math.hypot(enemy.position.x - me.x, enemy.position.y - me.y)
 
     if (dashing > 0) {
       // 撤离窗口：背向敌人 move + dash（dash 已在进入分支时调过一次）
       dashing -= 1 / 60
-      ctx.api.move(me.x - enemy.position.x, me.y - enemy.position.y)
-      ctx.api.shield(ctx.self.hp < 50) // 血量低就带盾撤
+      bot.move(me.x - enemy.position.x, me.y - enemy.position.y)
+      bot.shield(bot.self.hp < 50) // 血量低就带盾撤
       return
     }
 
-    if (ctx.self.hp < 30 && ctx.self.energy >= 20) {
+    if (bot.self.hp < 30 && bot.self.energy >= 20) {
       // 低血：开盾 + 反向 dash 撤离（耗 20 能量 + 盾 18/s，量入为出）
-      ctx.api.shield(true)
-      ctx.api.move(me.x - enemy.position.x, me.y - enemy.position.y)
-      ctx.api.dash() // 调一次即持续锁存，之后 CD/能量允许仍会再冲
+      bot.shield(true)
+      bot.move(me.x - enemy.position.x, me.y - enemy.position.y)
+      bot.dash() // 调一次即持续锁存，之后 CD/能量允许仍会再冲
       dashing = 1.5
       return
     }
 
     // 常态：关盾后贴脸射击；fire 锁存后持续输出，与 hack 互斥
-    ctx.api.shield(false)
-    ctx.api.moveTo(enemy.position)
-    ctx.api.aimAt(enemy)
-    ctx.api.fire()
+    bot.shield(false)
+    bot.moveTo(enemy.position)
+    bot.aimAt(enemy)
+    bot.fire()
   },
 }
 export default bot

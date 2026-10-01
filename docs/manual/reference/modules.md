@@ -9,7 +9,7 @@ audience: coder
 
 ## 1. tick 生命周期
 
-**怎么运行**：游戏以 60Hz（与模拟同频）调用你的 `tick(ctx)`。一帧的标准流程：读感知 → 决策 → 调 API 表达意图。
+**怎么运行**：游戏以 60Hz（与模拟同频）调用你的 `tick(bot)`。一帧的标准流程：读感知 → 决策 → 调 API 表达意图。
 
 - `ctx` 每帧重建：`self`、`game`、`scan()` 都是本帧快照，帧间不复用；
 - **模块级状态跨帧存活**：写在 `const bot = {...}` 外面/里面的变量就是你的记忆（计数器、路标索引、自记冷却）。热更新成功后程序重建、状态清零；
@@ -22,8 +22,8 @@ audience: coder
 let idx = 0 // 模块级状态：当前目标路标（写 tick 里就每帧清零了）
 
 const bot = {
-  tick(ctx) {
-    const me = ctx.self.position
+  tick(bot) {
+    const me = bot.self.position
     const target = waypoints[idx]
     const dx = target.x - me.x
     const dy = target.y - me.y
@@ -31,7 +31,7 @@ const bot = {
       idx = (idx + 1) % waypoints.length // 距离 < 2m 算到点，切下一个
       return
     }
-    ctx.api.moveTo(target)
+    bot.moveTo(target)
   },
 }
 ```
@@ -43,12 +43,12 @@ const bot = {
 
 ## 2. 感知
 
-**怎么运行**：`ctx.scan()` 返回游戏裁剪好的可见实体集合，零成本、每帧可读、每调给新对象。
+**怎么运行**：`bot.scan()` 返回游戏裁剪好的可见实体集合，零成本、每帧可读、每调给新对象。
 
 - **可见性规则**（对机器人和弹丸）：中心距 ≤ 20m **且**视线不被墙拦截；
 - **cores 与 uplinks 恒全量**：不受距离和墙限制，全图目标位置皆可知——这是全局导航（`nearestCore`/`nearestUplink`）的底气；
 - **搭档豁免**：搭档恒在 `robots` 列表，无视距离与墙，带 `isPartner: true`；
-- **自己不在 `robots` 里**（用 `ctx.self`）；死者被过滤；
+- **自己不在 `robots` 里**（用 `bot.self`）；死者被过滤；
 - **`pulseScan()`**：耗 12 能量、冷却 2s；执行成功的帧使用 32m 感知，普通帧仍为 20m，均受墙体遮挡。请求执行成功才扣能量和进入冷却，调用始终返回请求前已有的当前快照。
 
 **陷阱**：
@@ -91,9 +91,9 @@ let cdUntil = -1 // 估算的等待截止时间（秒）
 let started = -1 // 估算的引导起始时间，-1 = 未在计时
 
 // ……（减速、刹车和离开范围时重置 started 见完整示例）
-if (started >= 0 && ctx.game.time - started > 8.5) {
+if (started >= 0 && bot.game.time - started > 8.5) {
   // 无法确认成功：仅按预计时长等待，服务器仍强制真实冷却
-  cdUntil = ctx.game.time + 30
+  cdUntil = bot.game.time + 30
   started = -1
 }
 ```
@@ -117,11 +117,11 @@ if (started >= 0 && ctx.game.time - started > 8.5) {
 示例库 `shield-brawler.ts` 是本模块的教材——低血开盾反向 dash 撤离：
 
 ```ts
-const me = ctx.self.position
-if (ctx.self.hp < 30 && ctx.self.energy >= 20) {
-  ctx.api.shield(true)   // 开盾
-  ctx.api.move(me.x - enemy.position.x, me.y - enemy.position.y) // 反向推杆
-  ctx.api.dash()         // 调一次即锁存，撤离结束后仍可能自动再冲
+const me = bot.self.position
+if (bot.self.hp < 30 && bot.self.energy >= 20) {
+  bot.shield(true)   // 开盾
+  bot.move(me.x - enemy.position.x, me.y - enemy.position.y) // 反向推杆
+  bot.dash()         // 调一次即锁存，撤离结束后仍可能自动再冲
   dashing = 1.5
   return
 }
@@ -146,9 +146,9 @@ if (ctx.self.hp < 30 && ctx.self.energy >= 20) {
 let lastSay = -99 // 上次喊话时间（秒）
 
 // 夹击时才喊，且至少隔 3.5 秒（游戏层还有 3s 强制冷却双保险）
-if (ctx.game.time - lastSay > 3.5) {
-  ctx.api.say('pincing ' + enemy.id)
-  lastSay = ctx.game.time
+if (bot.game.time - lastSay > 3.5) {
+  bot.say('pincing ' + enemy.id)
+  lastSay = bot.game.time
 }
 ```
 

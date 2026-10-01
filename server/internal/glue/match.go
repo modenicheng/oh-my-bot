@@ -333,6 +333,7 @@ func (m *Match) submitScriptLocked(pid uint64, src string) (ok bool, errMsg stri
 	if err := rt.Load(src); err != nil {
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
+	m.sendScriptLogsLocked(rid, rt)
 	return true, "", rt.Rev()
 }
 
@@ -676,14 +677,21 @@ func (m *Match) runScripts(wv sim.WorldView) {
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
+		rt := m.runtimes[res.ID]
 		if res.Err != nil || res.Deferred {
 			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
+			if rt != nil && !res.Deferred {
+				m.sendScriptLogsLocked(res.ID, rt)
+			}
 			continue
 		}
 		if m.botRobots[res.ID] {
 			res.Commands = soloBotCommands(res.Commands)
 		}
 		m.sim.ApplyScriptCommands(res.ID, res.Commands)
+		if rt != nil {
+			m.sendScriptLogsLocked(res.ID, rt)
+		}
 	}
 }
 

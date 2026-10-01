@@ -22,23 +22,23 @@ L1 是 7 个常用组合动作，帮你省掉重复样板代码。它们最终�
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const core = ctx.api.nearestCore()
-    if (core) ctx.api.moveTo(core)
+  tick(bot) {
+    const core = bot.nearestCore()
+    if (core) bot.moveTo(core)
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    core = ctx.api.nearest_core()
+def tick(bot):
+    core = bot.nearest_core()
     if core:
-        ctx.api.move_to(core)
+        bot.move_to(core)
 ```
 ```java
-void tick(Context ctx) {
-    Vec2 core = ctx.api.nearestCore();
-    if (core != null) ctx.api.moveTo(core);
+void tick(Context bot) {
+    Vec2 core = bot.nearestCore();
+    if (core != null) bot.moveTo(core);
 }
 ```
 
@@ -60,7 +60,7 @@ void tick(Context ctx) {
 
 **游戏规则**：传**不可见**的机器人（被墙挡住、超出视野，搭档除外）会当场抛异常 `aimAt: entity not visible`；当帧没接住的话，该帧全部脚本动作作废。
 
-**常见坑**：先确认目标在 `ctx.scan().robots` 里再传，搭档不用确认。
+**常见坑**：先确认目标在 `bot.scan().robots` 里再传，搭档不用确认。
 
 ## nearestEnemy()
 
@@ -71,29 +71,29 @@ void tick(Context ctx) {
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const enemy = ctx.api.nearestEnemy()
+  tick(bot) {
+    const enemy = bot.nearestEnemy()
     if (enemy) {
-      ctx.api.aimAt(enemy)
-      ctx.api.fire()
+      bot.aimAt(enemy)
+      bot.fire()
     }
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    enemy = ctx.api.nearest_enemy()
+def tick(bot):
+    enemy = bot.nearest_enemy()
     if enemy:
-        ctx.api.aim_at(enemy)
-        ctx.api.fire()
+        bot.aim_at(enemy)
+        bot.fire()
 ```
 ```java
-void tick(Context ctx) {
-    RobotRef enemy = ctx.api.nearestEnemy();
+void tick(Context bot) {
+    RobotRef enemy = bot.nearestEnemy();
     if (enemy != null) {
-        ctx.api.aimAt(enemy);
-        ctx.api.fire();
+        bot.aimAt(enemy);
+        bot.fire();
     }
 }
 ```
@@ -107,34 +107,34 @@ void tick(Context ctx) {
 
 **做什么**：找全图最近的**存活** Core 的坐标。Core 不受视野限制（恒全量可见），所以这是全局导航用的。
 
-返回值是**纯坐标 `{ x, y }`**——没有 id。需要区分是哪颗 Core（比如记住"我在追第 3 颗"）时，用 `ctx.scan().cores`，那里每颗都带 id。找不到（全被捡完了）返回 `null`。
+返回值是**纯坐标 `{ x, y }`**——没有 id。需要区分是哪颗 Core（比如记住"我在追第 3 颗"）时，用 `bot.scan().cores`，那里每颗都带 id。找不到（全被捡完了）返回 `null`。
 
 ```ts|py|java
 全图 Core 都可见：直接朝最近的去。
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const core = ctx.api.nearestCore()
-    if (core) ctx.api.moveTo(core)
-    else ctx.api.move(0, 0) // 暂无 Core，原地待刷
+  tick(bot) {
+    const core = bot.nearestCore()
+    if (core) bot.moveTo(core)
+    else bot.move(0, 0) // 暂无 Core，原地待刷
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    core = ctx.api.nearest_core()
+def tick(bot):
+    core = bot.nearest_core()
     if core:
-        ctx.api.move_to(core)
+        bot.move_to(core)
     else:
-        ctx.api.move(0, 0)  # 暂无 Core，原地待刷
+        bot.move(0, 0)  # 暂无 Core，原地待刷
 ```
 ```java
-void tick(Context ctx) {
-    Vec2 core = ctx.api.nearestCore();
-    if (core != null) ctx.api.moveTo(core);
-    else ctx.api.move(0, 0); // 暂无 Core，原地待刷
+void tick(Context bot) {
+    Vec2 core = bot.nearestCore();
+    if (core != null) bot.moveTo(core);
+    else bot.move(0, 0); // 暂无 Core，原地待刷
 }
 ```
 
@@ -144,46 +144,46 @@ void tick(Context ctx) {
 
 **做什么**：找全图最近的**激活** Uplink 的坐标。Uplink 恒全量可见，但**未激活的桩不进候选**——中央主桩要到 CORE_OPEN（4:00）才算激活。没有激活桩时返回 `null`。
 
-返回值同样是**纯坐标 `{ x, y }`**——没有 id、没有 ready 状态、没有持有者、**没有你的个人冷却**。桩的详细状态在 `ctx.scan().uplinks` 里查（那里有 `id`、`ready`、`holder`）；脚本拿不到你的 30 秒个人冷却和成功事件；可用 `game.time` 估算等待时间，但不能据此确认成功（示例库 `uplink-rusher.ts` 演示这一限制）。
+返回值同样是**纯坐标 `{ x, y }`**——没有 id、没有 ready 状态、没有持有者、**没有你的个人冷却**。桩的详细状态在 `bot.scan().uplinks` 里查（那里有 `id`、`ready`、`holder`）；脚本拿不到你的 30 秒个人冷却和成功事件；可用 `game.time` 估算等待时间，但不能据此确认成功（示例库 `uplink-rusher.ts` 演示这一限制）。
 
 ```ts|py|java
 接近最近激活桩并刹车引导；成功后真实冷却仍由服务器强制。
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const uplink = ctx.api.nearestUplink()
-    if (!uplink) { ctx.api.move(0, 0); return }
-    const me = ctx.self.position
+  tick(bot) {
+    const uplink = bot.nearestUplink()
+    if (!uplink) { bot.move(0, 0); return }
+    const me = bot.self.position
     const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
-    if (dist > 1) ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
-    else { ctx.api.move(0, 0); ctx.api.interact() }
+    if (dist > 1) bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+    else { bot.move(0, 0); bot.interact() }
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    uplink = ctx.api.nearest_uplink()
+def tick(bot):
+    uplink = bot.nearest_uplink()
     if not uplink:
-        ctx.api.move(0, 0)
+        bot.move(0, 0)
         return
-    me = ctx.self.position
+    me = bot.self.position
     dist = math.hypot(uplink.x - me.x, uplink.y - me.y)
     if dist > 1:
-        ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+        bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
     else:
-        ctx.api.move(0, 0)
-        ctx.api.interact()
+        bot.move(0, 0)
+        bot.interact()
 ```
 ```java
-void tick(Context ctx) {
-    Vec2 uplink = ctx.api.nearestUplink();
-    if (uplink == null) { ctx.api.move(0, 0); return; }
-    Vec2 me = ctx.self.position;
+void tick(Context bot) {
+    Vec2 uplink = bot.nearestUplink();
+    if (uplink == null) { bot.move(0, 0); return; }
+    Vec2 me = bot.self.position;
     double dist = Math.hypot(uplink.x - me.x, uplink.y - me.y);
-    if (dist > 1) ctx.api.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3);
-    else { ctx.api.move(0, 0); ctx.api.interact(); }
+    if (dist > 1) bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3);
+    else { bot.move(0, 0); bot.interact(); }
 }
 ```
 
@@ -200,30 +200,30 @@ void tick(Context ctx) {
 ```
 ```ts
 const bot = {
-  tick(ctx) {
-    const partner = ctx.api.partner()
+  tick(bot) {
+    const partner = bot.partner()
     if (!partner) return // 没搭档（奇数局末位）：退化为普通策略
-    const enemy = ctx.api.nearestEnemy()
-    if (!enemy) ctx.api.moveTo(partner.position)
+    const enemy = bot.nearestEnemy()
+    if (!enemy) bot.moveTo(partner.position)
   },
 }
 export default bot
 ```
 ```py
-def tick(ctx):
-    partner = ctx.api.partner()
+def tick(bot):
+    partner = bot.partner()
     if not partner:
         return  # 没搭档（奇数局末位）：退化为普通策略
-    enemy = ctx.api.nearest_enemy()
+    enemy = bot.nearest_enemy()
     if not enemy:
-        ctx.api.move_to(partner.position)
+        bot.move_to(partner.position)
 ```
 ```java
-void tick(Context ctx) {
-    RobotRef partner = ctx.api.partner();
+void tick(Context bot) {
+    RobotRef partner = bot.partner();
     if (partner == null) return; // 没搭档（奇数局末位）：退化为普通策略
-    RobotRef enemy = ctx.api.nearestEnemy();
-    if (enemy == null) ctx.api.moveTo(partner.position);
+    RobotRef enemy = bot.nearestEnemy();
+    if (enemy == null) bot.moveTo(partner.position);
 }
 ```
 

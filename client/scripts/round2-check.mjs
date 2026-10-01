@@ -274,9 +274,9 @@ try {
     await page.keyboard.press('ControlOrMeta+v')
     await until(() => page.evaluate(k => localStorage.getItem(k), key).then(s => s === source), 'draft saved')
   }
-  const prelude = "/** @param {import('@omb/bot-api').TickContext} ctx */\n"
+  const prelude = "/** @param {import('@omb/bot-api').BotContext} bot */\n"
   // Completion is supplied by the real TypeScript worker using canonical Bot API declarations.
-  await replaceSource(`${prelude}function tick(ctx) { ctx.api. }`)
+  await replaceSource(`${prelude}function tick(bot) { bot. }`)
   await page.keyboard.press('End')
   await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ArrowLeft')
@@ -284,12 +284,23 @@ try {
   await page.locator('.suggest-widget.visible').waitFor()
   await until(() => page.locator('.suggest-widget.visible').textContent().then(t => t.includes('moveTo')), 'Bot API completion')
   await page.keyboard.press('Escape')
-  const validSource = `${prelude}function tick(ctx) { ctx.api.shield(true); ctx.api.say('脚本 say 正常') }\n`
+  const validSource = `console.info('JS load console')\n${prelude}function tick(bot) { bot.shield(true); bot.say('脚本 say 正常') }\n`
   await replaceSource(validSource)
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'valid JS diagnostics', 20000)
   const energyBefore = robots.get(id).energyX10
+  assert.equal(await editorInput.evaluate(el => el === document.activeElement), true, 'Monaco focused before submit')
   await page.keyboard.press('ControlOrMeta+Enter')
   await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r1')), 'script success')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('JS load console')), 'real server console log')
+  assert.equal(await editorInput.evaluate(el => el === document.activeElement), true, 'console follow never steals Monaco focus')
+  await page.click('.script-console-toggle')
+  assert.equal(await page.locator('.script-console-toggle').getAttribute('aria-expanded'), 'false', 'console collapses')
+  assert.equal(await page.locator('.script-console-body').isHidden(), true, 'collapsed console does not cover editor')
+  await page.click('.script-console-toggle')
+  assert.equal(await page.locator('.script-console-toggle').getAttribute('aria-expanded'), 'true', 'console expands')
+  await page.click('.script-console-clear')
+  assert.equal(await page.locator('.script-console-list').textContent(), '', 'console clear removes buffered lines')
+  assert.equal(await page.locator('[data-console-count]').textContent(), '0', 'console count resets after clear')
   assert.equal(submissions.at(-1).source, validSource)
   assert.equal(receipts.at(-1).clientScriptId, submissions.at(-1).clientScriptId)
   await page.click('#workbench-assist')
@@ -313,7 +324,7 @@ try {
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)
   // TypeScript 模式：开关、注解补全、编译提交、编译失败保留旧脚本。
-  const tsSource = ["import type { TickContext } from '@omb/bot-api'", "", "export function tick(ctx: TickContext) {", "  const walls = ctx.scan().walls", "  if (!Array.isArray(walls) || !walls.length) throw new Error('missing static walls')", "  if (!walls.every(w => Number.isFinite(w.min.x) && Number.isFinite(w.min.y) && Number.isFinite(w.max.x) && Number.isFinite(w.max.y) && w.min.x <= w.max.x && w.min.y <= w.max.y)) throw new Error('invalid wall geometry')", "  const heading: number = ctx.self.position.x + ctx.self.position.y", "  ctx.api.shield(heading > 0)", "  ctx.api.say('TS 脚本运行正常')", "}", ""].join(String.fromCharCode(10))
+  const tsSource = ["import type { BotContext } from '@omb/bot-api'", "", "console.info('TS load console')", "export function tick(bot: BotContext) {", "  const walls = bot.scan().walls", "  if (!Array.isArray(walls) || !walls.length) throw new Error('missing static walls')", "  if (!walls.every(w => Number.isFinite(w.min.x) && Number.isFinite(w.min.y) && Number.isFinite(w.max.x) && Number.isFinite(w.max.y) && w.min.x <= w.max.x && w.min.y <= w.max.y)) throw new Error('invalid wall geometry')", "  const heading: number = bot.self.position.x + bot.self.position.y", "  bot.shield(heading > 0)", "  bot.say('TS 脚本运行正常')", "}", ""].join(String.fromCharCode(10))
   await page.click('#workbench-lang-switch [data-lang="ts"]')
   assert.equal(await page.locator('#workbench-lang-switch [data-lang="ts"]').getAttribute('aria-pressed'), 'true', 'TS switch toggles pressed state')
   assert.equal(await page.locator('#workbench-lang-switch [data-lang="js"]').getAttribute('aria-pressed'), 'false', 'JS switch released')
@@ -326,14 +337,15 @@ try {
   await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r2')), 'TS compiles and submits JS', 20000)
   assert.equal(submissions.length, jsBeforeTs + 1, 'TS submit sends exactly one message')
   const tsPayload = submissions.at(-1).source
-  assert.ok(!tsPayload.includes(': TickContext'), 'submitted source is compiled, not TS')
+  assert.ok(!tsPayload.includes(': BotContext'), 'submitted source is compiled, not TS')
   assert.ok(tsPayload.includes('function tick'), 'compiled JS keeps tick entrypoint')
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'assist on for TS script')
   await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'compiled TS script runs on server')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('TS load console') && t.includes('script r2')), 'TS console revision appears')
   assert.equal(await page.evaluate(key => localStorage.getItem(key), tsDraftKey), tsSource, 'TS draft saved under language-scoped key')
   // 编译失败：不发送任何帧，旧脚本继续运行。
-  await replaceSource('function tick(ctx: { api: { moveTo(p: { x: number, y: number }): void } }) { ctx.api.moveTo() }\n', tsDraftKey)
+  await replaceSource('function tick(bot: { moveTo(p: { x: number, y: number }): void }) { bot.moveTo() }\n', tsDraftKey)
   await page.keyboard.press('ControlOrMeta+Enter')
   await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('TypeScript 编译失败')), 'compile failure surfaces TS errors', 20000)
   assert.ok(await page.locator('#workbench-result').textContent().then(t => t.includes('第 1 行')), 'compile errors carry original TS line numbers')

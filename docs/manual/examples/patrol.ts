@@ -13,8 +13,8 @@ const waypoints = [
 let idx = 0 // 模块级状态：当前目标路标
 
 const bot = {
-  tick(ctx) {
-    const me = ctx.self.position
+  tick(bot) {
+    const me = bot.self.position
     const target = waypoints[idx]
     const dx = target.x - me.x
     const dy = target.y - me.y
@@ -23,7 +23,7 @@ const bot = {
       idx = (idx + 1) % waypoints.length
       return
     }
-    ctx.api.moveTo(target)
+    bot.moveTo(target)
   },
 }
 export default bot

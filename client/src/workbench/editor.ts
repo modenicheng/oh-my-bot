@@ -143,13 +143,14 @@ export function createBotEditor(
   initialLanguage: BotLanguage = 'js',
 ): BotEditor {
   // 两个语言各建一个模型，Bot API 声明同时挂到两套 defaults 上。
+  const consoleTypes = `declare const console: import('@omb/bot-api').ScriptConsole`
   const apiTypes = [
     javascriptDefaults.addExtraLib(
-      `declare module '@omb/bot-api' {\n${botApiSource}\n}`,
+      `declare module '@omb/bot-api' {\n${botApiSource}\n}\n${consoleTypes}`,
       'file:///bot-api.d.ts',
     ),
     typescriptDefaults.addExtraLib(
-      `declare module '@omb/bot-api' {\n${botApiSource}\n}`,
+      `declare module '@omb/bot-api' {\n${botApiSource}\n}\n${consoleTypes}`,
       'file:///bot-api-ts.d.ts',
     ),
   ]
@@ -194,7 +195,7 @@ export function createBotEditor(
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
       run: () => callbacks.onSubmit(),
     }),
-    // Bot API 前缀补全：ctx / ctx.api / 成员链。TS worker 已覆盖能推断的
+    // Bot API 前缀补全：bot / bot.scan() / metadata 成员链。TS worker 已覆盖能推断的
     // 通用补全，这里只补 JSDoc 类型链失效时仍可用的入口与方法，随编辑器销毁。
     monaco.languages.registerCompletionItemProvider('javascript', {
       triggerCharacters: ['.'],

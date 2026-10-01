@@ -21,7 +21,7 @@ type BotModule = { tick(ctx: TickContext): void }
 
 **生命周期规则**（完整陷阱分析见[模块语义与陷阱](modules.md)）：
 
-- `ctx` **每帧重建**：`ctx.self`、`ctx.game`、`ctx.scan()` 都是本帧快照，帧间不复用、不共享对象；
+- `ctx` **每帧重建**：`bot.self`、`bot.game`、`bot.scan()` 都是本帧快照，帧间不复用、不共享对象；
 - **模块级状态跨帧存活**：声明在 `bot` 对象外/内的变量就是你的记忆。热更新成功 → 程序重建 → 状态清零；
 - **每帧预算 10ms**（可配置）：超时该帧脚本动作全部作废，下一帧恢复；
 - **失败安全**：加载失败（语法错、缺入口）→ 旧版本继续跑、状态保持；tick 内异常 → 只作废该帧，不影响后续帧。
@@ -56,7 +56,7 @@ interface GameInfo {
 
 ## Observation —— 感知快照
 
-`ctx.scan()` 的返回值。当前脚本运行时的 `pulseScan()` 也始终返回这份快照，不能据此判断脉冲是否执行成功：
+`bot.scan()` 的返回值。当前脚本运行时的 `pulseScan()` 也始终返回这份快照，不能据此判断脉冲是否执行成功：
 
 ```ts
 interface Observation {
@@ -107,11 +107,11 @@ interface Vec2 { x: number; y: number }
 
 | 想知道 | 去哪拿 |
 |---|---|
-| 我的血量/能量/位置/速度 | `ctx.self` |
-| 局时/剩余/阶段 | `ctx.game` |
-| 看得见哪些敌人 | `ctx.scan().robots`（20m + 不穿墙） |
-| 全图 Core 在哪 | `ctx.scan().cores` 或 `ctx.api.nearestCore()` |
-| 桩的状态（激活/被引导中） | `ctx.scan().uplinks` 的 `ready` / `holder` |
+| 我的血量/能量/位置/速度 | `bot.self` |
+| 局时/剩余/阶段 | `bot.game` |
+| 看得见哪些敌人 | `bot.scan().robots`（20m + 不穿墙） |
+| 全图 Core 在哪 | `bot.scan().cores` 或 `bot.nearestCore()` |
+| 桩的状态（激活/被引导中） | `bot.scan().uplinks` 的 `ready` / `holder` |
 | 我在这桩的冷却剩几秒 | **没有**，只能按 `game.time` 估算 |
-| 搭档在哪 | `ctx.api.partner()`（恒可见） |
+| 搭档在哪 | `bot.partner()`（恒可见） |
 | 谁在瞄我/弹道预测 | **没有**，自己从 `projectiles` 和位置差分算 |

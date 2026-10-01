@@ -4,11 +4,11 @@
 import type { BotModule } from '@omb/bot-api'
 
 const bot = {
-  tick(ctx) {
-    const enemy = ctx.api.nearestEnemy() // 只搜 20m 视野内（不含搭档/死者），不可见返回 null
+  tick(bot) {
+    const enemy = bot.nearestEnemy() // 只搜 20m 视野内（不含自己/死者），不可见返回 null
     if (enemy) {
-      ctx.api.aimAt(enemy) // L1 重载：按实体方位角转向（目标可见才不抛错）
-      ctx.api.fire() // 服务器强制 250ms 节流 + 能量>=5；护盾开启时静默不射
+      bot.aimAt(enemy) // L1 重载：按实体方位角转向（目标可见才不抛错）
+      bot.fire() // 服务器强制 250ms 节流 + 能量>=5；护盾开启时静默不射
     }
   },
 }

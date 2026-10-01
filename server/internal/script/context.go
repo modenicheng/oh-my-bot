@@ -8,37 +8,52 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
-// buildTickContext 组装 JS 侧 TickContext（runtime.ts 契约）：
+// buildTickContext 组装 JS 侧 BotContext（runtime.ts 契约）：
 //
-//	{ self: Self, game: GameInfo, scan(): Observation, api: L0 & L1 }
+//	{ self, game, scan(), move(), ..., api }
 //
-// 全部字段为只读快照；api 方法闭包捕获 frame/cmd，不触碰 Sim 内部状态。
+// 新脚本直接使用 flat bot.move()/bot.scan()；api 保留为 deprecated
+// 兼容引用。全部 metadata 为每 tick 独立快照，方法闭包只记录命令。
 func buildTickContext(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *goja.Object {
 	self := frame.Self
 	obs := &frame.Obs
 
 	// ---- self: Self { hp, energy, position, velocity } ----
 	selfObj := vm.NewObject()
-	_ = selfObj.Set("hp", x10ToFloat(self.HpX10))
-	_ = selfObj.Set("energy", x10ToFloat(self.EnergyX10))
-	_ = selfObj.Set("position", toJSVec2(vm, self.Pos))
-	_ = selfObj.Set("velocity", toJSVec2(vm, self.Vel))
+	defineReadonly(selfObj, "id", vm.ToValue(self.ID))
+	defineReadonly(selfObj, "hp", vm.ToValue(x10ToFloat(self.HpX10)))
+	defineReadonly(selfObj, "energy", vm.ToValue(x10ToFloat(self.EnergyX10)))
+	defineReadonly(selfObj, "position", readonlyVec2(vm, self.Pos))
+	defineReadonly(selfObj, "velocity", readonlyVec2(vm, self.Vel))
 
 	// ---- game: GameInfo { time, timeLeft, phase, mapSeed } ----
 	gameObj := vm.NewObject()
-	_ = gameObj.Set("time", float64(obs.Frame.Tick)/60)
-	_ = gameObj.Set("timeLeft", float64(obs.Frame.TimeLeftS))
-	_ = gameObj.Set("phase", phaseName(obs.Frame.Phase))
-	_ = gameObj.Set("mapSeed", mapSeedOf(obs.Frame.Map))
+	defineReadonly(gameObj, "time", vm.ToValue(float64(obs.Frame.Tick)/60))
+	defineReadonly(gameObj, "timeLeft", vm.ToValue(float64(obs.Frame.TimeLeftS)))
+	defineReadonly(gameObj, "phase", vm.ToValue(phaseName(obs.Frame.Phase)))
+	defineReadonly(gameObj, "mapSeed", vm.ToValue(mapSeedOf(obs.Frame.Map)))
 
-	ctx := vm.NewObject()
-	_ = ctx.Set("self", selfObj)
-	_ = ctx.Set("game", gameObj)
-	_ = ctx.Set("scan", func(call goja.FunctionCall) goja.Value {
+	bot := buildAPI(vm, frame, cmd)
+	defineReadonly(bot, "self", selfObj)
+	defineReadonly(bot, "game", gameObj)
+	_ = bot.Set("scan", func(call goja.FunctionCall) goja.Value {
 		return toJSObservation(vm, obs, self.ID)
 	})
-	_ = ctx.Set("api", buildAPI(vm, frame, cmd))
-	return ctx
+	// Legacy compatibility: old tick(ctx) { ctx.api.move(...) } scripts keep
+	// running, while the same methods are canonical on the bot object itself.
+	defineReadonly(bot, "api", bot)
+	return bot
+}
+
+func defineReadonly(obj *goja.Object, name string, value goja.Value) {
+	_ = obj.DefineDataProperty(name, value, goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+}
+
+func readonlyVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {
+	o := vm.NewObject()
+	defineReadonly(o, "x", vm.ToValue(v.X))
+	defineReadonly(o, "y", vm.ToValue(v.Y))
+	return o
 }
 
 // buildAPI 绑定 L0 原语 + L1 便利层（index.ts 契约）。所有方法只记录意图，

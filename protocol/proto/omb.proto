@@ -234,7 +234,17 @@ message ServerEvent {
     EvShot shot = 26;
     EvProjectileImpact projectile_impact = 27;
     EvScoreboard scoreboard = 28; // 观战/回放可见；玩家同样可收（延迟 1s 内不影响作弊面）
+    EvScriptLog script_log = 29; // 仅脚本 owner session 可见，不进入 Match Event Log
   }
+}
+
+message EvScriptLog {
+  uint32 robot_id = 1;
+  uint32 script_rev = 2;
+  uint32 tick = 3;
+  string level = 4;
+  string text = 5;
+  bool truncated = 6;
 }
 
 message ServerMsg {

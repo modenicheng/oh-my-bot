@@ -243,6 +243,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
+    if (ev.kind.case === 'scriptLog') { workbench.acceptScriptLog(ev.kind.value); return }
     if (ev.kind.case === 'matchEnd') workbench.resetMatch()
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
       connectionNotice.hidden = true

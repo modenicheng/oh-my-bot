@@ -5,18 +5,18 @@
 import type { BotModule } from '@omb/bot-api'
 
 const bot = {
-  tick(ctx) {
-    const core = ctx.api.nearestCore() // 全图最近存活 Core（不是视野内），无则 null
+  tick(bot) {
+    const core = bot.nearestCore() // 全图最近存活 Core（不是视野内），无则 null
     if (core) {
-      ctx.api.moveTo(core) // 移动与瞄准互不干扰，可以边走边打
+      bot.moveTo(core) // 移动与瞄准互不干扰，可以边走边打
     } else {
-      ctx.api.move(0, 0) // 暂无 Core：原地待刷（move 每帧重调即可覆盖）
+      bot.move(0, 0) // 暂无 Core：原地待刷（move 每帧重调即可覆盖）
     }
 
-    const enemy = ctx.api.nearestEnemy()
+    const enemy = bot.nearestEnemy()
     if (enemy) {
-      ctx.api.aimAt(enemy) // 有效射程 16m，超过后散布增大，远距命中靠运气
-      ctx.api.fire()
+      bot.aimAt(enemy) // 有效射程 16m，超过后散布增大，远距命中靠运气
+      bot.fire()
     }
   },
 }
