@@ -38,6 +38,7 @@ export class Hud {
   private selfScore: HTMLElement
   private scoreRows: HTMLDivElement
   private assistEl: HTMLDivElement
+  private assistHint: HTMLDivElement
   private assistCard: HTMLDivElement
   private msgLine: HTMLDivElement
   private msgTimer: number | undefined
@@ -47,6 +48,12 @@ export class Hud {
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
   private assistLocal = false
   private assistServer: boolean | undefined
+  /** SelfState 权威分轴状态（缺失 = 旧服务器）。 */
+  private manualAxesMask: number | undefined
+  private assistMoveSrc: number | undefined
+  private assistTurretSrc: number | undefined
+  private assistFireSrc: number | undefined
+  private assistAbilitySrc: number | undefined
   private skills: Record<'fire' | 'dash' | 'shield' | 'uplink', SkillCard>
   private uplinkPanel: HTMLDivElement
   private uplinkText: HTMLSpanElement
@@ -71,6 +78,7 @@ export class Hud {
     this.leftPanel.append(ownScore)
     this.assistEl = req(root, 'hud-assist')
     this.assistCard = req(root, 'skill-assist')
+    this.assistHint = req(root, 'hud-assist-hint')
     this.msgLine = req(root, 'hud-msg')
     this.msgLine.setAttribute('role', 'status')
     if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
@@ -118,6 +126,11 @@ export class Hud {
 
     // 辅助开关：服务器权威值优先；缺失（旧服务器）回退本地输入
     this.assistServer = world.self?.assistOn
+    this.manualAxesMask = world.self?.manualAxesMask
+    this.assistMoveSrc = world.self?.moveSrc
+    this.assistTurretSrc = world.self?.turretSrc
+    this.assistFireSrc = world.self?.fireSrc
+    this.assistAbilitySrc = world.self?.abilitySrc
     this.renderAssist()
 
     // 阶段 / 时间
@@ -305,6 +318,17 @@ export class Hud {
 
   private renderAssist(): void {
     const on = this.assistServer ?? this.assistLocal
+    // 逐轴手操提示（服务端权威 manual_axes_mask；bit0 move/1 aim/2 fire/3 ability）。
+    // 仅在辅助开启且部分轴被人工接管时显示：这正是“Space 交回辅助”生效的状态
+    // （第二分支）。辅助关闭时玩家全手操属正常驾驶，不提示。缺失（旧服务器）回退
+    // 分轴来源标记推导，不做其他猜测。
+    const mask = this.manualAxesMask ?? srcMask(this.assistMoveSrc, this.assistTurretSrc, this.assistFireSrc, this.assistAbilitySrc)
+    const manual = on ? axesFromMask(mask) : []
+    const manualLine = manual.length ? `手操 ${manual.join('/')} · Space 交回辅助` : ''
+    setText(this.assistHint, manualLine)
+    this.assistHint.classList.toggle('on', manual.length > 0)
+    if (manual.length > 0) this.assistHint.removeAttribute('hidden')
+    else this.assistHint.setAttribute('hidden', '')
     setText(this.assistEl, on ? '辅助 ON' : '辅助 OFF')
     this.assistEl.classList.toggle('off', !on)
     const state = on ? 'active' : 'off'
@@ -313,6 +337,35 @@ export class Hud {
 }
 
 // ---- helpers ---------------------------------------------------------------
+
+/** 控制来源枚举（omb.v1.ControlSource）。 */
+const CS_HUMAN = 1
+
+/** 权威 manual_axes_mask 位定义（与协议 ClientInput.axis_mask 同构）。 */
+const AXIS_MOVE = 1 << 0
+const AXIS_AIM = 1 << 1
+const AXIS_FIRE = 1 << 2
+const AXIS_ABILITY = 1 << 3
+
+/** mask → 手操轴名列表（HUD 文案）。 */
+function axesFromMask(mask: number): string[] {
+  const out: string[] = []
+  if (mask & AXIS_MOVE) out.push('移动')
+  if (mask & AXIS_AIM) out.push('瞄准')
+  if (mask & AXIS_FIRE) out.push('开火')
+  if (mask & AXIS_ABILITY) out.push('技能')
+  return out
+}
+
+/** 旧服务器回退：由分轴来源标记推导手操轴。 */
+function srcMask(move: number | undefined, turret: number | undefined, fire: number | undefined, ability: number | undefined): number {
+  let m = 0
+  if (move === CS_HUMAN) m |= AXIS_MOVE
+  if (turret === CS_HUMAN) m |= AXIS_AIM
+  if (fire === CS_HUMAN) m |= AXIS_FIRE
+  if (ability === CS_HUMAN) m |= AXIS_ABILITY
+  return m
+}
 
 /** 绝对 tick → 剩余秒（一位小数由调用方格式化）；字段缺失返回 undefined（未知）。 */
 function cdSeconds(readyTick: number | undefined, nowTick: number): number | undefined {

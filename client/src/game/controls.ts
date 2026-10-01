@@ -190,6 +190,9 @@ export class GameController {
         this.scores.observe(this.world.robots)
         this.input.acknowledge(snap.ackSeq)
         if (snap.self?.assistOn !== undefined) this.input.assistOn = snap.self.assistOn
+        // 重连/全量快照：清粘滞轴与按键状态，避免重连前 held 键凭旧状态重新抢占；
+        // 服务端权威 manual_axes_mask 已随 SelfState 下发，HUD 按其显示。
+        if (snap.full) this.input.resetTakeover()
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
         if (snap.full) this.resyncAt = -Infinity
       }
@@ -344,6 +347,9 @@ export class GameController {
     if (this.pixelRatio !== (window.devicePixelRatio || 1)) this.resizeCanvas()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
+    // 死亡：人工接管归零（服务端重生时已重置控制状态），本地同步清粘滞轴，
+    // 防止重生后残余 held 键第一帧重新抢占。
+    if (self?.dead) this.input.resetTakeover()
     const pos = self?.base?.pos
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)

@@ -135,6 +135,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .skill[data-state="off"] { opacity: .45; }
 .skill[data-state="off"] .skill-cd { color: var(--fg-dim); }
 #hud-assist.off { color: var(--fg-dim); }
+.assist-hint { font-family: var(--pixel); font-size: 12px; line-height: 1.6; color: var(--amber);
+               background: #0a121ce8; border: 1px solid #1f2733; padding: 4px 8px; margin-top: 6px; }
+.assist-hint[hidden] { display: none; }
 .hud-hint { position: absolute; left: 16px; top: 64px; font-size: 11px; color: var(--fg-dim);
             line-height: 1.8; background: #0a121ce8; padding: 6px 10px; }
 .game-tools { position: absolute; top: 16px; right: 20px; display: flex; gap: 6px; pointer-events: auto; }

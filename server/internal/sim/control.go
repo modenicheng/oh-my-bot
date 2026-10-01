@@ -129,7 +129,7 @@ func setAxes(dst *ArbitratedInput, src ArbitratedInput, mask AxisMask) {
 }
 
 func (c *ControlState) resolve() ArbitratedInput {
-	out := ArbitratedInput{MoveSrc: '-', TurretSrc: '-'}
+	out := ArbitratedInput{MoveSrc: '-', TurretSrc: '-', FireSrc: '-', AbilitySrc: '-'}
 	if c.Assist {
 		setAxes(&out, c.Script, c.ScriptAxes)
 		if c.ScriptAxes&AxisMove != 0 {
@@ -138,6 +138,12 @@ func (c *ControlState) resolve() ArbitratedInput {
 		if c.ScriptAxes&AxisAim != 0 {
 			out.TurretSrc = 'S'
 		}
+		if c.ScriptAxes&AxisFire != 0 {
+			out.FireSrc = 'S'
+		}
+		if c.ScriptAxes&AxisAbility != 0 {
+			out.AbilitySrc = 'S'
+		}
 	}
 	setAxes(&out, c.Human, c.HumanAxes)
 	if c.HumanAxes&AxisMove != 0 {
@@ -145,6 +151,12 @@ func (c *ControlState) resolve() ArbitratedInput {
 	}
 	if c.HumanAxes&AxisAim != 0 {
 		out.TurretSrc = 'H'
+	}
+	if c.HumanAxes&AxisFire != 0 {
+		out.FireSrc = 'H'
+	}
+	if c.HumanAxes&AxisAbility != 0 {
+		out.AbilitySrc = 'H'
 	}
 	if n := out.Move.Len(); n > 1 {
 		out.Move = out.Move.Scale(1 / n)
@@ -213,15 +225,26 @@ func (s *Sim) consumeInputs() {
 		}
 		// Toggle precedes arbitration; same-tick human input must still win.
 		if c.ToggleCount != 0 {
-			humanThisTick := AxisMask(0)
-			if len(s.consumed) > 0 && s.consumed[len(s.consumed)-1].robotID == r.ID {
-				humanThisTick = r.Input.AxisMask
-			}
-			if c.ToggleCount%2 != 0 {
-				c.Assist = !c.Assist
-			}
-			if c.Assist || c.ToggleCount > 1 {
-				c.HumanAxes &= humanThisTick
+			// Space 三分支（ADR-0009 分轴仲裁，事件可合并）：
+			//  1. assist 关 → 开启并清除人工接管；
+			//  2. assist 开且任一轴被人工接管 → 仅把被接管轴交回脚本（assist 保持开）；
+			//  3. assist 开且全部脚本控制 → 关闭。
+			// 同 tick 在输入合并之后处理（上方 InputPending 块）：同 tick 先到的真实人类
+			// 输入已计入 HumanAxes，随后按分支决定去留；toggle 后到达的输入下一 tick
+			// 正常抢占。恢复后仍按住的键不会重新抢占：客户端在 Space 时清 sticky 与按键
+			// 状态（边沿触发），后续帧不带对应轴 mask。
+			for i := uint32(0); i < c.ToggleCount; i++ {
+				if !c.Assist {
+					c.Assist = true
+					c.HumanAxes = 0
+					c.Human = ArbitratedInput{}
+				} else if c.HumanAxes != 0 {
+					c.HumanAxes = 0
+					c.Human = ArbitratedInput{}
+				} else {
+					c.Assist = false
+					c.Script, c.ScriptAxes = ArbitratedInput{}, 0
+				}
 			}
 			if !c.Assist {
 				c.Script, c.ScriptAxes = ArbitratedInput{}, 0

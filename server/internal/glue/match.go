@@ -363,7 +363,8 @@ func (m *Match) releaseHumanLocked(pid uint64) {
 	if r.InputPending {
 		axes |= r.PendingInput.AxisMask
 	}
-	axes &= sim.AxisMove | sim.AxisFire | sim.AxisAbility
+	// 包含 Aim：断线/失焦时把全部人工轴（含炮塔）交还仲裁，下一全量快照确认。
+	axes &= sim.AxisMove | sim.AxisAim | sim.AxisFire | sim.AxisAbility
 	if axes == 0 {
 		return
 	}
@@ -539,6 +540,9 @@ func (m *Match) step() {
 			Robot:         rv,
 			MoveSrc:       ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
 			TurretSrc:     ctrl.TurretSrc,
+			FireSrc:       ctrl.FireSrc,
+			AbilitySrc:    ctrl.AbilitySrc,
+			ManualAxes:    uint32(robot.Control.HumanAxes),
 			AssistOn:      robot.Control.Assist,
 			DashReadyTick: robot.Combat.DashReady,
 			FireReadyTick: robot.Combat.FireReady,

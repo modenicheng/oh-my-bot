@@ -217,6 +217,6 @@ type ArbitratedInput struct {
 	Dash     bool
 	Shield   bool
 	Interact bool
-	// 来源标记（下发 SelfState.move_src/turret_src 供 UI 显示）。
-	MoveSrc, TurretSrc byte // 'H' human / 'S' script / '-' none
+	// 来源标记（下发 SelfState.move_src/turret_src/fire_src/ability_src 供 UI 显示）。
+	MoveSrc, TurretSrc, FireSrc, AbilitySrc byte // 'H' human / 'S' script / '-' none
 }

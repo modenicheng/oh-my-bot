@@ -1536,17 +1536,20 @@ func (x *HealthPackState) GetRespawnInS() uint32 {
 
 // 自机私有状态（不下发他机）
 type SelfState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RobotId       uint32                 `protobuf:"varint,1,opt,name=robot_id,json=robotId,proto3" json:"robot_id,omitempty"`
-	MoveSrc       ControlSource          `protobuf:"varint,2,opt,name=move_src,json=moveSrc,proto3,enum=omb.v1.ControlSource" json:"move_src,omitempty"` // 分轴仲裁结果（ADR-0009）
-	TurretSrc     ControlSource          `protobuf:"varint,3,opt,name=turret_src,json=turretSrc,proto3,enum=omb.v1.ControlSource" json:"turret_src,omitempty"`
-	AiRoundsLeft  uint32                 `protobuf:"varint,4,opt,name=ai_rounds_left,json=aiRoundsLeft,proto3" json:"ai_rounds_left,omitempty"`
-	AiTokensLeftK uint32                 `protobuf:"varint,5,opt,name=ai_tokens_left_k,json=aiTokensLeftK,proto3" json:"ai_tokens_left_k,omitempty"`     // 千 token
-	AssistOn      *bool                  `protobuf:"varint,6,opt,name=assist_on,json=assistOn,proto3,oneof" json:"assist_on,omitempty"`                  // 权威辅助状态；缺失表示旧服务器
-	DashReadyTick *uint32                `protobuf:"varint,7,opt,name=dash_ready_tick,json=dashReadyTick,proto3,oneof" json:"dash_ready_tick,omitempty"` // 绝对 60Hz tick，重连后仍准确
-	FireReadyTick *uint32                `protobuf:"varint,8,opt,name=fire_ready_tick,json=fireReadyTick,proto3,oneof" json:"fire_ready_tick,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RobotId        uint32                 `protobuf:"varint,1,opt,name=robot_id,json=robotId,proto3" json:"robot_id,omitempty"`
+	MoveSrc        ControlSource          `protobuf:"varint,2,opt,name=move_src,json=moveSrc,proto3,enum=omb.v1.ControlSource" json:"move_src,omitempty"` // 分轴仲裁结果（ADR-0009）
+	TurretSrc      ControlSource          `protobuf:"varint,3,opt,name=turret_src,json=turretSrc,proto3,enum=omb.v1.ControlSource" json:"turret_src,omitempty"`
+	AiRoundsLeft   uint32                 `protobuf:"varint,4,opt,name=ai_rounds_left,json=aiRoundsLeft,proto3" json:"ai_rounds_left,omitempty"`
+	AiTokensLeftK  uint32                 `protobuf:"varint,5,opt,name=ai_tokens_left_k,json=aiTokensLeftK,proto3" json:"ai_tokens_left_k,omitempty"`     // 千 token
+	AssistOn       *bool                  `protobuf:"varint,6,opt,name=assist_on,json=assistOn,proto3,oneof" json:"assist_on,omitempty"`                  // 权威辅助状态；缺失表示旧服务器
+	DashReadyTick  *uint32                `protobuf:"varint,7,opt,name=dash_ready_tick,json=dashReadyTick,proto3,oneof" json:"dash_ready_tick,omitempty"` // 绝对 60Hz tick，重连后仍准确
+	FireReadyTick  *uint32                `protobuf:"varint,8,opt,name=fire_ready_tick,json=fireReadyTick,proto3,oneof" json:"fire_ready_tick,omitempty"`
+	FireSrc        *ControlSource         `protobuf:"varint,9,opt,name=fire_src,json=fireSrc,proto3,enum=omb.v1.ControlSource,oneof" json:"fire_src,omitempty"`           // 分轴仲裁结果：开火轴当前来源（ADR-0009）
+	AbilitySrc     *ControlSource         `protobuf:"varint,10,opt,name=ability_src,json=abilitySrc,proto3,enum=omb.v1.ControlSource,oneof" json:"ability_src,omitempty"` // 分轴仲裁结果：技能轴当前来源（ADR-0009）
+	ManualAxesMask *uint32                `protobuf:"varint,11,opt,name=manual_axes_mask,json=manualAxesMask,proto3,oneof" json:"manual_axes_mask,omitempty"`             // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SelfState) Reset() {
@@ -1631,6 +1634,27 @@ func (x *SelfState) GetDashReadyTick() uint32 {
 func (x *SelfState) GetFireReadyTick() uint32 {
 	if x != nil && x.FireReadyTick != nil {
 		return *x.FireReadyTick
+	}
+	return 0
+}
+
+func (x *SelfState) GetFireSrc() ControlSource {
+	if x != nil && x.FireSrc != nil {
+		return *x.FireSrc
+	}
+	return ControlSource_CS_UNSPECIFIED
+}
+
+func (x *SelfState) GetAbilitySrc() ControlSource {
+	if x != nil && x.AbilitySrc != nil {
+		return *x.AbilitySrc
+	}
+	return ControlSource_CS_UNSPECIFIED
+}
+
+func (x *SelfState) GetManualAxesMask() uint32 {
+	if x != nil && x.ManualAxesMask != nil {
+		return *x.ManualAxesMask
 	}
 	return 0
 }
@@ -3769,7 +3793,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x04base\x18\x01 \x01(\v2\x12.omb.v1.EntityBaseR\x04base\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12 \n" +
 	"\frespawn_in_s\x18\x03 \x01(\rR\n" +
-	"respawnInS\"\x8f\x03\n" +
+	"respawnInS\"\xe4\x04\n" +
 	"\tSelfState\x12\x19\n" +
 	"\brobot_id\x18\x01 \x01(\rR\arobotId\x120\n" +
 	"\bmove_src\x18\x02 \x01(\x0e2\x15.omb.v1.ControlSourceR\amoveSrc\x124\n" +
@@ -3779,11 +3803,19 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x10ai_tokens_left_k\x18\x05 \x01(\rR\raiTokensLeftK\x12 \n" +
 	"\tassist_on\x18\x06 \x01(\bH\x00R\bassistOn\x88\x01\x01\x12+\n" +
 	"\x0fdash_ready_tick\x18\a \x01(\rH\x01R\rdashReadyTick\x88\x01\x01\x12+\n" +
-	"\x0ffire_ready_tick\x18\b \x01(\rH\x02R\rfireReadyTick\x88\x01\x01B\f\n" +
+	"\x0ffire_ready_tick\x18\b \x01(\rH\x02R\rfireReadyTick\x88\x01\x01\x125\n" +
+	"\bfire_src\x18\t \x01(\x0e2\x15.omb.v1.ControlSourceH\x03R\afireSrc\x88\x01\x01\x12;\n" +
+	"\vability_src\x18\n" +
+	" \x01(\x0e2\x15.omb.v1.ControlSourceH\x04R\n" +
+	"abilitySrc\x88\x01\x01\x12-\n" +
+	"\x10manual_axes_mask\x18\v \x01(\rH\x05R\x0emanualAxesMask\x88\x01\x01B\f\n" +
 	"\n" +
 	"_assist_onB\x12\n" +
 	"\x10_dash_ready_tickB\x12\n" +
-	"\x10_fire_ready_tick\"\xb9\x04\n" +
+	"\x10_fire_ready_tickB\v\n" +
+	"\t_fire_srcB\x0e\n" +
+	"\f_ability_srcB\x13\n" +
+	"\x11_manual_axes_mask\"\xb9\x04\n" +
 	"\rSnapshotDelta\x12\x12\n" +
 	"\x04tick\x18\x01 \x01(\rR\x04tick\x12\x17\n" +
 	"\aack_seq\x18\x02 \x01(\rR\x06ackSeq\x12#\n" +
@@ -4075,53 +4107,55 @@ var file_proto_omb_proto_depIdxs = []int32{
 	17, // 17: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
 	1,  // 18: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
 	1,  // 19: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
-	0,  // 20: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
-	18, // 21: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
-	19, // 22: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
-	20, // 23: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
-	21, // 24: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
-	23, // 25: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
-	22, // 26: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
-	5,  // 27: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
-	0,  // 28: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
-	0,  // 29: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
-	5,  // 30: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
-	5,  // 31: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
-	5,  // 32: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
-	5,  // 33: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
-	39, // 34: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
-	2,  // 35: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
-	39, // 36: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
-	4,  // 37: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
-	49, // 38: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
-	25, // 39: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
-	26, // 40: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
-	27, // 41: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
-	28, // 42: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
-	29, // 43: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
-	31, // 44: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
-	32, // 45: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
-	38, // 46: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
-	44, // 47: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
-	45, // 48: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
-	41, // 49: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
-	35, // 50: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
-	36, // 51: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
-	37, // 52: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
-	42, // 53: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
-	43, // 54: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
-	33, // 55: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
-	34, // 56: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
-	40, // 57: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
-	47, // 58: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
-	30, // 59: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
-	24, // 60: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
-	46, // 61: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	1,  // 20: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
+	1,  // 21: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
+	0,  // 22: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
+	18, // 23: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
+	19, // 24: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
+	20, // 25: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
+	21, // 26: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
+	23, // 27: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
+	22, // 28: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
+	5,  // 29: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
+	0,  // 30: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
+	0,  // 31: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
+	5,  // 32: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
+	5,  // 33: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
+	5,  // 34: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
+	5,  // 35: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
+	39, // 36: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
+	2,  // 37: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
+	39, // 38: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
+	4,  // 39: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
+	49, // 40: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
+	25, // 41: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
+	26, // 42: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
+	27, // 43: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
+	28, // 44: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
+	29, // 45: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
+	31, // 46: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
+	32, // 47: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
+	38, // 48: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
+	44, // 49: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
+	45, // 50: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
+	41, // 51: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
+	35, // 52: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
+	36, // 53: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
+	37, // 54: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
+	42, // 55: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
+	43, // 56: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
+	33, // 57: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
+	34, // 58: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
+	40, // 59: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
+	47, // 60: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
+	30, // 61: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
+	24, // 62: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
+	46, // 63: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
+	64, // [64:64] is the sub-list for method output_type
+	64, // [64:64] is the sub-list for method input_type
+	64, // [64:64] is the sub-list for extension type_name
+	64, // [64:64] is the sub-list for extension extendee
+	0,  // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_proto_omb_proto_init() }
