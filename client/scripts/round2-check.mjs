@@ -11,10 +11,11 @@ import assert from 'node:assert/strict'
 const work = mkdtempSync(join(tmpdir(), 'omb-round2-'))
 const shots = resolve(process.env.OMB_SHOTS || '../.artifacts/round2')
 mkdirSync(shots, { recursive: true })
-const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', '127.0.0.1:18420'], { cwd: work, stdio: 'ignore' })
+const port = Number(process.env.OMB_E2E_PORT || 18420)
+const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', `127.0.0.1:${port}`], { cwd: work, stdio: 'ignore' })
 let browser
 const errors = []
-const base = 'http://127.0.0.1:18420'
+const base = `http://127.0.0.1:${port}`
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function until(fn, label, timeout = 10000) {
   const end = Date.now() + timeout
@@ -284,7 +285,7 @@ try {
   await page.locator('.suggest-widget.visible').waitFor()
   await until(() => page.locator('.suggest-widget.visible').textContent().then(t => t.includes('moveTo')), 'Bot API completion')
   await page.keyboard.press('Escape')
-  const validSource = `console.info('JS load console')\n${prelude}function tick(bot) { bot.shield(true); bot.say('脚本 say 正常') }\n`
+  const validSource = `let layoutLog = 0\nconsole.info('JS load console')\n${prelude}function tick(bot) { if (layoutLog < 600) console.debug('layout-log', layoutLog++); bot.shield(true); bot.say('脚本 say 正常') }\n`
   await replaceSource(validSource)
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'valid JS diagnostics', 20000)
   const energyBefore = robots.get(id).energyX10
@@ -298,15 +299,46 @@ try {
   assert.equal(await page.locator('.script-console-body').isHidden(), true, 'collapsed console does not cover editor')
   await page.click('.script-console-toggle')
   assert.equal(await page.locator('.script-console-toggle').getAttribute('aria-expanded'), 'true', 'console expands')
-  await page.click('.script-console-clear')
-  assert.equal(await page.locator('.script-console-list').textContent(), '', 'console clear removes buffered lines')
-  assert.equal(await page.locator('[data-console-count]').textContent(), '0', 'console count resets after clear')
+  const cleared = await page.evaluate(() => {
+    document.querySelector('.script-console-clear').click()
+    return { text: document.querySelector('.script-console-list').textContent, count: document.querySelector('[data-console-count]').textContent }
+  })
+  assert.equal(cleared.text, '', 'console clear removes buffered lines')
+  assert.equal(cleared.count, '0', 'console count resets after clear')
   assert.equal(submissions.at(-1).source, validSource)
   assert.equal(receipts.at(-1).clientScriptId, submissions.at(-1).clientScriptId)
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'authoritative assist on')
   await until(() => robots.get(id).energyX10 < energyBefore - 20, 'submitted script runs on server')
   await until(() => messages.some(m => m.robot === id && m.text === '脚本 say 正常'), 'script say shares public broadcast path')
+  await until(() => page.locator('[data-console-count]').textContent().then(t => Number(t) === 300), 'console fills bounded browser buffer', 25000)
+  await page.locator('.workbench-tools [data-panel="docs"]').click()
+  assert.equal(await page.locator('#workbench-docs').isVisible(), true, 'docs and editor remain visible with full console')
+  for (const width of [400, 320]) {
+    await page.setViewportSize({ width, height: 700 })
+    await page.locator('.script-console-list').evaluate(list => { list.scrollTop = list.scrollHeight })
+    const layout = await page.evaluate(() => {
+      const body = document.querySelector('.script-console-body').getBoundingClientRect()
+      const list = document.querySelector('.script-console-list')
+      const listRect = list.getBoundingClientRect()
+      const last = list.lastElementChild.getBoundingClientRect()
+      return { bodyBottom: body.bottom, listBottom: listRect.bottom, lastBottom: last.bottom, scrollBottom: list.scrollHeight - list.scrollTop - list.clientHeight, overflow: document.documentElement.scrollWidth > innerWidth }
+    })
+    assert.ok(Math.abs(layout.bodyBottom - layout.listBottom) < 1.5, `${width}px console list fits body`)
+    assert.ok(layout.lastBottom <= layout.listBottom + 1, `${width}px final log line is visible`)
+    assert.ok(layout.scrollBottom <= 1, `${width}px console reaches true bottom`)
+    assert.equal(layout.overflow, false, `${width}px workbench has no horizontal overflow`)
+    await editorInput.focus()
+    const beforeScroll = await page.locator('.script-console-list').evaluate(list => { list.scrollTop = Math.max(0, list.scrollHeight - list.clientHeight - 240); return { top: list.scrollTop } })
+    const beforeLast = await page.locator('.script-console-line').last().getAttribute('data-tick')
+    await until(() => page.locator('.script-console-line').last().getAttribute('data-tick').then(t => t !== beforeLast), `${width}px receives log while scrolled up`, 10000)
+    const afterScroll = await page.locator('.script-console-list').evaluate(list => ({ top: list.scrollTop, distance: list.scrollHeight - list.scrollTop - list.clientHeight }))
+    assert.ok(afterScroll.distance > 100, `${width}px appended log does not jump to bottom`)
+    assert.ok(Math.abs(afterScroll.top - beforeScroll.top) < 80, `${width}px scroll stays near user position`)
+    assert.equal(await editorInput.evaluate(el => el === document.activeElement), true, `${width}px append keeps Monaco focus`)
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.locator('.workbench-tools [data-panel="docs"]').click()
   await replaceSource('function tick( {')
   await page.click('#workbench-submit')
   await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('加载失败')), 'load failure')
@@ -323,6 +355,16 @@ try {
   assert.equal(submissions.length, beforeOversize, 'oversized source never reaches websocket')
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)
+  const legacySource = `console.info('legacy ctx.api load')\nfunction tick(ctx) { ctx.api.shield(true); ctx.api.say('旧 ctx.api 正常') }\n`
+  await replaceSource(legacySource)
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r2')), 'legacy ctx.api loads on real server')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('legacy ctx.api load') && t.includes('script r2')), 'legacy load console reaches owner')
+  await page.click('#workbench-assist')
+  await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'assist on for legacy script')
+  await until(() => messages.some(m => m.robot === id && m.text === '旧 ctx.api 正常'), 'legacy ctx.api executes on real server', 15000)
+  await page.click('#workbench-assist')
+  await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'false'), 'assist off after legacy script')
   // TypeScript 模式：开关、注解补全、编译提交、编译失败保留旧脚本。
   const tsSource = ["import type { BotContext } from '@omb/bot-api'", "", "console.info('TS load console')", "export function tick(bot: BotContext) {", "  const walls = bot.scan().walls", "  if (!Array.isArray(walls) || !walls.length) throw new Error('missing static walls')", "  if (!walls.every(w => Number.isFinite(w.min.x) && Number.isFinite(w.min.y) && Number.isFinite(w.max.x) && Number.isFinite(w.max.y) && w.min.x <= w.max.x && w.min.y <= w.max.y)) throw new Error('invalid wall geometry')", "  const heading: number = bot.self.position.x + bot.self.position.y", "  bot.shield(heading > 0)", "  bot.say('TS 脚本运行正常')", "}", ""].join(String.fromCharCode(10))
   await page.click('#workbench-lang-switch [data-lang="ts"]')
@@ -334,7 +376,7 @@ try {
   await page.screenshot({ path: join(shots, 'workbench-ts.png') })
   const jsBeforeTs = submissions.length
   await page.keyboard.press('ControlOrMeta+Enter')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r2')), 'TS compiles and submits JS', 20000)
+  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r3')), 'TS compiles and submits JS', 20000)
   assert.equal(submissions.length, jsBeforeTs + 1, 'TS submit sends exactly one message')
   const tsPayload = submissions.at(-1).source
   assert.ok(!tsPayload.includes(': BotContext'), 'submitted source is compiled, not TS')
@@ -342,7 +384,7 @@ try {
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'assist on for TS script')
   await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'compiled TS script runs on server')
-  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('TS load console') && t.includes('script r2')), 'TS console revision appears')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('TS load console') && t.includes('script r3')), 'TS console revision appears')
   assert.equal(await page.evaluate(key => localStorage.getItem(key), tsDraftKey), tsSource, 'TS draft saved under language-scoped key')
   // 编译失败：不发送任何帧，旧脚本继续运行。
   await replaceSource('function tick(bot: { moveTo(p: { x: number, y: number }): void }) { bot.moveTo() }\n', tsDraftKey)
@@ -351,14 +393,14 @@ try {
   assert.ok(await page.locator('#workbench-result').textContent().then(t => t.includes('第 1 行')), 'compile errors carry original TS line numbers')
   assert.equal(submissions.length, jsBeforeTs + 1, 'compile failure sends nothing')
   await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'old compiled script keeps running', 100)
-  assert.equal(receipts.at(-1).scriptRev, 2, 'compile failure leaves server revision untouched')
+  assert.equal(receipts.at(-1).scriptRev, 3, 'compile failure leaves server revision untouched')
   assert.ok(await page.locator('#workbench-submit').isEnabled(), 'compile failure keeps submit usable')
   await page.screenshot({ path: join(shots, 'workbench-ts-error.png') })
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'false'), 'assist off after TS checks')
   await replaceSource(tsSource, tsDraftKey)
   await page.click('#workbench-lang-switch [data-lang="js"]')
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), validSource, 'switching back restores the JS draft')
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), legacySource, 'switching back restores the latest JS draft')
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'JS diagnostics after switching back', 20000)
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   const submittedCount = submissions.length
@@ -370,7 +412,7 @@ try {
   await until(() => latest?.self && !latest.self.assistOn, 'reload full state')
   assert.equal(id, firstId, 'editor refresh retains robot identity')
   assert.equal(submissions.length, submittedCount, 'reload never auto-submits')
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), validSource, 'draft survives refresh')
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), legacySource, 'latest JS draft survives refresh')
   assert.equal(new URL(page.url()).searchParams.get('panels'), 'docs,editor')
   assert.ok(Math.abs((await page.locator('#workbench').boundingBox()).width - savedWidth) < 2, 'sidebar width survives reload')
   assert.ok(Math.abs((await page.locator('#workbench-docs').boundingBox()).height - savedDocsHeight) < 3, 'split ratio survives reload')

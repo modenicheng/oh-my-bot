@@ -10,6 +10,7 @@
 //   - reliable：事件/tombstone 混合帧/MapBootstrap/ScriptResult/AiUsage——
 //     队列满 = 断开连接（丢任何一条都破坏状态一致性）
 //   - lossy：delta 快照——可丢，客户端靠 base_tick 检测缺口后 ResyncRequest
+//   - script log：owner-only Console 低优先队列——可丢，不影响游戏可靠消息
 //
 // 会话用帧首字节区分：发送侧 sendReliable/sendLossy；接收侧对下行业务帧
 // 解析 ServerMsg.payload：snapshot → lossy 队列，其余 → reliable 队列。
@@ -18,6 +19,7 @@ package netws
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -35,16 +37,18 @@ const (
 	frameUp   byte = 0x02
 	frameDown byte = 0x03
 
-	lossyQueueLen   = 4    // 丢帧通道小缓冲：只保留最新几帧
-	reliableQueueLn = 1024 // 可靠通道大缓冲：满即断
+	lossyQueueLen     = 4    // 丢帧通道小缓冲：只保留最新几帧
+	scriptLogQueueLen = 32   // Console 独立低优先队列：满时只丢日志
+	reliableQueueLn   = 1024 // 可靠通道大缓冲：满即断
 )
 
-// queuedFrame keeps superseded match snapshots out of the new map's timeline.
+// queuedFrame keeps superseded match snapshots and logs out of the new map's timeline.
 // Epochs are transport-local; the protobuf contract remains unchanged.
 type queuedFrame struct {
 	data      []byte
 	epoch     uint64
 	bootstrap bool
+	scriptLog *ombv1.EvScriptLog
 }
 
 // Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
@@ -60,10 +64,12 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 
 		ctx := r.Context()
 
-		// 下行队列：reliable 优先投递（事件先于快照，避免旧快照覆盖新事件后的状态）。
+		// 下行队列：游戏可靠消息优先；Console 有独立小队列且可丢。
 		reliableCh := make(chan queuedFrame, reliableQueueLn)
 		lossyCh := make(chan queuedFrame, lossyQueueLen)
+		scriptLogCh := make(chan queuedFrame, scriptLogQueueLen)
 		var epoch atomic.Uint64
+		var droppedScriptLogs atomic.Uint64
 		dead := make(chan struct{})
 		var deadOnce sync.Once
 		kill := func() { deadOnce.Do(func() { close(dead) }) }
@@ -77,6 +83,19 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		}
 
 		sendReliable := func(msg *ombv1.ServerMsg) {
+			if log := msg.GetEvent().GetScriptLog(); log != nil {
+				b := encode(msg)
+				if b == nil {
+					return
+				}
+				select {
+				case scriptLogCh <- queuedFrame{data: b, epoch: epoch.Load(), scriptLog: log}:
+				default:
+					droppedScriptLogs.Add(1)
+				}
+				return
+			}
+
 			b := encode(msg)
 			if b == nil {
 				return
@@ -144,23 +163,74 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		}
 
 		var deliveredEpoch uint64
+		var lastScriptLog *ombv1.EvScriptLog
+		var lastDropNotice time.Time
 		writeReliable := func(frame queuedFrame) error {
 			if frame.bootstrap {
 				deliveredEpoch = frame.epoch
+				droppedScriptLogs.Store(0)
+				lastScriptLog = nil
 			}
 			return write(frame.data)
 		}
+		writeDropNotice := func(now time.Time) error {
+			if lastScriptLog == nil || now.Sub(lastDropNotice) < time.Second {
+				return nil
+			}
+			dropped := droppedScriptLogs.Swap(0)
+			if dropped == 0 {
+				return nil
+			}
+			b := encode(scriptLogDropNotice(lastScriptLog, dropped))
+			if b == nil {
+				return nil
+			}
+			if err := write(b); err != nil {
+				return err
+			}
+			lastDropNotice = now
+			return nil
+		}
+		writeScriptLog := func(frame queuedFrame) error {
+			if frame.epoch != deliveredEpoch {
+				return nil
+			}
+			lastScriptLog = frame.scriptLog
+			if err := writeDropNotice(time.Now()); err != nil {
+				return err
+			}
+			return write(frame.data)
+		}
+
 		for {
-			// 优先级：reliable > lossy。先非阻塞排空 reliable，再阻塞等待任意通道。
-			// 注意：阻塞分支必须再含 reliableCh（排空与新帧间的竞态窗口）。
+			// 优先级：reliable > lossy > script log。先排空高优先通道。
 			select {
-			case b := <-reliableCh:
-				if err := writeReliable(b); err != nil {
+			case frame := <-reliableCh:
+				if err := writeReliable(frame); err != nil {
 					return
 				}
 				continue
 			default:
 			}
+			select {
+			case frame := <-lossyCh:
+				if frame.epoch == deliveredEpoch {
+					if err := write(frame.data); err != nil {
+						return
+					}
+				}
+				continue
+			default:
+			}
+			select {
+			case frame := <-scriptLogCh:
+				if err := writeScriptLog(frame); err != nil {
+					return
+				}
+				continue
+			default:
+			}
+
 			select {
 			case <-ctx.Done():
 				return
@@ -169,29 +239,44 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 			case err := <-readerErr:
 				_ = err
 				return
-			case b := <-reliableCh:
-				if err := writeReliable(b); err != nil {
+			case frame := <-reliableCh:
+				if err := writeReliable(frame); err != nil {
 					return
 				}
-			case b := <-lossyCh:
-				// A queued old delta can have a larger tick than the new match.
-				// New deltas selected before their bootstrap are also droppable.
-				if b.epoch != deliveredEpoch {
+			case frame := <-lossyCh:
+				if frame.epoch != deliveredEpoch {
 					continue
 				}
-				if err := write(b.data); err != nil {
+				if err := write(frame.data); err != nil {
 					return
 				}
-			case <-pingTicker.C:
+			case frame := <-scriptLogCh:
+				if err := writeScriptLog(frame); err != nil {
+					return
+				}
+			case now := <-pingTicker.C:
+				if err := writeDropNotice(now); err != nil {
+					return
+				}
 				var ts [9]byte
 				ts[0] = framePing
-				binary.LittleEndian.PutUint64(ts[1:], uint64(time.Now().UnixNano()))
+				binary.LittleEndian.PutUint64(ts[1:], uint64(now.UnixNano()))
 				if err := write(ts[:]); err != nil {
 					return
 				}
 			}
 		}
 	})
+}
+
+func scriptLogDropNotice(log *ombv1.EvScriptLog, dropped uint64) *ombv1.ServerMsg {
+	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Tick: log.GetTick(),
+		Kind: &ombv1.ServerEvent_ScriptLog{ScriptLog: &ombv1.EvScriptLog{
+			RobotId: log.GetRobotId(), ScriptRev: log.GetScriptRev(), Tick: log.GetTick(),
+			Level: "warn", Text: fmt.Sprintf("transport backlog: dropped %d console message(s)", dropped), Truncated: true,
+		}},
+	}}}
 }
 
 // sendLossyRaw 以可靠通道回 pong（ping/pong 属控制帧，不参与 lossy 丢弃）。
