@@ -55,8 +55,10 @@ async function open(options = {}) {
     window.__startupContexts = []
     window.__musicSources = []
     window.AudioContext = new Proxy(window.AudioContext, { construct(target, args) {
+      // Chromium consumes transient activation while constructing a running context.
+      const active = navigator.userActivation.isActive
       const context = Reflect.construct(target, args)
-      window.__startupContexts.push({ active: navigator.userActivation.isActive, context })
+      window.__startupContexts.push({ active, state: context.state, context })
       const makeSource = context.createBufferSource.bind(context)
       context.createBufferSource = () => {
         const source = makeSource()
@@ -86,6 +88,8 @@ async function entered(page) {
   assert.equal(await page.locator('#app').evaluate(el => el.inert), false)
   assert.equal(await page.evaluate(() => window.__startupContexts.length), 1)
   assert.equal(await page.evaluate(() => window.__startupContexts[0].active), true)
+  assert.equal(await page.evaluate(() => window.__startupContexts[0].state), 'running')
+  assert.equal(await page.evaluate(() => window.__startupContexts[0].context.state), 'running')
 }
 try {
   const page = await open()
@@ -120,6 +124,45 @@ try {
     assert.equal(await p.locator('#in-room').inputValue(), '')
     await p.close()
   }
+  const rejected = await open()
+  await rejected.goto('http://127.0.0.1:18425')
+  await ready(rejected)
+  for (const shortcut of ['Control+a', 'Alt+a', 'Meta+a']) {
+    await rejected.keyboard.press(shortcut)
+    assert.equal(await rejected.evaluate(() => window.__startupContexts.length), 0)
+  }
+  const cdp = await rejected.context().newCDPSession(rejected)
+  await rejected.evaluate(() => {
+    window.__startupCompositionKeys = []
+    document.addEventListener('keydown', event => {
+      window.__startupCompositionKeys.push({ trusted: event.isTrusted, composing: event.isComposing })
+    }, true)
+    const probe = document.createElement('div')
+    probe.id = 'startup-ime-probe'
+    probe.contentEditable = 'true'
+    document.getElementById('startup').append(probe)
+    probe.focus()
+  })
+  await cdp.send('Input.imeSetComposition', { text: '候', selectionStart: 1, selectionEnd: 1 })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 })
+  assert.deepEqual(await rejected.evaluate(() => window.__startupCompositionKeys.at(-1)), { trusted: true, composing: true })
+  assert.equal(await rejected.evaluate(() => window.__startupContexts.length), 0)
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 })
+  await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
+  await rejected.locator('#startup-ime-probe').evaluate(element => element.remove())
+  await rejected.keyboard.press('Enter')
+  await entered(rejected)
+  await rejected.close()
+  const background = await open()
+  await background.goto('http://127.0.0.1:18425')
+  await ready(background)
+  await background.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }))
+  await background.keyboard.press('Enter')
+  assert.equal(await background.evaluate(() => window.__startupContexts.length), 0)
+  await background.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, value: false }))
+  await background.keyboard.press('Enter')
+  await entered(background)
+  await background.close()
   const mobile = await open({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
   await mobile.goto('http://127.0.0.1:18425')
   await ready(mobile)
@@ -153,10 +196,11 @@ try {
   assert.equal(await navigation.locator('#in-room').inputValue(), 'AB12')
   await navigation.locator('#in-nick').fill('module-test')
   await navigation.locator('.swatch').nth(1).click()
+  const commandStart = commands.length
   await navigation.locator('#in-nick').press('Enter')
   await navigation.locator('#btn-start').waitFor({ state: 'visible' })
   assert.match(await navigation.locator('#room-state').textContent(), /房主 module-test/)
-  const join = commands.find(command => command.case === 'join')
+  const join = commands.slice(commandStart).find(command => command.case === 'join')
   assert.ok(join, 'join command reaches the existing session owner')
   assert.equal(join.value.roomCode, 'AB12')
   assert.equal(join.value.nick, 'module-test')
@@ -215,17 +259,19 @@ try {
   await scoring.waitForFunction(() => window.__musicSources.filter(entry => entry.source.loop && entry.started && !entry.stopped).length > 0)
   const weights = () => scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop && !entry.stopped).map(entry => entry.gain.value.toFixed(3)).join(','))
   /** Wait (bounded) until stage gains settle to new values — quantized switches
-   *  land on the next beat (≤1.5 beats ≈ 0.81s @ 112bpm), so poll for the
-   *  change instead of sleeping a fixed second. */
+   *  land on the next beat (≤1.5 beats ≈ 0.81s @ 112bpm), then fade for 90ms.
+   *  Three identical 100ms samples prove the value is no longer mid-fade. */
   const waitForWeights = async (before, label) => {
-    let current = ''
+    let current = before
+    let stableReads = 0
     for (let i = 0; i < 40; i++) {
-      current = await weights()
-      if (current !== before) break
+      const next = await weights()
+      stableReads = next !== before && next === current ? stableReads + 1 : next !== before ? 1 : 0
+      current = next
+      if (stableReads >= 3) return current
       await scoring.waitForTimeout(100)
     }
-    assert.notEqual(current, before, label)
-    return current
+    assert.fail(`${label}: stage gains did not settle to values different from ${before}; last observed ${current}`)
   }
   const titleWeights = await weights()
   const loopsBefore = await scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop).length)
