@@ -107,15 +107,17 @@ func (r *GojaRuntime) Load(source string) error {
 		return fmt.Errorf("compile: %w", err)
 	}
 	timer := time.AfterFunc(r.cfg.TickTimeout, func() { vm.Interrupt(r.interruptVal) })
+	defer func() {
+		timer.Stop()
+		vm.ClearInterrupt()
+	}()
 	_, runErr := vm.RunProgram(prog)
-	timer.Stop()
-	vm.ClearInterrupt()
 	if runErr != nil {
 		return fmt.Errorf("evaluate: %w", classifyErr(runErr, r.interruptVal))
 	}
-	tickFn, err := resolveTick(vm)
+	tickFn, err := resolveTickSafely(vm)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve entry: %w", classifyErr(err, r.interruptVal))
 	}
 
 	r.vm = vm
@@ -127,6 +129,19 @@ func (r *GojaRuntime) Load(source string) error {
 
 // resolveTick 解析入口：顶层 `function tick(ctx)` 或 `bot.tick`（手册示例
 // `const bot = { tick(ctx) {} }` 剥除 export 后的全局 bot）。
+func resolveTickSafely(vm *goja.Runtime) (fn goja.Callable, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if recoveredErr, ok := recovered.(error); ok {
+				err = recoveredErr
+				return
+			}
+			err = fmt.Errorf("entry resolution panic: %v", recovered)
+		}
+	}()
+	return resolveTick(vm)
+}
+
 func resolveTick(vm *goja.Runtime) (goja.Callable, error) {
 	if bot := vm.Get("bot"); bot != nil && !goja.IsUndefined(bot) && !goja.IsNull(bot) {
 		if obj, ok := bot.(*goja.Object); ok {

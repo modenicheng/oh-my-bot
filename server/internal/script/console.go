@@ -177,15 +177,30 @@ func safeConsoleValue(value goja.Value) string {
 }
 
 func truncateUTF8(text string, maxBytes int) (string, bool) {
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	valid := strings.ToValidUTF8(text, "")
+	changed := valid != text
+	text = valid
 	if len(text) <= maxBytes {
-		return text, false
+		return text, changed
 	}
+	if maxBytes == 0 {
+		return "", true
+	}
+
 	suffix := "…"
-	cut := maxBytes - len(suffix)
-	if cut < 0 {
-		cut = 0
+	if maxBytes < len(suffix) {
+		cut := maxBytes
+		for cut > 0 && !utf8.ValidString(text[:cut]) {
+			cut--
+		}
+		return text[:cut], true
 	}
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
+
+	cut := maxBytes - len(suffix)
+	for cut > 0 && !utf8.ValidString(text[:cut]) {
 		cut--
 	}
 	return text[:cut] + suffix, true

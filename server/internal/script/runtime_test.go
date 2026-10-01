@@ -247,6 +247,30 @@ func TestQuotaConfigurable(t *testing.T) {
 
 // ---- Hot Swap / Rev ----
 
+func TestHotSwapEntryGetterTimeoutKeepsOld(t *testing.T) {
+	rt := NewGojaRuntime(Config{TickTimeout: 10 * time.Millisecond})
+	defer rt.Close()
+	if err := rt.Load(`var n = 0; function tick(ctx){ n++; ctx.api.say("v1:" + n); }`); err != nil {
+		t.Fatalf("load v1: %v", err)
+	}
+	rev1 := rt.Rev()
+	start := time.Now()
+	err := rt.Load(`const bot = { get tick() { while (true) {} } };`)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("entry getter: want ErrQuotaExceeded, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("entry getter ignored init budget: %v", elapsed)
+	}
+	if rt.Rev() != rev1 {
+		t.Fatalf("failed load changed revision: got %d want %d", rt.Rev(), rev1)
+	}
+	cmds, err := rt.Tick(testFrame())
+	if err != nil || cmds.Say == nil || *cmds.Say != "v1:1" {
+		t.Fatalf("old script did not survive: cmds=%+v err=%v", cmds, err)
+	}
+}
+
 func TestHotSwapCompileFailureKeepsOld(t *testing.T) {
 	rt := NewGojaRuntime(Config{})
 	defer rt.Close()
