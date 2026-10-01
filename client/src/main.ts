@@ -15,9 +15,9 @@ import { LiveSpectator } from './live'
 import { readRoute, saveProfile, loadProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
+export { artReady as ready } from './game/art'
 
 mountIcons(document)
-audio.installUI()
 
 // ---- 常量 ---------------------------------------------------------------
 
@@ -658,6 +658,18 @@ window.addEventListener('pageshow', e => {
   else if (lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
 })
 
+let started = false
+
+/** 由首屏按钮的可信 click 同步调用；解锁音频之前不可 await。 */
+export function start(): void {
+  if (started) return
+  started = true
+  audio.unlock()
+  audio.installUI()
+  restoreInitialRoute()
+}
+
+function restoreInitialRoute(): void {
 const profile = loadProfile(initialRoute.roomCode)
 // A direct spectator URL must never restore a player session or join a room.
 if (initialRoute.view === 'live') {
@@ -675,4 +687,5 @@ if (initialRoute.view === 'live') {
   openManual(initialRoute.doc)
 } else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') {
   openReplays(initialRoute.replay)
+}
 }

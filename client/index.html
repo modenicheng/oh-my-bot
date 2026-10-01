@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>oh-my-bot</title>
+  <link rel="stylesheet" href="/src/startup.css">
   <style>
     /* Fusion Pixel 12px Mono zh-Hans, 2026.09.25; OFL licenses in /licenses/fusion-pixel/. */
     @font-face {
@@ -480,8 +481,28 @@
     }
   </style>
 </head>
-<body>
-  <div class="panel" id="app">
+<body data-startup>
+  <section id="startup" role="dialog" tabindex="0" aria-modal="true" aria-labelledby="startup-title" aria-describedby="startup-help startup-status" aria-busy="true" data-state="loading">
+    <pre id="startup-field" class="startup-field" aria-hidden="true"></pre>
+    <div class="startup-brand">
+      <h1 id="startup-title" class="startup-sr">OH MY BOT</h1>
+      <pre id="startup-ascii" class="startup-ascii" aria-hidden="true">  ####  ##  ##    ##   ## ##  ##    #####   ####  ######
+ ##  ## ##  ##    ### ### ##  ##    ##  ## ##  ##   ##
+ ##  ## ######    ## # ##  ####     #####  ##  ##   ##
+ ##  ## ##  ##    ##   ##   ##      ##  ## ##  ##   ##
+  ####  ##  ##    ##   ##   ##      #####   ####    ##</pre>
+      <p class="startup-tagline">代码上场，机甲开战。</p>
+    </div>
+    <div class="startup-center"><div class="startup-float"><p id="startup-start">PRESS TO START</p></div></div>
+    <div class="startup-footer">
+      <p id="startup-status" role="status" aria-live="polite">正在加载客户端…</p>
+      <progress id="startup-progress" aria-label="首屏资源加载"></progress>
+      <p id="startup-help">点击任意位置或按键开始 · 启用背景音乐与音效</p>
+      <a id="startup-retry" href="">加载遇到问题？重新加载</a>
+      <noscript>请启用 JavaScript 后重新加载，以启动游戏。</noscript>
+    </div>
+  </section>
+  <div class="panel" id="app" inert>
     <!-- 进房界面 -->
     <section id="view-join">
       <img class="robot-mark" src="/src/assets/robot.svg" alt="" width="72" height="72">
@@ -689,7 +710,7 @@
     </section>
   </div>
   <!-- 同一组音频设置由 main 移到当前视图工具栏，audio 保持绑定与用户偏好。 -->
-  <details id="audio-settings">
+  <details id="audio-settings" inert>
     <summary>音效</summary>
     <div class="audio-row">
       <button type="button" id="audio-mute" aria-label="静音切换"><span data-icon="sound"></span></button>
@@ -697,11 +718,11 @@
     </div>
   </details>
   <!-- 全局连接横幅（视图外，main 显示/隐藏并绑定按钮） -->
-  <div id="connection-notice" role="status" aria-live="polite" hidden>
+  <div id="connection-notice" inert role="status" aria-live="polite" hidden>
     <span id="connection-text">连接已断开</span>
     <button type="button" id="connection-retry">立即重试</button>
     <button type="button" id="connection-cancel">取消连接</button>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/startup.ts"></script>
 </body>
 </html>

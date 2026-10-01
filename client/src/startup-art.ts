@@ -1,0 +1,31 @@
+// 固定字形只改变笔画内字符：保持标题可读，而非整屏随机闪烁。
+const GLYPHS: Record<string, string[]> = {
+  O: ['01110', '11011', '11011', '11011', '11011', '11011', '01110'],
+  H: ['11011', '11011', '11011', '11111', '11011', '11011', '11011'],
+  M: ['10001', '11011', '11111', '10101', '10001', '10001', '10001'],
+  Y: ['11011', '11011', '11011', '01110', '00100', '00100', '00100'],
+  B: ['11110', '11011', '11011', '11110', '11011', '11011', '11110'],
+  T: ['11111', '11111', '00100', '00100', '00100', '00100', '00100'],
+  ' ': Array(7).fill('000'),
+}
+const mask = Array.from({ length: 7 }, (_, row) => [...'OH MY BOT']
+  .map(letter => GLYPHS[letter]![row]!).join('0')
+  .split('').map(cell => cell.repeat(2)).join(''))
+  .flatMap(row => [row, row])
+const INK = '#%+=*#'
+
+export function asciiTitle(frame: number): string {
+  return mask.map((row, y) => [...row].map((cell, x) => {
+    if (cell === '0') return ' '
+    const wave = Math.floor(x / 5 + y / 3 - frame / 2)
+    return INK[((wave % INK.length) + INK.length) % INK.length]
+  }).join('')).join(String.fromCharCode(10))
+}
+
+export function asciiField(frame: number, columns: number, rows: number): string {
+  return Array.from({ length: rows }, (_, y) => Array.from({ length: columns }, (_, x) => {
+    const seed = (x * 73 + y * 37) % 97
+    if (seed > 7) return ' '
+    return '.:+*'[Math.floor((frame / 5 + seed + y) % 4)]
+  }).join('')).join(String.fromCharCode(10))
+}

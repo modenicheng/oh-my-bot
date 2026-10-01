@@ -219,6 +219,9 @@ class AudioEngine {
     this.persist(); this.reflectUI()
   }
 
+  /** 必须从用户手势中同步调用；不支持 WebAudio 时仍允许进入。 */
+  unlock(): boolean { return this.ensure() }
+
   /** 一次性安装：手势解锁监听 + 委托式 UI 提示音 + HUD 控件绑定。 */
   installUI(): void {
     if (this.ui) return
