@@ -159,23 +159,9 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 	if len(records) == 0 || records[0].State == nil {
 		t.Fatal("missing replay bootstrap")
 	}
-	initial := records[0].State
-	ids := make([]uint32, len(initial.Robots))
-	for i, r := range initial.Robots {
-		ids[i] = r.ID
-	}
-	replayed := sim.NewSim(initial.Seed, ids, nil)
-	if err := replayed.SetMap(initial.Map); err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range initial.Robots {
-		replayed.SetRobotMeta(r.ID, r.Nick, r.Color)
-	}
-	controls := map[uint32][]sim.LogRecord{}
 	botControls := map[uint32]int{}
 	for _, rec := range records {
 		if rec.Type == "control" {
-			controls[rec.Tick] = append(controls[rec.Tick], rec)
 			if m.botRobots[rec.RobotID] && rec.Control.Script != nil {
 				botControls[rec.RobotID]++
 			}
@@ -186,19 +172,12 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 			t.Fatalf("bot %d has too few recorded commands: %d", rid, botControls[rid])
 		}
 	}
-	for tick := uint32(1); tick <= want.Tick; tick++ {
-		for _, rec := range controls[tick] {
-			c := rec.Control
-			for i := uint32(0); i < c.Toggles; i++ {
-				replayed.AssistToggle(rec.RobotID)
-			}
-			if c.ScriptFailed {
-				replayed.ClearScriptAxes(rec.RobotID)
-			} else if c.Script != nil {
-				replayed.ApplyScriptCommands(rec.RobotID, *c.Script)
-			}
-		}
-		replayed.Tick()
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := sim.ReplayTo(f, want.Tick, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(want, replayed.Snapshot()) {
 		t.Fatal("recorded bot controls do not reproduce the exact simulation state")

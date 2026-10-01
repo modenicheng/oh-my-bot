@@ -10,29 +10,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Restoration here is deliberately internal: the production replay service
-// owns selecting validated checkpoints and applying records in tick order.
 func restoreGameplay(t *testing.T, cp Checkpoint, sink EventSink) *Sim {
 	t.Helper()
-	raw, err := json.Marshal(cp)
+	s, err := RestoreCheckpoint(cp, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var copy Checkpoint
-	if err = json.Unmarshal(raw, &copy); err != nil {
-		t.Fatal(err)
-	}
-	ids := make([]uint32, len(copy.Robots))
-	for i, r := range copy.Robots {
-		ids[i] = r.ID
-	}
-	s := NewSim(copy.Seed, ids, sink)
-	s.simulationVersion = copy.SimulationVersion
-	s.tick, s.phase, s.ended = copy.Tick, copy.Phase, copy.Ended
-	s.robots, s.walls, s.mapDef = copy.Robots, copy.Walls, copy.Map
-	s.rng, s.nextProjectile = copy.RNG, copy.NextProjectile
-	s.projectiles, s.cores, s.uplinks = copy.Projectiles, copy.Cores, copy.Uplinks
-	s.publishView()
 	return s
 }
 
@@ -47,19 +30,8 @@ func replayGameplay(t *testing.T, s *Sim, records []LogRecord, until uint32) {
 	}
 	for s.tick < until {
 		for _, rec := range byTick[s.tick+1] {
-			r := &s.robots[s.index[rec.RobotID]]
-			switch rec.Type {
-			case "input":
-				// A match_start checkpoint can already contain this first pending input.
-				r.PendingInput, r.LatestSeq, r.HasSeq, r.InputPending = *rec.Input, rec.Input.Seq, true, true
-			case "control":
-				c := rec.Control
-				r.Control.PendingScript = cloneCommands(c.Script)
-				r.Control.ScriptPending = c.Script != nil || c.ScriptFailed
-				r.Control.ScriptFailed = c.ScriptFailed
-				r.Control.ToggleCount = c.Toggles
-				r.RespawnPending = c.Respawn
-				r.Control.PendingSay = c.Say
+			if err := s.applyReplayRecord(rec); err != nil {
+				t.Fatal(err)
 			}
 		}
 		s.Tick()
