@@ -176,26 +176,28 @@ func TestL1AimAtEntity(t *testing.T) {
 	if cmds.Aim == nil {
 		t.Fatalf("aimAt(entity) must produce Aim")
 	}
-	want := math.Atan2(-6, -16) // 唯一敌人 id3(-6,-6) 相对 self(10,0)；id2 是 partner 被排除
+	want := math.Atan2(8, -10) // FFA：legacy PartnerID=2 不排除最近机器人 id2(0,8)。
 	if d := *cmds.Aim - want; d > 1e-9 || d < -1e-9 {
 		t.Fatalf("aimAt(entity) angle: got %v want %v", *cmds.Aim, want)
 	}
 }
 
-func TestL1NearestAndPartner(t *testing.T) {
+func TestL1NearestFFAAndRemovedPartnerSurface(t *testing.T) {
 	src := `function tick(ctx){
-		var p = ctx.api.partner();
+		var e = ctx.api.nearestEnemy();
 		var c = ctx.api.nearestCore();
 		var u = ctx.api.nearestUplink();
-		ctx.api.say(p.id + "," + p.isPartner + "," + c.x + "," + u.x + "," + u.y);
+		var scanned = ctx.scan().robots.find(function (robot) { return robot.id === 2; });
+		ctx.api.say(e.id + "," + (typeof ctx.partner) + "," + (typeof ctx.api.partner) + "," +
+			Object.prototype.hasOwnProperty.call(scanned, "isPartner") + "," + c.x + "," + u.x + "," + u.y);
 	}`
 	cmds, err := loadAndTick(t, src, testFrame())
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	// partner=2(id2,isPartner)、nearestCore=(30,0)、nearestUplink=(15,15)（唯一 Active）。
-	if got := *cmds.Say; got != "2,true,30,15,15" {
-		t.Fatalf("L1: got %q", got)
+	// FFA：deprecated PartnerID 仅保留在 sim 契约，不影响最近候选，也不暴露 partner API/标记。
+	if got := *cmds.Say; got != "2,undefined,undefined,false,30,15,15" {
+		t.Fatalf("L1 FFA surface: got %q", got)
 	}
 }
 

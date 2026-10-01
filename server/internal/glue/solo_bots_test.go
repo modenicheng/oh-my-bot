@@ -77,9 +77,9 @@ func TestSoloBotScriptIntents(t *testing.T) {
 	if c := run(); !*c.Fire || c.Aim == nil {
 		t.Fatal("visible enemy not targeted")
 	}
-	frame.Obs.PartnerID = 4
-	if c := run(); *c.Fire {
-		t.Fatal("partner targeted or stale fire retained")
+	frame.Obs.PartnerID = 4 // legacy metadata must not change FFA targeting.
+	if c := run(); !*c.Fire || c.Aim == nil {
+		t.Fatal("legacy PartnerID incorrectly excluded visible robot")
 	}
 	frame.Obs.PartnerID = 0
 	frame.Obs.Robots = nil

@@ -131,7 +131,7 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 		bestD := math.Inf(1)
 		for i := range obs.Robots {
 			ro := &obs.Robots[i]
-			if ro.ID == self.ID || ro.Dead || obs.IsPartner(ro.ID) {
+			if ro.ID == self.ID || ro.Dead {
 				continue
 			}
 			if d := ro.Pos.Sub(self.Pos).Len(); d < bestD {
@@ -141,7 +141,7 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 		if best == nil {
 			return goja.Null()
 		}
-		return toJSRobotRef(vm, *best, false)
+		return toJSRobotRef(vm, *best)
 	})
 
 	_ = api.Set("nearestCore", func(call goja.FunctionCall) goja.Value {
@@ -180,19 +180,6 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 			return goja.Null()
 		}
 		return toJSVec2(vm, *best)
-	})
-
-	// partner()：本局搭档（奇数局末位玩家为 null）。
-	_ = api.Set("partner", func(call goja.FunctionCall) goja.Value {
-		if obs.PartnerID == 0 {
-			return goja.Null()
-		}
-		for i := range obs.Robots {
-			if obs.Robots[i].ID == obs.PartnerID {
-				return toJSRobotRef(vm, obs.Robots[i], true)
-			}
-		}
-		return goja.Null()
 	})
 
 	// pulseScan()：请求主动脉冲（12 能量/2s CD/32m 由 sim 校验），

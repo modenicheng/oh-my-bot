@@ -9,12 +9,14 @@ import (
 
 // toJSObservation Observation → index.ts Observation 形状（scan() 返回值）：
 //
-//	{ tick, robots: [{id, position, hp, isPartner}],
+//	{ tick, robots: [{id, position, hp}],
 //	  cores: [{id, x, y}], uplinks: [{id, x, y, ready, holder?}],
-//	  projectiles: [{id, x, y}], walls: [{id, min:{x,y}, max:{x,y}}] }
+//	  projectiles: [{id, x, y}],
+//	  healthPacks: [{id, x, y, available, respawnInS}],
+//	  walls: [{id, min:{x,y}, max:{x,y}}] }
 //
-// 手册：可见机器人不含自己；partner 恒在。静态墙是公开地图结构（挡移动+
-// 弹丸+视线），不随视野半径/遮挡裁剪，也不含任何动态实体信息。
+// 可见机器人不含自己。健康包与静态墙是公开地图结构，不随视野半径/
+// 遮挡裁剪，也不含任何动态机器人信息。每次调用均构建独立 JS 快照。
 func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("tick", float64(obs.Frame.Tick))
@@ -26,7 +28,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		if ro.Dead || ro.ID == selfID {
 			continue
 		}
-		_ = robots.Set(strconv.Itoa(n), toJSRobotRef(vm, *ro, obs.IsPartner(ro.ID)))
+		_ = robots.Set(strconv.Itoa(n), toJSRobotRef(vm, *ro))
 		n++
 	}
 	_ = o.Set("robots", robots)
@@ -74,6 +76,19 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		_ = projs.Set(strconv.Itoa(i), po)
 	}
 	_ = o.Set("projectiles", projs)
+
+	// 健康包恒全量公开：状态来自冻结 Observation，而非动态机器人或 MapDef。
+	healthPacks := vm.NewArray()
+	for i, pack := range obs.HealthPacks {
+		po := vm.NewObject()
+		_ = po.Set("id", float64(pack.ID))
+		_ = po.Set("x", pack.Pos.X)
+		_ = po.Set("y", pack.Pos.Y)
+		_ = po.Set("available", pack.Available)
+		_ = po.Set("respawnInS", float64(pack.RespawnInS))
+		_ = healthPacks.Set(strconv.Itoa(i), po)
+	}
+	_ = o.Set("healthPacks", healthPacks)
 
 	// 静态墙恒全量公开：每次调用新建 JS 对象，脚本改写不影响共享地图。
 	walls := vm.NewArray()
