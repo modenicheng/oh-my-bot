@@ -16,7 +16,7 @@ import (
 //
 // Cast design (all distances within the 8 m/s checkpoint cap):
 //
-//	r1: 2 kills (WAR_MACHINE), kills assisted by partner r2 (BEST_PARTNER 1-2),
+//	r1: 2 kills (WAR_MACHINE), with legacy single-assist events from r2,
 //	    3 hits, no AI (OLD_SCHOOL), moves 6+4=10m
 //	r2: partner of r1; 1 core pickup only; 3 AI rounds (AI_REGULAR)
 //	r3: 2 cores + 1 mega (SCAVENGER), 2 uplinks (SIGNAL_THIEF), 2 script
@@ -303,8 +303,8 @@ func TestGoldenTitles(t *testing.T) {
 	// r2(30) — below threshold, so no PEACEMAKER in the golden match
 	// (covered by TestTitlePeacemaker*).
 	want := map[uint32][]TitleID{
-		1: {ombv1.Title_BEST_PARTNER, ombv1.Title_OLD_SCHOOL},
-		2: {ombv1.Title_AI_REGULAR, ombv1.Title_BEST_PARTNER},
+		1: {ombv1.Title_OLD_SCHOOL},
+		2: {ombv1.Title_AI_REGULAR},
 		3: {ombv1.Title_SCAVENGER, ombv1.Title_SIGNAL_THIEF, ombv1.Title_BARRAGE,
 			ombv1.Title_WALL_HEAD, ombv1.Title_CNMB, ombv1.Title_RUNNER,
 			ombv1.Title_SURVIVOR, ombv1.Title_OLD_SCHOOL},

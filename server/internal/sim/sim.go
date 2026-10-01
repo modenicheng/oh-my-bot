@@ -193,7 +193,6 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 			s.nextProjectile = id + 1
 		}
 	}
-	s.pairPartners()
 	s.publishView()
 	return s
 }

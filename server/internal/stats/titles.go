@@ -45,6 +45,8 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 		ombv1.Title_AI_IDIOT, award)
 	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.hitsLanded, r.hitsAt },
 		ombv1.Title_BARRAGE, award)
+	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.killSteals, r.killStealsAt },
+		ombv1.Title_KILL_STEAL, award)
 
 	// ---- RUNNER: max cumulative checkpoint distance, first achiever wins.
 	p.awardMaxDist(sorted, ombv1.Title_RUNNER, award)
@@ -52,35 +54,6 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 	// ---- SURVIVOR: max contiguous alive segment length, first achiever wins.
 	p.awardMaxSortedUint(sorted, func(r *robotStats) (uint32, uint32) { return r.maxSurvTicks, r.maxSurvAt },
 		ombv1.Title_SURVIVOR, award)
-
-	// ---- BEST_PARTNER: pair cooperation score (see onKill), pair title to
-	// BOTH members. Ties: first pair to reach the max score (pairCoop.at).
-	if len(p.pairs) > 0 {
-		type cand struct {
-			lo, hi uint32
-			score  int32
-			at     uint32
-		}
-		list := make([]cand, 0, len(p.pairs))
-		for k, pc := range p.pairs {
-			list = append(list, cand{k.lo, k.hi, pc.score, pc.at})
-		}
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].score != list[j].score {
-				return list[i].score > list[j].score
-			}
-			if list[i].at != list[j].at {
-				return list[i].at < list[j].at
-			}
-			return list[i].lo < list[j].lo
-		})
-		if top := list[0]; top.score > 0 && (len(list) == 1 || list[1].score < top.score) {
-			award(top.lo, ombv1.Title_BEST_PARTNER)
-			award(top.hi, ombv1.Title_BEST_PARTNER)
-		}
-		// A tie at the top (list[1].score == top.score) awards no one: v0.3
-		// has no shared-title rule for partner ties.
-	}
 
 	// ---- PEACEMAKER: score >= p75 of all players, zero kills.
 	p.awardPeacemaker(sorted, award)

@@ -140,14 +140,14 @@ type UplinkView struct {
 // Core/Uplink 恒全量。T2 脚本只允许吃这个，不得接触 Sim 内部状态。
 type Observation struct {
 	Frame       FrameView
-	Robots      []RobotView // 裁剪后；搭档恒在（IsPartner 标记在 PartnerIDs）
-	PartnerID   uint32      // 搭档 robotID（0=无）
+	Robots      []RobotView // 按扫描半径与视线裁剪
+	PartnerID   uint32      // deprecated compatibility; live observations keep zero
 	Cores       []CoreView
 	Uplinks     []UplinkView
 	Projectiles []ProjView
 }
 
-// IsPartner 判定（O(1) 辅助）。
+// IsPartner is retained for source compatibility; live observations have no partner.
 func (o *Observation) IsPartner(id uint32) bool { return o.PartnerID != 0 && id == o.PartnerID }
 
 // ============ 脚本契约（T2 产、sim 时序消费） ============

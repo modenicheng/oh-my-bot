@@ -17,6 +17,11 @@ func kill(tick, killer, victim, assist uint32) *ombv1.ServerEvent {
 		Killer: killer, Victim: victim, Assist: assist}}}
 }
 
+func attributedKill(tick, killer, victim uint32, assists []uint32, steal bool) *ombv1.ServerEvent {
+	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{
+		Killer: killer, Victim: victim, Assists: assists, KillSteal: steal}}}
+}
+
 func hit(tick, from, to uint32, dmg int32) *ombv1.ServerEvent {
 	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_Hit{Hit: &ombv1.EvHit{From: from, To: to, Dmg: dmg}}}
 }
@@ -117,6 +122,16 @@ func TestScoreAccumulation(t *testing.T) {
 	}
 	if p.Live().Tick != 17 {
 		t.Errorf("live tick = %d, want 17", p.Live().Tick)
+	}
+}
+
+func TestMultiAssistAndLegacyAssistScoring(t *testing.T) {
+	p := NewProjector()
+	p.OnEvent(10, attributedKill(10, 1, 4, []uint32{2, 3}, false))
+	p.OnEvent(20, kill(20, 4, 1, 2)) // deprecated tag 3 remains readable
+	got := rowsByRobot(p.Live().Rows)
+	if got[1].Score != ScoreKill || got[4].Score != ScoreKill || got[2].Score != 2*ScoreAssist || got[3].Score != ScoreAssist {
+		t.Fatalf("unexpected scores: %+v", got)
 	}
 }
 

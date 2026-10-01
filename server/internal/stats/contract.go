@@ -43,7 +43,7 @@ type Projector interface {
 //   WAR_MACHINE 击毁最多 / SCAVENGER Core 最多 / SIGNAL_THIEF Uplink 最多 /
 //   RUNNER 移动距离最长（EvWallHit 不足——需位置差分，见下）/ WALL_HEAD 撞墙最多 /
 //   SURVIVOR 最长连续存活 / PEACEMAKER 高积分零击毁 / AI_IDIOT 脚本异常最多 /
-//   BARRAGE 射击最多 / BEST_PARTNER 搭档协作分 / AI_REGULAR AI 轮次最多 /
+//   BARRAGE 射击最多 / KILL_STEAL 抢人头最多 / AI_REGULAR AI 轮次最多 /
 //   OLD_SCHOOL 零 AI 零 Snippet 完赛 / CNMB 被击毁最多
 //
 // RUNNER 依赖位置数据：事件流中没有逐 tick 位置，Projector 消费 60s 检查点

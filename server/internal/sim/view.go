@@ -19,12 +19,12 @@ type WorldView struct {
 
 func cloneRobot(r Robot) Robot {
 	r.Control.PendingScript = cloneCommands(r.Control.PendingScript)
-	if r.Combat.Damagers != nil {
-		copy := make(map[uint32]bool, len(r.Combat.Damagers))
-		for id, v := range r.Combat.Damagers {
+	if r.Combat.DamageBy != nil {
+		copy := make(map[uint32]float64, len(r.Combat.DamageBy))
+		for id, v := range r.Combat.DamageBy {
 			copy[id] = v
 		}
-		r.Combat.Damagers = copy
+		r.Combat.DamageBy = copy
 	}
 	return r
 }
@@ -56,7 +56,6 @@ func (s *Sim) publishView() {
 		}
 		v.Robots[i] = RobotView{ID: r.ID, Pos: r.Position, Vel: r.Velocity, Turret: r.Heading, HpX10: int32(math.Round(r.HP * 10)), EnergyX10: int32(math.Round(r.Energy * 10)),
 			ShieldOn: r.Combat.ShieldOn, Dashing: r.Combat.DashUntil > s.tick, Dead: r.State == Dead, RespawnInS: secondsLeft(s.tick, r.Combat.RespawnAt), InvulnS: invuln, Nick: r.Nick, Color: r.Color}
-		v.Partners[r.ID] = r.Combat.Partner
 		v.Controls[r.ID] = r.Control.Output
 		v.AckSeqs[r.ID] = r.ConsumedSeq
 		if r.Combat.PulseTick == s.tick && s.tick != 0 && r.State != Dead {
@@ -168,7 +167,7 @@ func (v WorldView) LineOfSight(from, to Vec2) bool {
 }
 
 // Observe is a standalone convenience for integrations without a T3 builder.
-// Core/Uplink stay global; a partner is visible through walls at any range.
+// Core/Uplink stay global; robots and projectiles require range and line of sight.
 func (v WorldView) Observe(id uint32) (Observation, bool) {
 	var self RobotView
 	found := false
@@ -183,9 +182,9 @@ func (v WorldView) Observe(id uint32) (Observation, bool) {
 	}
 	frame := v.Frame
 	frame.Map = cloneMap(frame.Map)
-	obs := Observation{Frame: frame, PartnerID: v.Partners[id], Cores: append([]CoreView{}, v.Cores...), Uplinks: cloneUplinkViews(v.Uplinks)}
+	obs := Observation{Frame: frame, Cores: append([]CoreView{}, v.Cores...), Uplinks: cloneUplinkViews(v.Uplinks)}
 	for _, r := range v.Robots {
-		if r.ID == id || r.ID == obs.PartnerID || (self.Pos.Sub(r.Pos).Len() <= v.ScanRadius(id) && v.LineOfSight(self.Pos, r.Pos)) {
+		if r.ID == id || (self.Pos.Sub(r.Pos).Len() <= v.ScanRadius(id) && v.LineOfSight(self.Pos, r.Pos)) {
 			obs.Robots = append(obs.Robots, r)
 		}
 	}

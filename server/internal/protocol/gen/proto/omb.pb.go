@@ -128,19 +128,22 @@ type Title int32
 
 const (
 	Title_TITLE_UNSPECIFIED Title = 0
-	Title_WAR_MACHINE       Title = 1  // 战争机器：击毁最多
-	Title_SCAVENGER         Title = 2  // 垃圾佬：Core 最多
-	Title_SIGNAL_THIEF      Title = 3  // 信号大盗：Uplink 最多
-	Title_RUNNER            Title = 4  // 跑路大师
-	Title_WALL_HEAD         Title = 5  // 铁头娃：撞墙最多
-	Title_SURVIVOR          Title = 6  // 苟王
-	Title_PEACEMAKER        Title = 7  // 和平使者
-	Title_AI_IDIOT          Title = 8  // 人工智障
-	Title_BARRAGE           Title = 9  // 弹幕大师
-	Title_BEST_PARTNER      Title = 10 // 最佳搭档
-	Title_AI_REGULAR        Title = 11 // AI 常客
-	Title_OLD_SCHOOL        Title = 12 // 古法编程
-	Title_CNMB              Title = 13 // 充能面包：被击毁最多
+	Title_WAR_MACHINE       Title = 1 // 战争机器：击毁最多
+	Title_SCAVENGER         Title = 2 // 垃圾佬：Core 最多
+	Title_SIGNAL_THIEF      Title = 3 // 信号大盗：Uplink 最多
+	Title_RUNNER            Title = 4 // 跑路大师
+	Title_WALL_HEAD         Title = 5 // 铁头娃：撞墙最多
+	Title_SURVIVOR          Title = 6 // 苟王
+	Title_PEACEMAKER        Title = 7 // 和平使者
+	Title_AI_IDIOT          Title = 8 // 人工智障
+	Title_BARRAGE           Title = 9 // 弹幕大师
+	// Deprecated: Marked as deprecated in proto/omb.proto.
+	Title_BEST_PARTNER Title = 10 // 保留旧录像枚举，不再授予
+	Title_AI_REGULAR   Title = 11 // AI 常客
+	Title_OLD_SCHOOL   Title = 12 // 古法编程
+	Title_CNMB         Title = 13 // 充能面包：被击毁最多
+	Title_KILL_STEAL   Title = 14 // 抢人头：抢头次数最多
+	Title_HEALER       Title = 15 // 耐活王：累计实际回血最多
 )
 
 // Enum value maps for Title.
@@ -160,6 +163,8 @@ var (
 		11: "AI_REGULAR",
 		12: "OLD_SCHOOL",
 		13: "CNMB",
+		14: "KILL_STEAL",
+		15: "HEALER",
 	}
 	Title_value = map[string]int32{
 		"TITLE_UNSPECIFIED": 0,
@@ -176,6 +181,8 @@ var (
 		"AI_REGULAR":        11,
 		"OLD_SCHOOL":        12,
 		"CNMB":              13,
+		"KILL_STEAL":        14,
+		"HEALER":            15,
 	}
 )
 
@@ -1715,11 +1722,14 @@ func (x *SnapshotDelta) GetSelf() *SelfState {
 }
 
 type EvKill struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Killer        uint32                 `protobuf:"varint,1,opt,name=killer,proto3" json:"killer,omitempty"`
-	Victim        uint32                 `protobuf:"varint,2,opt,name=victim,proto3" json:"victim,omitempty"`
-	Assist        uint32                 `protobuf:"varint,3,opt,name=assist,proto3" json:"assist,omitempty"`
-	At            *Vec2                  `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Killer uint32                 `protobuf:"varint,1,opt,name=killer,proto3" json:"killer,omitempty"`
+	Victim uint32                 `protobuf:"varint,2,opt,name=victim,proto3" json:"victim,omitempty"`
+	// Deprecated: Marked as deprecated in proto/omb.proto.
+	Assist        uint32   `protobuf:"varint,3,opt,name=assist,proto3" json:"assist,omitempty"` // 旧录像兼容；新实现使用 assists
+	At            *Vec2    `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
+	Assists       []uint32 `protobuf:"varint,5,rep,packed,name=assists,proto3" json:"assists,omitempty"`               // 按 robot id 升序，允许多人
+	KillSteal     bool     `protobuf:"varint,6,opt,name=kill_steal,json=killSteal,proto3" json:"kill_steal,omitempty"` // 终结者本生命伤害份额严格小于 50%
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1768,6 +1778,7 @@ func (x *EvKill) GetVictim() uint32 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in proto/omb.proto.
 func (x *EvKill) GetAssist() uint32 {
 	if x != nil {
 		return x.Assist
@@ -1780,6 +1791,20 @@ func (x *EvKill) GetAt() *Vec2 {
 		return x.At
 	}
 	return nil
+}
+
+func (x *EvKill) GetAssists() []uint32 {
+	if x != nil {
+		return x.Assists
+	}
+	return nil
+}
+
+func (x *EvKill) GetKillSteal() bool {
+	if x != nil {
+		return x.KillSteal
+	}
+	return false
 }
 
 type EvCorePickup struct {
@@ -3516,12 +3541,15 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05cores\x18\v \x03(\v2\x11.omb.v1.CoreStateR\x05cores\x12\x1b\n" +
 	"\tcore_gone\x18\f \x03(\rR\bcoreGone\x12-\n" +
 	"\auplinks\x18\r \x03(\v2\x13.omb.v1.UplinkStateR\auplinks\x12%\n" +
-	"\x04self\x18\x0e \x01(\v2\x11.omb.v1.SelfStateR\x04self\"n\n" +
+	"\x04self\x18\x0e \x01(\v2\x11.omb.v1.SelfStateR\x04self\"\xab\x01\n" +
 	"\x06EvKill\x12\x16\n" +
 	"\x06killer\x18\x01 \x01(\rR\x06killer\x12\x16\n" +
-	"\x06victim\x18\x02 \x01(\rR\x06victim\x12\x16\n" +
-	"\x06assist\x18\x03 \x01(\rR\x06assist\x12\x1c\n" +
-	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\"M\n" +
+	"\x06victim\x18\x02 \x01(\rR\x06victim\x12\x1a\n" +
+	"\x06assist\x18\x03 \x01(\rB\x02\x18\x01R\x06assist\x12\x1c\n" +
+	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\x12\x18\n" +
+	"\aassists\x18\x05 \x03(\rR\aassists\x12\x1d\n" +
+	"\n" +
+	"kill_steal\x18\x06 \x01(\bR\tkillSteal\"M\n" +
 	"\fEvCorePickup\x12\x0e\n" +
 	"\x02by\x18\x01 \x01(\rR\x02by\x12\x17\n" +
 	"\acore_id\x18\x02 \x01(\rR\x06coreId\x12\x14\n" +
@@ -3658,7 +3686,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\bCS_HUMAN\x10\x01\x12\r\n" +
 	"\tCS_SCRIPT\x10\x02\x12\x0e\n" +
 	"\n" +
-	"CS_SNIPPET\x10\x03*\xe0\x01\n" +
+	"CS_SNIPPET\x10\x03*\x80\x02\n" +
 	"\x05Title\x12\x15\n" +
 	"\x11TITLE_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vWAR_MACHINE\x10\x01\x12\r\n" +
@@ -3671,14 +3699,18 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\n" +
 	"PEACEMAKER\x10\a\x12\f\n" +
 	"\bAI_IDIOT\x10\b\x12\v\n" +
-	"\aBARRAGE\x10\t\x12\x10\n" +
+	"\aBARRAGE\x10\t\x12\x14\n" +
 	"\fBEST_PARTNER\x10\n" +
-	"\x12\x0e\n" +
+	"\x1a\x02\b\x01\x12\x0e\n" +
 	"\n" +
 	"AI_REGULAR\x10\v\x12\x0e\n" +
 	"\n" +
 	"OLD_SCHOOL\x10\f\x12\b\n" +
-	"\x04CNMB\x10\rBEZCgithub.com/modenicheng/oh-my-bot/server/internal/protocol/gen;ombv1b\x06proto3"
+	"\x04CNMB\x10\r\x12\x0e\n" +
+	"\n" +
+	"KILL_STEAL\x10\x0e\x12\n" +
+	"\n" +
+	"\x06HEALER\x10\x0fBEZCgithub.com/modenicheng/oh-my-bot/server/internal/protocol/gen;ombv1b\x06proto3"
 
 var (
 	file_proto_omb_proto_rawDescOnce sync.Once

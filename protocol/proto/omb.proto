@@ -138,7 +138,14 @@ message SnapshotDelta {
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
 
-message EvKill { uint32 killer = 1; uint32 victim = 2; uint32 assist = 3; Vec2 at = 4; }
+message EvKill {
+  uint32 killer = 1;
+  uint32 victim = 2;
+  uint32 assist = 3 [deprecated = true]; // 旧录像兼容；新实现使用 assists
+  Vec2 at = 4;
+  repeated uint32 assists = 5; // 按 robot id 升序，允许多人
+  bool kill_steal = 6; // 终结者本生命伤害份额严格小于 50%
+}
 message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
 message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
@@ -171,10 +178,12 @@ enum Title {
   PEACEMAKER = 7;       // 和平使者
   AI_IDIOT = 8;         // 人工智障
   BARRAGE = 9;          // 弹幕大师
-  BEST_PARTNER = 10;    // 最佳搭档
+  BEST_PARTNER = 10 [deprecated = true]; // 保留旧录像枚举，不再授予
   AI_REGULAR = 11;      // AI 常客
   OLD_SCHOOL = 12;      // 古法编程
   CNMB = 13;            // 充能面包：被击毁最多
+  KILL_STEAL = 14;      // 抢人头：抢头次数最多
+  HEALER = 15;          // 耐活王：累计实际回血最多
 }
 
 message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，仅下发）

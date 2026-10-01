@@ -242,7 +242,7 @@ func TestWholeMatchReplayFromInitialAndMidpoint(t *testing.T) {
 
 func TestCheckpointDeepCopiesGameplayState(t *testing.T) {
 	s, _ := uplinkSim(t)
-	s.robots[0].Combat.Damagers = map[uint32]bool{2: true}
+	s.robots[0].Combat.DamageBy = map[uint32]float64{2: 12}
 	s.uplinks[0].ReadyAt[1] = 30
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Say: ptr("original")})
 	if !s.Say(1, "pending") {
@@ -250,17 +250,17 @@ func TestCheckpointDeepCopiesGameplayState(t *testing.T) {
 	}
 	cp := s.Snapshot()
 	cp.Robots[0].Control.PendingSay = "changed"
-	cp.Robots[0].Combat.Damagers[2] = false
+	cp.Robots[0].Combat.DamageBy[2] = 0
 	cp.Robots[0].Control.PendingScript.Move.X = 99
 	*cp.Robots[0].Control.PendingScript.Say = "changed"
 	cp.Uplinks[0].ReadyAt[1] = 99
 	cp.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 99
 	fresh := s.Snapshot()
-	if fresh.Robots[0].Control.PendingSay != "pending" || !fresh.Robots[0].Combat.Damagers[2] || fresh.Robots[0].Control.PendingScript.Move.X != 1 || *fresh.Robots[0].Control.PendingScript.Say != "original" || fresh.Uplinks[0].ReadyAt[1] != 30 || fresh.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 {
+	if fresh.Robots[0].Control.PendingSay != "pending" || fresh.Robots[0].Combat.DamageBy[2] != 12 || fresh.Robots[0].Control.PendingScript.Move.X != 1 || *fresh.Robots[0].Control.PendingScript.Say != "original" || fresh.Uplinks[0].ReadyAt[1] != 30 || fresh.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 {
 		t.Fatal("checkpoint aliases live gameplay")
 	}
 	robot, _ := s.Robot(1)
-	robot.Combat.Damagers[2] = false
+	robot.Combat.DamageBy[2] = 0
 	robot.Control.PendingScript.Move.X = 3
 	if !reflect.DeepEqual(fresh, s.Snapshot()) {
 		t.Fatal("Robot copy aliases live gameplay")

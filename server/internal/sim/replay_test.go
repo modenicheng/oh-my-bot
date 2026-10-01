@@ -78,7 +78,7 @@ func TestRestoreCheckpointDetachesAndRejectsInvalidState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cp.Robots[0].Control.PendingScript.Move.X = -1
-	cp.Robots[0].Combat.Damagers = map[uint32]bool{2: true}
+	cp.Robots[0].Combat.DamageBy = map[uint32]float64{2: 12}
 	cp.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 0
 	if !reflect.DeepEqual(s.Snapshot(), restored.Snapshot()) {
 		t.Fatal("restored checkpoint aliases caller memory")

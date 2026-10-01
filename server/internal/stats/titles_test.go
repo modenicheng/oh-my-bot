@@ -196,40 +196,30 @@ func TestTitleBarrage(t *testing.T) {
 	}
 }
 
-// 10. BEST_PARTNER — pair cooperation score (kills +1, mutual assist +2).
-func TestTitleBestPartner(t *testing.T) {
+// Deprecated BEST_PARTNER input remains accepted but never awards a live title.
+func TestDeprecatedBestPartnerNeverAwards(t *testing.T) {
 	p := NewProjector()
-	p.SetPartnerMap(map[uint32]uint32{1: 2, 2: 1, 3: 4, 4: 3})
-	// Pair (1,2): kill by 1 with mutual assist by 2 → 1+2 = 3.
+	p.SetPartnerMap(map[uint32]uint32{1: 2, 2: 1})
 	p.OnEvent(10, kill(10, 1, 3, 2))
-	// Pair (3,4): plain kill by 3 → 1.
-	p.OnEvent(20, kill(20, 3, 1, 0))
 	p.OnEvent(30, matchEnd(30))
-	rows := feedFinal(p)
-	for _, id := range []uint32{1, 2} {
-		if !titlesOf(t, rows[id])[ombv1.Title_BEST_PARTNER] {
-			t.Errorf("robot %d (pair 1-2, coop 3) missing BEST_PARTNER; titles=%v", id, rows[id].Titles)
-		}
-	}
-	for _, id := range []uint32{3, 4} {
-		if titlesOf(t, rows[id])[ombv1.Title_BEST_PARTNER] {
-			t.Errorf("robot %d (pair 3-4, coop 1) wrongly awarded BEST_PARTNER", id)
+	for id, row := range feedFinal(p) {
+		if titlesOf(t, row)[ombv1.Title_BEST_PARTNER] {
+			t.Errorf("robot %d awarded deprecated BEST_PARTNER", id)
 		}
 	}
 }
 
-// 10b. BEST_PARTNER tie between pairs → nobody gets it (no shared-title rule).
-func TestTitleBestPartnerTieAwardsNobody(t *testing.T) {
+func TestTitleKillStealFirstAchiever(t *testing.T) {
 	p := NewProjector()
-	p.SetPartnerMap(map[uint32]uint32{1: 2, 2: 1, 3: 4, 4: 3})
-	p.OnEvent(10, kill(10, 1, 3, 2)) // pair 1-2 coop 3
-	p.OnEvent(20, kill(20, 3, 1, 4)) // pair 3-4 coop 3
+	p.OnEvent(10, attributedKill(10, 2, 4, nil, true))
+	p.OnEvent(20, attributedKill(20, 1, 3, nil, true))
 	p.OnEvent(30, matchEnd(30))
 	rows := feedFinal(p)
-	for id := uint32(1); id <= 4; id++ {
-		if titlesOf(t, rows[id])[ombv1.Title_BEST_PARTNER] {
-			t.Errorf("robot %d awarded BEST_PARTNER on a tie (design: no award)", id)
-		}
+	if !titlesOf(t, rows[2])[ombv1.Title_KILL_STEAL] {
+		t.Errorf("first achiever missing KILL_STEAL: %v", rows[2].Titles)
+	}
+	if titlesOf(t, rows[1])[ombv1.Title_KILL_STEAL] {
+		t.Errorf("later tied robot awarded KILL_STEAL")
 	}
 }
 

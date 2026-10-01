@@ -3,6 +3,7 @@ package sim
 import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"math"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -114,7 +115,7 @@ func (s *Sim) stepProjectiles() {
 		}
 		for i := range s.robots {
 			r := &s.robots[i]
-			if r.State == Dead || r.ID == p.Owner || r.ID == s.robots[owner].Combat.Partner {
+			if r.State == Dead || r.ID == p.Owner {
 				continue
 			}
 			if t, hit := sweepCircle(p.Pos, delta, r.Position, RobotRadius); hit && (t < fraction-collisionEpsilon || (!blocked && victim < 0 && t <= fraction)) {
@@ -148,8 +149,8 @@ func (s *Sim) stepProjectiles() {
 }
 
 func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
-	idx, ok := s.index[attacker]
-	if !ok || r.State == Dead || r.Combat.Invulnerable || attacker == r.ID || s.robots[idx].Combat.Partner == r.ID {
+	_, ok := s.index[attacker]
+	if !ok || r.State == Dead || r.Combat.Invulnerable || attacker == r.ID {
 		return
 	}
 	if r.Combat.ShieldOn {
@@ -157,26 +158,36 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 	}
 	amount = math.Min(amount, r.HP)
 	r.HP = math.Max(0, r.HP-amount)
-	if r.Combat.Damagers == nil {
-		r.Combat.Damagers = make(map[uint32]bool)
+	if amount <= 0 {
+		return
 	}
-	r.Combat.Damagers[attacker] = true
+	if r.Combat.DamageBy == nil {
+		r.Combat.DamageBy = make(map[uint32]float64)
+	}
+	r.Combat.DamageBy[attacker] += amount
 	// EvHit.dmg is an integer in protocol v1. Physics retains fractional shield
 	// damage (4.2); only event telemetry is rounded, never the HP calculation.
 	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Hit{Hit: &ombv1.EvHit{From: attacker, To: r.ID, Dmg: int32(math.Round(amount))}}})
 	if r.HP > 0 {
 		return
 	}
-	partner := s.robots[idx].Combat.Partner
-	assist := uint32(0)
-	if partner != 0 && r.Combat.Damagers[partner] {
-		assist = partner
+	totalDamage := 0.0
+	for _, damage := range r.Combat.DamageBy {
+		totalDamage += damage
 	}
+	assists := make([]uint32, 0, len(r.Combat.DamageBy))
+	for contributor, damage := range r.Combat.DamageBy {
+		if contributor != attacker && damage*2 < totalDamage {
+			assists = append(assists, contributor)
+		}
+	}
+	sort.Slice(assists, func(i, j int) bool { return assists[i] < assists[j] })
+	killSteal := totalDamage > 0 && r.Combat.DamageBy[attacker]*2 < totalDamage
 	r.State, r.Velocity = Dead, Vec2{}
 	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false
 	r.Control = ControlState{Assist: r.Control.Assist}
 	r.Combat.ShieldOn, r.Combat.DashUntil, r.Combat.RespawnAt = false, 0, s.tick+RespawnDelay
-	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{Killer: attacker, Victim: r.ID, Assist: assist, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}}}})
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{Killer: attacker, Victim: r.ID, Assists: assists, KillSteal: killSteal, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}}}})
 }
 
 func (s *Sim) respawnRobot(r *Robot) {
@@ -192,7 +203,7 @@ func (s *Sim) respawnRobot(r *Robot) {
 	r.Control = ControlState{Assist: r.Control.Assist}
 	// Personal station cooldowns survive death; combat cooldowns and controls do
 	// not. The 4s protection timer starts only after a new effective operation.
-	r.Combat = CombatState{Partner: r.Combat.Partner, Invulnerable: true, SayReady: r.Combat.SayReady}
+	r.Combat = CombatState{Invulnerable: true, SayReady: r.Combat.SayReady}
 	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Respawn{Respawn: &ombv1.EvRespawn{Robot: r.ID, Sector: r.Sector}}})
 }
 
