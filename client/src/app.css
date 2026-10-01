@@ -240,6 +240,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .manual-audience { font-size: 11px; font-weight: 400; letter-spacing: .15em; color: var(--fg-dim);
                    border: 1px solid var(--line); padding: 2px 8px; vertical-align: 4px;
                    margin-left: 10px; }
+.manual-chips { display: inline-flex; gap: 6px; vertical-align: 4px; margin-left: 10px; }
+.manual-tag { font-size: 11px; font-weight: 400; letter-spacing: .1em; color: var(--fg-dim);
+              border: 1px solid var(--line); padding: 2px 8px; }
 .manual-body { font-size: 14px; line-height: 1.75; }
 .manual-body h2 { font-size: 16px; margin: 30px 0 10px; padding-top: 14px;
                   border-top: 1px solid var(--line); letter-spacing: .05em; }
