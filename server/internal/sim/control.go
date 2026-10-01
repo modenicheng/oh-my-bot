@@ -129,7 +129,7 @@ func setAxes(dst *ArbitratedInput, src ArbitratedInput, mask AxisMask) {
 }
 
 func (c *ControlState) resolve() ArbitratedInput {
-	out := ArbitratedInput{MoveSrc: '-', TurretSrc: '-'}
+	out := ArbitratedInput{MoveSrc: '-', TurretSrc: '-', FireSrc: '-', AbilitySrc: '-'}
 	if c.Assist {
 		setAxes(&out, c.Script, c.ScriptAxes)
 		if c.ScriptAxes&AxisMove != 0 {
@@ -138,6 +138,12 @@ func (c *ControlState) resolve() ArbitratedInput {
 		if c.ScriptAxes&AxisAim != 0 {
 			out.TurretSrc = 'S'
 		}
+		if c.ScriptAxes&AxisFire != 0 {
+			out.FireSrc = 'S'
+		}
+		if c.ScriptAxes&AxisAbility != 0 {
+			out.AbilitySrc = 'S'
+		}
 	}
 	setAxes(&out, c.Human, c.HumanAxes)
 	if c.HumanAxes&AxisMove != 0 {
@@ -145,6 +151,12 @@ func (c *ControlState) resolve() ArbitratedInput {
 	}
 	if c.HumanAxes&AxisAim != 0 {
 		out.TurretSrc = 'H'
+	}
+	if c.HumanAxes&AxisFire != 0 {
+		out.FireSrc = 'H'
+	}
+	if c.HumanAxes&AxisAbility != 0 {
+		out.AbilitySrc = 'H'
 	}
 	if n := out.Move.Len(); n > 1 {
 		out.Move = out.Move.Scale(1 / n)
@@ -217,14 +229,33 @@ func (s *Sim) consumeInputs() {
 			if len(s.consumed) > 0 && s.consumed[len(s.consumed)-1].robotID == r.ID {
 				humanThisTick = r.Input.AxisMask
 			}
-			if c.ToggleCount%2 != 0 {
-				c.Assist = !c.Assist
+			// Space 三分支（ADR-0009 分轴仲裁，事件可合并）：
+			//  1. assist 关 → 开启并清除人工接管；
+			//  2. assist 开且任一轴被人工接管 → 仅把被接管轴交回脚本（assist 保持开）；
+			//  3. assist 开且全部脚本控制 → 关闭。
+			// 同 tick 在途真实人类输入先合并（上面的 setAxes），随后在此按新状态处理，
+			// 仍优先于脚本仲裁；后续每帧输入是否重新抢占由客户端边沿触发约束（恢复时
+			// 清 sticky 与按键状态）与输入 mask 语义（0=不接管，带轴=接管）共同保证。
+			for i := uint32(0); i < c.ToggleCount; i++ {
+				if !c.Assist {
+					c.Assist = true
+					c.HumanAxes = 0
+					c.Human = ArbitratedInput{}
+				} else if c.HumanAxes != 0 {
+					c.HumanAxes = 0
+					c.Human = ArbitratedInput{}
+				} else {
+					c.Assist = false
+					c.Script, c.ScriptAxes = ArbitratedInput{}, 0
+				}
 			}
-			if c.Assist || c.ToggleCount > 1 {
-				c.HumanAxes &= humanThisTick
+			// 同 tick 真实人类输入仍优先：开启/恢复后同帧新接管保留。
+			c.HumanAxes |= humanThisTick
+			if humanThisTick != 0 {
+				setAxes(&c.Human, ArbitratedInput{Move: Vec2{float64(r.Input.MoveX) / 1000, float64(r.Input.MoveY) / 1000}, Aim: r.Input.Aim, Fire: r.Input.Fire, Dash: r.Input.Dash, Shield: r.Input.Shield, Interact: r.Input.Interact}, humanThisTick)
 			}
 			if !c.Assist {
-				c.Script, c.ScriptAxes = ArbitratedInput{}, 0
+					c.Script, c.ScriptAxes = ArbitratedInput{}, 0
 			}
 			s.operated(r, true)
 		}

@@ -16,6 +16,9 @@ type SelfInput struct {
 	Robot         sim.RobotView
 	MoveSrc       byte // 'H' human / 'S' script / '-' none
 	TurretSrc     byte
+	FireSrc       byte // 开火轴来源（ADR-0009 分轴仲裁）
+	AbilitySrc    byte // 技能轴来源
+	ManualAxes    uint32 // 当前被人工接管的轴位图（bit0 move/bit1 aim/bit2 fire/bit3 ability）
 	AiRounds      uint32
 	AiTokensK     uint32
 	AssistOn      bool
@@ -287,15 +290,19 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 		return nil
 	}
 	assist, dashReady, fireReady := s.AssistOn, s.DashReadyTick, s.FireReadyTick
+	fireSrc, abilitySrc, manualAxes := ctrlSrc(s.FireSrc), ctrlSrc(s.AbilitySrc), s.ManualAxes
 	return &ombv1.SelfState{
-		RobotId:       s.Robot.ID,
-		MoveSrc:       ctrlSrc(s.MoveSrc),
-		TurretSrc:     ctrlSrc(s.TurretSrc),
-		AiRoundsLeft:  s.AiRounds,
-		AiTokensLeftK: s.AiTokensK,
-		AssistOn:      &assist,
-		DashReadyTick: &dashReady,
-		FireReadyTick: &fireReady,
+		RobotId:        s.Robot.ID,
+		MoveSrc:        ctrlSrc(s.MoveSrc),
+		TurretSrc:      ctrlSrc(s.TurretSrc),
+		AiRoundsLeft:   s.AiRounds,
+		AiTokensLeftK:  s.AiTokensK,
+		AssistOn:       &assist,
+		DashReadyTick:  &dashReady,
+		FireReadyTick:  &fireReady,
+		FireSrc:        &fireSrc,
+		AbilitySrc:     &abilitySrc,
+		ManualAxesMask: &manualAxes,
 	}
 }
 

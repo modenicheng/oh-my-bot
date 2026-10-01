@@ -41,7 +41,7 @@ message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
 // Read-only full-world connection; never allocates a player or robot.
 message SpectateRoom { string room_code = 1; }
 message LeaveRoom {}
-message AssistToggle {} // Space 按下：驾驶辅助总开关翻转（事件语义，非状态）
+message AssistToggle {} // Space 按下：服务端权威三分支——辅助关→开启并清除人工接管；辅助开且任一轴被人工接管→仅将这些轴交回脚本（辅助保持开）；辅助开且全部脚本控制→关闭。事件语义，非状态
 message RoomAction {
   enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; SOLO_BOTS = 5; }
   Kind kind = 1;
@@ -117,6 +117,9 @@ message SelfState {
   optional bool assist_on = 6; // 权威辅助状态；缺失表示旧服务器
   optional uint32 dash_ready_tick = 7; // 绝对 60Hz tick，重连后仍准确
   optional uint32 fire_ready_tick = 8;
+  optional ControlSource fire_src = 9;    // 分轴仲裁结果：开火轴当前来源（ADR-0009）
+  optional ControlSource ability_src = 10; // 分轴仲裁结果：技能轴当前来源（ADR-0009）
+  optional uint32 manual_axes_mask = 11; // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
 }
 
 message SnapshotDelta {

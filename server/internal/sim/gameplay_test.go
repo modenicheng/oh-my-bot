@@ -43,25 +43,37 @@ func TestArbitrationAxisMaskTable(t *testing.T) {
 			got := c.resolve()
 			want := script
 			setAxes(&want, human, mask)
-			want.MoveSrc, want.TurretSrc = 'S', 'S'
+			want.MoveSrc, want.TurretSrc, want.FireSrc, want.AbilitySrc = 'S', 'S', 'S', 'S'
 			if mask&AxisMove != 0 {
 				want.MoveSrc = 'H'
 			}
 			if mask&AxisAim != 0 {
 				want.TurretSrc = 'H'
+			}
+			if mask&AxisFire != 0 {
+				want.FireSrc = 'H'
+			}
+			if mask&AxisAbility != 0 {
+				want.AbilitySrc = 'H'
 			}
 			if got != want {
 				t.Fatalf("got %+v want %+v", got, want)
 			}
 			c.Assist = false
 			got = c.resolve()
-			want = ArbitratedInput{MoveSrc: '-', TurretSrc: '-'}
+			want = ArbitratedInput{MoveSrc: '-', TurretSrc: '-', FireSrc: '-', AbilitySrc: '-'}
 			setAxes(&want, human, mask)
 			if mask&AxisMove != 0 {
 				want.MoveSrc = 'H'
 			}
 			if mask&AxisAim != 0 {
 				want.TurretSrc = 'H'
+			}
+			if mask&AxisFire != 0 {
+				want.FireSrc = 'H'
+			}
+			if mask&AxisAbility != 0 {
+				want.AbilitySrc = 'H'
 			}
 			if got != want {
 				t.Fatalf("assist off: got %+v want %+v", got, want)
@@ -100,12 +112,19 @@ func TestScriptPointerSemanticsAndHumanPersistence(t *testing.T) {
 	if out = s.Arbitrated(1); out.Move != (Vec2{0, 1}) || out.MoveSrc != 'H' || out.TurretSrc != 'S' {
 		t.Fatalf("human did not retain axis %+v", out)
 	}
-	s.AssistToggle(1)
+	// 新语义（ADR-0009 分轴接管）：Space 一次把人工轴交回脚本（辅助保持开），
+	// 再一次（全脚本控制时）才关闭辅助。
+	s.AssistToggle(1) // 交回 move 轴（人工仅接管了 move，Turret 本就是 S）
+	s.Tick()
+	if !s.robots[0].Control.Assist || s.Arbitrated(1).MoveSrc != 'S' {
+		t.Fatal("single-Space restore failed")
+	}
+	s.AssistToggle(1) // 现在全脚本控制 → 关闭
 	s.Tick()
 	if s.robots[0].Control.Assist || s.Arbitrated(1).TurretSrc != '-' {
 		t.Fatal("assist off failed")
 	}
-	s.AssistToggle(1)
+	s.AssistToggle(1) // 重新开启并清除人工接管
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0})})
 	s.Tick()
 	if s.Arbitrated(1).MoveSrc != 'S' {
