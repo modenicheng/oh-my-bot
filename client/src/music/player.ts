@@ -347,6 +347,15 @@ export class ChipMusic {
     const index = render.stages.indexOf(stage);
     if (index < 0) return 0;
 
+    // A repeat of the target already in flight changes nothing: re-ramping
+    // would restart the fade and re-reporting here would announce `settled`
+    // while the original ramp is still running. Return the time left to the
+    // already-scheduled settle.
+    if (this.pending === stage) {
+      const ctxNow = this.ctx ? this.ctx.currentTime : 0;
+      return Math.max(0, (this.switchEnd - ctxNow) * 1000);
+    }
+
     this.cancelSwitchTimer();
     if (!ctx || !this.playing || index === this.stageIndex) {
       // No live fade in flight: adopt the selection outright. A paused player
