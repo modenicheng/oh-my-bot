@@ -76,6 +76,12 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 				}
 			}
 			for _, other := range def.Walls[:i] {
+				// Gen4 L assemblies deliberately overlap their own two pieces
+				// (grouped base+stub pair); the 2.2m clearance is waived only for
+				// that grouped pair, never for independent walls.
+				if isLPair(other, w) {
+					continue
+				}
 				if gap2(wallRect(w), wallRect(other)) < 2.2*2.2-1e-9 {
 					t.Fatalf("seed %d insufficient wall gap", seed)
 				}
@@ -92,7 +98,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			}
 		}
 		for k, c := range counts {
-			if c != [3]int{1, 4, 2} {
+			if c != [3]int{1, 5, 2} {
 				t.Fatalf("seed %d wedge %d cover counts %v", seed, k, c)
 			}
 		}
@@ -133,6 +139,29 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 	}
 }
 
+// isLPair 判断 w 与 other 是否为同一 L 装配的两件：基座（4×0.7 或 0.7×4）
+// 与垂直短杠（0.7×2 或 2×0.7），正面积相交约 0.7×0.7。只豁免这对组合
+// 自身的重叠；任何其他独立墙对仍受 2.2m 间距约束。
+func isLPair(other, w sim.Wall) bool {
+	ow, oh := overlapDims(wallRect(other), wallRect(w))
+	if !(ow > 0 && oh > 0) {
+		return false
+	}
+	ro, rw := wallRect(other), wallRect(w)
+	oW, oH := ro.MaxX-ro.MinX, ro.MaxY-ro.MinY
+	wW, wH := rw.MaxX-rw.MinX, rw.MaxY-rw.MinY
+	// 两种合法组合（短杠长轴与基座长轴垂直）；平行组合不算 L。
+	comboA := math.Abs(oW-4) < 1e-9 && math.Abs(oH-0.7) < 1e-9 && math.Abs(wW-0.7) < 1e-9 && math.Abs(wH-2) < 1e-9
+	comboB := math.Abs(oW-0.7) < 1e-9 && math.Abs(oH-4) < 1e-9 && math.Abs(wW-2) < 1e-9 && math.Abs(wH-0.7) < 1e-9
+	if !comboA && !comboB {
+		return false
+	}
+	// 两件中心距固定为 sqrt(1.65²+0.65²)（短杠偏移的旋转像长度不变）。
+	co := other.Min.Add(other.Max).Scale(0.5)
+	cw := w.Min.Add(w.Max).Scale(0.5)
+	return math.Abs(co.Sub(cw).Len()-math.Hypot(1.65, 0.65)) < 1e-6
+}
+
 func TestPlayableGridIsCircular(t *testing.T) {
 	blocked, n := gridFor(nil, true)
 	for _, p := range [][2]float64{{79.9, 0}, {70, 70}, {-70, -70}} {
@@ -145,5 +174,67 @@ func TestPlayableGridIsCircular(t *testing.T) {
 	}
 	if math.Abs(agentR-0.6) > 1e-12 {
 		t.Fatal("radius drift")
+	}
+}
+
+// TestLASsemblySilhouette：Gen4 L 层的形状契约。每楔恰有一个两件套装配：
+// 4×0.7 基座与垂直 2×0.7 短杠正面积相交 0.7×0.7（并集连通为真实 L 剪影，
+// 而非仅相接/分离）；基座定向遵循 coverXLong 约定（k0/3/4/7 横向，其余
+// 纵向）；同批楔 k 与 k+2 的装配互为精确 90° 旋转像。装配外的任何墙对
+// 仍需 ≥2.2m 间距（由 TestStrataClearanceAndSpawns 保证）。
+func TestLASsemblySilhouette(t *testing.T) {
+	for seed := uint64(0); seed < 256; seed++ {
+		def, err := Generate(seed)
+		if err != nil {
+			t.Fatalf("seed %d: %v", seed, err)
+		}
+		assemblies := 0
+		for i := 0; i+1 < len(def.Walls); i++ {
+			a, b := def.Walls[i], def.Walls[i+1]
+			if !isLPair(a, b) {
+				continue
+			}
+			assemblies++
+			ow, oh := overlapDims(wallRect(a), wallRect(b))
+			if math.Abs(ow-0.7) > 1e-9 || math.Abs(oh-0.7) > 1e-9 {
+				t.Fatalf("seed %d: L pair %d/%d overlap %.3fx%.3f, want 0.7x0.7", seed, a.ID, b.ID, ow, oh)
+			}
+			if b.ID != a.ID+1 {
+				t.Fatalf("seed %d: L pair IDs %d/%d not adjacent", seed, a.ID, b.ID)
+			}
+			// 基座/短杠识别：基座长边 4（横或纵），短杠长边 2 且与基座垂直。
+			ra, rb := wallRect(a), wallRect(b)
+			wa, ha := ra.MaxX-ra.MinX, ra.MaxY-ra.MinY
+			wb, hb := rb.MaxX-rb.MinX, rb.MaxY-rb.MinY
+			if !(math.Abs(math.Max(wa, ha)-4) < 1e-9 && math.Abs(math.Min(wa, ha)-0.7) < 1e-9) &&
+				!(math.Abs(math.Max(wa, ha)-2) < 1e-9 && math.Abs(math.Min(wa, ha)-0.7) < 1e-9) {
+				t.Fatalf("seed %d: L piece %d unexpected size %.1fx%.1f", seed, a.ID, wa, ha)
+			}
+			if !(math.Abs(math.Max(wb, hb)-4) < 1e-9 && math.Abs(math.Min(wb, hb)-0.7) < 1e-9) &&
+				!(math.Abs(math.Max(wb, hb)-2) < 1e-9 && math.Abs(math.Min(wb, hb)-0.7) < 1e-9) {
+				t.Fatalf("seed %d: L piece %d unexpected size %.1fx%.1f", seed, b.ID, wb, hb)
+			}
+			// 长边 4 者为基座，长边 2 者为短杠；一楔内必各一件且短杠长轴
+			// 与基座长轴垂直。
+			var baseW, stubH float64
+			if math.Abs(math.Max(wa, ha)-4) < 1e-9 {
+				baseW, stubH = wa, hb
+			} else {
+				baseW, stubH = wb, ha
+			}
+			baseXLong := math.Abs(baseW-4) < 1e-9
+			stubYLong := math.Abs(stubH-2) < 1e-9
+			if baseXLong != stubYLong {
+				t.Fatalf("seed %d: stub axis not perpendicular to base axis", seed)
+			}
+			ca := a.Min.Add(a.Max).Scale(0.5)
+			k := int(angleDeg(ca.X, ca.Y)/45) % 8
+			if baseXLong != coverXLong(k) {
+				t.Fatalf("seed %d: wedge %d base orientation %v violates convention", seed, k, baseXLong)
+			}
+		}
+		if assemblies != 8 {
+			t.Fatalf("seed %d: L assemblies = %d, want 8", seed, assemblies)
+		}
 	}
 }

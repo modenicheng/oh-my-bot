@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"testing"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -41,7 +40,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 3 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 4 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -188,10 +187,11 @@ func TestTopologyInvariants(t *testing.T) {
 		if mega != 2 {
 			t.Fatalf("seed %d: mega pads = %d, want 2", seed, mega)
 		}
-		// Gen3 has seven complete batches of eight AABB covers, including one
-		// short inner-ring stratum with a different grid footprint.
-		if len(def.Walls) != 56 {
-			t.Fatalf("seed %d: walls = %d, want 56", seed, len(def.Walls))
+		// Gen4 has eight complete batches: six single-AABB strata plus one
+		// mid-ring stratum whose wedge cover is a two-piece L assembly
+		// (4×0.7 base + perpendicular 2×0.7 stub, positively overlapping).
+		if len(def.Walls) != 64 {
+			t.Fatalf("seed %d: walls = %d, want 64", seed, len(def.Walls))
 		}
 		for i, w := range def.Walls {
 			if w.ID != uint32(i+1) {
@@ -396,34 +396,22 @@ func TestRotationSymmetry(t *testing.T) {
 				t.Fatalf("seed %d: wedge %d perimeter %.6f != %.6f", seed, k, stats[k].peri, stats[0].peri)
 			}
 		}
-		// 尺寸类成套性：每类（排序半边相同）墙数必为 8 的倍数，且类内角度
-		// mod 45° 分组后每 8 个一组恒定（同构盖章的直接逆断言：同批 8 块的
-		// 楔内角度相同，批间原型可不同）。
-		classRes := map[string][]float64{}
+		// 尺寸类成套性：每类（排序半边相同）墙数必为 8 的倍数。Gen4 的 L 层
+		// 采用偶/奇双定向框（同尺寸类内短杠角度残差按构造不同），逐类角度
+		// 残差一致性不再成立，成套性由「每尺寸类 8 的倍数 + 逐楔统计一致 +
+		// 90° 精确多重集」共同保证；L 装配自身的重叠剪影在
+		// TestStrataClearanceAndSpawns 与 TestLASsemblySilhouette 中单独验证。
+		classCount := map[string]int{}
 		for _, w := range def.Walls {
-			cx := (w.Min.X + w.Max.X) / 2
-			cy := (w.Min.Y + w.Max.Y) / 2
 			sx := (w.Max.X - w.Min.X) / 2
 			sy := (w.Max.Y - w.Min.Y) / 2
 			sx, sy = min(sx, sy), max(sx, sy)
 			key := fmt.Sprintf("%.6fx%.6f", 2*sx, 2*sy)
-			res := math.Mod(angleDeg(cx, cy), 45)
-			if res < 0 {
-				res += 45
-			}
-			classRes[key] = append(classRes[key], res)
+			classCount[key]++
 		}
-		for key, res := range classRes {
-			if len(res)%8 != 0 {
-				t.Fatalf("seed %d: dim class %s count %d not divisible by 8", seed, key, len(res))
-			}
-			sort.Float64s(res)
-			for i := 0; i < len(res); i += 8 {
-				for j := i + 1; j < i+8; j++ {
-					if math.Abs(res[j]-res[i]) > 0.5 {
-						t.Fatalf("seed %d: dim class %s residues at %d (%.3f) and %d (%.3f) differ", seed, key, i, res[i], j, res[j])
-					}
-				}
+		for key, n := range classCount {
+			if n%8 != 0 {
+				t.Fatalf("seed %d: dim class %s count %d not divisible by 8", seed, key, n)
 			}
 		}
 	}

@@ -73,7 +73,7 @@ try {
   await page.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await until(() => tick > 90 && self, 'warmup simulation')
-  assert.equal(map.generator_ver, 3)
+  assert.equal(map.generator_ver, 4)
   assert.equal(map.core_rules.period_ticks, 1200)
   assert.ok(map.walls.some(w => Math.hypot((w.min.X+w.max.X)/2, (w.min.Y+w.max.Y)/2) < 28), 'map includes inner cover')
   assert.equal(self.assistOn, false, 'human assist remains opt-in')
