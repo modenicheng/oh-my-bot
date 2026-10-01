@@ -91,6 +91,7 @@ message RobotState {
 message ProjectileState {
   EntityBase base = 1;
   uint32 owner_id = 2;
+  string color = 3; // 服务器权威射手颜色：射手离开观察者 AOI 后弹丸仍可自足着色（旧客户端忽略）
 }
 
 message CoreState {
@@ -145,10 +146,10 @@ message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
 message EvSay { uint32 robot = 1; string text = 2; }
 message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
 // 表现事件只报告已发生的攻击，客户端不从弹丸消失推断命中。
-message EvShot { uint32 projectile = 1; uint32 owner = 2; Vec2 at = 3; float heading = 4; }
+message EvShot { uint32 projectile = 1; uint32 owner = 2; Vec2 at = 3; float heading = 4; string color = 5; }
 message EvProjectileImpact {
   uint32 projectile = 1; uint32 owner = 2; uint32 target = 3; // 0 = 掩体/锁区
-  Vec2 at = 4; bool shield = 5; bool invulnerable = 6;
+  Vec2 at = 4; bool shield = 5; bool invulnerable = 6; string color = 7; // 源色：护盾/无敌仍客户端置白
 }
 message EvMatchStart { uint64 map_seed = 1; uint32 players = 2; } // 开局：种子随事件落盘（回放可复现）
 message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/robot 节流（铁头娃埋点）

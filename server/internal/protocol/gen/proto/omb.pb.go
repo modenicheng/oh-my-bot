@@ -1281,6 +1281,7 @@ type ProjectileState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Base          *EntityBase            `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	OwnerId       uint32                 `protobuf:"varint,2,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	Color         string                 `protobuf:"bytes,3,opt,name=color,proto3" json:"color,omitempty"` // 服务器权威射手颜色：射手离开观察者 AOI 后弹丸仍可自足着色（旧客户端忽略）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1327,6 +1328,13 @@ func (x *ProjectileState) GetOwnerId() uint32 {
 		return x.OwnerId
 	}
 	return 0
+}
+
+func (x *ProjectileState) GetColor() string {
+	if x != nil {
+		return x.Color
+	}
+	return ""
 }
 
 type CoreState struct {
@@ -2117,6 +2125,7 @@ type EvShot struct {
 	Owner         uint32                 `protobuf:"varint,2,opt,name=owner,proto3" json:"owner,omitempty"`
 	At            *Vec2                  `protobuf:"bytes,3,opt,name=at,proto3" json:"at,omitempty"`
 	Heading       float32                `protobuf:"fixed32,4,opt,name=heading,proto3" json:"heading,omitempty"`
+	Color         string                 `protobuf:"bytes,5,opt,name=color,proto3" json:"color,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2179,6 +2188,13 @@ func (x *EvShot) GetHeading() float32 {
 	return 0
 }
 
+func (x *EvShot) GetColor() string {
+	if x != nil {
+		return x.Color
+	}
+	return ""
+}
+
 type EvProjectileImpact struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Projectile    uint32                 `protobuf:"varint,1,opt,name=projectile,proto3" json:"projectile,omitempty"`
@@ -2187,6 +2203,7 @@ type EvProjectileImpact struct {
 	At            *Vec2                  `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
 	Shield        bool                   `protobuf:"varint,5,opt,name=shield,proto3" json:"shield,omitempty"`
 	Invulnerable  bool                   `protobuf:"varint,6,opt,name=invulnerable,proto3" json:"invulnerable,omitempty"`
+	Color         string                 `protobuf:"bytes,7,opt,name=color,proto3" json:"color,omitempty"` // 源色：护盾/无敌仍客户端置白
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2261,6 +2278,13 @@ func (x *EvProjectileImpact) GetInvulnerable() bool {
 		return x.Invulnerable
 	}
 	return false
+}
+
+func (x *EvProjectileImpact) GetColor() string {
+	if x != nil {
+		return x.Color
+	}
+	return ""
 }
 
 type EvMatchStart struct {
@@ -3447,10 +3471,11 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05color\x18\t \x01(\tR\x05color\x12\x1d\n" +
 	"\n" +
 	"is_partner\x18\n" +
-	" \x01(\bR\tisPartner\"T\n" +
+	" \x01(\bR\tisPartner\"j\n" +
 	"\x0fProjectileState\x12&\n" +
 	"\x04base\x18\x01 \x01(\v2\x12.omb.v1.EntityBaseR\x04base\x12\x19\n" +
-	"\bowner_id\x18\x02 \x01(\rR\aownerId\"I\n" +
+	"\bowner_id\x18\x02 \x01(\rR\aownerId\x12\x14\n" +
+	"\x05color\x18\x03 \x01(\tR\x05color\"I\n" +
 	"\tCoreState\x12&\n" +
 	"\x04base\x18\x01 \x01(\v2\x12.omb.v1.EntityBaseR\x04base\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x11R\x05value\"\xb1\x01\n" +
@@ -3517,14 +3542,15 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05EvHit\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\rR\x04from\x12\x0e\n" +
 	"\x02to\x18\x02 \x01(\rR\x02to\x12\x10\n" +
-	"\x03dmg\x18\x03 \x01(\x11R\x03dmg\"v\n" +
+	"\x03dmg\x18\x03 \x01(\x11R\x03dmg\"\x8c\x01\n" +
 	"\x06EvShot\x12\x1e\n" +
 	"\n" +
 	"projectile\x18\x01 \x01(\rR\n" +
 	"projectile\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\rR\x05owner\x12\x1c\n" +
 	"\x02at\x18\x03 \x01(\v2\f.omb.v1.Vec2R\x02at\x12\x18\n" +
-	"\aheading\x18\x04 \x01(\x02R\aheading\"\xbc\x01\n" +
+	"\aheading\x18\x04 \x01(\x02R\aheading\x12\x14\n" +
+	"\x05color\x18\x05 \x01(\tR\x05color\"\xd2\x01\n" +
 	"\x12EvProjectileImpact\x12\x1e\n" +
 	"\n" +
 	"projectile\x18\x01 \x01(\rR\n" +
@@ -3533,7 +3559,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x06target\x18\x03 \x01(\rR\x06target\x12\x1c\n" +
 	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\x12\x16\n" +
 	"\x06shield\x18\x05 \x01(\bR\x06shield\x12\"\n" +
-	"\finvulnerable\x18\x06 \x01(\bR\finvulnerable\"C\n" +
+	"\finvulnerable\x18\x06 \x01(\bR\finvulnerable\x12\x14\n" +
+	"\x05color\x18\a \x01(\tR\x05color\"C\n" +
 	"\fEvMatchStart\x12\x19\n" +
 	"\bmap_seed\x18\x01 \x01(\x04R\amapSeed\x12\x18\n" +
 	"\aplayers\x18\x02 \x01(\rR\aplayers\"W\n" +
