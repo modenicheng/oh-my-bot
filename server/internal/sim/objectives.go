@@ -242,18 +242,24 @@ const (
 // sweptReach reports whether a robot moving start->end this tick came within
 // RobotRadius+itemR of center (inclusive), without crossing solid geometry.
 func (s *Sim) sweptReach(start, end, center Vec2, itemR float64) bool {
-	if s.mapDef != nil {
-		if c := s.sweepContact(start, end.Sub(start)); c.hit && c.t < 1-collisionEpsilon {
-			end = start.Add(end.Sub(start).Scale(max(0, c.t)))
-		}
+	touches := func(p Vec2) bool {
+		return p.Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon && s.LineOfSight(p, center)
+	}
+	// The final position is legal even when wall sliding makes its chord
+	// cross a corner; keep that contact before clipping the swept chord.
+	if touches(start) || touches(end) {
+		return true
+	}
+	if c := s.sweepContact(start, end.Sub(start)); c.hit && c.t < 1-collisionEpsilon {
+		end = start.Add(end.Sub(start).Scale(max(0, c.t)))
 	}
 	d := end.Sub(start)
 	l := d.Len()
 	if l <= collisionEpsilon {
-		return start.Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon
+		return false
 	}
 	t := math.Max(0, math.Min(1, ((center.X-start.X)*d.X+(center.Y-start.Y)*d.Y)/(l*l)))
-	return start.Add(d.Scale(t)).Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon
+	return touches(start.Add(d.Scale(t)))
 }
 
 func (s *Sim) stepHealthPacks() {

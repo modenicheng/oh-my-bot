@@ -18,7 +18,7 @@ import { join, resolve, extname } from 'node:path'
 import { WebSocketServer } from 'ws'
 import assert from 'node:assert/strict'
 
-const PORT = 18425
+const PORT = Number(process.env.OMB_PICKUP_PORT || 18449)
 const BASE = `http://127.0.0.1:${PORT}`
 const CLIENT_DIR = resolve(import.meta.dirname, '..')
 const DIST = join(CLIENT_DIR, 'dist')

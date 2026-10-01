@@ -333,29 +333,35 @@ func TestSweptPickupBoundaries(t *testing.T) {
 			t.Fatal("picked up beyond combined radius")
 		}
 	})
-	t.Run("wall_blocks_no_teleport_snap", func(t *testing.T) {
-		s := newPickupSim([]Wall{{ID: 90, Min: Vec2{X: 11.3, Y: -2}, Max: Vec2{X: 11.4, Y: 2}}})
-		place(s, 12.2) // west face of wall; straight-line distance < reach
+	t.Run("wall_blocks_within_pickup_radius", func(t *testing.T) {
+		s := newPickupSim(nil)
+		s.walls = []Wall{{ID: 90, Min: Vec2{X: 10.4, Y: -2}, Max: Vec2{X: 10.5, Y: 2}}}
+		place(s, 10+RobotRadius+HealthPackRadius)
 		s.stepHealthPacks()
 		if heals(s) != 0 || s.healthPacks[0].ReadyAt != 0 {
-			t.Fatal("picked up through wall")
+			t.Fatal("picked up through wall despite blocked sight")
 		}
 	})
-	t.Run("locked_zone_blocks_core", func(t *testing.T) {
+	t.Run("locked_zone_blocks_nearby_core", func(t *testing.T) {
 		s := newPickupSim(nil)
-		m := s.mapDef
-		m.CorePads[0] = CorePadDef{ID: 50, Pos: Vec2{X: -10, Y: 0}, Group: 0, Value: 10} // inside locked radius 5
-		s.cores = []CoreView{{ID: 50, Pos: Vec2{X: -10, Y: 0}, Value: 10, Alive: true}}
-		place(s, -5.55) // tangent to the locked-zone boundary, closest legal spot
+		s.cores = []CoreView{{ID: 50, Pos: Vec2{X: -4.9, Y: 0}, Value: 10, Alive: true}}
+		place(s, -s.mapDef.CoreZone.Radius-RobotRadius)
 		s.stepCores()
-		picked := false
-		for _, ev := range s.events {
-			if ev.GetCorePickup() != nil {
-				picked = true
-			}
+		if !s.cores[0].Alive {
+			t.Fatal("nearby core absorbed through locked-zone boundary")
 		}
-		if picked || !s.cores[0].Alive {
-			t.Fatal("core inside locked zone absorbed through the boundary")
+		s.phase = ombv1.Phase_CORE_OPEN
+		s.stepCores()
+		if s.cores[0].Alive {
+			t.Fatal("unlocked core within pickup radius was not collected")
+		}
+	})
+	t.Run("slide_endpoint_still_collects", func(t *testing.T) {
+		s := newPickupSim(nil)
+		s.walls = []Wall{{ID: 90, Min: Vec2{X: 10, Y: 0}, Max: Vec2{X: 12, Y: 2}}}
+		start, end := Vec2{X: 9.2, Y: 1}, Vec2{X: 11, Y: -0.7}
+		if !s.sweptReach(start, end, Vec2{X: 11, Y: -1.5}, HealthPackRadius) {
+			t.Fatal("legal slide endpoint contact lost when its chord crosses a corner")
 		}
 	})
 	t.Run("dash_path_collects", func(t *testing.T) {
