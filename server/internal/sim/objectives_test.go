@@ -304,7 +304,9 @@ func TestSweptPickupBoundaries(t *testing.T) {
 		s.robots[0].HP = 50
 		return s
 	}
-	place := func(s *Sim, x float64) { s.robots[0].Position, s.robots[0].PathStart = Vec2{X: x, Y: 0}, Vec2{X: x, Y: 0} }
+	place := func(s *Sim, x float64) {
+		s.robots[0].Position, s.robots[0].PathStart = Vec2{X: x, Y: 0}, Vec2{X: x, Y: 0}
+	}
 	heals := func(s *Sim) int {
 		n := 0
 		for _, ev := range s.events {
