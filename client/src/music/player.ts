@@ -112,7 +112,8 @@ export class ChipMusic {
   private pending: StageId | null = null;
   /** Absolute audio time at which the pending switch settles. */
   private switchEnd = 0;
-  /** Notified once the switch settles; paused selections settle immediately. */
+  /** Notified only when a switch finally settles; paused selections settle
+   *  immediately. Superseded and duplicated requests never fire it. */
   onStage: ((stage: StageId) => void) | null = null;
 
   get ready(): boolean {
@@ -140,6 +141,13 @@ export class ChipMusic {
     return this.volumeValue;
   }
 
+  /**
+   * Selected stage — the target a live switch is ramping towards, and what
+   * `play`/`startVoices` resume at. While `pendingStage` is set this is the
+   * requested scene, not yet the fully-settled audio state; `onStage` fires
+   * when it settles. Written at request time on purpose so a parked or muted
+   * player never resurrects a stale scene.
+   */
   get stage(): StageId {
     return this.render?.stages[this.stageIndex] ?? 'title';
   }
@@ -323,7 +331,12 @@ export class ChipMusic {
     if (this.echoReturn) this.echoReturn.gain.value = this.echoValue;
   }
 
-  /** Echo repeats follow the tempo; call it whenever the tune's bpm changes. */
+  /**
+   * Retunes the echo delay times to `bpm`. This does NOT change the tune:
+   * `render.bpm` — and with it the quantize grid used by `setStage` and
+   * `gridTime` — only changes via `setRender`. Call this to align echo
+   * repeats when the audio tempo differs from the rendered tune.
+   */
   setTempo(bpm: number): void {
     this.bpm = bpm;
     const seconds = (60 / Math.max(30, bpm)) * ECHO_DIVISION;
@@ -334,11 +347,14 @@ export class ChipMusic {
    * Change stage without restarting sources. Switches are quantized onto the
    * musical grid: the fade centres on the next beat (or bar) line at least
    * half a beat away, scheduled from AudioContext.currentTime and the tune's
-   * tempo, so the boundary is never missed and the wait stays under one bar.
-   * A request landing mid-fade replaces the pending one — only the latest
-   * scene survives — and `onStage` reports what actually settled.
-   * Unquantized fades start after a short scheduling lead. Returns milliseconds
-   * until the scheduled end (assuming the audio clock keeps running).
+   * tempo, so the boundary is never missed and the wait stays under 1.5 beats
+   * (beat mode); bar mode waits at most just over one bar (grid lead plus the
+   * fade). A request landing mid-fade replaces the pending one — only the
+   * latest scene survives — while a duplicate of the target already in
+   * flight is a no-op that keeps the original schedule; `onStage` reports
+   * only what actually settled. Unquantized fades start after a short
+   * scheduling lead. Returns milliseconds until the scheduled end (assuming
+   * the audio clock keeps running).
    */
   setStage(stage: StageId, options: StageSwitch = {}): number {
     const render = this.render;
@@ -346,6 +362,15 @@ export class ChipMusic {
     if (!render) return 0;
     const index = render.stages.indexOf(stage);
     if (index < 0) return 0;
+
+    // A repeat of the target already in flight changes nothing: re-ramping
+    // would restart the fade and re-reporting here would announce `settled`
+    // while the original ramp is still running. Return the time left to the
+    // already-scheduled settle.
+    if (this.pending === stage) {
+      const ctxNow = this.ctx ? this.ctx.currentTime : 0;
+      return Math.max(0, (this.switchEnd - ctxNow) * 1000);
+    }
 
     this.cancelSwitchTimer();
     if (!ctx || !this.playing || index === this.stageIndex) {
