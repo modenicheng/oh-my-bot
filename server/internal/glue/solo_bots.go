@@ -58,16 +58,33 @@ func soloBotCommands(cmd sim.ScriptCommands) sim.ScriptCommands {
 // observer's ordinary script API and stable robot identity. Resolved commands
 // (including timeouts) are recorded by the existing gameplay replay sink.
 func soloBotSource(id uint32) string {
-	return fmt.Sprintf("const botID = %d, personality = %d;\n", id, id%3) + `
+	return fmt.Sprintf("const botID = %d, personality = %d, bodyRadius = %g;\n", id, id%3, sim.RobotRadius) + `
 let last = null, stuck = 0, escapeUntil = 0, held = 0;
 const cooldowns = {};
-// 墙 AABB 碰撞预测：p+lookahead*v 是否穿墙。复用几何，不新建依赖。
-const LOOKAHEAD = 1.2; // 米，与每帧位移同量级，仅拒接近期碰撞
-function wallBlocked(walls, p, vx, vy, lookahead) {
-  const tx = p.x + vx * lookahead, ty = p.y + vy * lookahead;
-  const pad = 0.5; // 机器人半径近似，避免贴墙判否
+// 用带机体半径的整段路径检测，终点在墙外也不能跨过薄墙。
+const LOOKAHEAD = 1.2;
+function pathBlocked(walls, p, vx, vy, length, unlocked) {
+  const dx = vx * length, dy = vy * length;
+  if (Math.hypot(p.x + dx, p.y + dy) > 80 - bodyRadius) return true;
+  if (!unlocked) {
+    const t = Math.max(0, Math.min(1, -(p.x * dx + p.y * dy) / (length * length)));
+    if (Math.hypot(p.x + t * dx, p.y + t * dy) < 30 + bodyRadius) return true;
+  }
+  const pad = bodyRadius + 0.05;
   for (const w of walls) {
-    if (tx > w.min.x - pad && tx < w.max.x + pad && ty > w.min.y - pad && ty < w.max.y + pad) return true;
+    const ox = p.x - Math.max(w.min.x, Math.min(w.max.x, p.x));
+    const oy = p.y - Math.max(w.min.y, Math.min(w.max.y, p.y));
+    // 已贴墙时仍允许沿墙/远离墙移动，避免安全余量把机体困住。
+    if (Math.hypot(ox, oy) >= bodyRadius - 0.000001 && ox * dx + oy * dy >= 0) continue;
+    let enter = 0, exit = 1;
+    for (const [start, delta, min, max] of [[p.x, dx, w.min.x - pad, w.max.x + pad], [p.y, dy, w.min.y - pad, w.max.y + pad]]) {
+      if (Math.abs(delta) < 0.000001) { if (start < min || start > max) { enter = 2; break; } }
+      else {
+        const a = (min - start) / delta, b = (max - start) / delta;
+        enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
+      }
+    }
+    if (enter <= exit) return true;
   }
   return false;
 }
@@ -111,17 +128,16 @@ function tick(ctx) {
   if (last && Math.hypot(p.x-last.x,p.y-last.y) < 0.015) stuck++; else stuck = 0;
   if (stuck > 20) { escapeUntil = now + 0.8; stuck = 0; }
   if (now < escapeUntil) { const x = dx; dx = -dy; dy = x; }
-  // 主动避障：若预测路径穿墙，在 ±60°/±120° 候选向置中选无碰撞且最接近目标方向的。
   const length = Math.hypot(dx,dy);
-  if (length > 0.1 && wallBlocked(walls, p, dx/length, dy/length, LOOKAHEAD)) {
-    const base = Math.atan2(dy, dx), c = Math.cos(base), s = Math.sin(base);
+  if (length > 0.1 && pathBlocked(walls, p, dx/length, dy/length, LOOKAHEAD, unlocked)) {
+    const base = Math.atan2(dy, dx), sign = personality === 1 ? -1 : 1;
     let chose = null;
-    for (const a of [1.05, -1.05, 2.1, -2.1]) {
-      const ca = Math.cos(a), sa = Math.sin(a);
-      const nx = c*ca - s*sa, ny = s*ca + c*sa;
-      if (!wallBlocked(walls, p, nx, ny, LOOKAHEAD)) { chose = {x: nx, y: ny}; break; }
+    // 固定绕行侧，切向候选使长墙不会退化为左右来回顶墙。
+    for (const turn of [Math.PI/2, Math.PI/3, 2*Math.PI/3, Math.PI, -Math.PI/2, -Math.PI/3, -2*Math.PI/3]) {
+      const nx = Math.cos(base + sign * turn), ny = Math.sin(base + sign * turn);
+      if (!pathBlocked(walls, p, nx, ny, LOOKAHEAD, unlocked)) { chose = {x: nx, y: ny}; break; }
     }
-    if (chose) { dx = chose.x; dy = chose.y; }
+    dx = chose ? chose.x : 0; dy = chose ? chose.y : 0;
   }
   const len2 = Math.hypot(dx,dy);
   api.move(len2 > 0.1 ? dx/len2 : 0, len2 > 0.1 ? dy/len2 : 0);

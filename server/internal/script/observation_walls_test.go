@@ -1,8 +1,8 @@
 package script
 
 import (
-	"math"
 	"testing"
+	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -45,7 +45,7 @@ func TestScanWallsLongWallPartiallyOutsideVision(t *testing.T) {
 	frame.Obs.Frame.Map = &sim.MapDef{
 		Seed: 42,
 		Walls: []sim.Wall{
-			{ID: 200, Min: sim.Vec2{X: -60, Y: 5}, Max: sim.Vec2{X: 60, Y: 7}}, // 中心 (0,6) 距离 6 但长 120m
+			{ID: 200, Min: sim.Vec2{X: 12, Y: -60}, Max: sim.Vec2{X: 14, Y: 180}}, // 中心超过视野，近侧面仍在视野内
 		},
 	}
 	src := `
@@ -53,7 +53,7 @@ function tick(ctx) {
   const walls = ctx.scan().walls;
   if (!walls || walls.length !== 1) throw new Error("long wall truncated: " + (walls && walls.length));
   const w = walls[0];
-  if (w.min.x !== -60 || w.max.x !== 60 || w.min.y !== 5 || w.max.y !== 7) throw new Error("aabb altered");
+  if (w.min.x !== 12 || w.max.x !== 14 || w.min.y !== -60 || w.max.y !== 180) throw new Error("aabb altered");
 }
 `
 	if _, err := loadAndTick(t, src, frame); err != nil {
@@ -81,7 +81,7 @@ function tick(ctx) {
 func TestScanWallsNotSharedMutable(t *testing.T) {
 	frame := testFrame()
 	frame.Obs.Frame.Map = &sim.MapDef{
-		Seed: 42,
+		Seed:  42,
 		Walls: []sim.Wall{{ID: 300, Min: sim.Vec2{X: 1}, Max: sim.Vec2{X: 2, Y: 3}}},
 	}
 	src := `
@@ -111,5 +111,30 @@ function tick(ctx) {
 	if _, err := loadAndTick(t, src, frame); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	_ = math.Pi
+}
+
+func TestScanWallsNilMap(t *testing.T) {
+	frame := testFrame()
+	frame.Obs.Frame.Map = nil
+	if _, err := loadAndTick(t, `function tick(ctx) { if (ctx.scan().walls.length !== 0) throw new Error('nil-map walls'); }`, frame); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestScanWalls64WithinRuntimeBudget(t *testing.T) {
+	frame := testFrame()
+	frame.Obs.Frame.Map.Walls = make([]sim.Wall, 64)
+	for i := range frame.Obs.Frame.Map.Walls {
+		frame.Obs.Frame.Map.Walls[i] = sim.Wall{ID: uint32(i + 1), Min: sim.Vec2{X: float64(i), Y: -5}, Max: sim.Vec2{X: float64(i) + 0.2, Y: 5}}
+	}
+	rt := NewGojaRuntime(Config{TickTimeout: 5 * time.Millisecond})
+	defer rt.Close()
+	if err := rt.Load(`function tick(ctx) { const walls = ctx.scan().walls; if (walls.length !== 64) throw new Error('incomplete walls'); for (const w of walls) { if (w.min.x > w.max.x) throw new Error('invalid wall'); } ctx.api.move({x:0,y:1}); }`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 60; i++ {
+		if _, err := rt.Tick(frame); err != nil {
+			t.Fatal(i, err)
+		}
+	}
 }

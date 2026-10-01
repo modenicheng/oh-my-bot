@@ -284,3 +284,43 @@ describe('confirmed feedback transitions', () => {
     expect(f.countdown.mock.calls.map(c => c[0])).toEqual([30, 10, 1, 30, 10, 1])
   })
 })
+
+describe('projectile impact presentation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    vi.stubGlobal('document', { hidden: false })
+  })
+  function painted(feedback: GameFeedback): string[] {
+    const colors: string[] = []
+    const ctx = { fillStyle: '', save() {}, restore() {}, fillRect() { colors.push(this.fillStyle) } }
+    const camera = { toPxX: (n: number) => n, toPxY: (n: number) => n, cw: 200, ch: 200, scale: 10 }
+    feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+    return colors
+  }
+  it.each(['#a78bfa', '#fbbf24'])('uses %s at a visible wall even when owner and projectile are absent', color => {
+    const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
+    const event = create(ServerEventSchema, { tick: 11, kind: { case: 'projectileImpact', value: { projectile: 99, owner: 42, at: { x: 42, y: 0 }, color } } })
+    f.feedback.event(event, f.world, map, true)
+    expect(painted(f.feedback)).toEqual(Array(7).fill(color))
+  })
+  it('does not reveal distant or wall-occluded impacts from global events', () => {
+    const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
+    const event = (x: number) => create(ServerEventSchema, { tick: x, kind: { case: 'projectileImpact', value: { projectile: x, owner: 42, at: { x, y: 0 }, color: '#a78bfa' } } })
+    f.feedback.event(event(100), f.world, map, true)
+    const blocked = { ...map, walls: [{ id: 1, min: { x: 41, y: -1 }, max: { x: 41.1, y: 1 } }] }
+    f.feedback.event(event(42), f.world, blocked, true)
+    expect(painted(f.feedback)).toEqual([])
+    f.feedback.event(event(41), f.world, blocked, true)
+    expect(painted(f.feedback)).toEqual(Array(7).fill('#a78bfa'))
+  })
+  it('keeps shield feedback white and supports legacy payload fallback', () => {
+    const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'projectileImpact', value: { projectile: 99, owner: 1, target: 1, at: { x: 40, y: 0 }, shield: true, color: '#a78bfa' } } }), f.world, map, true)
+    expect(painted(f.feedback)).toEqual(Array(7).fill('#f4fbff'))
+    f.feedback.reset()
+    f.world.robots.get(1)!.color = '#fbbf24'
+    f.feedback.event(create(ServerEventSchema, { tick: 12, kind: { case: 'projectileImpact', value: { projectile: 100, owner: 1, at: { x: 42, y: 0 } } } }), f.world, map, true)
+    expect(painted(f.feedback)).toEqual(Array(7).fill('#fbbf24'))
+  })
+})

@@ -90,7 +90,7 @@ func (s *Sim) fireProjectiles() {
 		s.projectiles = append(s.projectiles, Projectile{ID: s.nextProjectile, Owner: r.ID, Pos: r.Position, Heading: r.Heading, BaseHeading: r.Heading, Spread: (s.randomUnit()*2 - 1) * MaxSpread})
 		// Telemetry only: announce the attack at the muzzle; impacts follow below.
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Shot{Shot: &ombv1.EvShot{
-			Projectile: s.nextProjectile, Owner: r.ID, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Heading: float32(r.Heading)}}})
+			Projectile: s.nextProjectile, Owner: r.ID, Color: r.Color, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Heading: float32(r.Heading)}}})
 		s.nextProjectile++ // zero means exhausted IDs: never wrap and reuse an entity.
 	}
 }
@@ -128,7 +128,7 @@ func (s *Sim) stepProjectiles() {
 			// Impact telemetry precedes damage so observers see the hit even when
 			// protection (invulnerability/partner) means no HP follows.
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
-				Projectile: p.ID, Owner: p.Owner, Target: v.ID, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y},
+				Projectile: p.ID, Owner: p.Owner, Color: s.robots[owner].Color, Target: v.ID, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y},
 				Shield: v.Combat.ShieldOn, Invulnerable: v.Combat.Invulnerable}}})
 			s.damage(p.Owner, v, ShotDamage)
 			continue
@@ -138,7 +138,7 @@ func (s *Sim) stepProjectiles() {
 			// stopping point with Target 0; range expiry stays silent.
 			if blocked {
 				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
-					Projectile: p.ID, Owner: p.Owner, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y}}}})
+					Projectile: p.ID, Owner: p.Owner, Color: s.robots[owner].Color, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y}}}})
 			}
 			continue
 		}

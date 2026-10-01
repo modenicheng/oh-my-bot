@@ -170,3 +170,28 @@ func snapshotsDiffer(a, b *Sim) bool {
 		a.Snapshot().Robots[1].Velocity != b.Snapshot().Robots[1].Velocity ||
 		a.Snapshot().RNG != b.Snapshot().RNG
 }
+
+func TestProjectileColorSurvivesWallImpact(t *testing.T) {
+	for _, color := range []string{"#a78bfa", "#fbbf24"} {
+		t.Run(color, func(t *testing.T) {
+			world, sink := enemySim(t)
+			world.robots[0].Color = color
+			world.walls = []Wall{{ID: 99, Min: Vec2{2, 48}, Max: Vec2{2.01, 52}}}
+			world.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisFire), Fire: true})
+			world.Tick()
+			view := world.WorldView()
+			if len(view.Projectiles) != 1 || view.Projectiles[0].Color != color {
+				t.Fatalf("missing projectile color: %+v", view.Projectiles)
+			}
+			world.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisFire)})
+			stepTicks(world, 20)
+			shots, impacts := shotsAndImpacts(sink)
+			if len(shots) != 1 || shots[0].Color != color {
+				t.Fatalf("shot color: %+v", shots)
+			}
+			if len(impacts) != 1 || impacts[0].Color != color || impacts[0].Target != 0 {
+				t.Fatalf("wall impact color: %+v", impacts)
+			}
+		})
+	}
+}

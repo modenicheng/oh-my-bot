@@ -65,6 +65,9 @@ func (s *Sim) publishView() {
 	}
 	for i, p := range s.projectiles {
 		v.Projectiles[i] = ProjView{ID: p.ID, Owner: p.Owner, Pos: p.Pos, Heading: p.Heading}
+		if owner, ok := s.index[p.Owner]; ok {
+			v.Projectiles[i].Color = s.robots[owner].Color
+		}
 	}
 	for i, u := range s.uplinks {
 		cds := make(map[uint32]uint32, len(u.ReadyAt))

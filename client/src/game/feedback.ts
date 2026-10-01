@@ -120,12 +120,12 @@ export class GameFeedback {
     switch (k.case) {
       case 'shot':
         if (!world.robots.has(k.value.owner)) break
-        if (k.value.at) { this.add('shot', k.value.at, white, k.value.projectile, 110, k.value.heading); this.sound('shot', k.value.at, world, 1, k.value.owner === selfId) }
+        if (k.value.at) { this.add('shot', k.value.at, k.value.color || world.robots.get(k.value.owner)?.color || white, k.value.projectile, 110, k.value.heading); this.sound('shot', k.value.at, world, 1, k.value.owner === selfId) }
         break
       case 'projectileImpact':
-        if (!world.robots.has(k.value.owner) && !world.robots.has(k.value.target)) break
+        if (!k.value.at || !this.visibleImpact(k.value.at, world, map, k.value.projectile)) break
         if (k.value.at) {
-          this.add('impact', k.value.at, k.value.shield || k.value.invulnerable ? white : k.value.target ? red : cyan, k.value.projectile, 330)
+          this.add('impact', k.value.at, k.value.shield || k.value.invulnerable ? white : k.value.target ? red : k.value.color || world.projectiles.get(k.value.projectile)?.color || world.robots.get(k.value.owner)?.color || cyan, k.value.projectile, 330)
           this.sound(k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit', k.value.at, world, 1, k.value.target === selfId)
         }
         if (k.value.target === selfId && !k.value.invulnerable) this.message(k.value.shield ? '护盾吸收命中' : '机体受击')
@@ -245,6 +245,29 @@ export class GameFeedback {
   private add(kind: EffectKind, pos: MapVec2, color: string, seed: number, duration: number, heading = 0): void {
     if (this.effects.length >= 160) this.effects.shift()
     this.effects.push({ kind, pos: { x: pos.x, y: pos.y }, at: performance.now(), duration, color, seed, heading })
+  }
+
+  // 事件为全房间广播；颜色元数据不能使视野外或掩体后的撞击凭空可见。
+  private visibleImpact(at: MapVec2, world: WorldState, map: MapDefParsed, projectileId: number): boolean {
+    const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
+    if (!self) return false
+    const dx = at.x - self.x, dy = at.y - self.y, distance = Math.hypot(dx, dy)
+    const knownProjectile = world.projectiles.get(projectileId)
+    if (distance > 32 || (distance > 20 && !knownProjectile)) return false
+    // 截短末端：撞击墙体近表面本身不应成为遮挡。
+    const end = Math.max(0, 1 - 0.03 / Math.max(distance, 0.03))
+    for (const wall of map.walls) {
+      let enter = 0, exit = end
+      for (const [origin, delta, min, max] of [[self.x, dx, wall.min.x, wall.max.x], [self.y, dy, wall.min.y, wall.max.y]] as const) {
+        if (Math.abs(delta) < 1e-8) { if (origin < min || origin > max) { enter = 2; break } }
+        else {
+          const a = (min - origin) / delta, b = (max - origin) / delta
+          enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b))
+        }
+      }
+      if (enter <= exit) return false
+    }
+    return true
   }
 
   private nickOf(id: number, world: WorldState): string {

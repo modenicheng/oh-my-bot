@@ -34,6 +34,8 @@ try {
   const messages = []
   const inputs = []
   const robots = new Map()
+  const projectileSnapshots = []
+  const projectileImpacts = []
   page.on('pageerror', e => errors.push(String(e)))
   page.on('websocket', socket => {
     socket.on('framesent', ({ payload }) => {
@@ -46,10 +48,21 @@ try {
     socket.on('framereceived', ({ payload }) => {
       if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
       const msg = fromBinary(ServerMsgSchema, payload.subarray(1))
-      if (msg.payload.case === 'snapshot') { latest = msg.payload.value; if (latest.full) robots.clear(); for (const r of latest.robots) robots.set(r.base.id, r); for (const id of latest.robotGone) robots.delete(id); if (latest.self) id = latest.self.robotId }
+      if (msg.payload.case === 'snapshot') {
+        latest = msg.payload.value
+        projectileSnapshots.push(...latest.projectiles)
+        if (latest.full) robots.clear()
+        for (const r of latest.robots) {
+          const previous = robots.get(r.base.id)
+          robots.set(r.base.id, { ...r, nick: r.nick || previous?.nick || '', color: r.color || previous?.color || '' })
+        }
+        for (const gone of latest.robotGone) robots.delete(gone)
+        if (latest.self) id = latest.self.robotId
+      }
       if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'mapBootstrap') { map = JSON.parse(msg.payload.value.kind.value.mapJson); latest = undefined; robots.clear() }
       if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'scriptResult') receipts.push(msg.payload.value.kind.value)
       if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'say') messages.push(msg.payload.value.kind.value)
+      if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'projectileImpact') projectileImpacts.push(msg.payload.value.kind.value)
     })
   })
   await page.goto(base)
@@ -60,6 +73,7 @@ try {
   await page.press('#in-nick', 'm')
   assert.equal(await page.locator('#view-manual').isHidden(), true, 'typing m must not open manual')
   await page.fill('#in-nick', 'tester')
+  await page.locator('.swatch[title="#a78bfa"]').click()
   await page.click('#btn-join')
   await page.locator('#btn-start').waitFor({ state: 'visible' })
   await page.keyboard.press('m')
@@ -92,7 +106,10 @@ try {
   await page.mouse.move(900, 400)
   await page.mouse.down()
   await until(() => robots.get(id).energyX10 < 980, 'fire energy')
+  await until(() => projectileSnapshots.some(projectile => projectile.ownerId === id), 'authoritative projectile snapshot')
   await page.mouse.up()
+  assert.equal(robots.get(id).color, '#a78bfa', 'selected shooter color survives join')
+  assert.ok(projectileSnapshots.filter(projectile => projectile.ownerId === id).every(projectile => projectile.color === '#a78bfa'), 'projectile snapshots carry owner color without requiring visible robot metadata')
   await page.screenshot({ path: join(shots, 'game.png') })
   const beforeRefresh = { ...robots.get(id).base.pos }
   latest = undefined
@@ -296,7 +313,7 @@ try {
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)
   // TypeScript 模式：开关、注解补全、编译提交、编译失败保留旧脚本。
-  const tsSource = `import type { TickContext } from '@omb/bot-api'\n\nexport function tick(ctx: TickContext) {\n  const heading: number = ctx.self.position.x + ctx.self.position.y\n  ctx.api.shield(heading > 0)\n  ctx.api.say('TS 脚本运行正常')\n}\n`
+  const tsSource = ["import type { TickContext } from '@omb/bot-api'", "", "export function tick(ctx: TickContext) {", "  const walls = ctx.scan().walls", "  if (!Array.isArray(walls) || !walls.length) throw new Error('missing static walls')", "  if (!walls.every(w => Number.isFinite(w.min.x) && Number.isFinite(w.min.y) && Number.isFinite(w.max.x) && Number.isFinite(w.max.y) && w.min.x <= w.max.x && w.min.y <= w.max.y)) throw new Error('invalid wall geometry')", "  const heading: number = ctx.self.position.x + ctx.self.position.y", "  ctx.api.shield(heading > 0)", "  ctx.api.say('TS 脚本运行正常')", "}", ""].join(String.fromCharCode(10))
   await page.click('#workbench-lang-switch [data-lang="ts"]')
   assert.equal(await page.locator('#workbench-lang-switch [data-lang="ts"]').getAttribute('aria-pressed'), 'true', 'TS switch toggles pressed state')
   assert.equal(await page.locator('#workbench-lang-switch [data-lang="js"]').getAttribute('aria-pressed'), 'false', 'JS switch released')

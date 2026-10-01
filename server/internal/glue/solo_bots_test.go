@@ -292,58 +292,86 @@ func TestSoloBotActuallyCollectsCoreAndCompletesHack(t *testing.T) {
 	}
 }
 
-// 主动避障：机器人与目标之间隔一堵墙时，不得持续朝墙直行；
-// 必须选择切向绕行向量（与直行方向有显著夹角）。
+// 前瞻终点已在薄墙另一侧，仍须检测整段路径；不受锁区绕行逻辑干扰。
 func TestSoloBotSteersAroundWall(t *testing.T) {
-	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
-	defer rt.Close()
-	if err := rt.Load(soloBotSource(3)); err != nil {
-		t.Fatal(err)
-	}
-	// 机器人位于 (0,-5)，目标核心在 (0,5)，中间横亘一堵墙 y∈[-1,1]。
-	frame := sim.ScriptFrame{
-		Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 0, Y: -5}, HpX10: 1000, EnergyX10: 1000},
-		Obs: sim.Observation{
-			Frame: sim.FrameView{Phase: sim.PhaseOuterRing, Map: &sim.MapDef{
-				Seed: 42,
-				Walls: []sim.Wall{
-					{ID: 1, Min: sim.Vec2{X: -8, Y: -1}, Max: sim.Vec2{X: 8, Y: 1}},
-				},
-			}},
-			Cores: []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 0, Y: 5}, Alive: true}},
-		},
-	}
-	run := func() sim.ScriptCommands {
-		t.Helper()
+	for _, phase := range []sim.Phase{sim.PhaseOuterRing, sim.PhaseCoreOpen} {
+		rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+		if err := rt.Load(soloBotSource(3)); err != nil {
+			t.Fatal(err)
+		}
+		frame := sim.ScriptFrame{
+			Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 40}, HpX10: 1000, EnergyX10: 1000},
+			Obs: sim.Observation{
+				Frame: sim.FrameView{Phase: phase, Map: &sim.MapDef{Seed: 42, Walls: []sim.Wall{
+					{ID: 1, Min: sim.Vec2{X: 40.7, Y: -30}, Max: sim.Vec2{X: 40.71, Y: 30}},
+				}}},
+				Cores: []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 46}, Alive: true}},
+			},
+		}
 		cmd, err := rt.Tick(frame)
+		rt.Close()
 		if err != nil {
 			t.Fatal(err)
 		}
-		frame.Obs.Frame.Tick++
-		return soloBotCommands(cmd)
-	}
-	first := run()
-	if first.Move.Y > 0.5 {
-		t.Fatalf("bot drives straight into wall: %+v", first.Move)
-	}
-	// 直行方向 (0,1) 与实际移动方向的夹角应显著（>30°），说明已绕行。
-	ang := math.Atan2(first.Move.Y, first.Move.X)
-	if math.Abs(ang-math.Pi/2) < 30*math.Pi/180 {
-		t.Fatalf("no meaningful steering: %+v ang=%v", first.Move, ang)
-	}
-	// 持续行进不回退到直行顶墙：模拟多帧位置推进，方向始终有横向分量。
-	pos := frame.Self.Pos
-	for i := 0; i < 40; i++ {
-		frame.Self.Pos = sim.Vec2{X: pos.X + first.Move.X*0.5*float64(i+1), Y: pos.Y + first.Move.Y*0.5*float64(i+1)}
-		c := run()
-		if c.Move.Len() == 0 {
-			continue
-		}
-		// 越过墙的 y 区间前，不得出现几乎纯 +Y 的持续顶墙。
-		if frame.Self.Pos.Y < -1.6 && c.Move.Y > 0.9 && math.Abs(c.Move.X) < 0.45 {
-			t.Fatalf("bot reverts to head-on wall pushing at %v: %+v", frame.Self.Pos, c.Move)
+		move := soloBotCommands(cmd).Move
+		if move.X > 0.1 || math.Abs(move.Y) < 0.8 {
+			t.Fatalf("phase %v: swept thin-wall avoidance failed: %+v", phase, move)
 		}
 	}
+}
+
+func TestSoloBotNavigatesAroundWallWithRealCollision(t *testing.T) {
+	const rid = uint32(4)
+	sink := &soloBotEvents{}
+	world := sim.NewSim(42, []uint32{rid}, sink)
+	def := &sim.MapDef{
+		Walls:     []sim.Wall{{ID: 1, Min: sim.Vec2{X: 42, Y: -3}, Max: sim.Vec2{X: 42.05, Y: 3}}},
+		CoreZone:  sim.CoreZoneDef{Radius: 30, UnlockPhase: sim.PhaseCoreOpen},
+		CorePads:  []sim.CorePadDef{{ID: 100, Pos: sim.Vec2{X: 47}, Group: 0, Value: 10}},
+		CoreRules: sim.CoreRulesDef{PeriodTicks: 3600, GroupWeights: map[sim.Phase][]float64{sim.PhaseOuterRing: {1}, sim.PhaseCoreOpen: {1}}},
+	}
+	for i := range def.Sectors {
+		def.Sectors[i] = sim.Sector{ID: uint32(i), Center: sim.Vec2{X: 40}, SpawnArea: sim.Rect{Min: sim.Vec2{X: 40}, Max: sim.Vec2{X: 40}}}
+	}
+	if err := world.SetMap(def); err != nil {
+		t.Fatal(err)
+	}
+	world.AssistToggle(rid)
+	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+	defer rt.Close()
+	if err := rt.Load(soloBotSource(rid)); err != nil {
+		t.Fatal(err)
+	}
+	maxY := 0.0
+	for tick := 0; tick < 1200; tick++ {
+		world.Tick()
+		view := world.WorldView()
+		self := view.Robots[0]
+		maxY = math.Max(maxY, math.Abs(self.Pos.Y))
+		nearestX := math.Max(42.0, math.Min(42.05, self.Pos.X))
+		nearestY := math.Max(-3.0, math.Min(3.0, self.Pos.Y))
+		if math.Hypot(self.Pos.X-nearestX, self.Pos.Y-nearestY) < sim.RobotRadius-1e-5 {
+			t.Fatalf("bot overlaps wall at %+v", self.Pos)
+		}
+		obs, ok := view.Observe(rid)
+		if !ok {
+			t.Fatal("missing bot observation")
+		}
+		cmd, err := rt.Tick(sim.ScriptFrame{Self: self, Obs: obs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		world.ApplyScriptCommands(rid, soloBotCommands(cmd))
+		for _, ev := range sink.events {
+			if ev.GetCorePickup() != nil {
+				if maxY < 3+sim.RobotRadius {
+					t.Fatalf("bot reached target without going around wall: y=%v", maxY)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("bot failed to reach core behind wall: final=%+v maxY=%v", world.WorldView().Robots[0].Pos, maxY)
 }
 
 // 锁区关闭时贴边绕行不因新增避障逻辑退化：无墙场景直行不受影响。

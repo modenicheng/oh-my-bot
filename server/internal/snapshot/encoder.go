@@ -54,7 +54,10 @@ func stampRobot(r *sim.RobotView) robotStamp {
 }
 
 // projStamp / coreStamp / uplinkStamp：各类别的变化子集。
-type projStamp struct{ pos sim.Vec2 }
+type projStamp struct {
+	pos   sim.Vec2
+	color string
+}
 
 // coreStamp：Alive=false 不编码为实体——被拾取以 core_gone 表达。
 type coreStamp struct {
@@ -122,13 +125,13 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	nextProjs := make(map[uint32]projStamp, len(obs.Projectiles))
 	for i := range obs.Projectiles {
 		p := &obs.Projectiles[i]
-		nextProjs[p.ID] = projStamp{pos: p.Pos}
+		nextProjs[p.ID] = projStamp{pos: p.Pos, color: p.Color}
 		if full {
 			delta.Projectiles = append(delta.Projectiles, encodeProj(p))
 			continue
 		}
 		prev, seen := e.lastProjs[p.ID]
-		if !seen || prev.pos != p.Pos {
+		if !seen || prev != nextProjs[p.ID] {
 			delta.Projectiles = append(delta.Projectiles, encodeProj(p))
 		}
 	}
@@ -248,6 +251,7 @@ func encodeProj(p *sim.ProjView) *ombv1.ProjectileState {
 			Heading: float32(p.Heading),
 		},
 		OwnerId: p.Owner,
+		Color:   p.Color,
 	}
 }
 

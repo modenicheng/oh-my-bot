@@ -57,7 +57,7 @@ export class Renderer {
     drawCover(ctx, map, cam)
     for (const p of world.projectiles.values()) {
       const b = p.base
-      if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, world.robots.get(p.ownerId)?.color || ink.cyan)
+      if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan)
     }
     for (const r of world.robots.values()) {
       const b = r.base

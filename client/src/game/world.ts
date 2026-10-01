@@ -82,7 +82,11 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
   for (const id of snap.robotGone) world.robots.delete(id)
 
   for (const p of snap.projectiles) {
-    world.projectiles.set(p.base?.id ?? 0, { ...p, seenAt: now })
+    const prev = world.projectiles.get(p.base?.id ?? 0)
+    world.projectiles.set(p.base?.id ?? 0, {
+      ...p, seenAt: now,
+      color: p.color || (prev?.ownerId === p.ownerId ? prev.color : '') || world.robots.get(p.ownerId)?.color || '',
+    })
   }
   for (const id of snap.projectileGone) world.projectiles.delete(id)
 

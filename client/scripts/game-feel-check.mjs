@@ -248,6 +248,30 @@ const AUDIO_INIT = `(() => {
   } catch {}
 })()`
 
+// Observe actual Canvas calls, not application internals or screenshot heuristics.
+const COLOR_INIT = `(() => {
+  const log = window.__ombColors = { beams: [], impacts: [] }
+  const gradients = new WeakMap()
+  const proto = CanvasRenderingContext2D.prototype
+  const gradient = proto.createLinearGradient, stop = CanvasGradient.prototype.addColorStop, fill = proto.fillRect
+  proto.createLinearGradient = function (...args) {
+    const value = gradient.apply(this, args); gradients.set(value, []); return value
+  }
+  CanvasGradient.prototype.addColorStop = function (offset, color) {
+    gradients.get(this)?.push({ offset, color }); return stop.call(this, offset, color)
+  }
+  proto.fillRect = function (x, y, width, height) {
+    if (this.canvas.id === 'game-canvas') {
+      if (y === -2 && height === 4 && this.fillStyle instanceof CanvasGradient) {
+        log.beams.push(gradients.get(this.fillStyle) ?? []); if (log.beams.length > 200) log.beams.shift()
+      } else if (width === 4 && height === 4 && typeof this.fillStyle === 'string') {
+        log.impacts.push(this.fillStyle); if (log.impacts.length > 200) log.impacts.shift()
+      }
+    }
+    return fill.call(this, x, y, width, height)
+  }
+})()`
+
 const audioStarted = page => page.evaluate(() => (window.__ombAudio ? window.__ombAudio.started.length : 0))
 /** master = first GainNode the engine creates (ensure(): compressor -> gain -> destination) */
 const masterGainValue = page => page.evaluate(() => {
@@ -802,6 +826,58 @@ async function reducedMotionPass(browser, fix) {
   }
 }
 
+async function projectileColorPass(browser, fix) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await ctx.addInitScript(COLOR_INIT)
+  const page = await ctx.newPage(), errors = []
+  const clearColors = () => page.evaluate(() => { window.__ombColors.beams = []; window.__ombColors.impacts = [] })
+  const hasBeam = color => page.evaluate(c => window.__ombColors.beams.some(stops => stops.some(s => s.offset === 1 && s.color === c)), color)
+  const hasImpact = color => page.evaluate(c => window.__ombColors.impacts.includes(c), color)
+  const failures = []
+  const checkColor = async (check, label) => {
+    try { await until(check, label, 1500) } catch (error) { failures.push(error.message) }
+  }
+  try {
+    await joinGame(page, fix, errors)
+    for (const [i, color] of ['#a78bfa', '#fbbf24'].entries()) {
+      // Owner starts visible, but the impact arrives after its projectile tombstone.
+      fix.st.robots[1].color = color
+      fix.sendFull()
+      await fix.step(st => { st.projectiles = [{ base: { id: 940 + i, pos: { x: 5, y: 2 }, heading: 0.2 }, ownerId: ENEMY_ID, color }] })
+      await clearColors()
+      await checkColor(() => hasBeam(color), `visible owner's ${color} projectile beam`)
+      await fix.step(st => { st.projectiles = []; st.gone.projectiles = [940 + i] })
+      await clearColors()
+      fix.bcast(fix.event('projectileImpact', EvProjectileImpactSchema, { projectile: 940 + i, owner: ENEMY_ID, target: 0, at: { x: 5, y: 2 }, color }))
+      await checkColor(() => hasImpact(color), `${color} wall impact preserves projectile color`)
+      await sleep(370)
+    }
+    // Shooter leaves AOI while its yellow projectile remains in sight.
+    const yellow = '#fbbf24'
+    await fix.step(st => { st.projectiles = [{ base: { id: 950, pos: { x: 5, y: 2 }, heading: 0.3 }, ownerId: ENEMY_ID, color: yellow }] })
+    await fix.step(st => { st.robots = st.robots.filter(r => r.base.id !== ENEMY_ID); st.gone.robots = [ENEMY_ID] })
+    await clearColors()
+    await checkColor(() => hasBeam(yellow), 'projectile retains yellow after robotGone')
+    await fix.step(st => { st.projectiles = []; st.gone.projectiles = [950] })
+    await clearColors()
+    fix.bcast(fix.event('projectileImpact', EvProjectileImpactSchema, { projectile: 950, owner: ENEMY_ID, target: 0, at: { x: 5, y: 2 }, color: yellow }))
+    await checkColor(() => hasImpact(yellow), 'wall impact remains yellow after both owner and projectile disappear')
+    await sleep(370)
+    // No prior owner metadata exists: the projectile and event must be self-contained.
+    const purple = '#a78bfa'
+    await fix.step(st => { st.projectiles = [{ base: { id: 960, pos: { x: 4, y: -2 }, heading: 0.1 }, ownerId: 303, color: purple }] })
+    await clearColors()
+    await checkColor(() => hasBeam(purple), 'never-observed owner projectile stays purple')
+    await fix.step(st => { st.projectiles = []; st.gone.projectiles = [960] })
+    await clearColors()
+    fix.bcast(fix.event('projectileImpact', EvProjectileImpactSchema, { projectile: 960, owner: 303, target: 0, at: { x: 4, y: -2 }, color: purple }))
+    await checkColor(() => hasImpact(purple), 'never-observed owner impact stays purple')
+    await shot(page, 'projectile-color-regression.png')
+    assert.deepEqual(errors, [], 'no page errors during projectile color regression')
+    assert.deepEqual(failures, [], 'projectile colors remain independent of owner visibility and tombstone ordering')
+  } finally { await ctx.close() }
+}
+
 // ---------------------------------------------------------------- main
 if (!existsSync(join(DIST, 'index.html'))) {
   console.error(`dist missing: ${join(DIST, 'index.html')} — run "npm run build" in client/ first (main triggers builds)`)
@@ -815,6 +891,7 @@ fix.attach(server)
 let browser
 try {
   browser = await chromium.launch()
+  await projectileColorPass(browser, fix)
   await fullPass(browser, fix)
   await quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')
   await quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')

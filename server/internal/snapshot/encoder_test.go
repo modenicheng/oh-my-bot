@@ -334,3 +334,22 @@ func TestNilSelf(t *testing.T) {
 		t.Fatal("self=nil 时 Self 应留空")
 	}
 }
+
+func TestProjectileColorWithoutVisibleOwner(t *testing.T) {
+	enc := NewEncoder()
+	obs := sim.Observation{Projectiles: []sim.ProjView{{ID: 10, Owner: 99, Color: "#a78bfa", Pos: sim.Vec2{X: 2}}}}
+	full := enc.Encode(1, 0, sim.PhaseOuterRing, 480, obs, nil)
+	if len(full.Robots) != 0 || len(full.Projectiles) != 1 || full.Projectiles[0].Color != "#a78bfa" {
+		t.Fatalf("full projectile color: %+v", full)
+	}
+	obs.Projectiles[0].Pos.X++
+	delta := enc.Encode(2, 0, sim.PhaseOuterRing, 480, obs, nil)
+	if len(delta.Projectiles) != 1 || delta.Projectiles[0].Color != "#a78bfa" {
+		t.Fatalf("delta color: %+v", delta)
+	}
+	obs.Projectiles[0].Color = "#fbbf24"
+	delta = enc.Encode(3, 0, sim.PhaseOuterRing, 480, obs, nil)
+	if len(delta.Projectiles) != 1 || delta.Projectiles[0].Color != "#fbbf24" {
+		t.Fatalf("color-only delta: %+v", delta)
+	}
+}
