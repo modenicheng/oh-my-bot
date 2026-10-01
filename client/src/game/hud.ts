@@ -3,8 +3,8 @@
 // 描边、荧光只用于状态高亮。技能卡是状态显示（含键帽），不是可点击按钮。
 import type { WorldState, RobotEnt } from './world'
 import type { MapDefParsed, MapUplink } from './mapdef'
-import { phaseName, titleName } from './render'
-import type { ScoreRow } from '@omb/protocol'
+import { phaseName } from './render'
+import { type Scoreboard, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
 import './hud.css'
@@ -35,6 +35,7 @@ export class Hud {
   private leftPanel: HTMLDivElement
   private phaseEl: HTMLSpanElement
   private timeEl: HTMLSpanElement
+  private selfScore: HTMLElement
   private scoreRows: HTMLDivElement
   private assistEl: HTMLDivElement
   private assistCard: HTMLDivElement
@@ -62,6 +63,12 @@ export class Hud {
     this.phaseEl = req(root, 'hud-phase')
     this.timeEl = req(root, 'hud-time')
     this.scoreRows = req(root, 'hud-score-rows')
+    const ownScore = document.createElement('div')
+    ownScore.id = 'hud-self-score'
+    ownScore.append(document.createTextNode('当前积分'))
+    this.selfScore = document.createElement('strong')
+    ownScore.append(this.selfScore)
+    this.leftPanel.append(ownScore)
     this.assistEl = req(root, 'hud-assist')
     this.assistCard = req(root, 'skill-assist')
     this.msgLine = req(root, 'hud-msg')
@@ -90,7 +97,7 @@ export class Hud {
   }
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
-  update(world: WorldState, map?: MapDefParsed): void {
+  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard): void {
     if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
@@ -122,25 +129,18 @@ export class Hud {
     if (this.timeEl.textContent !== clock) this.timeEl.textContent = clock
     this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
-    // 比分简表：行 = nick + hp（分数服务器未透出，用状态占位；签名查重重建）
-    const rows = [...sortedRobots(world.robots)].slice(0, 8).map(r => ({
-      self: r.base?.id === selfId,
-      partner: r.isPartner,
-      nick: r.nick || `robot-${r.base?.id ?? '?'}`,
-      health: r.dead ? '重生中' : `${Math.max(0, Math.round(r.hpX10 / 10))}hp`,
-    }))
-    const sig = JSON.stringify(rows)
+    setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
+    const rows = scores?.display(world.robots, selfId) ?? []
+    const sig = JSON.stringify([scores?.hasScores, rows])
     if (sig !== this.lastRowsSig) {
       this.lastRowsSig = sig
-      this.scoreRows.replaceChildren(...rows.map(row => {
-        const div = document.createElement('div')
-        div.className = 'hud-score-row'
-        if (row.self) { div.append(icon('target')); div.title = '自己' }
-        div.append(document.createTextNode(row.nick))
-        if (row.partner) div.append(icon('partner'), document.createTextNode('搭档'))
-        div.append(document.createTextNode(` · ${row.health}`))
-        return div
-      }))
+      this.scoreRows.replaceChildren(...rows.map(row => scoreRow(row)))
+      if (!rows.length) {
+        const empty = document.createElement('div')
+        empty.className = 'score-waiting'
+        empty.textContent = scores?.hasScores ? '暂无积分记录' : '等待积分同步'
+        this.scoreRows.append(empty)
+      }
     }
 
     this.updateSkills(world, self)
@@ -202,6 +202,7 @@ export class Hud {
     this.clearMsg(); this.clearInnerRing(); this.clearCountdown()
     this.timeEl.classList.remove('urgent')
     this.innerBanner.remove()
+    this.selfScore.parentElement?.remove()
   }
 
   private clearInnerRing(): void {
@@ -311,77 +312,6 @@ export class Hud {
   }
 }
 
-/** 结算覆盖层：分数行 + 称号。重复调用防重（服务器幂等但客户端也只渲染一次）；
- *  onBack：「回到房间」回调（本地切视图，不发 RoomAction）。 */
-export function showMatchEnd(
-  root: HTMLElement,
-  rows: ScoreRow[],
-  idToNick: Map<number, string>,
-  onBack?: () => void,
-): void {
-  hideMatchEnd(root) // 防重：丢弃旧覆盖层，确保全屏只有一个
-  const overlay = document.createElement('div')
-  overlay.className = 'end-overlay'
-  const title = document.createElement('div')
-  title.className = 'end-title'
-  title.textContent = 'MATCH END'
-  overlay.appendChild(title)
-
-  if (rows.length === 0) {
-    const empty = document.createElement('div')
-    empty.className = 'end-empty'
-    empty.textContent = '本局无得分记录'
-    overlay.appendChild(empty)
-  } else {
-    const list = document.createElement('div')
-    list.className = 'end-list'
-    const sorted = [...rows].sort((a, b) => b.score - a.score)
-    for (let i = 0; i < sorted.length; i++) {
-      const row = sorted[i]!
-      const div = document.createElement('div')
-      div.className = 'end-row'
-      const rank = document.createElement('span')
-      rank.className = 'end-rank'
-      rank.textContent = String(i + 1)
-      const name = document.createElement('span')
-      name.className = 'end-name'
-      name.textContent = idToNick.get(row.robot) ?? `robot-${row.robot}`
-      const score = document.createElement('span')
-      score.className = 'end-score'
-      score.textContent = String(row.score)
-      div.append(rank, name, score)
-      list.appendChild(div)
-      // 称号行
-      for (const t of row.titles) {
-        const name2 = titleName(t)
-        if (!name2) continue
-        const tdiv = document.createElement('div')
-        tdiv.className = 'end-title-row'
-        tdiv.textContent = `「${name2}」`
-        list.appendChild(tdiv)
-      }
-    }
-    overlay.appendChild(list)
-  }
-
-  if (onBack) {
-    const back = document.createElement('button')
-    back.type = 'button'
-    back.className = 'end-back'
-    const label = document.createElement('span')
-    label.textContent = '回到房间'
-    back.append(icon('back'), label)
-    back.addEventListener('click', onBack)
-    overlay.appendChild(back)
-  }
-
-  root.appendChild(overlay)
-}
-
-export function hideMatchEnd(root: HTMLElement): void {
-  for (const el of root.querySelectorAll('.end-overlay')) el.remove()
-}
-
 // ---- helpers ---------------------------------------------------------------
 
 /** 绝对 tick → 剩余秒（一位小数由调用方格式化）；字段缺失返回 undefined（未知）。 */
@@ -405,11 +335,6 @@ function nearestUplink(map: MapDefParsed, phase: number, x: number, y: number): 
     if (d <= u.interactR && d < bestD) { best = u; bestD = d }
   }
   return best
-}
-
-function* sortedRobots(robots: Map<number, RobotEnt>): Generator<RobotEnt> {
-  const arr = [...robots.values()].sort((a, b) => (a.nick || '').localeCompare(b.nick || ''))
-  yield* arr
 }
 
 function clamp01(v: number): number {

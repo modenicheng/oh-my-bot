@@ -3,6 +3,8 @@
 // 时间轴：拖动条（0→endTick）+ 播放/暂停/倍速（0.5/1/2/4×）+ 步进（±1s）。
 // 事件叠加层：kill/core/uplink/phase 标记点，hover 显示详情。
 import { Camera } from '../game/camera'
+import { rankedScores, scoreRow } from '../game/scoreboard'
+import { bgm } from '../music/bgm'
 import { SpectatorCamera } from './spectator'
 import { artReady } from '../game/art'
 import { iconButton } from '../icons'
@@ -379,6 +381,7 @@ export class ReplayPlayer {
     if (!this.index || !this.map) return
     this.bindRenderer()
     const frame = this.index.frameAt(this.tick)
+    bgm.phase('replay', frame.phase)
     // 相机：跟随或全景（地图中心）
     if (this.pixelRatio !== (window.devicePixelRatio || 1)) { this.resize(); return }
     if (this.spectator) {
@@ -428,27 +431,24 @@ export class ReplayPlayer {
     if (timeEl) timeEl.textContent = fmtClock(frame.tick / TICK_HZ)
     const phaseEl = this.el['rp-phase']
     if (phaseEl) phaseEl.textContent = phaseName(frame.phase as any)
-    // 比分表：事件累计分数排序
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
-      const rows = [...frame.scores.values()]
-        .map((s) => {
-          const r = this.index!.robots.get(s.id)
-          return { nick: r?.nick ?? `#${s.id}`, color: r?.color ?? '#d8dee9', total: s.total, kill: s.kill, hit: s.hit, core: s.core, uplink: s.uplink, assist: s.assist }
-        })
-        .sort((a, b) => b.total - a.total)
-      const markup = rows
-        .map(
-          (r) =>
-            `<div class="rp-score-row"><span class="rp-score-dot" style="--c:${r.color}"></span>` +
-            `<span class="rp-score-nick">${escapeHtml(r.nick)}</span>` +
-            `<span class="rp-score-detail">K${r.kill} H${r.hit} C${r.core} U${r.uplink} A${r.assist}</span>` +
-            `<span class="rp-score-total">${r.total}</span></div>`,
-        )
-        .join('')
-      if (markup !== this.scoreMarkup) {
-        scoreEl.innerHTML = markup
-        this.scoreMarkup = markup
+      const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
+      const signature = JSON.stringify([frame.finalScores !== null, rows, [...frame.scores]])
+      if (signature !== this.scoreMarkup) {
+        scoreEl.replaceChildren(...rows.map((row, i) => {
+          const element = scoreRow({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
+            self: false, partner: false, dead: false }, 'div', frame.finalScores !== null)
+          const score = frame.scores.get(row.robot)
+          if (score) {
+            const detail = document.createElement('span'); detail.className = 'score-state'
+            detail.textContent = `K${score.kill} H${score.hit} C${score.core} U${score.uplink} A${score.assist}`
+            element.append(detail)
+          }
+          return element
+        }))
+        scoreEl.setAttribute('aria-label', frame.finalScores ? '最终积分与称号' : '回放积分')
+        this.scoreMarkup = signature
       }
     }
     // 时间轴滑块同步
@@ -516,16 +516,4 @@ function extractMapJson(data: ReturnType<typeof parseReplayNDJSON>): string | nu
 function fmtClock(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case '&': return '&amp;'
-      case '<': return '&lt;'
-      case '>': return '&gt;'
-      case '"': return '&quot;'
-      default: return '&#39;'
-    }
-  })
 }

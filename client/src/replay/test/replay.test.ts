@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseReplayNDJSON, ReplayParseError } from '../model'
 import { ReplayIndex } from '../index'
+import { Title } from '@omb/protocol'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/REPLAY1-000000001.jsonl', import.meta.url),
@@ -85,6 +86,40 @@ describe('ReplayIndex', () => {
   it('阶段随 checkpoint 切换（240s CORE_OPEN）', () => {
     expect(idx.frameAt(0).phase).toBe(1)
     expect(idx.frameAt(241 * 60).phase).toBe(2)
+  })
+
+  it('结算使用服务器最终分与称号，跳回过去不会泄漏未来结果', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: { tick: 0, phase: 1, robots: [] } },
+      { type: 'event', tick: 120, event: { kill: { killer: 1, victim: 2, assist: 0 } } },
+      { type: 'event', tick: 125, event: { match_end: { scores: [
+        { robot: 1, score: 77, titles: ['WAR_MACHINE', 'BEST_PARTNER'] },
+        { robot: 2, score: 0, titles: [Title.SURVIVOR] },
+      ] } } },
+    ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
+    const replay = new ReplayIndex(data)
+    expect(replay.frameAt(119).scores.get(1)?.total ?? 0).toBe(0)
+    expect(replay.frameAt(124).scores.get(1)?.total).toBe(25)
+    expect(replay.frameAt(124).finalScores).toBeNull()
+    const final = replay.frameAt(125)
+    expect(final.scores.get(1)?.total).toBe(77)
+    expect(final.finalScores?.[0]?.titles).toEqual([Title.WAR_MACHINE, Title.BEST_PARTNER])
+    expect(final.finalScores?.[1]?.titles).toEqual([Title.SURVIVOR])
+    final.scores.get(1)!.total = 999
+    expect(replay.frameAt(125).scores.get(1)?.total).toBe(77)
+    expect(replay.frameAt(60).finalScores).toBeNull()
+    expect(replay.frameAt(60).scores.get(1)?.total ?? 0).toBe(0)
+  })
+
+  it('旧录像没有结算分时仍保留事件累计积分', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: { tick: 0, robots: [] } },
+      { type: 'event', tick: 60, event: { hit: { from: 1, to: 2 } } },
+      { type: 'event', tick: 120, event: { match_end: {} } },
+    ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
+    const final = new ReplayIndex(data).frameAt(120)
+    expect(final.finalScores).toBeNull()
+    expect(final.scores.get(1)?.total).toBe(1)
   })
 
   it('末尾 tick 可查且钳制', () => {

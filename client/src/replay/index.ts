@@ -9,6 +9,8 @@
 // 为了 60fps 拖动条不掉帧，预计算每个「关键帧 tick」的完整态，查询时取
 // ≤tick 的最近关键帧。关键帧 = checkpoint 或每 60 tick 定时采样。
 
+import { Title } from '@omb/protocol'
+import type { ScoreEntry } from '../game/scoreboard'
 import {
   ReplayData,
   ReplayEvent,
@@ -37,6 +39,7 @@ export interface ReplayFrame {
   robots: RobotTickState[]
   /** 分数表（事件累计）。 */
   scores: Map<number, ScoreAcc>
+  finalScores: ScoreEntry[] | null
   /** 最近 4s（240 tick）内的 say 事件，供气泡渲染。 */
   bubbles: SayMark[]
   /** 最近关键帧携带的核心/弹丸（仅 checkpoint 粒度，供参考渲染）。 */
@@ -107,6 +110,7 @@ export class ReplayIndex {
     const robots = new Map<number, RobotTickState>()
     const scores = new Map<number, ScoreAcc>()
     const bubbles: SayMark[] = []
+    let finalScores: ScoreEntry[] | null = null
     let cores: ReplayCheckpoint['cores'] = []
     let projectiles: ReplayCheckpoint['projectiles'] = []
 
@@ -115,6 +119,7 @@ export class ReplayIndex {
       phase,
       robots: cloneRobots(robots),
       scores: cloneScores(scores),
+      finalScores: finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: bubbles.filter((b) => tick - b.tick <= BUBBLE_TTL),
       cores: cores.map((c) => ({ ...c, pos: { ...c.pos } })),
       projectiles: projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
@@ -177,7 +182,26 @@ export class ReplayIndex {
         continue
       }
       const ev = rec.event!
+      // 先保存事件之前的采样点，避免晚到的得分或结算泄漏进过去。
+      while (ev.tick > nextSample) {
+        commit(snapshot(nextSample))
+        nextSample += KEYFRAME_EVERY
+      }
       applyEvent(ev, robots, scores, bubbles, this.marks, this.robots)
+      if (ev.kind === 'phase_change') phase = phaseNum(ev.payload?.to)
+      if (ev.kind === 'match_end' && Array.isArray(ev.payload?.scores)) {
+        finalScores = ev.payload.scores.map((row: { robot?: number; score?: number; titles?: Array<string | number> }) => ({
+          robot: numOr(row.robot, 0), score: numOr(row.score, 0),
+          titles: (row.titles ?? []).map(title => typeof title === 'number' ? title : Title[title as keyof typeof Title])
+            .filter((title): title is number => typeof title === 'number'),
+        }))
+        for (const row of finalScores!) {
+          const score = scores.get(row.robot) ?? emptyScore(row.robot)
+          score.total = row.score
+          scores.set(row.robot, score)
+        }
+        commit(snapshot(ev.tick))
+      }
       while (ev.tick >= nextSample) {
         commit(snapshot(nextSample))
         nextSample += KEYFRAME_EVERY
@@ -212,6 +236,7 @@ export class ReplayIndex {
       phase: kf.phase,
       robots: [...kf.robots.values()],
       scores: cloneScores(kf.scores),
+      finalScores: kf.finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: kf.bubbles.filter((b) => q - b.tick <= BUBBLE_TTL),
       cores: kf.cores.map((c) => ({ ...c, pos: { ...c.pos } })),
       projectiles: kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
@@ -224,6 +249,7 @@ interface FrameState {
   phase: number
   robots: Map<number, RobotTickState>
   scores: Map<number, ScoreAcc>
+  finalScores: ScoreEntry[] | null
   bubbles: SayMark[]
   cores: ReplayCheckpoint['cores']
   projectiles: ReplayCheckpoint['projectiles']

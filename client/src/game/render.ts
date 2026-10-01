@@ -1,30 +1,11 @@
 // Live snapshots share the same arena and SVG entity art as the replay renderer.
-import { Phase, Title } from '@omb/protocol'
+import { Phase } from '@omb/protocol'
 import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
 import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawUplink, drawProjectile, drawVitals } from './art'
 const ROBOT_R = 0.6
-
-export function titleName(t: number): string {
-  switch (t) {
-    case Title.WAR_MACHINE: return '战争机器'
-    case Title.SCAVENGER: return '垃圾佬'
-    case Title.SIGNAL_THIEF: return '信号大盗'
-    case Title.RUNNER: return '跑路大师'
-    case Title.WALL_HEAD: return '铁头娃'
-    case Title.SURVIVOR: return '苟王'
-    case Title.PEACEMAKER: return '和平使者'
-    case Title.AI_IDIOT: return '人工智障'
-    case Title.BARRAGE: return '弹幕大师'
-    case Title.BEST_PARTNER: return '最佳搭档'
-    case Title.AI_REGULAR: return 'AI 常客'
-    case Title.OLD_SCHOOL: return '古法编程'
-    case Title.CNMB: return '充能面包'
-    default: return ''
-  }
-}
 
 export function phaseName(p: number): string {
   switch (p) {

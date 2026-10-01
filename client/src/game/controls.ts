@@ -3,7 +3,7 @@
 import { create } from '@bufbuild/protobuf'
 import {
   AssistToggleSchema, ClientMsgSchema, SaySchema,
-  type ServerMsg, type ScoreRow, type EvMatchEnd,
+  type ServerMsg, type EvMatchEnd,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { parseMapDef, type MapDefParsed } from './mapdef'
@@ -11,9 +11,11 @@ import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldStat
 import { Camera } from './camera'
 import { Renderer, type SayBubble } from './render'
 import { InputSampler } from './input'
-import { Hud, showMatchEnd, hideMatchEnd } from './hud'
+import { Hud } from './hud'
+import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback } from './feedback'
 import { audio } from '../audio'
+import { bgm } from '../music/bgm'
 
 const SEND_HZ = 60
 const FRAME_MS = 1000 / SEND_HZ
@@ -40,7 +42,7 @@ export class GameController {
   private raf = 0
   private sendTimer: ReturnType<typeof setInterval> | undefined
   private ended = false
-  private matchEndRows: ScoreRow[] = []
+  private scores = new Scoreboard()
   private endShown = false
   private canvas: HTMLCanvasElement
   private hudRoot: HTMLElement
@@ -125,14 +127,14 @@ export class GameController {
     this.resyncAt = -Infinity
     this.startCuePending = false
     this.endShown = false
-    this.matchEndRows = []
+    this.scores.reset()
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
     this.sayTicks.clear()
     this.feedback.reset()
     this.input.assistOn = false
     this.world = emptyWorld()
-    this.hud.update(this.world, this.map)
+    this.hud.update(this.world, this.map, this.scores)
     this.hud.setAssist(false)
     this.setupCanvas()
     if (this.active && this.inputEnabled) this.input.attach(this.canvas, this.cam)
@@ -175,15 +177,6 @@ export class GameController {
     this.onExitToRoom?.()
   }
 
-  /** 最近一次 full 快照的机器人名单（大厅成员列表数据源；空 = 尚无对局数据） */
-  lastRoster(): Array<{ nick: string; color: string }> {
-    const out: Array<{ nick: string; color: string }> = []
-    for (const r of this.world.robots.values()) {
-      if (r.nick) out.push({ nick: r.nick, color: r.color || '' })
-    }
-    return out
-  }
-
   /** ServerMsg 分发（main.ts 转发所有下行） */
   onMessage(msg: ServerMsg): void {
     if (!this.map) return
@@ -194,6 +187,7 @@ export class GameController {
         this.resyncAt = performance.now()
         this.send(buildResync())
       } else if (result === 'applied') {
+        this.scores.observe(this.world.robots)
         this.input.acknowledge(snap.ackSeq)
         if (snap.self?.assistOn !== undefined) this.input.assistOn = snap.self.assistOn
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
@@ -220,9 +214,12 @@ export class GameController {
         }
         break
       }
+      case 'scoreboard':
+        this.scores.accept(ev.kind.value.rows, ev.kind.value.tick)
+        break
       case 'matchEnd': {
         if (this.endShown) break // 事件去重：服务器幂等重发时不再重复渲染
-        this.matchEndRows = ev.kind.value.scores
+        this.scores.accept(ev.kind.value.scores, this.world.tick, true)
         this.ended = true
         this.closeChat(false)
         this.endShown = true
@@ -343,6 +340,7 @@ export class GameController {
 
   private drawFrame(): void {
     if (!this.map || !this.active) return
+    bgm.phase('game', this.world.phase)
     if (this.pixelRatio !== (window.devicePixelRatio || 1)) this.resizeCanvas()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
@@ -354,7 +352,7 @@ export class GameController {
     this.renderer.render(this.world, this.map, this.cam, {
       bubbles: this.bubbles, localAim: pos ? this.input.aimAt(pos.x, pos.y) : undefined, feedback: this.feedback,
     })
-    this.hud.update(this.world, this.map)
+    this.hud.update(this.world, this.map, this.scores)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }
@@ -376,11 +374,6 @@ export class GameController {
   }
 
   private showEnd(ev: EvMatchEnd): void {
-    const idToNick = new Map<number, string>()
-    for (const r of this.world.robots.values()) {
-      const id = r.base?.id
-      if (id !== undefined) idToNick.set(id, r.nick || `robot-${id}`)
-    }
-    showMatchEnd(this.hudRoot, ev.scores, idToNick, () => this.dismissMatchEnd())
+    showMatchEnd(this.hudRoot, ev.scores, this.scores.names, () => this.dismissMatchEnd(), this.world.self?.robotId)
   }
 }

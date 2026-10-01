@@ -2,6 +2,7 @@
 // 破解为门控蜂鸣 + 信息噪声流。AudioContext 只在可信指针/按键时懒创建；静音、切后台、离开对局
 // 时持续声部立即断开，不排队过期声音。样式令牌见 client/STYLE.md；HUD 提供 #audio-mute / #audio-volume。
 import { iconButton } from './icons'
+import { bgm } from './music/bgm'
 
 export type SoundCue =
   | 'shot' | 'hit' | 'shieldHit' | 'wallHit' | 'dash' | 'shieldOn' | 'shieldOff'
@@ -154,6 +155,7 @@ class AudioEngine {
       }
     } catch { /* 隐私模式或存储被禁用时保持默认 */ }
     this.vol = vol; this.mute = mute
+    bgm.setLevel(vol, mute)
   }
 
   get muted(): boolean { return this.mute }
@@ -204,6 +206,7 @@ class AudioEngine {
   setMuted(muted: boolean): void {
     if (this.mute === muted) return
     this.mute = muted
+    bgm.setLevel(this.vol, muted)
     if (this.master) this.master.gain.setTargetAtTime(muted ? 0 : this.vol, this.ctx!.currentTime, 0.01)
     if (muted) this.stopLoop()
     else if (this.desired !== 'off' && !document.hidden && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
@@ -215,6 +218,7 @@ class AudioEngine {
     const v = Math.min(1, Math.max(0, volume))
     if (Math.abs(v - this.vol) < 1e-3) return
     this.vol = v
+    bgm.setLevel(v, this.mute)
     if (this.master && !this.mute) this.master.gain.setTargetAtTime(v, this.ctx!.currentTime, 0.01)
     this.persist(); this.reflectUI()
   }
@@ -270,7 +274,12 @@ class AudioEngine {
       master.gain.value = this.mute ? 0 : this.vol
       master.connect(comp); comp.connect(ctx.destination)
       this.ctx = ctx; this.master = master
+      bgm.setVisible(!document.hidden)
+      bgm.attach(ctx)
+      window.addEventListener('pagehide', () => bgm.setVisible(false))
+      window.addEventListener('pageshow', () => bgm.setVisible(!document.hidden))
       document.addEventListener('visibilitychange', () => {
+        bgm.setVisible(!document.hidden)
         if (document.hidden) this.stopLoop()
         else if (this.desired !== 'off' && !this.mute && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
       })

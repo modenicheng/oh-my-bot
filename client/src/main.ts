@@ -1,5 +1,5 @@
-// 房间页主流程：进房表单 → WS 连接 + JoinRoom → 房间大厅；mapBootstrap 后切游戏视图。
-// 样式令牌见 client/STYLE.md；连接层见 client/src/net.ts；游戏视图见 client/src/game/。
+// 应用协调入口：玩家会话、路由、对局与工作台；页面呈现由 app/ 模块负责。
+// 连接层见 net.ts，游戏视图见 game/，页面样式与职责约定见 client/STYLE.md。
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, RoomActionSchema,
          RoomAction_Kind, EvRoomState_State,
@@ -8,46 +8,26 @@ import { encodeClient } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
-import { ManualView } from './manual/manual'
 import { Workbench } from './workbench/workbench'
-import { ReplayLibrary } from './replay/library'
-import { LiveSpectator } from './live'
 import { readRoute, saveProfile, loadProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
-export { artReady as ready } from './game/art'
+import { artReady } from './game/art'
+import { bgm } from './music/bgm'
+import { Lobby } from './app/lobby'
+import { AuxiliaryViews } from './app/auxiliary-views'
+
+export const ready = Promise.all([artReady, bgm.preload()])
 
 mountIcons(document)
 
-// ---- 常量 ---------------------------------------------------------------
-
-const PRESET_COLORS = [
-  '#22d3ee', '#a3e635', '#f472b6', '#ff5c5c',
-  '#fbbf24', '#a78bfa', '#34d399', '#f97316',
-] as const
-
-const ROOM_CODE_RE = /^[A-Z0-9]{4,8}$/
-const NICK_RE = /^.{1,16}$/
-
-// ---- DOM ----------------------------------------------------------------
+// ---- DOM ---------------------------------------------------------------
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
 const app = $('app') as HTMLDivElement & { classList: DOMTokenList }
 const viewJoin = $<HTMLElement>('view-join')
 const viewRoom = $<HTMLElement>('view-room')
-const inRoom = $<HTMLInputElement>('in-room')
-const inNick = $<HTMLInputElement>('in-nick')
-const swatches = $<HTMLDivElement>('swatches')
-const btnJoin = $<HTMLButtonElement>('btn-join')
-const formError = $<HTMLDivElement>('form-error')
-const roomCodeEl = $<HTMLDivElement>('room-code')
-const membersEl = $<HTMLUListElement>('members')
-const roomStateEl = $<HTMLDivElement>('room-state')
-const btnStart = $<HTMLButtonElement>('btn-start')
-const btnWarmup = $<HTMLButtonElement>('btn-warmup')
-const btnSoloBots = $<HTMLButtonElement>('btn-solo-bots')
-const roomNotice = $<HTMLDivElement>('room-notice')
 const statusText = $<HTMLSpanElement>('status-text')
 const btnReconnect = $<HTMLButtonElement>('btn-reconnect')
 const connectionNotice = $('connection-notice')
@@ -57,74 +37,43 @@ const viewGame = $<HTMLElement>('view-game')
 const gameCanvas = $<HTMLCanvasElement>('game-canvas')
 const hudRoot = $<HTMLElement>('hud')
 const viewManual = $<HTMLElement>('view-manual')
-const btnManual = $<HTMLButtonElement>('btn-manual')
-const btnReplay = $<HTMLButtonElement>('btn-replay')
 const viewReplays = $<HTMLElement>('view-replays')
-const replayListEl = $<HTMLElement>('replay-list')
-const replayErrorEl = $<HTMLElement>('replay-error')
-const btnReplaysBack = $<HTMLButtonElement>('btn-replays-back')
 const viewReplayPlayer = $<HTMLElement>('view-replay-player')
-const replayCanvas = $<HTMLCanvasElement>('replay-canvas')
 const viewLive = $<HTMLElement>('view-live')
-let live: LiveSpectator | null = null
-let liveRoom = ''
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
 viewJoin.appendChild(audioSettings)
 
-// ---- 进房表单 ---------------------------------------------------------------
+// ---- 页面模块 ---------------------------------------------------------------
 
-let selectedColor: string = PRESET_COLORS[0]!
-
-for (const color of PRESET_COLORS) {
-  const b = document.createElement('button')
-  b.type = 'button'
-  b.className = 'swatch' + (color === selectedColor ? ' sel' : '')
-  b.style.setProperty('--sw', color)
-  b.title = color
-  b.setAttribute('aria-label', `颜色 ${color}`)
-  b.addEventListener('click', () => {
-    selectedColor = color
-    for (const el of swatches.children) el.classList.toggle('sel', el === b)
-  })
-  swatches.appendChild(b)
-}
-
-// ?room=CODE 完整链接解析（自动大写、最多 8 位）
 const initialRoute = readRoute()
-const params = new URLSearchParams(location.search)
-const fromLink = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
-if (fromLink) inRoom.value = fromLink
+const lobby = new Lobby({
+  selfNick: () => lastJoin?.nick ?? '',
+  inGame: isInGame,
+  join: profile => { void joinWith(profile.roomCode, profile.nick, profile.color) },
+  roomAction: sendRoomAction,
+  watchLive: roomCode => screens.openLive(roomCode),
+})
 
-/** 输入即时规范化：房间码大写、仅 A-Z0-9；昵称截断 16 字。 */
-function normalize(): void {
-  const pos = inRoom.selectionStart
-  inRoom.value = inRoom.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
-  if (pos !== null) inRoom.setSelectionRange(pos, pos)
-  inNick.value = inNick.value.slice(0, 16)
-}
-
-inRoom.addEventListener('input', () => { normalize(); showFormError('') })
-inNick.addEventListener('input', () => { normalize(); showFormError('') })
-
-function validate(): string | null {
-  if (!ROOM_CODE_RE.test(inRoom.value)) return '房间码需为 4–8 位字母/数字'
-  const nick = inNick.value.trim()
-  if (!NICK_RE.test(nick)) return '昵称需为 1-16 个字符'
-  return null
-}
-
-// ---- 视图切换与状态行 ----------------------------------------------------------
+const screens = new AuxiliaryViews({
+  show: showView,
+  hasGame: () => game !== null,
+  hasRoom: () => !!(session || lastJoin),
+  refreshLobby: () => { lobby.refresh(); syncWorkbench() },
+  setRoomCode: roomCode => lobby.setRoomCode(roomCode),
+})
 
 function showView(view: View, extra?: RouteExtra): void {
   const enteringGame = view === 'game' && viewGame.hidden
   game?.setActive(view === 'game' && session?.state === 'online' && !awaitingFull)
-  writeRoute(view, view === 'live' ? liveRoom : lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
+  writeRoute(view, view === 'live' ? screens.liveRoom : lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
   viewManual.hidden = view !== 'manual'
   viewLive.hidden = view !== 'live'
   const spectatorPlayer = view === 'spectator' && !!extra?.replay
+  bgm.setView(view === 'game' ? 'game' : view === 'live' ? 'live'
+    : view === 'replay-player' || spectatorPlayer ? 'replay' : 'menu')
   viewReplays.hidden = view !== 'replays' && !(view === 'spectator' && !spectatorPlayer)
   viewReplayPlayer.hidden = view !== 'replay-player' && !spectatorPlayer
   const audioHost = view === 'live' ? viewLive.querySelector('.live-heading')!
@@ -146,27 +95,8 @@ function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
   statusText.textContent = text
 }
 
-function showFormError(msg: string): void {
-  formError.textContent = msg
-}
+function isInGame(): boolean { return game !== null && !viewGame.hidden }
 
-// ---- 大厅状态（roomState / 快照 full 帧驱动） --------------------------------
-
-/** 房间状态缓存：hostNick 判定房主视角，lastRoster 补成员昵称。 */
-const room = {
-  hostNick: '',
-  robotsOnline: 0,
-  state: -1 as number,
-  soloBots: 0,
-  /** 最近一次对局 full 快照的 robots[].nick/color（对局名单，离场后标暗） */
-  lastRoster: [] as Array<{ nick: string; color: string }>,
-}
-
-function isInGame(): boolean {
-  return game !== null && !viewGame.hidden
-}
-
-/** 发送 RoomAction（仅房主按钮；服务器二次鉴权）。 */
 function sendRoomAction(kind: RoomAction_Kind): void {
   if (session?.state !== 'online') return
   session.send(encodeClient(create(ClientMsgSchema, {
@@ -174,208 +104,16 @@ function sendRoomAction(kind: RoomAction_Kind): void {
   })))
 }
 
-/** EvRoomState 驱动：状态行、操作栏可见性、成员列表。 */
-function onRoomState(state: number, hostNick: string, robotsOnline: number): void {
-  room.hostNick = hostNick
-  room.robotsOnline = robotsOnline
-  room.state = state
-
-  const stateName = ['空闲', '热身中', '对局中', '已结束'][state] ?? `状态${state}`
-  roomStateEl.textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (room.soloBots ? ' · 下次开场最多 3 个测试 Bot' : '')
-
-  const isHost = hostNick !== '' && hostNick === selfNick()
-  $('btn-game-start').hidden = !(isHost && state === EvRoomState_State.R_WARMUP)
-  const idleLike = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP
-  btnStart.hidden = !(isHost && idleLike && !isInGame())
-  // 热身场：Idle（开局前练习）与 Ended（下局前重整）都可用（room 状态机两态均合法）
-  btnWarmup.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_ENDED) && !isInGame())
-  btnSoloBots.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP || state === EvRoomState_State.R_ENDED) && !isInGame())
-  $('solo-bots-label').textContent = room.soloBots ? '关闭测试 Bot（下次开场）' : '添加 3 个测试 Bot'
-  btnSoloBots.setAttribute('aria-pressed', String(room.soloBots > 0))
-  if (btnStart.hidden && btnWarmup.hidden && btnSoloBots.hidden) {
-    roomNotice.hidden = false
-    roomNotice.textContent = state === EvRoomState_State.R_RUNNING ? '对局进行中' : (isHost ? '等待开始' : '等待房主开始')
-  } else {
-    roomNotice.hidden = true
-  }
-
-  syncWorkbench()
-  renderMembers()
-}
-
-function selfNick(): string {
-  return lastJoin?.nick ?? ''
-}
-
-/** 大厅成员列表：自己 + 房主 + 最近对局名单（真实数据源，不造名单）。 */
-function renderMembers(): void {
-  const n = room.robotsOnline
-  const me = selfNick()
-  const items = [
-    room.hostNick ? `房主：${room.hostNick}` : '',
-    me && me !== room.hostNick ? `你：${me}` : '',
-    n > 0 ? `在线：${n} 人` : '',
-  ]
-  membersEl.replaceChildren(...items.filter(Boolean).map((text) => {
-    const li = document.createElement('li')
-    li.textContent = text
-    return li
-  }))
-}
-
-function resetLobby(): void {
-  room.hostNick = ''
-  room.robotsOnline = 0
-  room.state = -1
-  room.lastRoster = []
-  room.soloBots = 0
-  membersEl.innerHTML = ''
-  btnStart.hidden = true
-  btnWarmup.hidden = true
-  btnSoloBots.hidden = true
-  roomNotice.hidden = true
-  roomStateEl.textContent = '已发送进房请求，等待服务器…'
-}
-
-// ---- 手册视图（v1 手册基建：不依赖 WS，大厅随时可进） -------------------------
-
-let manualView: ManualView | null = null
-let manualReturnView: View = 'join'
-let lastManualPath = 'index.md'
-
-function closeManual(): void {
-  lastManualPath = readRoute().doc ?? 'index.md'
-  manualView?.close()
-  showView(game ? 'game' : manualReturnView === 'game' ? 'room' : manualReturnView)
-  if (session || lastJoin) onRoomState(room.state, room.hostNick, room.robotsOnline)
-}
-
-function openManual(path = lastManualPath): void {
-  if (!viewManual.hidden) return
-  manualReturnView = !viewGame.hidden ? 'game' : !viewRoom.hidden ? 'room' : 'join'
-  if (!manualView) {
-    manualView = new ManualView({
-      root: viewManual,
-      breadcrumb: $<HTMLElement>('manual-breadcrumb'),
-      sidebar: $<HTMLElement>('manual-sidebar'),
-      content: $<HTMLElement>('manual-content'),
-      status: $<HTMLElement>('manual-status'),
-      onExit: closeManual,
-    })
-  }
-  showView('manual', { doc: path })
-  void manualView.open(path)
-}
-
-btnManual.addEventListener('click', () => openManual())
-$('btn-game-start').addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
-
-// ---- 回放库（对局列表 ⇄ 回放器；同源 HTTP，不依赖 WS） --------------------
-
-let replayLibrary: ReplayLibrary | null = null
-let spectatorMode = false
-
-function openReplays(replayId?: string, spectator = false): void {
-  if (spectatorMode !== spectator) {
-    replayLibrary?.exit()
-    replayLibrary = null
-  }
-  spectatorMode = spectator
-  viewReplayPlayer.toggleAttribute('data-spectator', spectator)
-  for (const element of viewReplayPlayer.querySelectorAll<HTMLElement>('.spectator-heading, .spectator-camera')) element.hidden = !spectator
-  $('spectator-library-note').hidden = !spectator
-  $('replay-library-title').textContent = spectator ? '只读观战 · 选择录像' : '回放库'
-  replayCanvas.setAttribute('aria-label', spectator ? '只读录像地图；方向键平移，加减缩放，Home 全图' : '录像战场')
-  if (spectator) replayCanvas.setAttribute('aria-describedby', 'spectator-help spectator-source')
-  else replayCanvas.removeAttribute('aria-describedby')
-  if (!replayLibrary) {
-    replayLibrary = new ReplayLibrary({
-      listRoot: replayListEl,
-      errorEl: replayErrorEl,
-      playerRoot: viewReplayPlayer,
-      canvas: replayCanvas,
-      spectator,
-      onExitToList: () => showView(spectator ? 'spectator' : 'replays'),
-      showPlayer: matchId => {
-        $('spectator-source').textContent = `录像 ${matchId} · 按已有回放记录重建，非实时；不发送游戏输入。`
-        showView(spectator ? 'spectator' : 'replay-player', { replay: matchId })
-        if (spectator) $('rp-return').focus({ preventScroll: true })
-      },
-      showList: () => {
-        showView(spectator ? 'spectator' : 'replays')
-        if (spectator) btnReplaysBack.focus({ preventScroll: true })
-      },
-    })
-  }
-  showView(spectator ? 'spectator' : 'replays')
-  void replayLibrary.open(replayId)
-}
-
-function closeReplays(): void {
-  replayLibrary?.exit()
-  replayLibrary = null
-  showView(game ? 'game' : session || lastJoin ? 'room' : 'join')
-  if (spectatorMode && !game) $(session || lastJoin ? 'btn-room-spectator' : 'btn-spectator').focus({ preventScroll: true })
-}
-
-$('btn-spectator').addEventListener('click', () => openReplays(undefined, true))
-$('btn-room-spectator').addEventListener('click', () => openReplays(undefined, true))
-viewReplays.addEventListener('keydown', e => {
-  if (spectatorMode && e.key === 'Escape') { e.preventDefault(); closeReplays() }
-})
-btnReplay.addEventListener('click', () => openReplays())
-$('btn-game-replay').addEventListener('click', () => openReplays())
-btnReplaysBack.addEventListener('click', closeReplays)
-
-// ---- 实时观战：独立连接，不恢复玩家身份 --------------------------------------
-
-function openLive(roomCode: string): void {
-  live?.dispose()
-  liveRoom = roomCode
-  inRoom.value = roomCode
-  showView('live')
-  live = new LiveSpectator({ root: viewLive, canvas: $<HTMLCanvasElement>('live-canvas'), onExit: closeLive })
-  void live.connect(roomCode)
-  $('live-canvas').focus({ preventScroll: true })
-}
-
-function closeLive(): void {
-  live?.dispose()
-  live = null
-  showView('join')
-  $('btn-live').focus({ preventScroll: true })
-}
-
-$('btn-live').addEventListener('click', () => {
-  normalize()
-  if (!ROOM_CODE_RE.test(inRoom.value)) { showFormError('房间码需为 4–8 位字母/数字'); return }
-  showFormError('')
-  openLive(inRoom.value)
-})
-
-// ---- 连接会话 ---------------------------------------------------------------
-
 let session: RoomSession | null = null
 let lastJoin: { roomCode: string; nick: string; color: string } | null = null
 let awaitingFull = false
 
-async function join(): Promise<void> {
-  showFormError('')
-  const invalid = validate()
-  if (invalid) return showFormError(invalid)
-
-  void joinWith(inRoom.value, inNick.value.trim(), selectedColor)
-}
-
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   if (session?.state === 'connecting') return
-  btnJoin.disabled = true
+  lobby.beginJoin(roomCode)
   lastJoin = { roomCode, nick, color }
   saveProfile(lastJoin)
   workbench.setIdentity(roomCode, nick)
-  roomCodeEl.textContent = roomCode
-  $<HTMLAnchorElement>('room-live').href = `?view=live&room=${encodeURIComponent(roomCode)}`
-  resetLobby()
   showView('room')
   setStatus('off', '连接中…')
 
@@ -397,9 +135,9 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
     s.close()
     if (session !== s) return
     session = null
-    btnJoin.disabled = false
+    lobby.setJoining(false)
     setStatus('down', '连接失败')
-    showFormError(err instanceof Error ? err.message : '连接失败，请重试')
+    lobby.showError(err instanceof Error ? err.message : '连接失败，请重试')
     btnReconnect.hidden = false
     showView('join')
     return
@@ -413,11 +151,7 @@ function onDisconnected(reason: string): void {
   awaitingFull = game !== null
   game?.setActive(false)
   setStatus('down', reason)
-  btnStart.hidden = true
-  btnWarmup.hidden = true
-  $('btn-game-start').hidden = true
-  roomNotice.hidden = false
-  roomNotice.textContent = '正在恢复连接，房间与昵称已保留'
+  lobby.disconnected()
 }
 
 function onConnectionState(state: SessionState, retryInMs = 0): void {
@@ -443,7 +177,7 @@ function cancelConnection(): void {
   stopRttLoop(); game?.exit(); game = null; awaitingFull = false
   workbench.resetMatch()
   syncWorkbench()
-  connectionNotice.hidden = true; btnJoin.disabled = false; btnReconnect.hidden = false
+  connectionNotice.hidden = true; lobby.setJoining(false); btnReconnect.hidden = false
   setStatus('off', '连接已取消'); showView('join')
 }
 $('connection-cancel').addEventListener('click', cancelConnection)
@@ -479,7 +213,7 @@ document.addEventListener('visibilitychange', syncGameInput)
 
 function syncWorkbench(): void {
   workbench.setAvailability(session?.state === 'online', game !== null && !game.isMatchEndShown() && !awaitingFull &&
-    (room.state === EvRoomState_State.R_WARMUP || room.state === EvRoomState_State.R_RUNNING))
+    (lobby.state === EvRoomState_State.R_WARMUP || lobby.state === EvRoomState_State.R_RUNNING))
 }
 
 function enterGame(): void {
@@ -501,7 +235,7 @@ function exitGame(): void {
   workbench.resetMatch()
   showView('room')
   // 用缓存状态立即刷新操作栏，下一次 roomState 会覆盖
-  onRoomState(room.state, room.hostNick, room.robotsOnline)
+  lobby.refresh(); syncWorkbench()
 }
 
 function onServerMsg(roomCode: string, msg: ServerMsg): void {
@@ -522,15 +256,14 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       syncWorkbench()
       setStatus('down', '进房失败')
       showView('join')
-      showFormError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
-      btnJoin.disabled = false
+      lobby.showError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
+      lobby.setJoining(false)
       return
     }
     if (ev.kind.case === 'mapBootstrap') {
       workbench.resetMatch()
       // 服务器下发地图：切游戏视图（解析失败留在大厅）
-      const utilityView = !viewManual.hidden ? 'manual' : !viewReplays.hidden ? (spectatorMode ? 'spectator' : 'replays')
-        : !viewReplayPlayer.hidden ? (spectatorMode ? 'spectator' : 'replay-player') : null
+      const utilityView = screens.currentUtilityView()
       const utilityRoute = readRoute()
       if (!game) enterGame()
       awaitingFull = true
@@ -545,7 +278,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
         awaitingFull = false
         connectionNotice.hidden = true
         showView('room')
-        roomStateEl.textContent = '地图数据异常，无法进入对局'
+        lobby.mapFailed()
       }
       return
     }
@@ -560,12 +293,12 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
           else { game.exit(); game = null; workbench.resetMatch() }
         }
       }
-      room.soloBots = rs.soloBots
-      onRoomState(rs.state, rs.hostNick, rs.robotsOnline)
+      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots)
+      syncWorkbench()
       if (!restoredView) {
         restoredView = true
-        if (initialRoute.view === 'manual') openManual(initialRoute.doc)
-        else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') openReplays(initialRoute.replay)
+        if (initialRoute.view === 'manual') screens.openManual(initialRoute.doc)
+        else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') screens.openReplays(initialRoute.replay)
       }
       return
     }
@@ -582,19 +315,10 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       syncGameInput()
       game.setActive(!viewGame.hidden && session?.state === 'online')
       syncWorkbench()
-      room.lastRoster = game.lastRoster()
-      if (!viewGame.hidden) renderMembers()
+      if (!viewGame.hidden) lobby.renderMembers()
     }
   }
 }
-
-btnJoin.addEventListener('click', () => void join())
-inRoom.addEventListener('keydown', (e) => { if (e.key === 'Enter') void join() })
-inNick.addEventListener('keydown', (e) => { if (e.key === 'Enter') void join() })
-
-btnStart.addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
-btnWarmup.addEventListener('click', () => sendRoomAction(RoomAction_Kind.WARMUP))
-btnSoloBots.addEventListener('click', () => sendRoomAction(RoomAction_Kind.SOLO_BOTS))
 
 btnReconnect.addEventListener('click', () => {
   if (session) { session.retryNow(); return }
@@ -636,9 +360,9 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC' && !viewGame.hidden) {
     e.preventDefault(); workbench.toggle('editor')
   } else if (e.code === 'KeyM') {
-    if (!viewManual.hidden) { e.preventDefault(); closeManual() }
+    if (!viewManual.hidden) { e.preventDefault(); screens.closeManual() }
     else if (!viewGame.hidden) { e.preventDefault(); workbench.toggle('docs') }
-    else if (!viewRoom.hidden) { e.preventDefault(); openManual() }
+    else if (!viewRoom.hidden) { e.preventDefault(); screens.openManual() }
   } else if (game && !viewGame.hidden && document.activeElement === gameCanvas) {
     if (e.code === 'Space') { e.preventDefault(); game.toggleAssist() }
     else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); game.openChat() }
@@ -650,17 +374,17 @@ window.addEventListener('pagehide', () => {
   game?.setActive(false)
   workbench.setAvailability(false, false)
   session?.close()
-  live?.dispose()
+  screens.disposeLive()
 })
 window.addEventListener('pageshow', e => {
   if (!e.persisted) return
-  if (!viewLive.hidden && liveRoom) openLive(liveRoom)
+  if (!viewLive.hidden && screens.liveRoom) screens.openLive(screens.liveRoom)
   else if (lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
 })
 
 let started = false
 
-/** 由首屏按钮的可信 click 同步调用；解锁音频之前不可 await。 */
+/** 由首屏可信点击或按键同步调用；解锁音频之前不可 await。 */
 export function start(): void {
   if (started) return
   started = true
@@ -670,22 +394,19 @@ export function start(): void {
 }
 
 function restoreInitialRoute(): void {
-const profile = loadProfile(initialRoute.roomCode)
-// A direct spectator URL must never restore a player session or join a room.
-if (initialRoute.view === 'live') {
-  if (initialRoute.roomCode) openLive(initialRoute.roomCode)
-  else { showView('join'); showFormError('请输入要观战的房间码') }
-} else if (initialRoute.view === 'spectator') {
-  openReplays(initialRoute.replay, true)
-} else if (profile) {
-  inRoom.value = profile.roomCode
-  inNick.value = profile.nick
-  selectedColor = profile.color
-  for (const el of swatches.children) el.classList.toggle('sel', (el as HTMLElement).style.getPropertyValue('--sw') === selectedColor)
-  void joinWith(profile.roomCode, profile.nick, profile.color)
-} else if (initialRoute.view === 'manual') {
-  openManual(initialRoute.doc)
-} else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') {
-  openReplays(initialRoute.replay)
-}
+  const profile = loadProfile(initialRoute.roomCode)
+  // 观战直达链接不能恢复玩家会话；必须先于 profile 分支判断。
+  if (initialRoute.view === 'live') {
+    if (initialRoute.roomCode) screens.openLive(initialRoute.roomCode)
+    else { showView('join'); lobby.showError('请输入要观战的房间码') }
+  } else if (initialRoute.view === 'spectator') {
+    screens.openReplays(initialRoute.replay, true)
+  } else if (profile) {
+    lobby.restore(profile)
+    void joinWith(profile.roomCode, profile.nick, profile.color)
+  } else if (initialRoute.view === 'manual') {
+    screens.openManual(initialRoute.doc)
+  } else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') {
+    screens.openReplays(initialRoute.replay)
+  }
 }

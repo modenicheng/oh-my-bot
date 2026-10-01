@@ -1,0 +1,24 @@
+.score-row { display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: baseline; gap: 4px 8px; padding: 6px 0; font: 12px/1.5 var(--pixel); }
+.score-rank, .score-state, .score-no-title { color: var(--fg-dim); }
+.score-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-value { color: var(--accent); font-variant-numeric: tabular-nums; }
+.score-state, .score-titles { grid-column: 2 / -1; font-size: 11px; }
+.score-self .score-name { color: var(--accent); }
+.score-titles { display: flex; flex-wrap: wrap; gap: 4px; }
+.score-title { border: 1px solid var(--line); padding: 1px 5px; color: var(--amber); }
+#hud-self-score { display: flex; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--line); font: 14px/1.5 var(--pixel); }
+#hud-self-score strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+#hud-score-rows { max-height: 27vh; overflow-y: auto; pointer-events: auto; }
+.score-waiting { color: var(--fg-dim); padding: 6px 0; font-size: 12px; }
+.end-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #0a0e14e6; pointer-events: none; z-index: 5; }
+.end-title { font: 24px/1.5 var(--pixel); letter-spacing: .2em; color: var(--accent); }
+.end-list { list-style: none; margin: 0; width: min(560px, calc(100vw - 32px)); max-height: 65vh; overflow: auto; pointer-events: auto; border: 1px solid var(--line); background: var(--panel); padding: 12px 20px; }
+.end-list .score-row { padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--line); }
+.end-list .score-row:last-child { border-bottom: 0; }
+.end-list .score-first .score-rank { color: var(--amber); }
+.end-list .score-first .score-name::before { content: '冠军 · '; color: var(--amber); }
+.end-list .score-self { box-shadow: inset 2px 0 var(--accent); padding-left: 8px; }
+.end-empty { color: var(--fg-dim); font-size: 13px; }
+.end-back { pointer-events: auto; border: 1px solid var(--accent); background: var(--panel); color: var(--accent); padding: 8px 28px; font: inherit; cursor: pointer; }
+.end-back:hover, .end-back:focus-visible { box-shadow: 0 0 12px #22d3ee40; }
+#live-scores .score-row { margin: 0; padding: 5px 0; border: 0; background: none; }

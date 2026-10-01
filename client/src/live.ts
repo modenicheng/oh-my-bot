@@ -3,7 +3,9 @@ import { RoomSession, type SessionState } from './net'
 import { SpectatorCamera } from './replay/spectator'
 import { artReady } from './game/art'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
-import { Renderer, phaseName, titleName, type SayBubble } from './game/render'
+import { Renderer, phaseName, type SayBubble } from './game/render'
+import { Scoreboard, scoreRow } from './game/scoreboard'
+import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
 
 export interface LiveSpectatorDeps {
@@ -32,6 +34,8 @@ export class LiveSpectator {
   private roomState = 0
   private bubbles: SayBubble[] = []
   private roster = ''
+  private scores = new Scoreboard()
+  private scoreSignature = ''
   private drag: { id: number; x: number; y: number } | null = null
   private follow: HTMLSelectElement
   private status: HTMLElement
@@ -111,6 +115,8 @@ export class LiveSpectator {
       this.el('live-time').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
       this.el('live-count').textContent = `机器人 ${this.world.robots.size}`
       this.updateRoster()
+      this.scores.observe(this.world.robots)
+      this.renderScores()
       this.draw()
       return
     }
@@ -142,22 +148,14 @@ export class LiveSpectator {
       this.updateMatchState()
       this.el('live-online').textContent = `真人 ${kind.value.robotsOnline}`
       if (!this.map && kind.value.state === 0) this.status.textContent = '已连接'
+    } else if (kind.case === 'scoreboard') {
+      this.scores.accept(kind.value.rows, kind.value.tick)
+      this.renderScores()
     } else if (kind.case === 'matchEnd') {
       this.ended = true
       this.el('live-match').textContent = '已结束'
-      const rows = kind.value.scores.map(score => {
-        const row = document.createElement('li')
-        const name = document.createElement('span')
-        name.textContent = this.world.robots.get(score.robot)?.nick || `#${score.robot}`
-        const total = document.createElement('strong')
-        total.textContent = String(score.score)
-        row.append(name, total)
-        row.title = score.titles.map(titleName).filter(Boolean).join(' / ')
-        return row
-      })
-      const list = this.el('live-scores')
-      list.replaceChildren(...rows)
-      list.hidden = rows.length === 0
+      this.scores.accept(kind.value.scores, this.world.tick, true)
+      this.renderScores()
     } else if (kind.case === 'say' && kind.value.robot !== 0 && !this.ended) {
       const say = kind.value
       const previous = this.bubbles.find(b => b.robotId === say.robot)
@@ -167,7 +165,20 @@ export class LiveSpectator {
     }
   }
 
+  private renderScores(): void {
+    const rows = this.scores.display(this.world.robots)
+    const signature = JSON.stringify([this.scores.ended, rows])
+    if (signature === this.scoreSignature) return
+    this.scoreSignature = signature
+    const list = this.el('live-scores')
+    list.replaceChildren(...rows.map(row => scoreRow(row, 'li', this.scores.ended)))
+    list.hidden = rows.length === 0
+    list.setAttribute('aria-label', this.scores.ended ? '最终积分与称号' : '实时积分榜')
+  }
+
   private resetMatchDisplay(): void {
+    this.scores.reset()
+    this.scoreSignature = ''
     this.world = emptyWorld()
     this.needsFull = true
     this.resyncSent = false
@@ -209,6 +220,7 @@ export class LiveSpectator {
 
   private draw(): void {
     if (!this.map || this.disposed) return
+    bgm.phase('live', this.world.phase)
     if (this.dpr !== (window.devicePixelRatio || 1)) { this.resize(); return }
     this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
     this.follow.value = this.camera.followId === null ? '' : String(this.camera.followId)
