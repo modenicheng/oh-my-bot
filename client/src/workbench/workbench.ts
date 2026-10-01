@@ -4,8 +4,16 @@ import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
+import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from './ts-submit'
 import './workbench.css'
 
+const INITIAL_SOURCE_TS = `import type { TickContext } from '@omb/bot-api'
+
+export function tick(ctx: TickContext) {
+  const core = ctx.api.nearestCore()
+  if (core) ctx.api.moveTo(core)
+}
+`
 const INITIAL_SOURCE = `/** @param {import('@omb/bot-api').TickContext} ctx */
 function tick(ctx) {
   const core = ctx.api.nearestCore()
@@ -39,10 +47,13 @@ export class Workbench {
   private docPath: string
   private draftKey = ''
   private source = INITIAL_SOURCE
+  private language: BotLanguage = 'js'
+  private prefKey = ''
   private online = false
   private inMatch = false
   private assistOn = false
   private nextScriptId = 0
+  private compiling = false
   private pending?: { id: number; source: string; timer: ReturnType<typeof setTimeout> }
   private loaded?: { source: string; revision: number }
   private readonly docsPane: HTMLElement
@@ -56,6 +67,7 @@ export class Workbench {
   private readonly assistButton: HTMLButtonElement
   private readonly result: HTMLElement
   private readonly draftStatus: HTMLElement
+  private readonly languageButtons: HTMLButtonElement[]
 
   constructor(private readonly deps: WorkbenchDeps) {
     this.docPath = deps.initial.doc ?? 'index.md'
@@ -87,7 +99,11 @@ export class Workbench {
       <div id="workbench-split" class="workbench-resize" role="separator" tabindex="0" aria-label="文档与编辑器高度" aria-orientation="horizontal" aria-controls="workbench-docs workbench-editor"></div>
       <section id="workbench-editor" class="workbench-pane" tabindex="-1" aria-label="脚本编辑器">
         <header class="workbench-heading">
-          <h2>bot.js <span>JavaScript</span></h2>
+          <h2>bot.<span id="workbench-lang-ext">js</span> <span id="workbench-lang-name">JavaScript</span></h2>
+          <span id="workbench-lang-switch" class="workbench-lang-switch" role="group" aria-label="脚本语言">
+            <button type="button" data-lang="js" aria-pressed="true" title="编辑 JavaScript，按原样提交">JS</button>
+            <button type="button" data-lang="ts" aria-pressed="false" title="编辑 TypeScript，提交前在浏览器内编译为 JavaScript">TS</button>
+          </span>
           <span id="workbench-draft" role="status">本地草稿</span>
           <button type="button" data-panel="editor" aria-label="收起编辑器"><span data-icon="collapse"></span></button>
         </header>
@@ -111,6 +127,10 @@ export class Workbench {
     this.assistButton = this.el('workbench-assist')
     this.result = this.el('workbench-result')
     this.draftStatus = this.el('workbench-draft')
+    this.languageButtons = Array.from(this.deps.root.querySelectorAll<HTMLButtonElement>('#workbench-lang-switch [data-lang]'))
+    for (const button of this.languageButtons) {
+      button.addEventListener('click', () => this.setLanguage((button.dataset.lang as BotLanguage) === 'ts' ? 'ts' : 'js'))
+    }
     this.manual = new ManualView({
       root: this.docsPane,
       breadcrumb: this.el('workbench-breadcrumb'),
@@ -322,16 +342,79 @@ export class Workbench {
   }
 
   setIdentity(roomCode: string, nick: string): void {
-    const key = `omb.bot.draft:${JSON.stringify([roomCode, nick])}`
+    const prefKey = languagePrefKey(roomCode, nick)
+    if (this.draftKey) this.saveLanguagePref()
+    let language = this.language
+    if (this.prefKey !== prefKey) {
+      language = this.loadLanguagePref(prefKey)
+      this.prefKey = prefKey
+    }
+    const key = draftKeyFor(roomCode, nick, language)
     if (this.draftKey === key) return
     this.resetMatch()
     this.draftKey = key
-    this.source = INITIAL_SOURCE
+    // 编辑器已存在时同步切换模型，避免把 TS 源码写进 JS 模型。
+    this.applyLanguage(language, this.editor !== undefined)
+    this.source = this.loadDraft() ?? (language === 'ts' ? INITIAL_SOURCE_TS : INITIAL_SOURCE)
     try {
-      this.source = localStorage.getItem(key) ?? INITIAL_SOURCE
       this.draftStatus.textContent = '本地草稿'
     } catch { this.draftStatus.textContent = '草稿无法保存' }
     this.editor?.setValue(this.source)
+  }
+
+  private loadDraft(): string | undefined {
+    if (!this.draftKey) return undefined
+    try { return localStorage.getItem(this.draftKey) ?? undefined } catch { return undefined }
+  }
+
+  private loadLanguagePref(prefKey: string): BotLanguage {
+    try {
+      const saved = localStorage.getItem(prefKey)
+      return isBotLanguage(saved) ? saved : 'js'
+    } catch { return 'js' }
+  }
+
+  private saveLanguagePref(): void {
+    if (!this.prefKey) return
+    try { localStorage.setItem(this.prefKey, this.language) } catch { /* 语言偏好不可存时不阻断 */ }
+  }
+
+  /** 切换语言：标题/按钮/诊断提示同步，编辑器模型与草稿键跟随；不改内容。 */
+  setLanguage(language: BotLanguage): void {
+    if (language === this.language) return
+    this.applyLanguage(language, true)
+    const nextKey = this.languageKeyFor()
+    if (this.draftKey) {
+      this.saveLanguagePref()
+      this.draftKey = nextKey
+      this.source = this.loadDraft() ?? (language === 'ts' ? INITIAL_SOURCE_TS : INITIAL_SOURCE)
+      try { this.draftStatus.textContent = '本地草稿' } catch { /* 忽略 */ }
+      this.editor?.setValue(this.source)
+    } else {
+      this.draftKey = nextKey
+    }
+    this.renderButtons()
+  }
+
+  private languageKeyFor(): string {
+    if (!this.draftKey) return ''
+    // 从现有键恢复身份（房间码 + 昵称），再按新语言重建。
+    try {
+      const identity = JSON.parse(this.draftKey.slice('omb.bot.draft:'.length))
+      const [roomCode = '', nick = ''] = Array.isArray(identity) ? identity : []
+      return draftKeyFor(roomCode, nick, this.language)
+    } catch { return this.draftKey }
+  }
+
+  private applyLanguage(language: BotLanguage, forward: boolean): void {
+    this.language = language
+    this.el('workbench-lang-ext').textContent = language === 'ts' ? 'ts' : 'js'
+    this.el('workbench-lang-name').textContent = language === 'ts' ? 'TypeScript' : 'JavaScript'
+    for (const button of this.languageButtons) {
+      button.setAttribute('aria-pressed', String((button.dataset.lang === 'ts') === (language === 'ts')))
+    }
+    this.el('workbench-diagnostics').textContent = language === 'ts' ? 'TypeScript · 提交时编译为 JavaScript' : 'JavaScript · Bot API 补全'
+    if (forward) this.editor?.setLanguage(language)
   }
 
   private async ensureEditor(): Promise<void> {
@@ -356,9 +439,9 @@ export class Workbench {
         },
         onSubmit: () => this.submit(),
         onDiagnostics: (errors, warnings) => {
-          this.el('workbench-diagnostics').textContent = errors || warnings ? `${errors} 个错误 · ${warnings} 个警告` : '检查通过 · Bot API 补全'
+          this.el('workbench-diagnostics').textContent = errors || warnings ? `${errors} 个错误 · ${warnings} 个警告` : this.language === 'ts' ? '检查通过 · 提交时编译为 JavaScript' : '检查通过 · Bot API 补全'
         },
-      })
+      }, this.language)
       loading.hidden = true
       this.renderButtons()
       if (this.editorPane.getClientRects().length && this.editorPane.contains(document.activeElement)) this.editor.focus()
@@ -394,7 +477,7 @@ export class Workbench {
   }
 
   private renderButtons(): void {
-    this.submitButton.disabled = !this.editor || !this.online || !this.inMatch || !!this.pending
+    this.submitButton.disabled = !this.editor || !this.online || !this.inMatch || !!this.pending || this.compiling
     this.submitButton.title = !this.online ? '连接恢复后可提交' : !this.inMatch ? '进入热身或正式对局后可提交' : '提交当前草稿（Ctrl / ⌘ + Enter）'
     this.assistButton.disabled = !this.online || !this.inMatch
     this.assistButton.textContent = `辅助 ${this.assistOn ? 'ON' : 'OFF'}`
@@ -408,13 +491,37 @@ export class Workbench {
   }
 
   submit(): void {
-    if (!this.editor || !this.online || !this.inMatch || this.pending) return
-    const source = this.editor.getValue()
+    if (!this.editor || !this.online || !this.inMatch || this.pending || this.compiling) return
     const id = this.nextScriptId = (this.nextScriptId + 1) >>> 0
+    if (this.language === 'ts') {
+      this.compiling = true
+      this.renderButtons()
+      this.setResult('正在编译 TypeScript…')
+      void this.editor.compile().then(outcome => {
+        this.compiling = false
+        if (!outcome.ok) {
+          // 编译失败：不发送任何内容，旧脚本继续运行，错误按 TS 原始行列展示。
+          this.setResult(`TypeScript 编译失败，未提交：\n${outcome.errors.join('\n')}`, 'error')
+          this.renderButtons()
+          return
+        }
+        this.sendScript(id, outcome.js)
+      }).catch(error => {
+        this.compiling = false
+        this.setResult(`TypeScript 编译失败，未提交：${error instanceof Error ? error.message : String(error)}`, 'error')
+        this.renderButtons()
+      })
+      return
+    }
+    this.sendScript(id, this.editor.getValue())
+  }
+
+  /** 编码后的整帧超过 32 KiB 会断开连接，不能只计算字符数。 */
+  private sendScript(id: number, source: string): void {
     const frame = encodeClient(create(ClientMsgSchema, { payload: { case: 'scriptSubmit', value: { clientScriptId: id, source } } }))
-    // WebSocket 默认上限为整帧 32 KiB；超限会断开连接，不能只计算字符数。
     if (frame.byteLength > 32768) {
       this.setResult('脚本过大：提交消息不能超过 32 KiB，请精简后重试。', 'error')
+      this.renderButtons()
       return
     }
     this.pending = { id, source, timer: setTimeout(() => {
