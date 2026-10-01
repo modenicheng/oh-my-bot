@@ -177,15 +177,16 @@ export function drawCore(ctx: CanvasRenderingContext2D, cam: Camera, wx: number,
 }
 
 export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, available: boolean, respawnInS: number, tick = 0): void {
-  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, 1.45 * cam.scale)
+  // 0.95 m sprite: clearly bigger than a core (0.8 m) but smaller than a
+  // robot (1.2 m), matching the 1.15 m pickup reach of HealthPackRadius.
+  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(10, 0.95 * cam.scale)
   if (!visible(cam, x, y)) return
   const bob = available && !motion.matches ? Math.sin(tick / 18 + wx * 0.1) * Math.min(2, cam.scale * 0.05) : 0
   ctx.save()
-  ctx.globalAlpha = available ? 1 : 0.32
-  ctx.fillStyle = '#020910a0'; ctx.beginPath(); ctx.ellipse(x, y + size * 0.48, size * 0.36, size * 0.12, 0, 0, tau); ctx.fill()
+  ctx.globalAlpha = available ? 1 : 0.35
   sprite(ctx, 'healthPack', x, y + bob, size)
   if (available) {
-    ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.72); ctx.stroke()
+    ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
   } else if (respawnInS > 0) {
     ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = `10px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
     ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)

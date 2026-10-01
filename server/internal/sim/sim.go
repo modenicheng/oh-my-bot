@@ -101,6 +101,7 @@ type Robot struct {
 	Color           string       `json:"color,omitempty"`
 	ID              uint32       `json:"id"`
 	Position        Vec2         `json:"position"`
+	PathStart       Vec2         `json:"path_start"`
 	Velocity        Vec2         `json:"velocity"`
 	HP              float64      `json:"hp"`
 	Energy          float64      `json:"energy"`
@@ -330,6 +331,9 @@ func (s *Sim) Tick() {
 func (s *Sim) moveAndCollide() {
 	for i := range s.robots {
 		r := &s.robots[i]
+		// PathStart anchors this tick's swept pickup tests; it is overwritten
+		// every tick before stepCores/stepHealthPacks read it.
+		r.PathStart = r.Position
 		if r.State == Dead {
 			r.Velocity = Vec2{}
 			continue
