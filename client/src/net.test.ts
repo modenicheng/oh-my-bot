@@ -2,9 +2,10 @@
 // close 取消、陈旧消息丢弃、未在线不缓存输入、相同身份重进、join failed 终结。
 // 真实 WsTransport + FakeWebSocket 全局桩 + fake timers；window 事件桥到真实 EventTarget。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { toBinary, create } from '@bufbuild/protobuf'
+import { toBinary, fromBinary, create } from '@bufbuild/protobuf'
 import { RoomSession, type JoinOptions, type SessionState } from './net'
-import { frame, ServerMsgSchema, ServerEventSchema, EvSaySchema, EvRoomStateSchema, type ServerMsg } from '@omb/protocol'
+import { frame, ServerMsgSchema, ServerEventSchema, EvSaySchema, EvRoomStateSchema, ClientMsgSchema,
+  ClientInputSchema, ResyncRequestSchema, LeaveRoomSchema, encodeClient, type ServerMsg } from '@omb/protocol'
 
 const CONNECTING = 0
 const OPEN = 1
@@ -191,6 +192,41 @@ describe('RoomSession', () => {
     expect(ws2.upFrames()[0]).toEqual(ws1.upFrames()[0]) // 完全一致的身份
     ws2.message(roomStateFrame())
     expect(s.state).toBe('online')
+    s.close()
+  })
+
+  it('观战握手不带玩家身份；重连保持角色并仅允许 resync/leave 上行', async () => {
+    const s = new RoomSession()
+    await s.connect({ ...opts, spectator: true })
+    const first = await ack(s)
+    const handshake = fromBinary(ClientMsgSchema, new Uint8Array(first.upFrames()[0]!).subarray(1))
+    expect(handshake.payload).toMatchObject({ case: 'spectate', value: { roomCode: opts.roomCode } })
+    const before = first.upFrames().length
+    const blocked = [
+      create(ClientMsgSchema, { payload: { case: 'input', value: create(ClientInputSchema, { seq: 7, moveX: 1000 }) } }),
+      create(ClientMsgSchema, { payload: { case: 'roomAction', value: { kind: 1 } } }),
+      create(ClientMsgSchema, { payload: { case: 'scriptSubmit', value: { source: 'function tick() {}' } } }),
+      create(ClientMsgSchema, { payload: { case: 'assistToggle', value: {} } }),
+      create(ClientMsgSchema, { payload: { case: 'warmupInput', value: { seq: 8, moveX: 1000 } } }),
+      create(ClientMsgSchema, { payload: { case: 'aiPrompt', value: { text: 'not allowed' } } }),
+      create(ClientMsgSchema, { payload: { case: 'say', value: { text: 'not allowed' } } }),
+      create(ClientMsgSchema, { payload: { case: 'join', value: { roomCode: opts.roomCode, nick: 'player' } } }),
+      create(ClientMsgSchema, { payload: { case: 'spectate', value: { roomCode: 'ELSE' } } }),
+    ]
+    for (const message of blocked) s.send(encodeClient(message))
+    s.send(new Uint8Array([frame.up, 255]))
+    expect(first.upFrames()).toHaveLength(before)
+    for (const message of [
+      create(ClientMsgSchema, { payload: { case: 'resyncRequest', value: create(ResyncRequestSchema) } }),
+      create(ClientMsgSchema, { payload: { case: 'leave', value: create(LeaveRoomSchema) } }),
+    ]) s.send(encodeClient(message))
+    expect(first.upFrames()).toHaveLength(before + 2)
+    first.closeEvent()
+    await vi.advanceTimersByTimeAsync(1000)
+    const second = FakeWebSocket.instances.at(-1)!
+    second.open()
+    await flush()
+    expect(second.upFrames()).toEqual([first.upFrames()[0]])
     s.close()
   })
 

@@ -3,14 +3,15 @@
 // 心跳与存活检测完全下沉到 WsTransport；本层负责握手超时、重试节奏与状态上报。
 // 断线后以相同 room/nick/color 自动重进；close() 后会话不可复用（重新 joinRoom）。
 import { WsTransport, decodeServer, encodeClient,
-         JoinRoomSchema, ClientMsgSchema,
+         JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame,
          type ServerMsg } from '@omb/protocol'
-import { create } from '@bufbuild/protobuf'
+import { create, fromBinary } from '@bufbuild/protobuf'
 
 export interface JoinOptions {
   roomCode: string
   nick: string
   color: string
+  spectator?: boolean
   onMessage: (msg: ServerMsg) => void
   /** 已建立的连接断开（socket close / 心跳超时）时回调，每次掉线恰好一次 */
   onDisconnect: (reason: string) => void
@@ -97,6 +98,13 @@ export class RoomSession {
   /** 上行发送：未在线直接丢弃（不排队、不回放）；在线发送失败转入重连。 */
   send(msg: Uint8Array): void {
     if (this.state !== 'online' || !this.transport) return
+    if (this.opts?.spectator) {
+      try {
+        if (msg[0] !== frame.up) return
+        const payload = fromBinary(ClientMsgSchema, msg.subarray(1)).payload.case
+        if (payload !== 'resyncRequest' && payload !== 'leave') return
+      } catch { return }
+    }
     try {
       this.transport.send(msg)
     } catch {
@@ -148,12 +156,12 @@ export class RoomSession {
       () => {
         if (this.closed || gen !== this.gen) return
         try {
-          const join = create(JoinRoomSchema, {
-            roomCode: opts.roomCode,
-            nick: opts.nick,
-            color: opts.color,
-          })
-          t.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'join', value: join } })))
+          const message = opts.spectator
+            ? create(ClientMsgSchema, { payload: { case: 'spectate', value: create(SpectateRoomSchema, { roomCode: opts.roomCode }) } })
+            : create(ClientMsgSchema, { payload: { case: 'join', value: create(JoinRoomSchema, {
+              roomCode: opts.roomCode, nick: opts.nick, color: opts.color,
+            }) } })
+          t.send(encodeClient(message))
         } catch {
           this.failAttempt(gen)
         }

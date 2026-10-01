@@ -1,4 +1,4 @@
-// Read-only navigation over recorded frames. No session, protocol or gameplay input.
+// Read-only navigation over arena frames. No session, protocol or gameplay input.
 import { Camera } from '../game/camera'
 
 export class SpectatorCamera {

@@ -11,6 +11,7 @@ import { GameController } from './game/controls'
 import { ManualView } from './manual/manual'
 import { Workbench } from './workbench/workbench'
 import { ReplayLibrary } from './replay/library'
+import { LiveSpectator } from './live'
 import { readRoute, saveProfile, loadProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
@@ -64,6 +65,9 @@ const replayErrorEl = $<HTMLElement>('replay-error')
 const btnReplaysBack = $<HTMLButtonElement>('btn-replays-back')
 const viewReplayPlayer = $<HTMLElement>('view-replay-player')
 const replayCanvas = $<HTMLCanvasElement>('replay-canvas')
+const viewLive = $<HTMLElement>('view-live')
+let live: LiveSpectator | null = null
+let liveRoom = ''
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
 viewJoin.appendChild(audioSettings)
 
@@ -114,15 +118,17 @@ function validate(): string | null {
 function showView(view: View, extra?: RouteExtra): void {
   const enteringGame = view === 'game' && viewGame.hidden
   game?.setActive(view === 'game' && session?.state === 'online' && !awaitingFull)
-  writeRoute(view, lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
+  writeRoute(view, view === 'live' ? liveRoom : lastJoin?.roomCode, view === 'game' ? workbench.route : extra)
   viewJoin.hidden = view !== 'join'
   viewRoom.hidden = view !== 'room'
   viewGame.hidden = view !== 'game'
   viewManual.hidden = view !== 'manual'
+  viewLive.hidden = view !== 'live'
   const spectatorPlayer = view === 'spectator' && !!extra?.replay
   viewReplays.hidden = view !== 'replays' && !(view === 'spectator' && !spectatorPlayer)
   viewReplayPlayer.hidden = view !== 'replay-player' && !spectatorPlayer
-  const audioHost = view === 'game' ? viewGame.querySelector('.game-tools')!
+  const audioHost = view === 'live' ? viewLive.querySelector('.live-heading')!
+    : view === 'game' ? viewGame.querySelector('.game-tools')!
     : view === 'manual' ? viewManual.querySelector('.manual-top')!
     : view === 'replay-player' || spectatorPlayer ? viewReplayPlayer.querySelector('.rp-buttons')!
     : view === 'room' ? viewRoom : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin
@@ -321,6 +327,32 @@ btnReplay.addEventListener('click', () => openReplays())
 $('btn-game-replay').addEventListener('click', () => openReplays())
 btnReplaysBack.addEventListener('click', closeReplays)
 
+// ---- 实时观战：独立连接，不恢复玩家身份 --------------------------------------
+
+function openLive(roomCode: string): void {
+  live?.dispose()
+  liveRoom = roomCode
+  inRoom.value = roomCode
+  showView('live')
+  live = new LiveSpectator({ root: viewLive, canvas: $<HTMLCanvasElement>('live-canvas'), onExit: closeLive })
+  void live.connect(roomCode)
+  $('live-canvas').focus({ preventScroll: true })
+}
+
+function closeLive(): void {
+  live?.dispose()
+  live = null
+  showView('join')
+  $('btn-live').focus({ preventScroll: true })
+}
+
+$('btn-live').addEventListener('click', () => {
+  normalize()
+  if (!ROOM_CODE_RE.test(inRoom.value)) { showFormError('房间码需为 4–8 位字母/数字'); return }
+  showFormError('')
+  openLive(inRoom.value)
+})
+
 // ---- 连接会话 ---------------------------------------------------------------
 
 let session: RoomSession | null = null
@@ -342,6 +374,7 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
   saveProfile(lastJoin)
   workbench.setIdentity(roomCode, nick)
   roomCodeEl.textContent = roomCode
+  $<HTMLAnchorElement>('room-live').href = `?view=live&room=${encodeURIComponent(roomCode)}`
   resetLobby()
   showView('room')
   setStatus('off', '连接中…')
@@ -596,6 +629,7 @@ function stopRttLoop(): void {
 
 // M / C 切换侧栏；编辑、输入法和浏览器组合键保留原行为。
 window.addEventListener('keydown', (e) => {
+  if (!viewLive.hidden) return
   if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return
@@ -616,14 +650,20 @@ window.addEventListener('pagehide', () => {
   game?.setActive(false)
   workbench.setAvailability(false, false)
   session?.close()
+  live?.dispose()
 })
 window.addEventListener('pageshow', e => {
-  if (e.persisted && lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
+  if (!e.persisted) return
+  if (!viewLive.hidden && liveRoom) openLive(liveRoom)
+  else if (lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
 })
 
 const profile = loadProfile(initialRoute.roomCode)
 // A direct spectator URL must never restore a player session or join a room.
-if (initialRoute.view === 'spectator') {
+if (initialRoute.view === 'live') {
+  if (initialRoute.roomCode) openLive(initialRoute.roomCode)
+  else { showView('join'); showFormError('请输入要观战的房间码') }
+} else if (initialRoute.view === 'spectator') {
   openReplays(initialRoute.replay, true)
 } else if (profile) {
   inRoom.value = profile.roomCode
