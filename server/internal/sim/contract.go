@@ -173,8 +173,9 @@ type ScriptFrame struct {
 	Obs  Observation // AOI 裁剪后的外部世界
 }
 
-// ScriptCommands 是脚本的输出意图。指针语义 = 本 tick 脚本操作过该轴
-// （与 ClientInput.axis_mask 同构）；nil = 未操作，仲裁器保留人类/上次控制。
+// ScriptCommands 是脚本的单 tick 输出意图。指针语义 = 本 tick 脚本
+// 明确操作过该轴；nil = 本 tick 不操作该轴，不会延续到下一 tick。
+// 人类按键的持续态由 ClientInput 单独维护；Aim 未操作时物理炮塔朝向保持。
 type ScriptCommands struct {
 	Move      *Vec2    // 单位向量 × 速度意向
 	Aim       *float64 // 炮塔目标角（弧度）
@@ -190,7 +191,7 @@ type ScriptCommands struct {
 type Runtime interface {
 	// Load 编译装载；失败返回 err（不替换旧版本——Hot Swap 语义）。
 	Load(source string) error
-	// Tick 在配额内执行一次脚本；超时/异常返回 err（调用方清脚本轴）。
+	// Tick 在配额内执行一次脚本；超时/异常返回 err（该 tick 无脚本意图）。
 	Tick(frame ScriptFrame) (ScriptCommands, error)
 	// Rev 当前版本号（服务器侧单调）。
 	Rev() uint32

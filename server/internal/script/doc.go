@@ -1,10 +1,10 @@
 // Package script 提供 Bot Script 运行时（ADR-0007 r2：60Hz 单时钟、并行脚本池）。
 //
-// v1 唯一实现是 GojaRuntime：goja ES5.1 沙箱。玩家脚本以全局 tick(ctx)
-// 为入口（手册 §五行代码起步），每 tick 由仲裁器调用，产出 sim.ScriptCommands。
+// v1 唯一实现是 GojaRuntime：goja ES5.1 沙箱。玩家脚本以全局
+// tick(bot: BotContext) 为入口，每 tick 由仲裁器调用并产出 sim.ScriptCommands。
 //
 // 与 @omb/bot-api（packages/bot-api/src/index.ts + runtime.ts）对齐：
-// TickContext { self, game, scan(), api }，api = L0 原语 + L1 便利层。
+// BotContext 直接暴露 self/game/scan 与 L0/L1；api 是旧语法兼容别名。
 // 手册 docs/manual/code/bot-scripting.md 是行为基准。
 //
 // 配额：单 tick wall-clock（默认 10ms，Config 可调）。到期通过 goja

@@ -41,7 +41,7 @@ oh-my-bot 是一场最多 **64 人的机器人大乱斗**：每个人操控一�
 | [操作与控制仲裁](rules/controls.md) | 快捷键、技能状态、音效与重连 | 所有人 |
 | [写第一个 Bot](code/bot-scripting.md) | 网页编辑器、脚本提交、感知和运行规则 | 写代码的人 |
 | [API 总览](reference/index.md) | 动作、数据结构和示例库 | 写代码的人 |
-| [模块语义与陷阱](reference/modules.md) | 锁存、预算、感知和交互限制 | 写代码的人 |
+| [模块语义与陷阱](reference/modules.md) | 每 tick 意图、预算、感知和交互限制 | 写代码的人 |
 
 ## 核心概念速查
 

@@ -26,18 +26,18 @@ func systemInstruction() string {
 	b.WriteString("## 脚本 API（@omb/bot-api）\n\n")
 	b.WriteString(botAPITypes())
 
-	b.WriteString("\n能量：上限 100、回复 10/s。开火 5/发、dash 20、shield 约 18/s、pulseScan 12——不要无条件开盾+冲刺。\n\n")
+	b.WriteString("\n能量：上限 100、回复 10/s。开火 5/发、dash 20/s、shield 约 18/s、pulseScan 12。动作只对当前 tick 生效；持续动作要每 tick 调用。shield 与 dash 互斥且 shield 优先。\n\n")
 	b.WriteString("刻意不提供（不要幻想调用）：寻路、弹道预测、威胁评估、检测玩家是否在手操（脚本感知不到手操状态，分轴仲裁已处理）。API 之外不存在任何全局函数或对象。\n")
 	return b.String()
 }
 
 // botAPITypes @omb/bot-api 类型定义摘要（packages/bot-api/src/index.ts 镜像）。
 func botAPITypes() string {
-	return `interface TickContext {
+	return `interface BotContext extends L0, L1 {
   self: Self           // 自己的状态
   game: GameInfo       // 局时、阶段
   scan(): Observation  // 免费感知：服务器已按视野 20m + 墙体遮挡裁剪好的最近快照，零成本任意频次
-  api: L0 & L1         // 全部动作
+  api: L0 & L1         // 旧语法兼容别名；新代码使用 bot.xxx()
 }
 
 interface Vec2 { x: number; y: number }
@@ -48,10 +48,12 @@ interface GameInfo { time: number; timeLeft: number; phase: 'OUTER_RING' | 'CORE
 
 interface Observation {
   tick: number
-  robots: (RobotRef & { isPartner: boolean })[]  // 搭档恒可见（唯一例外）
+  robots: RobotRef[]
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
   projectiles: (Vec2 & { id: number })[]
+  healthPacks: (Vec2 & { id: number; available: boolean; respawnInS: number })[]
+  walls: { id: number; min: Vec2; max: Vec2 }[]
 }
 
 // L0 原语（自己组合策略）
@@ -59,9 +61,9 @@ interface L0 {
   move(vx: number, vy: number): void   // 全向移动，速度上限 8 m/s
   aimAt(angle: number): void           // 炮塔转向（弧度）
   fire(): void                         // 间隔 250ms、耗能 5/发、有效射程 16m（16–20m 精度衰减）
-  dash(): void                         // 位移约 4.8m、耗能 20、CD 2.5s、无无敌帧
+  dash(): void                         // 按住式 16m/s、持续耗能 20/s、无冷却/无无敌帧
   shield(on: boolean): void            // 减伤 65%、不可开火、移速约 80%、耗能约 18/s
-  interact(): void                     // Uplink 引导黑入（2.5m 内、引导 1.5s）
+  interact(): void                     // Uplink 引导黑入（2.5m 内、引导 8s）
   say(text: string): void              // 喊话 3s CD，自由文本
 }
 
@@ -72,7 +74,6 @@ interface L1 {
   nearestEnemy(): RobotRef | null     // 最近可见敌人
   nearestCore(): Vec2 | null
   nearestUplink(): Vec2 | null
-  partner(): RobotRef | null          // 本局搭档；奇数局末位玩家 null
   pulseScan(): Observation | null     // 半径 32m、耗能 12、CD 2s，仍不穿墙
 }
 `

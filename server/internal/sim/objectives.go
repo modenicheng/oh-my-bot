@@ -270,7 +270,11 @@ func (s *Sim) stepHealthPacks() {
 		}
 		for j := range s.robots {
 			r := &s.robots[j]
-			if r.State != Alive || r.HP >= MaxHP || !s.sweptReach(r.PathStart, r.Position, pack.Pos, HealthPackRadius) {
+			reached := r.Position.Sub(pack.Pos).Len() <= RobotRadius
+			if s.simulationVersion >= 2 {
+				reached = s.sweptReach(r.PathStart, r.Position, pack.Pos, HealthPackRadius)
+			}
+			if r.State != Alive || r.HP >= MaxHP || !reached {
 				continue
 			}
 			heal := math.Min(HealthPackHeal, MaxHP-r.HP)
@@ -298,7 +302,11 @@ func (s *Sim) stepCores() {
 		}
 		for j := range s.robots {
 			r := &s.robots[j]
-			if r.State == Alive && s.sweptReach(r.PathStart, r.Position, core.Pos, CoreRadius) {
+			reached := r.Position.Sub(core.Pos).Len() <= RobotRadius
+			if s.simulationVersion >= 2 {
+				reached = s.sweptReach(r.PathStart, r.Position, core.Pos, CoreRadius)
+			}
+			if r.State == Alive && reached {
 				core.Alive = false
 				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_CorePickup{CorePickup: &ombv1.EvCorePickup{By: r.ID, CoreId: core.ID, Value: core.Value}}})
 				break

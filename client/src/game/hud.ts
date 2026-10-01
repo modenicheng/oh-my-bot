@@ -12,7 +12,6 @@ import './hud.css'
 const MAX_HP = 1000   // hp_x10（×10）
 const MAX_EN = 1000   // energy_x10（×10）
 const TICK_HZ = 60    // 服务器固定 60Hz 绝对 tick
-const DASH_COST_EN = 20  // server sim.DashCost
 const FIRE_COST_EN = 5   // server sim.FireCost
 const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
 const HACK_MAX_X10 = 80  // progress_x10 满值（8s × 10）
@@ -250,7 +249,6 @@ export class Hud {
     const dead = self.dead
     const en = self ? self.energyX10 / 10 : 0
     const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick)
-    const dashCd = cdSeconds(world.self?.dashReadyTick, world.tick)
 
     // 开火：无 CD 概念外的能量门槛（5/发）；间隔 250ms 仅在射击后瞬时可见
     if (dead) this.setCard(this.skills.fire, 'off', '阵亡')
@@ -260,13 +258,12 @@ export class Hud {
     else if (fireCd > 0) this.setCard(this.skills.fire, 'cooling', `${fireCd.toFixed(1)}s`)
     else this.setCard(this.skills.fire, 'ready', '—')
 
-    // 冲刺：耗 20 EN + 服务器 CD
+    // 冲刺：按住持续耗能，无冷却；护盾优先。
     if (dead) this.setCard(this.skills.dash, 'off', '阵亡')
+    else if (self.shieldOn) this.setCard(this.skills.dash, 'off', '护盾中')
     else if (self.dashing) this.setCard(this.skills.dash, 'active', '冲刺中')
-    else if (en < DASH_COST_EN) this.setCard(this.skills.dash, 'off', `EN ${DASH_COST_EN}`)
-    else if (dashCd === undefined) this.setCard(this.skills.dash, 'ready', '—')
-    else if (dashCd > 0) this.setCard(this.skills.dash, 'cooling', `${dashCd.toFixed(1)}s`)
-    else this.setCard(this.skills.dash, 'ready', '—')
+    else if (self.energyX10 < 4) this.setCard(this.skills.dash, 'off', '能量低')
+    else this.setCard(this.skills.dash, 'ready', '按住')
 
     // 护盾：按住持续，无假 CD；开盾期间禁开火
     if (dead) this.setCard(this.skills.shield, 'off', '阵亡')

@@ -190,9 +190,8 @@ export class GameController {
         this.scores.observe(this.world.robots)
         this.input.acknowledge(snap.ackSeq)
         if (snap.self?.assistOn !== undefined) this.input.assistOn = snap.self.assistOn
-        // 重连/全量快照：清粘滞轴与按键状态，避免重连前 held 键凭旧状态重新抢占；
-        // 服务端权威 manual_axes_mask 已随 SelfState 下发，HUD 按其显示。
-        if (snap.full) this.input.resetTakeover()
+        // 普通 full 只是状态重同步，不代表服务端释放了 HumanAxes；保留本地
+        // held/mask，避免服务端继续旧值而客户端静默停止发送对应轴。
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
         if (snap.full) this.resyncAt = -Infinity
       }

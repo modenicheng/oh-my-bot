@@ -27,6 +27,7 @@ export interface InputSample {
 export class InputSampler {
   private keys = new Set<string>()
   private mouseDown = false
+  private dashMouseDown = false
   private pointer = { x: 0, y: 0 }
   /** 人类操作轴的粘性：某轴被真实人类操作（非 repeat 边沿）后持续置位，
    * 直到 Space 交回辅助/关闭或失焦。assist 关闭期间不置位（无脚本可抢占）。
@@ -38,8 +39,6 @@ export class InputSampler {
   private cam: Camera | null = null
   private canvas: HTMLCanvasElement | null = null
   private disposers: (() => void)[] = []
-  /** Shift dash 按下沿（单帧 true） */
-  private dashEdge = false
   /** assist 开关状态（本地镜像，快照权威回写） */
   assistOn = false
 
@@ -66,7 +65,7 @@ export class InputSampler {
         if (edge) this.stickyAxes |= AXIS_ABILITY
         e.preventDefault()
       } else if (k === 'ShiftLeft' || k === 'ShiftRight') {
-        if (!e.repeat) this.dashEdge = true
+        this.keys.add(k)
         if (edge) this.stickyAxes |= AXIS_ABILITY
         e.preventDefault()
       } else if (k === 'KeyQ') {
@@ -77,7 +76,7 @@ export class InputSampler {
     }
     const onKeyUp = (e: KeyboardEvent) => {
       const k = e.code
-      if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD' || k === 'KeyQ' || k === 'KeyE' || k === 'KeyF') this.keys.delete(k)
+      if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD' || k === 'KeyQ' || k === 'KeyE' || k === 'KeyF' || k === 'ShiftLeft' || k === 'ShiftRight') this.keys.delete(k)
     }
     const onMouseMove = (e: MouseEvent) => {
       // 指针微抖也会持续置位：只在真实移动（坐标变化）时抢占 aim 轴。
@@ -93,11 +92,17 @@ export class InputSampler {
         this.mouseDown = true
         this.stickyAxes |= AXIS_FIRE
         e.preventDefault()
+      } else if (e.button === 2) {
+        this.dashMouseDown = true
+        this.stickyAxes |= AXIS_ABILITY
+        e.preventDefault()
       }
     }
     const onMouseUp = (e: MouseEvent) => {
       if (e.button === 0) this.mouseDown = false
+      if (e.button === 2) this.dashMouseDown = false
     }
+    const onContextMenu = (e: MouseEvent) => e.preventDefault()
     const onBlur = () => {
       this.release()
       this.releaseAxes = this.stickyAxes
@@ -110,6 +115,7 @@ export class InputSampler {
     window.addEventListener('keyup', onKeyUp)
     canvas.addEventListener('mousemove', onMouseMove)
     canvas.addEventListener('mousedown', onMouseDown)
+    canvas.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('mouseup', onMouseUp)
     window.addEventListener('blur', onBlur)
 
@@ -119,6 +125,7 @@ export class InputSampler {
       () => window.removeEventListener('keyup', onKeyUp),
       () => canvas.removeEventListener('mousemove', onMouseMove),
       () => canvas.removeEventListener('mousedown', onMouseDown),
+      () => canvas.removeEventListener('contextmenu', onContextMenu),
       () => window.removeEventListener('mouseup', onMouseUp),
       () => window.removeEventListener('blur', onBlur),
     )
@@ -134,7 +141,7 @@ export class InputSampler {
   release(): void {
     this.keys.clear()
     this.mouseDown = false
-    this.dashEdge = false
+    this.dashMouseDown = false
   }
 
   /** 释放按键并把全部人工接管轴归零（下一个采样帧发出 0 mask，交回仲裁）。
@@ -196,11 +203,10 @@ export class InputSampler {
 
     const aim = this.aimAt(selfX, selfY) ?? this.lastAim
     this.lastAim = aim
-    const dash = this.dashEdge
+    const dash = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.dashMouseDown
     const interact = this.keys.has('KeyE') || this.keys.has('KeyF')
-    this.dashEdge = false
 
-    // Q 护盾与 E/F 破解均按住持续，松开后发送显式 false。
+      // Q 护盾、E/F 破解和 Shift/右键 Dash 均按住持续，松开后发送显式 false。
     const shield = this.keys.has('KeyQ')
 
     const heldAxes = this.stickyAxes | this.releaseAxes
