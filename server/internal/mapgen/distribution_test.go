@@ -143,6 +143,10 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 // 与垂直短杠（0.7×2 或 2×0.7），正面积相交约 0.7×0.7。只豁免这对组合
 // 自身的重叠；任何其他独立墙对仍受 2.2m 间距约束。
 func isLPair(other, w sim.Wall) bool {
+	// The fourth stratum owns IDs 25..40, base then stub per wedge.
+	if other.ID < 25 || other.ID > 39 || (other.ID-25)%2 != 0 || w.ID != other.ID+1 {
+		return false
+	}
 	ow, oh := overlapDims(wallRect(other), wallRect(w))
 	if !(ow > 0 && oh > 0) {
 		return false
@@ -160,6 +164,22 @@ func isLPair(other, w sim.Wall) bool {
 	co := other.Min.Add(other.Max).Scale(0.5)
 	cw := w.Min.Add(w.Max).Scale(0.5)
 	return math.Abs(co.Sub(cw).Len()-math.Hypot(1.65, 0.65)) < 1e-6
+}
+
+func TestLClearanceChecksOtherGroups(t *testing.T) {
+	pieces := stampCell(coverCell{lShape: true}, sim.Vec2{}, 0)
+	base, stub := pieces[0], pieces[1]
+	if !pieceHasClearance(stub, []stampedPiece{base}) {
+		t.Fatal("same-assembly overlap rejected")
+	}
+	other := stampedPiece{r: stub.r, group: 1}
+	if pieceHasClearance(stub, []stampedPiece{other, base}) {
+		t.Fatal("stub skipped another assembly after sibling overlap")
+	}
+	other.group = -1
+	if pieceHasClearance(stub, []stampedPiece{other, base}) {
+		t.Fatal("stub skipped independent wall")
+	}
 }
 
 func TestPlayableGridIsCircular(t *testing.T) {

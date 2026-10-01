@@ -112,6 +112,18 @@ func stampCell(c coverCell, proto sim.Vec2, k int) []stampedPiece {
 	return out
 }
 
+func pieceHasClearance(piece stampedPiece, batch []stampedPiece) bool {
+	for _, other := range batch {
+		if piece.group >= 0 && other.group == piece.group {
+			continue
+		}
+		if gap2(piece.r, other.r) < wallClearance*wallClearance {
+			return false
+		}
+	}
+	return true
+}
+
 // positiveOverlap 判断两矩形是否正面积相交（交叠宽高均 > 0，贴边不算）。
 func positiveOverlap(a, b rect) bool {
 	w, h := overlapDims(a, b)
@@ -199,8 +211,7 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef) ([]sim.Wal
 			}
 			proto := slotDirection(angle / 7.5).Scale(radius)
 			batch := make([]sim.Wall, 0, 16)
-			rects := make([]rect, 0, 16)
-			groups := make([]int, 0, 16)
+			pieces := make([]stampedPiece, 0, 16)
 			valid := true
 			for k := 0; k < 8 && valid; k++ {
 				for _, pc := range stampCell(c, proto, k) {
@@ -209,33 +220,18 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef) ([]sim.Wal
 						valid = false
 						break
 					}
-					sibling := pc.group >= 0 && len(groups) > 0 && groups[len(groups)-1] == pc.group
-					if sibling {
-						// Same L assembly: the pair must positively overlap so
-						// the union is a connected silhouette by construction.
-						if !positiveOverlap(rects[len(rects)-1], pc.r) {
-							shapeReject++
-							valid = false
-							break
-						}
-					} else {
-						rejected := false
-						for i := range rects {
-							if pc.group >= 0 && groups[i] == pc.group {
-								continue
-							}
-							if gap2(pc.r, rects[i]) < wallClearance*wallClearance {
-								batchReject++
-								valid, rejected = false, true
-								break
-							}
-						}
-						if rejected {
-							break
-						}
+					sibling := pc.group >= 0 && len(pieces) > 0 && pieces[len(pieces)-1].group == pc.group
+					if sibling && !positiveOverlap(pieces[len(pieces)-1].r, pc.r) {
+						shapeReject++
+						valid = false
+						break
 					}
-					rects = append(rects, pc.r)
-					groups = append(groups, pc.group)
+					if !pieceHasClearance(pc, pieces) {
+						batchReject++
+						valid = false
+						break
+					}
+					pieces = append(pieces, pc)
 					batch = append(batch, rectToWall(uint32(len(walls)+len(batch)+1), pc.r))
 				}
 			}
