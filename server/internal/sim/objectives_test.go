@@ -284,3 +284,105 @@ func TestCoreWeightedSelectionDeterministic(t *testing.T) {
 		t.Fatalf("weight distribution outside tolerance %v", counts)
 	}
 }
+
+// Swept pickup boundary table: tangency inclusive, just-outside miss, no
+// absorption through walls or a locked zone, dash-speed paths still collect.
+func TestSweptPickupBoundaries(t *testing.T) {
+	newPickupSim := func(walls []Wall) *Sim {
+		s := NewSim(11, []uint32{1}, nil)
+		m := gameMap()
+		m.HealthPacks = []HealthPackDef{{ID: 1, Pos: Vec2{X: 10, Y: 0}}}
+		m.CorePads = []CorePadDef{{ID: 50, Pos: Vec2{X: -10, Y: 0}, Group: 0, Value: 10}}
+		m.CoreRules.GroupWeights = map[Phase][]float64{PhaseOuterRing: {1}, PhaseCoreOpen: {1}}
+		m.Walls = walls
+		if err := s.SetMap(m); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetSpawn(1, Vec2{X: 20, Y: 0}, 0); err != nil {
+			t.Fatal(err)
+		}
+		s.robots[0].HP = 50
+		return s
+	}
+	place := func(s *Sim, x float64) { s.robots[0].Position, s.robots[0].PathStart = Vec2{X: x, Y: 0}, Vec2{X: x, Y: 0} }
+	heals := func(s *Sim) int {
+		n := 0
+		for _, ev := range s.events {
+			if ev.GetHeal() != nil {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("tangent_edge_inclusive", func(t *testing.T) {
+		s := newPickupSim(nil)
+		place(s, 10+RobotRadius+HealthPackRadius) // exact tangency
+		s.stepHealthPacks()
+		if heals(s) != 1 || s.healthPacks[0].ReadyAt != HealthPackCooldown || s.robots[0].HP != 80 {
+			t.Fatalf("tangency not picked up: heals=%d hp=%.1f", heals(s), s.robots[0].HP)
+		}
+	})
+	t.Run("just_outside_misses", func(t *testing.T) {
+		s := newPickupSim(nil)
+		place(s, 10+RobotRadius+HealthPackRadius+0.01)
+		s.stepHealthPacks()
+		if s.healthPacks[0].ReadyAt != 0 || s.robots[0].HP != 50 {
+			t.Fatal("picked up beyond combined radius")
+		}
+	})
+	t.Run("wall_blocks_no_teleport_snap", func(t *testing.T) {
+		s := newPickupSim([]Wall{{ID: 90, Min: Vec2{X: 11.3, Y: -2}, Max: Vec2{X: 11.4, Y: 2}}})
+		place(s, 12.2) // west face of wall; straight-line distance < reach
+		s.stepHealthPacks()
+		if heals(s) != 0 || s.healthPacks[0].ReadyAt != 0 {
+			t.Fatal("picked up through wall")
+		}
+	})
+	t.Run("locked_zone_blocks_core", func(t *testing.T) {
+		s := newPickupSim(nil)
+		m := s.mapDef
+		m.CorePads[0] = CorePadDef{ID: 50, Pos: Vec2{X: -10, Y: 0}, Group: 0, Value: 10} // inside locked radius 5
+		s.cores = []CoreView{{ID: 50, Pos: Vec2{X: -10, Y: 0}, Value: 10, Alive: true}}
+		place(s, -5.55) // tangent to the locked-zone boundary, closest legal spot
+		s.stepCores()
+		picked := false
+		for _, ev := range s.events {
+			if ev.GetCorePickup() != nil {
+				picked = true
+			}
+		}
+		if picked || !s.cores[0].Alive {
+			t.Fatal("core inside locked zone absorbed through the boundary")
+		}
+	})
+	t.Run("dash_path_collects", func(t *testing.T) {
+		s := newPickupSim(nil)
+		// One tick at dash speed crosses the pack: start 0.2 before overlap,
+		// end 0.2 after. Neither endpoint alone is inside combined radius.
+		s.robots[0].PathStart = Vec2{X: 10 + RobotRadius + HealthPackRadius + 0.2, Y: 0}
+		s.robots[0].Position = Vec2{X: 10 - RobotRadius - HealthPackRadius - 0.2, Y: 0}
+		s.stepHealthPacks()
+		if heals(s) != 1 || s.robots[0].HP != 80 {
+			t.Fatalf("dash path skipped pack: heals=%d hp=%.1f", heals(s), s.robots[0].HP)
+		}
+	})
+	t.Run("full_health_and_single_consumer", func(t *testing.T) {
+		s := NewSim(11, []uint32{1, 2}, &recordingSink{})
+		m := gameMap()
+		m.HealthPacks = []HealthPackDef{{ID: 1, Pos: Vec2{X: 10, Y: 0}}}
+		if err := s.SetMap(m); err != nil {
+			t.Fatal(err)
+		}
+		for i := range s.robots {
+			s.robots[i].Position, s.robots[i].PathStart = Vec2{X: 10, Y: 0}, Vec2{X: 10, Y: 0}
+		}
+		s.robots[0].HP = MaxHP // full: must not consume
+		s.robots[1].HP = 40
+		s.stepHealthPacks()
+		h1, h2 := s.robots[0].HP, s.robots[1].HP
+		if h1 != MaxHP || h2 != 70 || s.healthPacks[0].ReadyAt != HealthPackCooldown {
+			t.Fatalf("full-health or multi-consumer leak: h1=%.1f h2=%.1f ready=%d", h1, h2, s.healthPacks[0].ReadyAt)
+		}
+	})
+}

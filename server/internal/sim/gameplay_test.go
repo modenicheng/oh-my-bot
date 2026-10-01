@@ -47,6 +47,7 @@ func TestHealthPackPickupRules(t *testing.T) {
 	pack := &s.healthPacks[0]
 	for i := range s.robots {
 		s.robots[i].Position = pack.Pos
+		s.robots[i].PathStart = pack.Pos // direct call without Tick: no path
 		s.robots[i].HP = MaxHP
 	}
 	s.stepHealthPacks()
@@ -90,6 +91,7 @@ func TestHealthPackCheckpointRestoresCooldown(t *testing.T) {
 	}
 	r := &s.robots[s.index[1]]
 	r.Position = s.healthPacks[0].Pos
+	r.PathStart = r.Position // direct call without Tick: no path
 	r.HP = 60
 	s.stepHealthPacks()
 	cp := s.Snapshot()

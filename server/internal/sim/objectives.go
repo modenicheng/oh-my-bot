@@ -229,7 +229,32 @@ func (s *Sim) stepUplinks() {
 const (
 	HealthPackHeal     = 30.0
 	HealthPackCooldown = 30 * TickRate
+
+	// CoreRadius/HealthPackRadius are pickup body radii in world meters. Pickup
+	// is circle overlap swept along the whole per-tick motion path (inclusive at
+	// tangency), so a dash or knockback cannot skip an item its body touched.
+	// Path reach is clamped at the first wall/locked-zone/arena contact, so
+	// items behind cover or a locked core are never absorbed through it.
+	CoreRadius       = 0.35
+	HealthPackRadius = 0.55
 )
+
+// sweptReach reports whether a robot moving start->end this tick came within
+// RobotRadius+itemR of center (inclusive), without crossing solid geometry.
+func (s *Sim) sweptReach(start, end, center Vec2, itemR float64) bool {
+	if s.mapDef != nil {
+		if c := s.sweepContact(start, end.Sub(start)); c.hit && c.t < 1-collisionEpsilon {
+			end = start.Add(end.Sub(start).Scale(max(0, c.t)))
+		}
+	}
+	d := end.Sub(start)
+	l := d.Len()
+	if l <= collisionEpsilon {
+		return start.Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon
+	}
+	t := math.Max(0, math.Min(1, ((center.X-start.X)*d.X+(center.Y-start.Y)*d.Y)/(l*l)))
+	return start.Add(d.Scale(t)).Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon
+}
 
 func (s *Sim) stepHealthPacks() {
 	for i := range s.healthPacks {
@@ -239,7 +264,7 @@ func (s *Sim) stepHealthPacks() {
 		}
 		for j := range s.robots {
 			r := &s.robots[j]
-			if r.State != Alive || r.HP >= MaxHP || r.Position.Sub(pack.Pos).Len() > RobotRadius {
+			if r.State != Alive || r.HP >= MaxHP || !s.sweptReach(r.PathStart, r.Position, pack.Pos, HealthPackRadius) {
 				continue
 			}
 			heal := math.Min(HealthPackHeal, MaxHP-r.HP)
@@ -267,7 +292,7 @@ func (s *Sim) stepCores() {
 		}
 		for j := range s.robots {
 			r := &s.robots[j]
-			if r.State == Alive && r.Position.Sub(core.Pos).Len() <= RobotRadius {
+			if r.State == Alive && s.sweptReach(r.PathStart, r.Position, core.Pos, CoreRadius) {
 				core.Alive = false
 				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_CorePickup{CorePickup: &ombv1.EvCorePickup{By: r.ID, CoreId: core.ID, Value: core.Value}}})
 				break
