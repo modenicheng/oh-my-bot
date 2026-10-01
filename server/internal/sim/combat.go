@@ -171,17 +171,23 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 	if r.HP > 0 {
 		return
 	}
-	totalDamage := 0.0
-	for _, damage := range r.Combat.DamageBy {
-		totalDamage += damage
+	contributors := make([]uint32, 0, len(r.Combat.DamageBy))
+	for id := range r.Combat.DamageBy {
+		contributors = append(contributors, id)
 	}
-	assists := make([]uint32, 0, len(r.Combat.DamageBy))
-	for contributor, damage := range r.Combat.DamageBy {
-		if contributor != attacker && damage*2 < totalDamage {
-			assists = append(assists, contributor)
+	sort.Slice(contributors, func(i, j int) bool { return contributors[i] < contributors[j] })
+	// Stable addition order keeps the strict half-damage boundary identical
+	// across live play and replay without rounding away effective HP damage.
+	totalDamage := 0.0
+	for _, id := range contributors {
+		totalDamage += r.Combat.DamageBy[id]
+	}
+	assists := make([]uint32, 0, len(contributors))
+	for _, id := range contributors {
+		if id != attacker && r.Combat.DamageBy[id]*2 < totalDamage {
+			assists = append(assists, id)
 		}
 	}
-	sort.Slice(assists, func(i, j int) bool { return assists[i] < assists[j] })
 	killSteal := totalDamage > 0 && r.Combat.DamageBy[attacker]*2 < totalDamage
 	r.State, r.Velocity = Dead, Vec2{}
 	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false

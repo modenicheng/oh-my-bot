@@ -56,7 +56,8 @@ func (s *Sim) SetMap(def *MapDef) error {
 		}
 	}
 	for i, h := range m.HealthPacks {
-		if h.ID == 0 || (i > 0 && m.HealthPacks[i-1].ID == h.ID) || !h.Pos.finite() || h.Pos.Len() < m.CoreZone.Radius+RobotRadius {
+		outsideArena := m.GeneratorVer >= 2 && h.Pos.Len() > arenaCenterRadius
+		if h.ID == 0 || (i > 0 && m.HealthPacks[i-1].ID == h.ID) || !h.Pos.finite() || outsideArena || h.Pos.Len() < m.CoreZone.Radius+RobotRadius {
 			return fmt.Errorf("sim: invalid health pack %d", h.ID)
 		}
 		for _, wall := range m.Walls {
