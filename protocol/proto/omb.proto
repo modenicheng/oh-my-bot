@@ -41,7 +41,7 @@ message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
 message LeaveRoom {}
 message AssistToggle {} // Space 按下：驾驶辅助总开关翻转（事件语义，非状态）
 message RoomAction {
-  enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; }
+  enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; SOLO_BOTS = 5; }
   Kind kind = 1;
 }
 message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
@@ -194,6 +194,7 @@ message EvRoomState { // 房间生命周期广播（含 Session 榜）
   State state = 1;
   uint32 robots_online = 2;
   string host_nick = 3;
+  uint32 solo_bots = 4; // room-scoped deterministic test opponents; zero when disabled
 }
 
 message EvAiQuota {

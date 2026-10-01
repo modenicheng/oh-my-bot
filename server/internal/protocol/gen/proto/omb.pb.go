@@ -209,11 +209,12 @@ func (Title) EnumDescriptor() ([]byte, []int) {
 type RoomAction_Kind int32
 
 const (
-	RoomAction_NONE    RoomAction_Kind = 0
-	RoomAction_START   RoomAction_Kind = 1
-	RoomAction_ABORT   RoomAction_Kind = 2
-	RoomAction_RESTART RoomAction_Kind = 3
-	RoomAction_WARMUP  RoomAction_Kind = 4
+	RoomAction_NONE      RoomAction_Kind = 0
+	RoomAction_START     RoomAction_Kind = 1
+	RoomAction_ABORT     RoomAction_Kind = 2
+	RoomAction_RESTART   RoomAction_Kind = 3
+	RoomAction_WARMUP    RoomAction_Kind = 4
+	RoomAction_SOLO_BOTS RoomAction_Kind = 5
 )
 
 // Enum value maps for RoomAction_Kind.
@@ -224,13 +225,15 @@ var (
 		2: "ABORT",
 		3: "RESTART",
 		4: "WARMUP",
+		5: "SOLO_BOTS",
 	}
 	RoomAction_Kind_value = map[string]int32{
-		"NONE":    0,
-		"START":   1,
-		"ABORT":   2,
-		"RESTART": 3,
-		"WARMUP":  4,
+		"NONE":      0,
+		"START":     1,
+		"ABORT":     2,
+		"RESTART":   3,
+		"WARMUP":    4,
+		"SOLO_BOTS": 5,
 	}
 )
 
@@ -2676,6 +2679,7 @@ type EvRoomState struct {
 	State         EvRoomState_State      `protobuf:"varint,1,opt,name=state,proto3,enum=omb.v1.EvRoomState_State" json:"state,omitempty"`
 	RobotsOnline  uint32                 `protobuf:"varint,2,opt,name=robots_online,json=robotsOnline,proto3" json:"robots_online,omitempty"`
 	HostNick      string                 `protobuf:"bytes,3,opt,name=host_nick,json=hostNick,proto3" json:"host_nick,omitempty"`
+	SoloBots      uint32                 `protobuf:"varint,4,opt,name=solo_bots,json=soloBots,proto3" json:"solo_bots,omitempty"` // room-scoped deterministic test opponents; zero when disabled
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2729,6 +2733,13 @@ func (x *EvRoomState) GetHostNick() string {
 		return x.HostNick
 	}
 	return ""
+}
+
+func (x *EvRoomState) GetSoloBots() uint32 {
+	if x != nil {
+		return x.SoloBots
+	}
+	return 0
 }
 
 type EvAiQuota struct {
@@ -3250,17 +3261,18 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x04nick\x18\x02 \x01(\tR\x04nick\x12\x14\n" +
 	"\x05color\x18\x03 \x01(\tR\x05color\"\v\n" +
 	"\tLeaveRoom\"\x0e\n" +
-	"\fAssistToggle\"z\n" +
+	"\fAssistToggle\"\x89\x01\n" +
 	"\n" +
 	"RoomAction\x12+\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x17.omb.v1.RoomAction.KindR\x04kind\"?\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x17.omb.v1.RoomAction.KindR\x04kind\"N\n" +
 	"\x04Kind\x12\b\n" +
 	"\x04NONE\x10\x00\x12\t\n" +
 	"\x05START\x10\x01\x12\t\n" +
 	"\x05ABORT\x10\x02\x12\v\n" +
 	"\aRESTART\x10\x03\x12\n" +
 	"\n" +
-	"\x06WARMUP\x10\x04\"P\n" +
+	"\x06WARMUP\x10\x04\x12\r\n" +
+	"\tSOLO_BOTS\x10\x05\"P\n" +
 	"\fScriptSubmit\x12(\n" +
 	"\x10client_script_id\x18\x01 \x01(\rR\x0eclientScriptId\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\"\x1e\n" +
@@ -3423,11 +3435,12 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05robot\x18\x01 \x01(\rR\x05robot\x12!\n" +
 	"\frounds_delta\x18\x02 \x01(\rR\vroundsDelta\x12!\n" +
 	"\ftokens_delta\x18\x03 \x01(\rR\vtokensDelta\x12\"\n" +
-	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\xbf\x01\n" +
+	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\xdc\x01\n" +
 	"\vEvRoomState\x12/\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.omb.v1.EvRoomState.StateR\x05state\x12#\n" +
 	"\rrobots_online\x18\x02 \x01(\rR\frobotsOnline\x12\x1b\n" +
-	"\thost_nick\x18\x03 \x01(\tR\bhostNick\"=\n" +
+	"\thost_nick\x18\x03 \x01(\tR\bhostNick\x12\x1b\n" +
+	"\tsolo_bots\x18\x04 \x01(\rR\bsoloBots\"=\n" +
 	"\x05State\x12\n" +
 	"\n" +
 	"\x06R_IDLE\x10\x00\x12\f\n" +

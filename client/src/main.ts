@@ -45,6 +45,7 @@ const membersEl = $<HTMLUListElement>('members')
 const roomStateEl = $<HTMLDivElement>('room-state')
 const btnStart = $<HTMLButtonElement>('btn-start')
 const btnWarmup = $<HTMLButtonElement>('btn-warmup')
+const btnSoloBots = $<HTMLButtonElement>('btn-solo-bots')
 const roomNotice = $<HTMLDivElement>('room-notice')
 const statusText = $<HTMLSpanElement>('status-text')
 const btnReconnect = $<HTMLButtonElement>('btn-reconnect')
@@ -150,6 +151,7 @@ const room = {
   hostNick: '',
   robotsOnline: 0,
   state: -1 as number,
+  soloBots: 0,
   /** 最近一次对局 full 快照的 robots[].nick/color（对局名单，离场后标暗） */
   lastRoster: [] as Array<{ nick: string; color: string }>,
 }
@@ -173,7 +175,7 @@ function onRoomState(state: number, hostNick: string, robotsOnline: number): voi
   room.state = state
 
   const stateName = ['空闲', '热身中', '对局中', '已结束'][state] ?? `状态${state}`
-  roomStateEl.textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 机器人 ${robotsOnline}`
+  roomStateEl.textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (room.soloBots ? ' · 下次开场最多 3 个测试 Bot' : '')
 
   const isHost = hostNick !== '' && hostNick === selfNick()
   $('btn-game-start').hidden = !(isHost && state === EvRoomState_State.R_WARMUP)
@@ -181,7 +183,10 @@ function onRoomState(state: number, hostNick: string, robotsOnline: number): voi
   btnStart.hidden = !(isHost && idleLike && !isInGame())
   // 热身场：Idle（开局前练习）与 Ended（下局前重整）都可用（room 状态机两态均合法）
   btnWarmup.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_ENDED) && !isInGame())
-  if (btnStart.hidden && btnWarmup.hidden) {
+  btnSoloBots.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP || state === EvRoomState_State.R_ENDED) && !isInGame())
+  $('solo-bots-label').textContent = room.soloBots ? '关闭测试 Bot（下次开场）' : '添加 3 个测试 Bot'
+  btnSoloBots.setAttribute('aria-pressed', String(room.soloBots > 0))
+  if (btnStart.hidden && btnWarmup.hidden && btnSoloBots.hidden) {
     roomNotice.hidden = false
     roomNotice.textContent = state === EvRoomState_State.R_RUNNING ? '对局进行中' : (isHost ? '等待开始' : '等待房主开始')
   } else {
@@ -217,9 +222,11 @@ function resetLobby(): void {
   room.robotsOnline = 0
   room.state = -1
   room.lastRoster = []
+  room.soloBots = 0
   membersEl.innerHTML = ''
   btnStart.hidden = true
   btnWarmup.hidden = true
+  btnSoloBots.hidden = true
   roomNotice.hidden = true
   roomStateEl.textContent = '已发送进房请求，等待服务器…'
 }
@@ -520,6 +527,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
           else { game.exit(); game = null; workbench.resetMatch() }
         }
       }
+      room.soloBots = rs.soloBots
       onRoomState(rs.state, rs.hostNick, rs.robotsOnline)
       if (!restoredView) {
         restoredView = true
@@ -553,6 +561,7 @@ inNick.addEventListener('keydown', (e) => { if (e.key === 'Enter') void join() }
 
 btnStart.addEventListener('click', () => sendRoomAction(RoomAction_Kind.START))
 btnWarmup.addEventListener('click', () => sendRoomAction(RoomAction_Kind.WARMUP))
+btnSoloBots.addEventListener('click', () => sendRoomAction(RoomAction_Kind.SOLO_BOTS))
 
 btnReconnect.addEventListener('click', () => {
   if (session) { session.retryNow(); return }

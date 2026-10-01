@@ -176,7 +176,7 @@ func (s *Session) ToggleAssist() {
 	})
 }
 func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
-	act := map[ombv1.RoomAction_Kind]room.Action{ombv1.RoomAction_START: room.ActionStart, ombv1.RoomAction_ABORT: room.ActionAbort, ombv1.RoomAction_RESTART: room.ActionRestart, ombv1.RoomAction_WARMUP: room.ActionWarmup}[kind]
+	act := map[ombv1.RoomAction_Kind]room.Action{ombv1.RoomAction_START: room.ActionStart, ombv1.RoomAction_ABORT: room.ActionAbort, ombv1.RoomAction_RESTART: room.ActionRestart, ombv1.RoomAction_WARMUP: room.ActionWarmup, ombv1.RoomAction_SOLO_BOTS: room.ActionSoloBots}[kind]
 	if act == 0 {
 		return
 	}
@@ -268,20 +268,26 @@ func say(text string) *ombv1.ServerMsg {
 type launcherAdapter struct{ rc *RoomConn }
 
 func (la *launcherAdapter) Launch(seed uint64, ids []uint64) room.MatchHandle {
-	return la.launch(seed, ids, false)
+	return la.launch(seed, ids, false, 0)
 }
 func (la *launcherAdapter) LaunchWarmup(seed uint64, ids []uint64) room.MatchHandle {
-	return la.launch(seed, ids, true)
+	return la.launch(seed, ids, true, 0)
 }
-func (la *launcherAdapter) launch(seed uint64, ids []uint64, warmup bool) room.MatchHandle {
+func (la *launcherAdapter) LaunchWithBots(seed uint64, ids []uint64, count uint32) room.MatchHandle {
+	return la.launch(seed, ids, false, count)
+}
+func (la *launcherAdapter) LaunchWarmupWithBots(seed uint64, ids []uint64, count uint32) room.MatchHandle {
+	return la.launch(seed, ids, true, count)
+}
+func (la *launcherAdapter) launch(seed uint64, ids []uint64, warmup bool, botCount uint32) room.MatchHandle {
 	a := &asyncHandle{}
 	if previous := la.rc.launch.Swap(a); previous != nil {
 		previous.Abort()
 	}
-	go la.launchSync(a, seed, append([]uint64(nil), ids...), warmup)
+	go la.launchSync(a, seed, append([]uint64(nil), ids...), warmup, botCount)
 	return a
 }
-func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64, warmup bool) {
+func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64, warmup bool, botCount uint32) {
 	rc := la.rc
 	rc.mu.Lock()
 	players := map[uint64]SessionInfo{}
@@ -293,6 +299,7 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 			}
 		}
 	}
+	addSoloBots(players, botCount)
 	rc.mu.Unlock()
 	if a.cancelled.Load() || rc.launch.Load() != a {
 		return
@@ -345,6 +352,7 @@ func (a *asyncHandle) Abort() {
 	}
 }
 func (rc *RoomConn) currentMatch() *Match { rc.mu.Lock(); defer rc.mu.Unlock(); return rc.match }
+
 func (rc *RoomConn) EnsureLauncher() {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()

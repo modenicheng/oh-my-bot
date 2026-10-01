@@ -46,6 +46,7 @@ type Match struct {
 
 	robotOf      map[uint64]uint32 // playerID -> robotID
 	playerOf     map[uint32]uint64 // robotID -> playerID
+	botRobots    map[uint32]bool
 	reliableFull map[uint64]bool
 	handle       *asyncHandle
 	startOnce    sync.Once
@@ -63,6 +64,7 @@ type SessionInfo struct {
 	PlayerID uint64
 	Nick     string
 	Color    string
+	Bot      bool
 }
 
 // NewMatch only assembles. Publication sends bootstrap before start runs the clock.
@@ -74,6 +76,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		proj:         stats.NewProjector(),
 		robotOf:      map[uint64]uint32{},
 		playerOf:     map[uint32]uint64{},
+		botRobots:    map[uint32]bool{},
 		reliableFull: map[uint64]bool{},
 		warmup:       warmup,
 		encoders:     map[uint32]*snapshot.DeltaEncoder{},
@@ -91,10 +94,16 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	// player↔robot 映射（glue 唯一 owner；robotID = 稳定哈希 playerID）
 	ids := make([]uint32, 0, len(players))
 	playerMap := map[uint32]uint64{}
-	for pid := range players {
+	for pid, info := range players {
 		rid := stableRobotID(pid)
+		if _, exists := m.playerOf[rid]; rid == 0 || exists {
+			return nil, fmt.Errorf("duplicate or zero robot identity for player %d", pid)
+		}
 		m.robotOf[pid] = rid
 		m.playerOf[rid] = pid
+		if info.Bot {
+			m.botRobots[rid] = true
+		}
 		playerMap[rid] = pid
 		ids = append(ids, rid)
 	}
@@ -135,6 +144,20 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
 	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
+	for rid := range m.botRobots {
+		rt := script.NewGojaRuntime(script.Config{})
+		if err := rt.Load(soloBotSource(rid)); err != nil {
+			rt.Close()
+			m.scriptPool.Close()
+			if m.log != nil {
+				_ = m.log.Close()
+			}
+			return nil, fmt.Errorf("test bot %d: %w", rid, err)
+		}
+		m.scriptPool.Register(rid, rt)
+		m.runtimes[rid] = rt
+		m.sim.AssistToggle(rid)
+	}
 
 	return m, nil
 }
@@ -427,6 +450,9 @@ func (m *Match) runScripts(wv sim.WorldView) {
 			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
 			continue
 		}
+		if m.botRobots[res.ID] {
+			res.Commands = soloBotCommands(res.Commands)
+		}
 		m.sim.ApplyScriptCommands(res.ID, res.Commands)
 	}
 }
@@ -448,7 +474,9 @@ func (m *Match) finishLocked(wv sim.WorldView) {
 	rows := m.proj.Final()
 	scores := map[uint64]int32{}
 	for _, r := range rows {
-		scores[r.PlayerID] = r.Score
+		if !m.botRobots[r.RobotID] {
+			scores[r.PlayerID] = r.Score
+		}
 	}
 	m.rc.Room.AddMatchResult(scores)
 	// 终局事件（含 13 称号）：可靠广播

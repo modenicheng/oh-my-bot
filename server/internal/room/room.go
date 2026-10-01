@@ -66,10 +66,11 @@ func (s State) protoState() ombv1.EvRoomState_State {
 type Action int
 
 const (
-	ActionStart   Action = iota + 1 // START:  begin a scored match
-	ActionAbort                     // ABORT:  end a running match early
-	ActionRestart                   // RESTART: after a match ends, go again
-	ActionWarmup                    // WARMUP: enter the warmup lobby
+	ActionStart    Action = iota + 1 // START:  begin a scored match
+	ActionAbort                      // ABORT:  end a running match early
+	ActionRestart                    // RESTART: after a match ends, go again
+	ActionWarmup                     // WARMUP: enter the warmup lobby
+	ActionSoloBots                   // SOLO_BOTS: toggle deterministic test opponents
 )
 
 // String implements fmt.Stringer.
@@ -83,6 +84,8 @@ func (a Action) String() string {
 		return "Restart"
 	case ActionWarmup:
 		return "Warmup"
+	case ActionSoloBots:
+		return "SoloBots"
 	default:
 		return fmt.Sprintf("Action(%d)", int(a))
 	}
@@ -105,6 +108,13 @@ type SimLauncher interface {
 	Launch(seed uint64, playerIDs []uint64) MatchHandle
 	// LaunchWarmup 装配热身场（同链路、warmup 语义：不落日志、无结算）。
 	LaunchWarmup(seed uint64, playerIDs []uint64) MatchHandle
+}
+
+// SoloBotLauncher is an optional extension used by the real glue launcher.
+// Rooms keep synthetic bots out of membership and transport identity maps.
+type SoloBotLauncher interface {
+	LaunchWithBots(seed uint64, playerIDs []uint64, botCount uint32) MatchHandle
+	LaunchWarmupWithBots(seed uint64, playerIDs []uint64, botCount uint32) MatchHandle
 }
 
 // Member is a seated player.
@@ -136,6 +146,7 @@ type Room struct {
 	sessionSeq int         // number of matches started
 
 	pendingNicks map[uint64]string
+	soloBots     uint32
 }
 
 // NewRoom creates a room with the given code and host. The host is not
@@ -205,6 +216,14 @@ func (r *Room) IsHost(playerID uint64) bool {
 	return playerID == r.host
 }
 
+// SoloBots returns the number of deterministic test opponents configured for
+// the next launch. They are not room members and do not affect online count.
+func (r *Room) SoloBots() uint32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.soloBots
+}
+
 // MemberCount returns the number of seated players.
 func (r *Room) MemberCount() int {
 	r.mu.Lock()
@@ -222,6 +241,7 @@ var (
 	ErrNoPlayers      = errors.New("room: cannot start a match with no players")
 	ErrIllegalTransit = errors.New("room: illegal state transition")
 	ErrNoLauncher     = errors.New("room: no SimLauncher configured")
+	ErrNoSoloBots     = errors.New("room: launcher does not support solo bots")
 )
 
 // Join seats a player. It fails if the room is full, or the player is
@@ -305,6 +325,17 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 	}
 
 	switch action {
+	case ActionSoloBots:
+		if r.state != Idle && r.state != Warmup && r.state != Ended {
+			return fmt.Errorf("%w: SoloBots from %s", ErrIllegalTransit, r.state)
+		}
+		if r.soloBots == 0 {
+			r.soloBots = 3
+		} else {
+			r.soloBots = 0
+		}
+		return nil
+
 	case ActionWarmup:
 		// Entering warmup is allowed from Idle and from Ended ("play again,
 		// but let people reconfigure first"); it must not interrupt a match.
@@ -323,9 +354,21 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		}
 		playerIDs := make([]uint64, len(r.joinOrder))
 		copy(playerIDs, r.joinOrder)
+		var soloLauncher SoloBotLauncher
+		if r.soloBots > 0 {
+			var ok bool
+			soloLauncher, ok = r.launcher.(SoloBotLauncher)
+			if !ok {
+				return ErrNoSoloBots
+			}
+		}
 		r.state = Warmup
 		// LaunchWarmup 须快（异步装配，同 Launch 契约：不得回调 Room）。
-		r.match = r.launcher.LaunchWarmup(seed, playerIDs)
+		if soloLauncher != nil {
+			r.match = soloLauncher.LaunchWarmupWithBots(seed, playerIDs, r.soloBots)
+		} else {
+			r.match = r.launcher.LaunchWarmup(seed, playerIDs)
+		}
 		return nil
 
 	case ActionStart:
@@ -348,10 +391,23 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		// transition atomic (no ABORT can interleave between the state check
 		// and storing the handle). Contract: Launch must be quick and must not
 		// call back into this Room, or it will deadlock.
+		var soloLauncher SoloBotLauncher
+		if r.soloBots > 0 {
+			var ok bool
+			soloLauncher, ok = r.launcher.(SoloBotLauncher)
+			if !ok {
+				return ErrNoSoloBots
+			}
+		}
 		if r.match != nil {
 			r.match.Abort()
 		}
-		handle := r.launcher.Launch(seed, playerIDs)
+		var handle MatchHandle
+		if soloLauncher != nil {
+			handle = soloLauncher.LaunchWithBots(seed, playerIDs, r.soloBots)
+		} else {
+			handle = r.launcher.Launch(seed, playerIDs)
+		}
 		r.seed = seed
 		r.match = handle
 		r.lastMatch = handle
@@ -390,8 +446,20 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		}
 		playerIDs := make([]uint64, len(r.joinOrder))
 		copy(playerIDs, r.joinOrder)
+		var soloLauncher SoloBotLauncher
+		if r.soloBots > 0 {
+			var ok bool
+			soloLauncher, ok = r.launcher.(SoloBotLauncher)
+			if !ok {
+				return ErrNoSoloBots
+			}
+		}
 		r.state = Warmup
-		r.match = r.launcher.LaunchWarmup(seed, playerIDs)
+		if soloLauncher != nil {
+			r.match = soloLauncher.LaunchWarmupWithBots(seed, playerIDs, r.soloBots)
+		} else {
+			r.match = r.launcher.LaunchWarmup(seed, playerIDs)
+		}
 		return nil
 
 	default:
@@ -475,6 +543,7 @@ func (r *Room) StateBroadcast() *ombv1.EvRoomState {
 		State:        r.state.protoState(),
 		RobotsOnline: uint32(len(r.members)),
 		HostNick:     r.nickLocked(r.host),
+		SoloBots:     r.soloBots,
 	}
 }
 

@@ -585,3 +585,123 @@ func mustAction(t *testing.T, r *Room, playerID uint64, a Action) {
 		t.Fatalf("host %s: %v", a, err)
 	}
 }
+
+// soloLauncher preserves the base launcher contract while recording the optional
+// next-match bot configuration independently from real seated players.
+type soloLauncher struct {
+	*fakeLauncher
+	counts  []uint32
+	warmups []bool
+}
+
+func (l *soloLauncher) LaunchWithBots(seed uint64, ids []uint64, count uint32) MatchHandle {
+	l.counts = append(l.counts, count)
+	l.warmups = append(l.warmups, false)
+	return l.Launch(seed, ids)
+}
+func (l *soloLauncher) LaunchWarmupWithBots(seed uint64, ids []uint64, count uint32) MatchHandle {
+	l.counts = append(l.counts, count)
+	l.warmups = append(l.warmups, true)
+	return l.Launch(seed, ids)
+}
+
+func TestSoloBotsNextLaunchConfiguration(t *testing.T) {
+	r, base := newTestRoom(t)
+	launcher := &soloLauncher{fakeLauncher: base}
+	r.SetSimLauncher(launcher)
+	if err := r.HostCommand(2, ActionSoloBots); err != ErrNotHost {
+		t.Fatalf("guest: %v", err)
+	}
+	if err := r.HostCommand(1, ActionSoloBots); err != nil {
+		t.Fatal(err)
+	}
+	if rs := r.StateBroadcast(); rs.SoloBots != 3 || rs.RobotsOnline != 1 {
+		t.Fatalf("state: %+v", rs)
+	}
+	if err := r.HostCommand(1, ActionWarmup); err != nil {
+		t.Fatal(err)
+	}
+	if len(launcher.counts) != 1 || launcher.counts[0] != 3 || !launcher.warmups[0] {
+		t.Fatal("warmup lost config")
+	}
+	warm := base.handles[0]
+	// Changing configuration in warmup never mutates the active simulation.
+	if err := r.HostCommand(1, ActionSoloBots); err != nil {
+		t.Fatal(err)
+	}
+	if base.launchCount() != 1 {
+		t.Fatal("toggle relaunched active warmup")
+	}
+	select {
+	case <-warm.aborted:
+		t.Fatal("toggle aborted warmup")
+	default:
+	}
+	if err := r.HostCommand(1, ActionStart); err != nil {
+		t.Fatal(err)
+	}
+	if len(launcher.counts) != 1 {
+		t.Fatal("disabled bots still launched")
+	}
+	if err := r.HostCommand(1, ActionSoloBots); err == nil {
+		t.Fatal("changed configuration during running match")
+	}
+	if err := r.HostCommand(1, ActionAbort); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HostCommand(1, ActionSoloBots); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HostCommand(1, ActionRestart); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HostCommand(1, ActionStart); err != nil {
+		t.Fatal(err)
+	}
+	if len(launcher.counts) != 3 || !launcher.warmups[1] || launcher.warmups[2] {
+		t.Fatal("restart/formal launch lost config")
+	}
+	for _, roster := range base.rosters {
+		if len(roster) != 1 || roster[0] != 1 {
+			t.Fatalf("synthetic bot leaked into member roster: %v", roster)
+		}
+	}
+}
+
+func TestUnsupportedSoloBotsKeepStateAndHandle(t *testing.T) {
+	for _, action := range []Action{ActionWarmup, ActionStart, ActionRestart} {
+		t.Run(action.String(), func(t *testing.T) {
+			r, launcher := newTestRoom(t)
+			if action == ActionStart {
+				if err := r.HostCommand(1, ActionWarmup); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if action == ActionRestart {
+				if err := r.HostCommand(1, ActionStart); err != nil {
+					t.Fatal(err)
+				}
+				if err := r.HostCommand(1, ActionAbort); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, launches, handle := r.State(), launcher.launchCount(), r.match
+			if err := r.HostCommand(1, ActionSoloBots); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.HostCommand(1, action); err != ErrNoSoloBots {
+				t.Fatalf("got %v", err)
+			}
+			if r.State() != before || r.match != handle || launcher.launchCount() != launches {
+				t.Fatal("failed launch mutated room state")
+			}
+			if action == ActionStart {
+				select {
+				case <-launcher.handles[0].aborted:
+					t.Fatal("failed launch aborted live warmup")
+				default:
+				}
+			}
+		})
+	}
+}
