@@ -38,8 +38,9 @@ func cloneCommands(v *ScriptCommands) *ScriptCommands {
 	return &c
 }
 
-// ApplyScriptCommands queues a detached worker result. nil members preserve
-// the last script value; explicit false/zero updates that member.
+// ApplyScriptCommands queues one detached worker result for the next tick.
+// Every script result is a complete tick intent: nil members mean that action
+// is idle for this tick. Human-held axes remain independent and persistent.
 func (s *Sim) ApplyScriptCommands(id uint32, commands ScriptCommands) bool {
 	i, ok := s.index[id]
 	if !ok || s.ended {
@@ -73,8 +74,8 @@ func (s *Sim) Say(id uint32, text string) bool {
 	return true
 }
 
-// ClearScriptAxes must be called for a failed/timed-out script result; human
-// overrides are retained. A missed deadline may use an empty ScriptCommands.
+// ClearScriptAxes queues an idle script tick for a failed/timed-out result;
+// human overrides are retained. It never clears physical aim state.
 func (s *Sim) ClearScriptAxes(id uint32) bool {
 	i, ok := s.index[id]
 	if !ok || s.ended {
@@ -229,10 +230,8 @@ func (s *Sim) consumeInputs() {
 			//  1. assist 关 → 开启并清除人工接管；
 			//  2. assist 开且任一轴被人工接管 → 仅把被接管轴交回脚本（assist 保持开）；
 			//  3. assist 开且全部脚本控制 → 关闭。
-			// 同 tick 在输入合并之后处理（上方 InputPending 块）：同 tick 先到的真实人类
-			// 输入已计入 HumanAxes，随后按分支决定去留；toggle 后到达的输入下一 tick
-			// 正常抢占。恢复后仍按住的键不会重新抢占：客户端在 Space 时清 sticky 与按键
-			// 状态（边沿触发），后续帧不带对应轴 mask。
+			// 同 tick 先合并真实人类输入，再按分支决定接管轴是否归还。客户端
+			// Space 边沿会同步清理本地 held/mask，后续新按键仍可重新接管。
 			for i := uint32(0); i < c.ToggleCount; i++ {
 				if !c.Assist {
 					c.Assist = true
@@ -254,6 +253,12 @@ func (s *Sim) consumeInputs() {
 		if c.PendingSay != "" {
 			s.operated(r, s.say(r, c.PendingSay))
 			c.PendingSay = ""
+		}
+		// Version 2 scripts submit a complete intent each tick. A missing,
+		// empty, failed, or timed-out result is neutral; physical Heading remains
+		// stateful. Version 0/1 checkpoints retain the historical latch semantics.
+		if s.simulationVersion >= 2 {
+			c.Script, c.ScriptAxes = ArbitratedInput{}, 0
 		}
 		if c.ScriptPending {
 			if c.ScriptFailed {

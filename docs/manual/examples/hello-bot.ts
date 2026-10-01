@@ -1,5 +1,5 @@
 // 教学点：最小闭环——scan 感知 → nearestEnemy 索敌 → aimAt 实体重载转向 → fire 开火。
-// 注意：fire() 一经调用即锁存（全自动射击直到死亡），五行示例不处理战术，只跑通 API 链路。
+// 注意：动作只对当前 tick 生效；有敌人时每 tick 调用 fire()，敌人消失即停火。
 // 提交契约：import type / export default 行会被服务器剥除；正文不得出现任何类型注解。
 import type { BotModule } from '@omb/bot-api'
 

@@ -41,6 +41,25 @@ describe('human input continuity', () => {
     expect(release.axisMask & AXIS_ABILITY).toBe(AXIS_ABILITY)
   })
 
+  it('keeps dash held by either Shift key or right mouse button', () => {
+    send(win, 'keydown', { code: 'ShiftLeft' })
+    expect(input.sample(10, 10).msg.dash).toBe(true)
+    send(win, 'keyup', { code: 'ShiftLeft' })
+    expect(input.sample(10, 10).msg.dash).toBe(false)
+
+    send(win, 'keydown', { code: 'ShiftRight' })
+    send(win, 'keydown', { code: 'ShiftLeft' })
+    send(win, 'keyup', { code: 'ShiftLeft' })
+    expect(input.sample(10, 10).msg.dash).toBe(true)
+    send(canvas, 'mousedown', { button: 2 })
+    send(win, 'keyup', { code: 'ShiftRight' })
+    expect(input.sample(10, 10).msg.dash).toBe(true)
+    send(win, 'mouseup', { button: 2 })
+    const release = input.sample(10, 10).msg
+    expect(release.dash).toBe(false)
+    expect(release.axisMask & AXIS_ABILITY).toBe(AXIS_ABILITY)
+  })
+
   it('reprojects a stationary pointer with camera movement and CSS resize', () => {
     send(canvas, 'mousemove', { clientX: 640, clientY: 320 })
     const expected = () => Math.atan2(cam.toWorldY((320 - canvas.rect.top) * cam.ch / canvas.rect.height) - 10,

@@ -7,23 +7,32 @@ tags: [脚本, 数据]
 
 # 数据结构参考
 
-Bot Script 里流动的全部数据：每帧递给你的 `ctx`（TickContext）、感知快照 `Observation`、以及里面的实体形状。字段名与 `@omb/bot-api` 的类型定义逐字对齐。
+Bot Script 里流动的全部数据：每帧递给你的 `bot`（BotContext）、感知快照 `Observation`、以及里面的实体形状。字段名与 `@omb/bot-api` 的类型定义逐字对齐。
 
-## TickContext —— 每帧递给你的信息包
+## BotContext —— 每帧递给你的信息包
 
 ```ts
-interface TickContext {
+interface BotContext {
   self: Self          // 你自己，本帧快照
   game: GameInfo      // 对局信息
   scan(): Observation // 感知快照（每次调用都给新对象，零成本）
-  api: L0 & L1        // 全部动作
+  move(vx: number, vy: number): void
+  aimAt(angle: number | RobotRef): void
+  fire(): void
+  dash(): void
+  shield(on: boolean): void
+  interact(): void
+  say(text: string): void
+  api: L0 & L1        // 旧脚本兼容别名；新脚本使用 bot.xxx()
 }
-type BotModule = { tick(ctx: TickContext): void }
+type BotModule = { tick(bot: BotContext): void }
 ```
+
+`tick(bot: BotContext)` 是统一入口。`bot.api` 只保留旧语法兼容，不改变每 tick 显式意图语义。
 
 **生命周期规则**（完整陷阱分析见[模块语义与陷阱](modules.md)）：
 
-- `ctx` **每帧重建**：`bot.self`、`bot.game`、`bot.scan()` 都是本帧快照，帧间不复用、不共享对象；
+- `bot` **每帧重建**：`bot.self`、`bot.game`、`bot.scan()` 都是本帧快照，帧间不复用、不共享对象；
 - **模块级状态跨帧存活**：声明在 `bot` 对象外/内的变量就是你的记忆。热更新成功 → 程序重建 → 状态清零；
 - **每帧预算 10ms**（可配置）：超时该帧脚本动作全部作废，下一帧恢复；
 - **失败安全**：加载失败（语法错、缺入口）→ 旧版本继续跑、状态保持；tick 内异常 → 只作废该帧，不影响后续帧。
@@ -67,11 +76,20 @@ interface Observation {
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
   projectiles: (Vec2 & { id: number })[]
+  healthPacks: HealthPackRef[]
   walls: { id: number; min: Vec2; max: Vec2 }[]
+}
+
+interface HealthPackRef {
+  id: number
+  x: number
+  y: number
+  available: boolean
+  respawnInS: number
 }
 ```
 
-四张列表各自的裁剪规则：
+各列表的可见性和公开范围：
 
 | 列表 | 可见性规则 |
 |---|---|
@@ -79,6 +97,7 @@ interface Observation {
 | `cores` | **全图存活资源**：不按距离裁剪，但只返回 `Alive=true` 的 Core；被拾取或尚未激活的资源不会出现在列表中 |
 | `uplinks` | **恒全量**：全图所有 Uplink。`ready` = 桩激活且无人正在引导；`holder` = 当前引导者的机器人 id（有人正在引导才有值） |
 | `projectiles` | 与 robots 同规则（20m + 不穿墙） |
+| `healthPacks` | **公开全量**：固定血包点的位置和状态；`available=false` 时 `respawnInS` 是预计恢复秒数 |
 | `walls` | **静态公开全量**：不随视野半径/遮挡裁剪，与碰撞几何一致的只读 AABB（改写返回值不影响地图） |
 
 **注意**：个人黑入冷却和喊话冷却不在 Observation 里。可用 `game.time` 控制请求间隔；黑入成功事件也不下发，所以黑入完成时间及冷却只能估算。
@@ -115,5 +134,5 @@ interface Vec2 { x: number; y: number }
 | 全图 Core 在哪 | `bot.scan().cores` 或 `bot.nearestCore()` |
 | 桩的状态（激活/被引导中） | `bot.scan().uplinks` 的 `ready` / `holder` |
 | 我在这桩的冷却剩几秒 | **没有**，只能按 `game.time` 估算 |
-| 血包在哪 | 中环 4 个固定点、位置公开；`scan()` 尚未返回血包状态（即将接入），先按地图记点位 |
+| 血包在哪、能否拾取 | `bot.scan().healthPacks`：`HealthPackRef{id, x, y, available, respawnInS}`；接触可用血包自动回血 |
 | 谁在瞄我/弹道预测 | **没有**，自己从 `projectiles` 和位置差分算 |

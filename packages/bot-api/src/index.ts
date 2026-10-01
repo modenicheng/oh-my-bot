@@ -49,10 +49,12 @@ export interface GameInfo {
 }
 
 // ---- L0 原语 ----
+/** 动作只对当前 tick 生效；省略即中立，持续动作需每 tick 调用。 */
 export interface L0 {
   move(vx: number, vy: number): void
   aimAt(angle: number): void
   fire(): void
+  /** 持续冲刺，耗能 20/秒；护盾优先，耗尽后至少省略一个 tick 才能重启。 */
   dash(): void
   shield(on: boolean): void
   interact(): void

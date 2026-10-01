@@ -15,9 +15,10 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
-// SimulationVersion distinguishes deterministic physics semantics in saved
-// states. Version 0 predates robot contact impulses.
-const SimulationVersion = 1
+// SimulationVersion distinguishes deterministic gameplay semantics in saved
+// states. Version 0 predates robot contact impulses; version 2 adds tick-scoped
+// script intent, held Dash, and swept circle pickup contact.
+const SimulationVersion = 2
 
 const (
 	TickRate                   = 60

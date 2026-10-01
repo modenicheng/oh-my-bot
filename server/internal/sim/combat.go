@@ -15,6 +15,9 @@ func (s *Sim) prepareCombat() {
 		in := r.Control.Output
 		if r.State == Dead {
 			c.ShieldOn = false
+			if s.simulationVersion >= 2 {
+				c.DashUntil = 0
+			}
 			continue
 		}
 		r.Energy = math.Min(MaxEnergy, r.Energy+EnergyRegen*DT)
@@ -22,15 +25,36 @@ func (s *Sim) prepareCombat() {
 		if c.ShieldOn {
 			r.Energy = math.Max(0, r.Energy-ShieldDrain*DT)
 		}
-		if in.Dash && s.tick >= c.DashReady && r.Energy+collisionEpsilon >= DashCost {
-			direction := in.Move
-			if n := direction.Len(); n > 0 {
-				direction = direction.Scale(1 / n)
-			} else {
-				direction = Vec2{math.Cos(r.Heading), math.Sin(r.Heading)}
+		if s.simulationVersion < 2 {
+			// Recorded v0/v1 inputs allowed shield and timed Dash together.
+			if in.Dash && s.tick >= c.DashReady && r.Energy+collisionEpsilon >= DashCost {
+				direction := dashDirection(in.Move, r.Heading)
+				r.Energy = math.Max(0, r.Energy-DashCost)
+				c.DashReady, c.DashUntil, c.DashDirection = s.tick+DashCooldown, s.tick+DashDuration, direction
 			}
-			r.Energy = math.Max(0, r.Energy-DashCost)
-			c.DashReady, c.DashUntil, c.DashDirection = s.tick+DashCooldown, s.tick+DashDuration, direction
+		} else {
+			if !in.Dash {
+				c.DashExhausted = false
+			}
+			if !in.Shield && in.Dash && !c.DashExhausted && r.Energy+collisionEpsilon >= DashCost*DT {
+				// Held Dash is continuous: every active tick pays the per-second
+				// drain, refreshes direction, and remains active for exactly this tick.
+				r.Energy = math.Max(0, r.Energy-DashCost*DT)
+				c.DashReady, c.DashUntil, c.DashDirection = s.tick, s.tick+1, dashDirection(in.Move, r.Heading)
+			} else {
+				// Release, shield intent, or insufficient energy stops immediately.
+				// Exhaustion requires a release before Dash may start again, avoiding
+				// one-tick cue flicker as passive regeneration crosses the threshold.
+				if in.Dash && !in.Shield && r.Energy+collisionEpsilon < DashCost*DT {
+					c.DashExhausted = true
+				}
+				if c.DashUntil >= s.tick && c.DashUntil != 0 {
+					if speed := r.Velocity.Len(); speed > MaxSpeed {
+						r.Velocity = r.Velocity.Scale(MaxSpeed / speed)
+					}
+				}
+				c.DashUntil = 0
+			}
 		}
 		if c.PulseRequested && s.tick >= c.PulseReady && r.Energy+collisionEpsilon >= PulseCost {
 			r.Energy = math.Max(0, r.Energy-PulseCost)
@@ -38,6 +62,13 @@ func (s *Sim) prepareCombat() {
 		}
 		c.PulseRequested = false
 	}
+}
+
+func dashDirection(move Vec2, heading float64) Vec2 {
+	if n := move.Len(); n > 0 {
+		return move.Scale(1 / n)
+	}
+	return Vec2{math.Cos(heading), math.Sin(heading)}
 }
 
 // normalizeSay bounds visible text without allocating for the whole upstream string.

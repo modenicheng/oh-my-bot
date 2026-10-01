@@ -171,24 +171,32 @@ func TestScriptPointerSemanticsAndHumanPersistence(t *testing.T) {
 	}
 	s.ApplyScriptCommands(1, ScriptCommands{})
 	s.Tick()
-	if s.Arbitrated(1) != out {
-		t.Fatal("nil lost held script state")
+	if got := s.Arbitrated(1); got.Move != (Vec2{}) || got.Fire || got.Shield || got.MoveSrc != '-' || got.TurretSrc != '-' {
+		t.Fatalf("empty script result retained prior intent: %+v", got)
+	}
+	// A worker error/deadline follows the same idle-tick path and must not
+	// revive the previous script action on a later tick.
+	s.ClearScriptAxes(1)
+	s.Tick()
+	if got := s.Arbitrated(1); got.Move != (Vec2{}) || got.Fire || got.Shield {
+		t.Fatalf("failed script result retained intent: %+v", got)
 	}
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{}), Fire: ptr(false), Shield: ptr(false)})
 	s.Tick()
-	if out = s.Arbitrated(1); out.Move != (Vec2{}) || out.Fire || out.Shield || out.Aim != 1 {
-		t.Fatalf("zero/false not respected %+v", out)
+	if out = s.Arbitrated(1); out.Move != (Vec2{}) || out.Fire || out.Shield || out.Aim != 0 || s.robots[0].Heading != 1 {
+		t.Fatalf("zero/false or physical aim state not respected: output=%+v heading=%v", out, s.robots[0].Heading)
 	}
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveY: 1000})
 	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Aim: ptr(2.0)})
 	s.Tick()
 	stepTicks(s, 10)
-	if out = s.Arbitrated(1); out.Move != (Vec2{0, 1}) || out.MoveSrc != 'H' || out.TurretSrc != 'S' {
-		t.Fatalf("human did not retain axis %+v", out)
+	if out = s.Arbitrated(1); out.Move != (Vec2{0, 1}) || out.MoveSrc != 'H' || out.TurretSrc != '-' {
+		t.Fatalf("human axis or script tick scope wrong %+v", out)
 	}
 	// 新语义（ADR-0009 分轴接管）：Space 一次把人工轴交回脚本（辅助保持开），
 	// 再一次（全脚本控制时）才关闭辅助。
-	s.AssistToggle(1) // 交回 move 轴（人工仅接管了 move，Turret 本就是 S）
+	s.AssistToggle(1) // 交回 move 轴（人工仅接管了 move）
+	s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Aim: ptr(2.0)})
 	s.Tick()
 	if !s.robots[0].Control.Assist || s.Arbitrated(1).MoveSrc != 'S' {
 		t.Fatal("single-Space restore failed")
@@ -203,6 +211,11 @@ func TestScriptPointerSemanticsAndHumanPersistence(t *testing.T) {
 	s.Tick()
 	if s.Arbitrated(1).MoveSrc != 'S' {
 		t.Fatal("toggle on did not return axis")
+	}
+	s.ApplyScriptCommands(1, ScriptCommands{Aim: ptr(2.5)})
+	s.Tick()
+	if got := s.Arbitrated(1); got.Move != (Vec2{}) || got.MoveSrc != '-' || got.TurretSrc != 'S' {
+		t.Fatalf("omitted move was not neutral: %+v", got)
 	}
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisMove)})
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisAim), Aim: 3})
@@ -292,6 +305,38 @@ func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 		})
 	}
 }
+func TestLegacyCheckpointKeepsScriptLatchAndTimedDash(t *testing.T) {
+	for _, version := range []int{0, 1} {
+		t.Run(fmt.Sprintf("version %d", version), func(t *testing.T) {
+			cp := NewSim(0, []uint32{1}, nil).Snapshot()
+			cp.SimulationVersion = version
+			s, err := RestoreCheckpoint(cp, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.AssistToggle(1)
+			s.ApplyScriptCommands(1, ScriptCommands{Move: ptr(Vec2{1, 0}), Aim: ptr(1.0), Fire: ptr(true), Dash: ptr(true), Shield: ptr(true), Interact: ptr(true)})
+			s.Tick()
+			out := s.Arbitrated(1)
+			r := &s.robots[0]
+			if !r.Combat.ShieldOn || r.Combat.DashUntil != 1+DashDuration || r.Combat.DashReady != 1+DashCooldown {
+				t.Fatalf("legacy simultaneous shield/timed dash changed: %+v", r.Combat)
+			}
+			closeFloat(t, r.Energy, MaxEnergy-ShieldDrain*DT-DashCost)
+			closeFloat(t, r.Velocity.Len(), DashSpeed)
+			s.ApplyScriptCommands(1, ScriptCommands{})
+			s.Tick()
+			if s.Arbitrated(1) != out || r.Combat.DashUntil != 1+DashDuration {
+				t.Fatal("legacy empty script or held shield cancelled recorded intent")
+			}
+			s.Tick() // No worker result also retains the historical intent.
+			if s.Arbitrated(1) != out {
+				t.Fatal("legacy missing result lost script latch")
+			}
+		})
+	}
+}
+
 func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 	t.Run("regen", func(t *testing.T) {
 		s := NewSim(0, []uint32{1}, nil)
@@ -303,23 +348,53 @@ func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 		s := NewSim(0, []uint32{1}, nil)
 		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Dash: true})
 		s.Tick()
-		closeFloat(t, s.robots[0].Energy, 80)
-		closeFloat(t, s.robots[0].Velocity.Len(), 16)
-		stepTicks(s, 17)
-		closeFloat(t, s.robots[0].Position.X, 4.8)
+		closeFloat(t, s.robots[0].Energy, 100-DashCost*DT)
+		closeFloat(t, s.robots[0].Velocity.Len(), DashSpeed)
+		stepTicks(s, 59)
+		closeFloat(t, s.robots[0].Energy, 100-DashCost*DT+59*(EnergyRegen-DashCost)*DT)
+		if s.robots[0].Combat.DashUntil != s.tick+1 {
+			t.Fatal("held dash was not refreshed")
+		}
+
+		// Releasing held Dash cancels it immediately and removes dash-only speed.
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisAbility), Dash: false})
 		s.Tick()
-		if s.robots[0].Velocity.Len() > 8 {
-			t.Fatal("dash lasted beyond .30s")
+		if s.robots[0].Combat.DashUntil != 0 || s.robots[0].Velocity.Len() > MaxSpeed {
+			t.Fatalf("released dash remained active: until=%d velocity=%v", s.robots[0].Combat.DashUntil, s.robots[0].Velocity.Len())
 		}
-		stepTicks(s, 131)
-		if s.robots[0].Combat.DashReady != 151 {
-			t.Fatal("dash reset before 2.5s")
-		}
+
+		// Shield has authoritative priority when both intents are true.
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisAbility), Dash: true, Shield: true})
 		s.Tick()
-		if s.robots[0].Combat.DashReady != 301 {
-			t.Fatal("dash not ready at 2.5s")
+		if !s.robots[0].Combat.ShieldOn || s.robots[0].Combat.DashUntil != 0 {
+			t.Fatal("shield did not win dash conflict")
 		}
-		closeFloat(t, s.robots[0].Velocity.Len(), 16)
+	})
+	t.Run("idle combat preserves external velocity", func(t *testing.T) {
+		s := NewSim(0, []uint32{1}, nil)
+		s.robots[0].Velocity = Vec2{MaxSpeed + 2, 0}
+		s.prepareCombat()
+		closeFloat(t, s.robots[0].Velocity.X, MaxSpeed+2)
+	})
+	t.Run("dash energy floor", func(t *testing.T) {
+		s := NewSim(0, []uint32{1}, nil)
+		s.robots[0].Energy = 0
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Dash: true})
+		s.Tick()
+		if s.robots[0].Combat.DashUntil != 0 || !s.robots[0].Combat.DashExhausted || s.robots[0].Velocity.Len() > MaxSpeed {
+			t.Fatal("dash continued without one tick of energy")
+		}
+		stepTicks(s, 10)
+		if s.robots[0].Combat.DashUntil != 0 {
+			t.Fatal("held exhausted dash restarted from passive regeneration")
+		}
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisAbility), Dash: false})
+		s.Tick()
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisAbility), Dash: true})
+		s.Tick()
+		if s.robots[0].Combat.DashUntil != s.tick+1 {
+			t.Fatal("dash did not restart after release")
+		}
 	})
 	t.Run("shield", func(t *testing.T) {
 		s, _ := enemySim(t)

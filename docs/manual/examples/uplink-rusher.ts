@@ -1,7 +1,7 @@
 // 教学点：Uplink 站桩引导 8s；成功事件和个人 CD 不下发，本例仅估算等待时间。
-// - 黑入要求本 tick 无 fire 意图；本例从不调 fire()，避免锁存阻止引导
-// - 引导中断（出圈/开火/死亡）进度清零但不进 CD；只有成功才启动 30s 个人 CD
-// - interact() 调一次即锁存为"按住"——引导正需要持续按住，出圈自动断、回圈自动续
+// - 黑入要求本 tick 无 fire 意图；本例从不调 fire()
+// - 引导中断（省略 interact/出圈/开火/死亡）进度清零；只有成功才启动 30s 个人 CD
+// - 站桩期间每 tick 调 interact()，离开分支即松开
 import type { BotModule } from '@omb/bot-api'
 
 let cdUntil = -1 // 本例的全局等待截止时间；真实 CD 按机器人和桩分别记录
@@ -30,7 +30,7 @@ const bot = {
       started = -1 // 离开保守站桩范围就重新计时
       bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
     } else {
-      bot.move(0, 0) // 显式刹车，防止旧移动意图把机器人带出引导圈
+      bot.move(0, 0) // 显式刹车，避免惯性把机器人带出引导圈
       bot.interact()
       if (started < 0) started = bot.game.time
       if (bot.game.time - started > 8.5) {

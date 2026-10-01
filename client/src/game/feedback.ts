@@ -193,9 +193,8 @@ export class GameFeedback {
     const self = world.robots.get(world.self?.robotId ?? 0)
     if (!self || self.dead) return
     let reason = ''
-    if (input.dash) {
-      if ((world.self?.dashReadyTick ?? 0) > world.tick) reason = '冲刺冷却中'
-      else if (self.energyX10 < 200) reason = '冲刺需要 20 能量'
+    if (input.dash && self.energyX10 < 4) {
+      reason = '能量不足，冲刺停止'
     } else if (input.fire && !this.held.fire) {
       if (self.shieldOn || input.shield) reason = '护盾期间无法开火'
       else if (self.energyX10 < 50) reason = '开火需要 5 能量'

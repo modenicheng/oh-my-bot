@@ -8,9 +8,10 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
-// commandCollector 把 api 调用折叠为 sim.ScriptCommands。
-// 指针语义：本 tick 调用过某轴 → 对应指针非 nil；未调 → nil
-// （仲裁器保留人类/上次控制）。重复调用同一轴 = 后者覆盖（脚本最后意志）。
+// commandCollector 把 bot（以及兼容的 bot.api）调用折叠为
+// sim.ScriptCommands。每个结果都是一个完整的单 tick 意图：调用过某轴
+// 对应指针非 nil，未调用就是本 tick 中立，不会沿用上一 tick 脚本动作。
+// 重复调用同一轴 = 后者覆盖（脚本最后意志）。
 type commandCollector struct {
 	out sim.ScriptCommands
 }

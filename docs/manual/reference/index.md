@@ -22,14 +22,14 @@ tags: [脚本, API]
 
 | 文档 | 内容 |
 |---|---|
-| [动作参考](actions.md) | L0 原语 7 个：move / aimAt / fire / dash / shield / interact / say。含"锁存"概念的完整讲解 |
+| [动作参考](actions.md) | L0 原语 7 个：move / aimAt / fire / dash / shield / interact / say。含每 tick 意图规则 |
 | [便利层参考](helpers.md) | L1 便利层 6 个：moveTo / aimAt(target) / nearestEnemy / nearestCore / nearestUplink / pulseScan |
 | [数据结构](data.md) | Observation / RobotRef / Self / GameInfo 逐字段，TickContext 与 BotModule 生命周期 |
 | [模块语义与陷阱](modules.md) | 按主题拆解运行规则：tick 生命周期 / 感知 / 移动与战斗 / 目标交互 / 存活 / 通信，每个主题附陷阱清单 |
 
 ## 三个最贵的坑（先记这三条）
 
-1. **轴锁存**：`fire()` / `dash()` / `interact()` 调用一次 = 持续按住，直到死亡、脚本异常/超时或玩家关辅助。没有 `fire(false)`。详见[动作参考的锁存一节](actions.md)。
+1. **每 tick 重算**：本 tick 未调用的脚本动作就是中立；想持续开火、Dash、举盾或引导就每 tick 调用。旧 `bot.api` 只是语法兼容，不恢复锁存。详见[动作参考](actions.md)。
 2. **一拍延迟**：脚本在第 T 帧看到的世界，指令在 T+1 帧才生效。瞄准留提前量、到点判定留阈值（写 `dist < 2`，别写 `dist == 0`）。
 3. **个人黑入冷却不下发**：感知数据里没有"我在这根桩还剩几秒冷却"的字段，成功事件也不下发，`game.time` 只能用于估算等待时间（见示例库 `uplink-rusher`）。
 

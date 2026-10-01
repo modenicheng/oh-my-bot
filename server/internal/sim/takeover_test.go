@@ -93,6 +93,7 @@ func TestTakeoverBranchManualAxesReturnToScriptWithoutAssistOff(t *testing.T) {
 
 	// 接管 move+fire 两轴（真实新 keydown，下一 tick 生效）。
 	sendInput(t, s, 1, AxisMove|AxisFire, 1, func(in *ombv1.ClientInput) { in.MoveX = 1000; in.Fire = true })
+	scriptAll(t, s)
 	stepAndArbitrate(t, s, 1)
 
 	c := s.Arbitrated(1)
@@ -102,6 +103,7 @@ func TestTakeoverBranchManualAxesReturnToScriptWithoutAssistOff(t *testing.T) {
 
 	// Space 一次：把人工轴交回脚本，辅助保持开（不经过关闭）。
 	s.AssistToggle(1)
+	scriptAll(t, s)
 	stepAndArbitrate(t, s, 1)
 
 	c = s.Arbitrated(1)
@@ -150,10 +152,12 @@ func TestTakeoverKeyUpZeroInputDoesNotReTakeover(t *testing.T) {
 
 	// Space 恢复（一次交回脚本）。
 	s.AssistToggle(1)
+	scriptAll(t, s)
 	stepAndArbitrate(t, s, 1)
 
 	// 恢复后客户端已清 sticky：keyup 释放帧 mask=0，不得重新抢占也不得卡住。
 	sendInput(t, s, 1, 0, 2, nil)
+	scriptAll(t, s)
 	stepAndArbitrate(t, s, 1)
 	if c := s.Arbitrated(1); c.MoveSrc != 'S' {
 		t.Fatalf("release frame after restore must not re-takeover: MoveSrc=%c want S", c.MoveSrc)
@@ -182,6 +186,7 @@ func TestTakeoverPerAxisIndependence(t *testing.T) {
 	s.AssistToggle(1)
 	stepAndArbitrate(t, s, 1) // 辅助开、脚本接管
 	sendInput(t, s, 1, AxisFire, 1, func(in *ombv1.ClientInput) { in.Fire = true })
+	scriptAll(t, s)
 	stepAndArbitrate(t, s, 1)
 
 	c := s.Arbitrated(1)
@@ -207,11 +212,11 @@ func TestTakeoverRestoreImmuneToSameTickInFlightFrame(t *testing.T) {
 	// Space 交回；随后客户端帧已清 sticky（mask=0）。
 	s.AssistToggle(1)
 	sendInput(t, s, 1, 0, 2, nil) // 恢复后的干净帧
-	stepAndArbitrate(t, s, 1)
 	for i := 0; i < 5; i++ {
+		scriptAll(t, s)
+		stepAndArbitrate(t, s, 1)
 		if c := s.Arbitrated(1); c.MoveSrc != 'S' {
 			t.Fatalf("frame %d after restore re-took axis: MoveSrc=%c want S", i, c.MoveSrc)
 		}
-		stepAndArbitrate(t, s, 1)
 	}
 }
