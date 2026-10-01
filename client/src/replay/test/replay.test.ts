@@ -1,5 +1,5 @@
 // 回放模型/索引冒烟：解析 fixture NDJSON → 关键帧查询 → 事件标记 → 分数断言。
-// fixture 由 server/scripts/gen-replay-fixture.mjs 生成（对齐 sim/log.go 磁盘格式）。
+// fixture 由 server/scripts/gen-replay-fixture.mjs 生成并纳入版本控制。
 // client tsconfig 无 node 类型，但本文件运行于 vitest（Node）环境；独立 tsconfig
 // 引入 @types/node。仅引入 node:url 与 node:fs（fixture 读取）。
 import { describe, it, expect } from 'vitest'
@@ -9,7 +9,7 @@ import { parseReplayNDJSON, ReplayParseError } from '../model'
 import { ReplayIndex } from '../index'
 
 const fixturePath = fileURLToPath(
-  new URL('../../../../server/data/matches/REPLAY1-000000001.jsonl', import.meta.url),
+  new URL('./fixtures/REPLAY1-000000001.jsonl', import.meta.url),
 )
 const fixture = readFileSync(fixturePath, 'utf8')
 
