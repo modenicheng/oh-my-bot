@@ -43,6 +43,7 @@ const DIST = join(CLIENT_DIR, 'dist')
 const SHOTS = resolve(process.env.OMB_SHOTS || '../.artifacts/feel')
 
 const CS_HUMAN = 1
+const CS_SCRIPT = 2
 const PHASE_OUTER = 1
 const R_WARMUP = 1
 
@@ -94,7 +95,7 @@ function freshState() {
     ],
     projectiles: [], cores: [],
     uplinks: [{ base: { id: UPLINK_ID, pos: { x: 1.5, y: 1.0 }, heading: 0 }, ready: true, hackingId: 0, progressX10: 0, myCooldownS: 0 }],
-    self: { robotId: SELF_ID, moveSrc: CS_HUMAN, turretSrc: CS_HUMAN, aiRoundsLeft: 0, aiTokensLeftK: 0, assistOn: false, dashReadyTick: 0, fireReadyTick: 0 },
+    self: { robotId: SELF_ID, moveSrc: CS_HUMAN, turretSrc: CS_HUMAN, aiRoundsLeft: 0, aiTokensLeftK: 0, assistOn: false, dashReadyTick: 0, fireReadyTick: 0, fireSrc: CS_SCRIPT, abilitySrc: CS_SCRIPT, manualAxesMask: 0 },
     gone: { robots: [], projectiles: [], cores: [] },
   }
 }
@@ -139,8 +140,16 @@ class Fixture {
     }
     else if (c.case === 'assistToggle') {
       this.assistToggles++
-      this.st.self.assistOn = !this.st.self.assistOn
-      // authoritative echo: broadcast a delta carrying the new assist_on
+      // 服务端权威三分支裁决（fixture 模拟）：
+      // 开+manual_axes_mask≠0 → 清 mask（交回脚本，仍开）；开+全脚本 → 关；关 → 开。
+      if (this.st.self.assistOn) {
+        if ((this.st.self.manualAxesMask ?? 0) !== 0) this.st.self.manualAxesMask = 0
+        else this.st.self.assistOn = false
+      } else {
+        this.st.self.assistOn = true
+        this.st.self.manualAxesMask = 0
+      }
+      // authoritative echo: broadcast a delta carrying the new assist state
       this.pushDelta()
     }
     else if (c.case === 'resyncRequest') { this.sendFull() }
@@ -439,6 +448,44 @@ async function fullPass(browser, fix) {
     await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist ON after authoritative delta')
     await page.keyboard.press(' ')
     await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist OFF after second authoritative delta')
+
+    // --- fine-grained takeover: manual axes shown per-axis; single Space returns them
+    // 开辅助（分支1：开+清接管），接管 move（W）与 fire（LMB），fixture 权威回显 mask。
+    await page.keyboard.press(' ')
+    await until(() => fix.assistToggles >= 3, 'third assistToggle upstream')
+    await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist ON before takeover')
+    await page.keyboard.down('w')
+    await sleep(250)
+    await page.mouse.down()
+    await sleep(250)
+    // fixture 收到带 mask 帧后置权威 mask（模拟服务端 SelfState 回显）
+    fix.st.self.manualAxesMask = 0b101 // move|fire
+    fix.pushDelta()
+    await until(async () => {
+      const t = ((await page.locator('#hud-assist-hint').textContent()) || '').trim()
+      return /移动/.test(t) && /开火/.test(t) && /Space 交回辅助/.test(t)
+    }, 'HUD must list manual axes (移动/开火) with Space hint')
+    await shot(page, '08-manual-axes-hud.png')
+    // 仍按住 W/LMB 时按一次 Space：轴交回（分支2），辅助保持开，held 不重抢
+    await page.keyboard.press(' ')
+    await until(() => fix.assistToggles >= 4, 'fourth assistToggle upstream')
+    fix.st.self.manualAxesMask = 0
+    fix.pushDelta()
+    await until(async () => {
+      const t = ((await page.locator('#hud-assist-hint').textContent()) || '').trim()
+      return t === ''
+    }, 'HUD hint must clear after single-Space restore')
+    await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'assist stays ON after restore')
+    const holdMark = lastSeq(fix)
+    await sleep(300)
+    const heldFrames = framesSince(fix, holdMark).filter(f => (f.axisMask & 0b1) !== 0)
+    assert.equal(heldFrames.length, 0, 'held W after restore must not re-send move takeover mask')
+    await page.keyboard.up('w')
+    await page.mouse.up()
+    // 分支3：全脚本控制时 Space 关闭辅助
+    await page.keyboard.press(' ')
+    await until(() => fix.assistToggles >= 5, 'fifth assistToggle upstream')
+    await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist OFF after all-script branch')
 
     // --- held E then F across >=10 input frames, release false
     for (const key of ['e', 'f']) {
