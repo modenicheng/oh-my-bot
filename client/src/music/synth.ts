@@ -7,8 +7,8 @@
  *  - NES-ish waveform quirks (16-step triangle, LFSR noise) are easy to keep
  */
 
-import { clamp, midiToFreq } from './music.ts';
-import type { InstrumentSpec } from './types.ts';
+import { clamp, midiToFreq } from './music';
+import type { InstrumentSpec } from './types';
 
 const TAU = Math.PI * 2;
 
@@ -92,7 +92,7 @@ export function renderVoice(
     const t0 = s * arpFrames;
     if (t0 >= end) break;
     const t1 = s === segments - 1 ? end : Math.min(end, t0 + arpFrames);
-    const baseFreq = midiToFreq(note.midi + (arp ? arp[s % arp.length] : 0));
+    const baseFreq = midiToFreq(note.midi + (arp ? arp[s % arp.length]! : 0));
     const first = s === 0;
 
     for (let i = 0, n = t1 - t0; i < n; i++) {
@@ -134,7 +134,7 @@ export function renderVoice(
           sample = noiseBit ? 1 : -1;
         } else {
           for (let c = 0; c < copies; c++) {
-            let p = phases[c] + (freq * detunes[c]) / sr;
+            let p = phases[c]! + (freq * detunes[c]!) / sr;
             if (p >= 1) p -= Math.floor(p);
             phases[c] = p;
             if (isPulse) {
@@ -148,7 +148,7 @@ export function renderVoice(
           sample *= copyGain;
         }
 
-        out[start + t] += sample * level * volume;
+        out[start + t]! += sample * level * volume;
       }
 
       if (slideMul !== slideTarget) {

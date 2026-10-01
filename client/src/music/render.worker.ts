@@ -4,8 +4,8 @@
  * agree to the sample.
  */
 
-import { renderSong } from './render.ts';
-import type { SongSpec } from './types.ts';
+import { renderSong } from './render';
+import type { SongSpec } from './types';
 
 interface RenderRequest {
   token: number;

@@ -1,6 +1,6 @@
 /** Ten complementary roles for v3.1. Harmony stays explicit in the score. */
-import { bass, hat, kick, pad, pulse, snare } from '../instruments.ts';
-import type { InstrumentSpec, StageId, VoicePart, VoiceSpec } from '../types.ts';
+import { bass, hat, kick, pad, pulse, snare } from '../instruments';
+import type { InstrumentSpec, StageId, VoicePart, VoiceSpec } from '../types';
 
 export const VOICE_COLORS = { lead: '#e0452b', riff: '#c85b9e', harmony: '#dfa32b', pad: '#6f9de0', bass: '#46a3b4', kick: '#b07a4a', snare: '#bdb6a6', hat: '#8fae3e', chord: '#ad88d6', perc: '#5ab993' } as const;
 export type Parts = Partial<Record<StageId, VoicePart>>;

@@ -1,6 +1,6 @@
 /** 星灯航线 v3.1 — original themes with wider harmony and restrained percussion. */
-import { parts, shared, bassVoice, hatVoice, harmonyVoice, kickVoice, leadVoice, padVoice, riffVoice, snareVoice, chordVoice, percVoice } from './voices.ts';
-import type { SongSpec, StageSpec } from '../types.ts';
+import { parts, shared, bassVoice, hatVoice, harmonyVoice, kickVoice, leadVoice, padVoice, riffVoice, snareVoice, chordVoice, percVoice } from './voices';
+import type { SongSpec, StageSpec } from '../types';
 
 export const STAGES: StageSpec[] = [
   { id: 'title', label: 'TITLE SCREEN', tag: '星灯', color: '#6f9de0',

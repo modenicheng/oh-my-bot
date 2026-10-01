@@ -594,13 +594,13 @@ function createSpaceImpulse(ctx: BaseAudioContext, seconds: number): AudioBuffer
     }
     for (const [millis, gain] of early) {
       const index = Math.round(((millis + channel * 6) * rate) / 1000);
-      if (index < frames) data[index] += gain * (channel === 0 ? 1 : -1);
+      if (index < frames) data[index]! += gain * (channel === 0 ? 1 : -1);
     }
 
     let energy = 0;
-    for (let i = 0; i < frames; i++) energy += data[i] * data[i];
+    for (let i = 0; i < frames; i++) energy += data[i]! * data[i]!;
     const scale = 1 / Math.sqrt(Math.max(1e-9, energy) * 2);
-    for (let i = 0; i < frames; i++) data[i] *= scale;
+    for (let i = 0; i < frames; i++) data[i]! *= scale;
   }
 
   return impulse;

@@ -3,8 +3,8 @@
  * runs (dragging a tempo or duty slider re-synthesizes the whole loop).
  */
 
-import { renderSong, type SongRender } from './render.ts';
-import type { SongSpec } from './types.ts';
+import { renderSong, type SongRender } from './render';
+import type { SongSpec } from './types';
 
 interface RenderRequest {
   token: number;
@@ -31,7 +31,10 @@ export class SongRenderer {
       const worker = new Worker(new URL('./render.worker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = (event: MessageEvent<RenderResponse>) => this.settle(event.data);
       worker.onerror = () => {
+        worker.terminate();
         this.worker = null;
+        for (const job of this.pending.values()) job.reject(new Error('music render worker failed'));
+        this.pending.clear();
       };
       this.worker = worker;
     } catch {

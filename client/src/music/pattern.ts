@@ -10,7 +10,7 @@
  * blocks; its token count must divide the song's step count.
  */
 
-import { parseNote } from './music.ts';
+import { parseNote } from './music';
 
 export type TokenKind = 'note' | 'tie' | 'rest';
 
@@ -56,11 +56,11 @@ export interface PatternNote {
 export function notesFromTokens(tokens: PatternToken[]): PatternNote[] {
   const notes: PatternNote[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
+    const token = tokens[i]!;
     if (token.kind !== 'note') continue;
     let end = tokens.length;
     for (let j = i + 1; j < tokens.length; j++) {
-      if (tokens[j].kind !== 'tie') {
+      if (tokens[j]!.kind !== 'tie') {
         end = j;
         break;
       }

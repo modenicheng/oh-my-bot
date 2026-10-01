@@ -17,10 +17,10 @@
  *     anything, it only changes gains.
  */
 
-import { notesFromTokens, tokenizePattern } from './pattern.ts';
-import { renderVoice, voiceTailSeconds, type ScheduledNote } from './synth.ts';
-import { clamp } from './music.ts';
-import { loopSeconds, loopSteps, type SongSpec, type StageId } from './types.ts';
+import { notesFromTokens, tokenizePattern } from './pattern';
+import { renderVoice, voiceTailSeconds, type ScheduledNote } from './synth';
+import { clamp } from './music';
+import { loopSeconds, loopSteps, type SongSpec, type StageId } from './types';
 
 /** Corner frequency of the DC blocker, in Hz. */
 const DC_BLOCK_HZ = 8;
