@@ -1,7 +1,8 @@
 // Real-server acceptance for a distinct, read-only live room connection.
 import { chromium } from 'playwright'
-import { fromBinary } from '@bufbuild/protobuf'
-import { ClientMsgSchema, ServerMsgSchema } from '../../packages/protocol/src/index.ts'
+import { fromBinary, create, toBinary } from '@bufbuild/protobuf'
+import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, SnapshotDeltaSchema, Phase,
+  RoomActionSchema, RoomAction_Kind, EvRoomState_State, encodeClient } from '../../packages/protocol/src/index.ts'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
@@ -43,12 +44,18 @@ try {
   browser = await chromium.launch()
   const host = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   host.on('pageerror', error => errors.push(String(error)))
-  let humanOnline = 0, selfId = 0
+  let humanOnline = 0, selfId = 0, hostTick = 0, hostRoomState
   host.on('websocket', socket => socket.on('framereceived', ({ payload }) => {
     if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
     const msg = fromBinary(ServerMsgSchema, payload.subarray(1))
-    if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'roomState') humanOnline = msg.payload.value.kind.value.robotsOnline
-    if (msg.payload.case === 'snapshot' && msg.payload.value.self) selfId = msg.payload.value.self.robotId
+    if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'roomState') {
+      hostRoomState = msg.payload.value.kind.value.state
+      humanOnline = msg.payload.value.kind.value.robotsOnline
+    }
+    if (msg.payload.case === 'snapshot') {
+      hostTick = msg.payload.value.tick
+      if (msg.payload.value.self) selfId = msg.payload.value.self.robotId
+    }
   }))
   await host.goto(base)
   await host.fill('#in-room', 'LIVEBOT')
@@ -71,6 +78,7 @@ try {
   watch = await context.newPage()
   watch.on('pageerror', error => errors.push(String(error)))
   const connections = []
+  let rawSpoof = false
   let room, source = '', snapshotTick = 0
   const robots = new Map()
   watch.on('websocket', socket => {
@@ -80,7 +88,8 @@ try {
       if (!Buffer.isBuffer(payload) || payload[0] !== 2) return
       const message = fromBinary(ClientMsgSchema, payload.subarray(1))
       connection.upstream.push(message.payload.case)
-      assert.ok(['spectate', 'resyncRequest', 'leave'].includes(message.payload.case), `spectator sent ${message.payload.case}`)
+      assert.ok(rawSpoof && message.payload.case === 'roomAction' ||
+        ['spectate', 'resyncRequest', 'leave'].includes(message.payload.case), `spectator sent ${message.payload.case}`)
     })
     socket.on('framereceived', ({ payload }) => {
       if (!Buffer.isBuffer(payload) || payload[0] !== 3) return
@@ -126,8 +135,8 @@ try {
   assert.ok(human, 'spectator sees real robot')
   assert.ok([...robots.values()].some(robot => Math.hypot(robot.base.pos.x - human.base.pos.x, robot.base.pos.y - human.base.pos.y) > 20), 'feed extends beyond player vision')
   assert.ok([...robots.values()].every(robot => robot.nick), 'global feed carries identity labels')
-  const beforeTick = snapshotTick
-  await until(() => snapshotTick > beforeTick + 30, 'live simulation advances')
+  const beforeTick = Number(await watch.locator('#view-live').getAttribute('data-tick'))
+  await until(() => watch.locator('#view-live').getAttribute('data-tick').then(tick => Number(tick) > beforeTick + 30), 'client applies live simulation frames')
   await watch.screenshot({ path: join(shots, 'desktop.png') })
 
   await watch.selectOption('#live-follow', String(selfId))
@@ -186,15 +195,35 @@ try {
         const { left, right, top, bottom } = document.querySelector(selector).getBoundingClientRect()
         return { left, right, top, bottom }
       })
-      return { rects, height: innerHeight, scroll: document.documentElement.scrollWidth }
+      const contents = ['.live-heading', '.live-camera', '.live-footer'].flatMap(selector => {
+        const parent = document.querySelector(selector)
+        const bounds = parent.getBoundingClientRect()
+        return [...parent.children].filter(child => getComputedStyle(child).display !== 'none').map(child => {
+          const box = child.getBoundingClientRect()
+          return { name: child.id || child.tagName, left: box.left, right: box.right,
+            top: box.top, bottom: box.bottom, parentLeft: bounds.left, parentRight: bounds.right,
+            parentTop: bounds.top, parentBottom: bounds.bottom, clipped: child.scrollWidth > child.clientWidth + 1 }
+        })
+      })
+      return { rects, contents, height: innerHeight, scroll: document.documentElement.scrollWidth }
     })
     assert.ok(metrics.scroll <= width, `no horizontal overflow at ${width}px`)
+    for (const element of metrics.contents) {
+      assert.ok(element.left >= element.parentLeft - 1 && element.right <= element.parentRight + 1 &&
+        element.top >= element.parentTop - 1 && element.bottom <= element.parentBottom + 1 && !element.clipped,
+      `${element.name} fits its toolbar at ${width}px`)
+    }
     for (const [i, rect] of metrics.rects.entries()) {
       assert.ok(rect.left >= -1 && rect.right <= width + 1 && rect.top >= 0 && rect.bottom <= metrics.height + 1, `panel ${i} in viewport at ${width}px`)
       if (i) assert.ok(rect.top >= metrics.rects[i - 1].bottom - 1, `panel ${i} does not overlap at ${width}px`)
     }
     assert.ok(await pixels(watch) > 20, `nonblank narrow canvas ${width}px`)
+    await watch.locator('#audio-settings summary').click()
+    const audioBounds = await watch.locator('.audio-row').boundingBox()
+    assert.ok(audioBounds.x >= 0 && audioBounds.x + audioBounds.width <= width, `audio popup fits at ${width}px`)
+    await watch.locator('#audio-mute').click()
     await watch.screenshot({ path: join(shots, `narrow-${width}.png`) })
+    await watch.locator('#audio-settings summary').click()
   }
   await watch.locator('#live-canvas').focus()
   await watch.keyboard.press('Escape')
@@ -204,6 +233,93 @@ try {
   const beforeReopen = connections.length
   await watch.click('#btn-live')
   await until(() => watch.locator('#view-live').isVisible().then(visible => visible && connections.length > beforeReopen && connections.at(-1).full), 'reopen live spectator from form')
+
+  assert.equal(hostRoomState, EvRoomState_State.R_RUNNING)
+  const beforeSpoof = hostTick
+  const abort = encodeClient(create(ClientMsgSchema, {
+    payload: { case: 'roomAction', value: create(RoomActionSchema, { kind: RoomAction_Kind.ABORT }) },
+  }))
+  rawSpoof = true
+  await watch.evaluate(bytes => window.__liveSockets.at(-1).send(new Uint8Array(bytes)), [...abort])
+  await until(() => hostRoomState !== EvRoomState_State.R_RUNNING || hostTick > beforeSpoof + 20, 'unauthorized spectator ABORT')
+  rawSpoof = false
+  assert.equal(hostRoomState, EvRoomState_State.R_RUNNING, 'spectator cannot abort the match over raw WebSocket')
+  assert.equal(humanOnline, 1, 'spoofed command cannot add a player')
+  // Controlled UI-only final-frame checks; the preceding assertions use the real server.
+  const finalPage = await context.newPage()
+  finalPage.on('pageerror', error => errors.push(String(error)))
+  const fixtureUp = []
+  const fixtureRobots = [...robots.values()]
+  let fixtureSocket, fixtureMode = 'running'
+  const sendFixture = payload => fixtureSocket.send(Buffer.concat([
+    Buffer.from([3]), toBinary(ServerMsgSchema, create(ServerMsgSchema, { payload })),
+  ]))
+  const fixtureEvent = (tick, kind) => sendFixture({ case: 'event', value: create(ServerEventSchema, { tick, kind }) })
+  const fixtureSnapshot = (tick, extra = {}) => sendFixture({ case: 'snapshot', value: create(SnapshotDeltaSchema, {
+    tick, phase: Phase.CORE_OPEN, timeLeftS: 0, full: true, robots: fixtureRobots, ...extra,
+  }) })
+  await finalPage.routeWebSocket('**/ws', socket => {
+    fixtureSocket = socket
+    socket.onMessage(message => {
+      const data = Buffer.from(message)
+      if (data[0] === 0) { socket.send(Buffer.concat([Buffer.from([1]), data.subarray(1)])); return }
+      if (data[0] !== 2) return
+      const kind = fromBinary(ClientMsgSchema, data.subarray(1)).payload.case
+      fixtureUp.push(kind)
+      if (kind === 'spectate') {
+        if (fixtureMode === 'idle') {
+          fixtureEvent(0, { case: 'roomState', value: { state: EvRoomState_State.R_IDLE, robotsOnline: 0 } })
+          return
+        }
+        fixtureEvent(200, { case: 'roomState', value: { state: EvRoomState_State.R_RUNNING, robotsOnline: 1 } })
+        fixtureEvent(200, { case: 'mapBootstrap', value: { mapJson: fixtureMode === 'bad' ? '{broken' : source, generatorVersion: 4 } })
+        fixtureSnapshot(200, { phase: Phase.OUTER_RING, timeLeftS: 476 })
+      }
+    })
+  })
+  await finalPage.goto(`${base}/?view=live&room=LIVEBOT`)
+  await until(() => finalPage.locator('#view-live').getAttribute('data-tick').then(tick => tick === '200'), 'controlled live frame')
+  const target = fixtureRobots[0].base.id
+  await finalPage.selectOption('#live-follow', String(target))
+  fixtureSnapshot(201, { robots: fixtureRobots.map(r => r.base.id === target ? { ...r, dead: true, hpX10: 0 } : r) })
+  await until(() => finalPage.locator('#view-live').getAttribute('data-tick').then(tick => tick === '201'), 'follow dead target')
+  assert.equal(await finalPage.locator('#live-follow').inputValue(), String(target))
+  fixtureSnapshot(202, { robots: fixtureRobots.filter(r => r.base.id !== target) })
+  await until(() => finalPage.locator('#live-follow option').count().then(count => count === fixtureRobots.length), 'follow removed target')
+  assert.ok(await pixels(finalPage) > 20, 'target removal does not blank camera')
+  fixtureSnapshot(203)
+  await until(() => finalPage.locator('#live-follow').inputValue().then(value => value === String(target)), 'target returns to camera follow')
+  fixtureSnapshot(28800)
+  fixtureEvent(28800, { case: 'matchEnd', value: { scores: fixtureRobots.map((r, i) => ({ robot: r.base.id, score: 40 - i, titles: [] })) } })
+  fixtureEvent(28800, { case: 'roomState', value: { state: EvRoomState_State.R_ENDED, robotsOnline: 1 } })
+  await until(() => finalPage.locator('#live-scores li').count().then(count => count === fixtureRobots.length), 'final scores')
+  assert.equal(await finalPage.locator('#live-match').textContent(), '已结束')
+  assert.equal(await finalPage.locator('#live-time').textContent(), '0:00')
+  assert.equal(await finalPage.locator('#live-scores li').first().locator('span').textContent(), fixtureRobots[0].nick)
+  assert.ok(await pixels(finalPage) > 20, 'final arena stays visible')
+  assert.deepEqual(fixtureUp, ['spectate'], 'final view never sends gameplay commands')
+  await finalPage.setViewportSize({ width: 360, height: 780 })
+  await finalPage.screenshot({ path: join(shots, 'final-360.png') })
+  await finalPage.click('#live-back')
+  fixtureMode = 'idle'
+  await finalPage.fill('#in-room', 'IDLE123')
+  await finalPage.click('#btn-live')
+  await until(() => finalPage.locator('#live-status').textContent().then(text => text === '已连接'), 'idle room after final scores')
+  assert.equal(await finalPage.locator('#live-scores').isVisible(), false, 'previous scores cleared')
+  assert.equal(await finalPage.locator('#live-follow').isDisabled(), true, 'previous follow targets cleared')
+  assert.equal(await finalPage.locator('#live-follow option').count(), 1)
+  assert.equal(await finalPage.locator('#view-live').getAttribute('data-tick'), '0')
+  assert.equal(await finalPage.locator('#live-count').textContent(), '机器人 0')
+  await finalPage.click('#live-back')
+  fixtureMode = 'bad'
+  await finalPage.click('#btn-live')
+  await until(() => finalPage.locator('#live-status').textContent().then(text => text.includes('地图数据异常')), 'bad map remains actionable')
+  assert.equal(await finalPage.locator('#live-retry').isVisible(), true)
+  assert.equal(await finalPage.locator('#view-live').getAttribute('data-tick'), '0', 'bad map cannot be masked by snapshot')
+  fixtureMode = 'running'
+  await finalPage.click('#live-retry')
+  await until(() => finalPage.locator('#view-live').getAttribute('data-tick').then(tick => tick === '200'), 'map retry replaces stopped session')
+  await finalPage.close()
   assert.deepEqual(errors, [])
   console.log(`LIVE_SPECTATOR_OK connections=${connections.length} screenshots=${shots}`)
 } catch (error) {

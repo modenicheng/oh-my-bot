@@ -42,6 +42,8 @@ export class LiveSpectator {
     this.follow = this.el<HTMLSelectElement>('live-follow')
     this.status = this.el('live-status')
     this.retry = this.el<HTMLButtonElement>('live-retry')
+    this.resetMatchDisplay()
+    this.el('live-online').textContent = '真人 0'
     this.bindEvents()
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(deps.canvas)
@@ -121,26 +123,19 @@ export class LiveSpectator {
         const sameMap = source === this.mapSource
         this.mapSource = source
         this.map = map
-        this.world = emptyWorld()
-        this.needsFull = true
-        this.resyncSent = false
-        this.ended = false
-        this.bubbles = []
-        this.roster = ''
         if (!sameMap) this.camera.fit()
-        this.follow.replaceChildren(new Option('自由视角', ''))
-        this.follow.disabled = true
-        this.el('live-scores').replaceChildren()
-        this.el('live-scores').hidden = true
-        this.updateMatchState()
-        this.el('live-phase').textContent = '\u2014'
-        this.el('live-time').textContent = '0:00'
-        this.el('live-count').textContent = '机器人 0'
-        this.deps.root.dataset.tick = '0'
+        this.resetMatchDisplay()
         this.resize()
-      } catch (error) {
+      } catch {
         this.map = null
-        this.status.textContent = error instanceof Error ? error.message : '地图数据异常'
+        this.mapSource = ''
+        this.resetMatchDisplay()
+        this.resize()
+        this.session.close()
+        this.deps.root.dataset.connection = 'disconnected'
+        this.retry.hidden = false
+        this.retry.disabled = false
+        this.status.textContent = '地图数据异常，请重试'
       }
     } else if (kind.case === 'roomState') {
       this.roomState = kind.value.state
@@ -170,6 +165,25 @@ export class LiveSpectator {
       this.bubbles = this.bubbles.filter(b => b.robotId !== say.robot)
       this.bubbles.push({ robotId: say.robot, text: say.text, at: performance.now() })
     }
+  }
+
+  private resetMatchDisplay(): void {
+    this.world = emptyWorld()
+    this.needsFull = true
+    this.resyncSent = false
+    this.ended = false
+    this.bubbles = []
+    this.roster = ''
+    this.follow.replaceChildren(new Option('自由视角', ''))
+    this.follow.disabled = true
+    this.el('live-scores').replaceChildren()
+    this.el('live-scores').hidden = true
+    this.updateMatchState()
+    this.el('live-phase').textContent = '\u2014'
+    this.el('live-time').textContent = '0:00'
+    this.el('live-count').textContent = '机器人 0'
+    this.el('live-zoom').textContent = `${this.camera.zoom.toFixed(1)}\u00d7`
+    this.deps.root.dataset.tick = '0'
   }
 
   private updateMatchState(): void {
@@ -219,7 +233,7 @@ export class LiveSpectator {
     const signal = this.events.signal
     this.el('live-back').addEventListener('click', this.deps.onExit, { signal })
     this.retry.addEventListener('click', () => {
-      if (this.session.state !== 'disconnected') { this.session.retryNow(); return }
+      if (this.session.state === 'connecting' || this.session.state === 'reconnecting') { this.session.retryNow(); return }
       this.session.close()
       this.session = new RoomSession()
       void this.connect(this.roomCode)
