@@ -1,6 +1,8 @@
 ---
 title: 写第一个 Bot
 audience: both
+order: 31
+tags: [脚本, 入门]
 ---
 
 # 写第一个 Bot

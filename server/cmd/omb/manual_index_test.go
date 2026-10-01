@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"io/fs"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -208,4 +211,46 @@ func pathsOf(nodes []manualNode) []string {
 		out[i] = n.Path
 	}
 	return out
+}
+
+// TestManualDocsLayoutSnapshot 用真实 docs/manual 锁定目录顺序：
+// 首页 → 快速上手 → 游戏规则 → 写自己的 Bot → API 参考；
+// 章节内 index 落地页在最前，页面按 order 升序（非字典序）。
+func TestManualDocsLayoutSnapshot(t *testing.T) {
+	fsys := os.DirFS("../../docs/manual")
+	if _, err := fs.Stat(fsys, "index.md"); err != nil {
+		t.Skip("docs/manual not present in this checkout")
+	}
+	tree := buildManualTreeFS(fsys, ".")
+	var rootPaths []string
+	for _, n := range tree {
+		rootPaths = append(rootPaths, n.Path)
+	}
+	wantRoot := []string{"index.md", "start", "rules", "code", "reference"}
+	if !reflect.DeepEqual(rootPaths, wantRoot) {
+		t.Fatalf("root order = %v, want %v", rootPaths, wantRoot)
+	}
+	// 章节中文名来自各自 index.md，而非前后端硬编码。
+	if tree[1].Title != "快速上手" || tree[2].Title != "游戏规则" ||
+		tree[3].Title != "写自己的 Bot" || tree[4].Title != "API 总览" {
+		t.Fatalf("chapter titles = %v", []string{tree[1].Title, tree[2].Title, tree[3].Title, tree[4].Title})
+	}
+	// start 章节内部：index 落地页在前，页面按 order（11..14）非字典序。
+	var startPaths []string
+	for _, c := range tree[1].Children {
+		startPaths = append(startPaths, c.Path)
+	}
+	wantStart := []string{"start/index.md", "start/prepare.md", "start/first-match.md", "start/snippet.md", "start/ai-agent.md"}
+	if !reflect.DeepEqual(startPaths, wantStart) {
+		t.Fatalf("start order = %v, want %v", startPaths, wantStart)
+	}
+	// reference 章节内部。
+	var refPaths []string
+	for _, c := range tree[4].Children {
+		refPaths = append(refPaths, c.Path)
+	}
+	wantRef := []string{"reference/index.md", "reference/actions.md", "reference/helpers.md", "reference/data.md", "reference/modules.md"}
+	if !reflect.DeepEqual(refPaths, wantRef) {
+		t.Fatalf("reference order = %v, want %v", refPaths, wantRef)
+	}
 }

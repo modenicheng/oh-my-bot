@@ -1,6 +1,8 @@
 ---
 title: 你的第一局
 audience: both
+order: 12
+tags: [新手, 手操]
 ---
 
 # 你的第一局
