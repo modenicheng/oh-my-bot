@@ -48,7 +48,7 @@ describe('background music lifecycle', () => {
     expect(f.player.play).toHaveBeenCalledTimes(1)
     expect(f.player.setVolume).toHaveBeenLastCalledWith(0.2)
     f.music.setView('menu')
-    expect(f.player.setStage).toHaveBeenLastCalledWith('title', { fade: 0.8, quantize: false })
+    expect(f.player.setStage).toHaveBeenLastCalledWith('title', { fade: 0.09 })
     expect(f.player.play).toHaveBeenCalledTimes(1)
   })
 

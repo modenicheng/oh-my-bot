@@ -73,11 +73,15 @@ export class BackgroundMusic {
 
   setVisible(visible: boolean): void { this.visible = visible; this.sync() }
 
+  /** 播放器实例，供浏览器端观测调度状态（仅测试/诊断用）。 */
+  get musicPlayer(): ChipMusic | null { return this.player }
+
   private setScene(scene: StageId): void {
     if (this.scene === scene) return
     this.scene = scene
-    // 800ms 无重启淡变，游戏阶段变更立即响应，不额外等待下一小节。
-    this.player?.setStage(scene, { fade: 0.8, quantize: false })
+    // 场景切换对齐到下一个正拍边界（半拍提前调度，等待不超过一小节），
+    // 用短增益斜坡防爆音；不重启 sources，也不跨正拍长淡变。
+    this.player?.setStage(scene, { fade: 0.09 })
   }
 
   private sync(): void {
