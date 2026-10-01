@@ -61,9 +61,20 @@ func soloBotSource(id uint32) string {
 	return fmt.Sprintf("const botID = %d, personality = %d;\n", id, id%3) + `
 let last = null, stuck = 0, escapeUntil = 0, held = 0;
 const cooldowns = {};
+// 墙 AABB 碰撞预测：p+lookahead*v 是否穿墙。复用几何，不新建依赖。
+const LOOKAHEAD = 1.2; // 米，与每帧位移同量级，仅拒接近期碰撞
+function wallBlocked(walls, p, vx, vy, lookahead) {
+  const tx = p.x + vx * lookahead, ty = p.y + vy * lookahead;
+  const pad = 0.5; // 机器人半径近似，避免贴墙判否
+  for (const w of walls) {
+    if (tx > w.min.x - pad && tx < w.max.x + pad && ty > w.min.y - pad && ty < w.max.y + pad) return true;
+  }
+  return false;
+}
 function tick(ctx) {
   const api = ctx.api, p = ctx.self.position, now = ctx.game.time;
   const scan = ctx.scan();
+  const walls = scan.walls || [];
   const dist = q => Math.hypot(q.x - p.x, q.y - p.y);
   const unlocked = ctx.game.phase === "CORE_OPEN";
   const reachable = q => unlocked || Math.hypot(q.x, q.y) > 29;
@@ -100,8 +111,20 @@ function tick(ctx) {
   if (last && Math.hypot(p.x-last.x,p.y-last.y) < 0.015) stuck++; else stuck = 0;
   if (stuck > 20) { escapeUntil = now + 0.8; stuck = 0; }
   if (now < escapeUntil) { const x = dx; dx = -dy; dy = x; }
+  // 主动避障：若预测路径穿墙，在 ±60°/±120° 候选向置中选无碰撞且最接近目标方向的。
   const length = Math.hypot(dx,dy);
-  api.move(length > 0.1 ? dx/length : 0, length > 0.1 ? dy/length : 0);
+  if (length > 0.1 && wallBlocked(walls, p, dx/length, dy/length, LOOKAHEAD)) {
+    const base = Math.atan2(dy, dx), c = Math.cos(base), s = Math.sin(base);
+    let chose = null;
+    for (const a of [1.05, -1.05, 2.1, -2.1]) {
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const nx = c*ca - s*sa, ny = s*ca + c*sa;
+      if (!wallBlocked(walls, p, nx, ny, LOOKAHEAD)) { chose = {x: nx, y: ny}; break; }
+    }
+    if (chose) { dx = chose.x; dy = chose.y; }
+  }
+  const len2 = Math.hypot(dx,dy);
+  api.move(len2 > 0.1 ? dx/len2 : 0, len2 > 0.1 ? dy/len2 : 0);
   last = {x:p.x,y:p.y};
 }
 `

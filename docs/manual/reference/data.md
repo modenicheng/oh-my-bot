@@ -65,6 +65,7 @@ interface Observation {
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
   projectiles: (Vec2 & { id: number })[]
+  walls: { id: number; min: Vec2; max: Vec2 }[]
 }
 ```
 
@@ -76,6 +77,7 @@ interface Observation {
 | `cores` | **全图存活资源**：不按距离裁剪，但只返回 `Alive=true` 的 Core；被拾取或尚未激活的资源不会出现在列表中 |
 | `uplinks` | **恒全量**：全图所有 Uplink。`ready` = 桩激活且无人正在引导；`holder` = 当前引导者的机器人 id（有人正在引导才有值） |
 | `projectiles` | 与 robots 同规则（20m + 不穿墙），但**没有搭档豁免**——搭档的弹丸照裁 |
+| `walls` | **静态公开全量**：不随视野半径/遮挡裁剪，与碰撞几何一致的只读 AABB（改写返回值不影响地图） |
 
 **注意**：个人黑入冷却和喊话冷却不在 Observation 里。可用 `game.time` 控制请求间隔；黑入成功事件也不下发，所以黑入完成时间及冷却只能估算。
 
