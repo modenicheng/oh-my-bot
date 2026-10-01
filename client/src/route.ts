@@ -1,9 +1,9 @@
-export type View = 'join' | 'room' | 'game' | 'manual' | 'replays' | 'replay-player'
+export type View = 'join' | 'room' | 'game' | 'manual' | 'replays' | 'replay-player' | 'spectator'
 export type WorkbenchPanel = 'docs' | 'editor'
 export interface RouteExtra { doc?: string; replay?: string; panels?: WorkbenchPanel[] }
 export interface JoinProfile { roomCode: string; nick: string; color: string }
 const profileKey = 'omb.join'
-const views: View[] = ['join', 'room', 'game', 'manual', 'replays', 'replay-player']
+const views: View[] = ['join', 'room', 'game', 'manual', 'replays', 'replay-player', 'spectator']
 
 export function readRoute(url = new URL(location.href)): { roomCode: string; view: View } & RouteExtra {
   const roomCode = (url.searchParams.get('room') ?? '').toUpperCase()
@@ -37,7 +37,7 @@ export function writeRoute(view: View, roomCode?: string, extra?: RouteExtra): v
   else if (extra?.doc) url.searchParams.set('doc', extra.doc)
   if (view === 'game' && extra?.panels?.length) url.searchParams.set('panels', extra.panels.join(','))
   else url.searchParams.delete('panels')
-  if (view !== 'replay-player') url.searchParams.delete('replay')
-  else if (extra?.replay) url.searchParams.set('replay', extra.replay)
+  if ((view === 'replay-player' || view === 'spectator') && extra?.replay) url.searchParams.set('replay', extra.replay)
+  else url.searchParams.delete('replay')
   history.replaceState(null, '', url)
 }

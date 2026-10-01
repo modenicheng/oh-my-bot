@@ -3,6 +3,7 @@
 // 时间轴：拖动条（0→endTick）+ 播放/暂停/倍速（0.5/1/2/4×）+ 步进（±1s）。
 // 事件叠加层：kill/core/uplink/phase 标记点，hover 显示详情。
 import { Camera } from '../game/camera'
+import { SpectatorCamera } from './spectator'
 import { artReady } from '../game/art'
 import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
@@ -18,6 +19,7 @@ const SPEEDS = [0.5, 1, 2, 4] as const
 export interface ReplayPlayerDeps {
   root: HTMLElement
   canvas: HTMLCanvasElement
+  spectator?: boolean
   onExit: () => void
   /** 状态回调（加载错误显示在列表页）。 */
   onError: (msg: string) => void
@@ -28,6 +30,8 @@ export class ReplayPlayer {
   private map: MapDefParsed | null = null
   private renderer: ReplayRenderer | null = null
   private cam = new Camera()
+  private spectator: SpectatorCamera | null = null
+  private drag: { id: number; x: number; y: number } | null = null
   private raf = 0
   private disposed = false
 
@@ -50,6 +54,10 @@ export class ReplayPlayer {
   private hoveredMark = -1
 
   constructor(private deps: ReplayPlayerDeps) {
+    if (deps.spectator) {
+      this.spectator = new SpectatorCamera()
+      this.cam = this.spectator.camera
+    }
     this.bindDom()
     this.bindEvents()
   }
@@ -73,6 +81,14 @@ export class ReplayPlayer {
       this.tick = 0
       this.tickF = 0
       this.followRobotId = null
+      this.spectator?.fit()
+      const select = this.el['sp-follow'] as HTMLSelectElement | undefined
+      if (this.spectator && select) {
+        select.replaceChildren(new Option('自由视角', ''))
+        for (const robot of this.index.robots.values()) select.add(new Option(`${robot.nick} · #${robot.id}`, String(robot.id)))
+        select.disabled = false
+      }
+      if (this.spectator) this.deps.canvas.focus({ preventScroll: true })
       this.buildTimeline(data)
       this.updateSpeedUi()
       this.resize()
@@ -95,6 +111,7 @@ export class ReplayPlayer {
       'rp-timeline', 'rp-play', 'rp-speed', 'rp-back', 'rp-fwd', 'rp-return',
       'rp-tick', 'rp-time', 'rp-phase', 'rp-score', 'rp-marks', 'rp-mark-tip',
       'rp-follow', 'rp-title', 'rp-status',
+      'sp-follow', 'sp-free', 'sp-in', 'sp-out', 'sp-fit', 'sp-zoom',
     ]
     for (const id of ids) {
       const el = root.querySelector(`#${id}`)
@@ -133,8 +150,9 @@ export class ReplayPlayer {
     listen(marks, 'pointermove', (e) => this.onMarksHover(e))
     listen(marks, 'pointerleave', () => this.setMarkTip(-1))
 
-    // 机器人跟随：点击 canvas 命中机器人
-    listen(this.deps.canvas, 'pointerdown', (e) => this.onCanvasClick(e))
+    // Spectator navigation is scoped to this canvas; never bind GameController inputs.
+    if (this.spectator) this.bindSpectatorEvents()
+    else listen(this.deps.canvas, 'pointerdown', (e) => this.onCanvasClick(e))
 
     const follow = this.el['rp-follow']
     listen(follow, 'click', () => {
@@ -146,6 +164,75 @@ export class ReplayPlayer {
     this.resizeObserver = new ResizeObserver(this.onResize)
     this.resizeObserver.observe(this.deps.canvas)
     this.onResize()
+  }
+
+  private bindSpectatorEvents(): void {
+    const canvas = this.deps.canvas
+    const camera = this.spectator!
+    const signal = this.events.signal
+    const select = this.el['sp-follow'] as HTMLSelectElement | undefined
+    select?.addEventListener('change', () => {
+      camera.follow(select.value === '' ? null : Number(select.value))
+      this.drawFrame()
+    }, { signal })
+    this.el['sp-free']?.addEventListener('click', () => { camera.follow(null); this.drawFrame() }, { signal })
+    this.el['sp-fit']?.addEventListener('click', () => { camera.fit(); this.drawFrame() }, { signal })
+    this.el['sp-in']?.addEventListener('click', () => { camera.zoomAt(1.25); this.drawFrame() }, { signal })
+    this.el['sp-out']?.addEventListener('click', () => { camera.zoomAt(0.8); this.drawFrame() }, { signal })
+    canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !e.isPrimary || !this.index) return
+      canvas.focus({ preventScroll: true })
+      canvas.setPointerCapture(e.pointerId)
+      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }
+      canvas.classList.add('dragging')
+      e.preventDefault()
+    }, { signal })
+    canvas.addEventListener('pointermove', e => {
+      if (!this.drag || e.pointerId !== this.drag.id) return
+      const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y
+      if (dx === 0 && dy === 0) return
+      camera.pan(dx, dy)
+      this.drag.x = e.clientX; this.drag.y = e.clientY
+      this.drawFrame()
+    }, { signal })
+    const release = (e: PointerEvent) => { if (e.pointerId === this.drag?.id) this.endDrag() }
+    canvas.addEventListener('pointerup', release, { signal })
+    canvas.addEventListener('pointercancel', release, { signal })
+    canvas.addEventListener('lostpointercapture', release, { signal })
+    window.addEventListener('blur', () => this.endDrag(), { signal })
+    canvas.addEventListener('wheel', e => {
+      if (!this.index) return
+      e.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1
+      camera.zoomAt(Math.exp(-Math.max(-400, Math.min(400, e.deltaY * units)) * 0.002), e.clientX - rect.left, e.clientY - rect.top)
+      this.drawFrame()
+    }, { signal, passive: false })
+    this.deps.root.addEventListener('keydown', e => {
+      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 'Escape') { e.preventDefault(); this.deps.onExit(); return }
+      if (e.target !== canvas || !this.index) return
+      switch (e.key) {
+        case 'ArrowLeft': camera.pan(48, 0); break
+        case 'ArrowRight': camera.pan(-48, 0); break
+        case 'ArrowUp': camera.pan(0, 48); break
+        case 'ArrowDown': camera.pan(0, -48); break
+        case '+': case '=': camera.zoomAt(1.25); break
+        case '-': case '_': camera.zoomAt(0.8); break
+        case 'Home': camera.fit(); break
+        case ' ': this.togglePlay(); break
+        default: return
+      }
+      e.preventDefault()
+      this.drawFrame()
+    }, { signal })
+  }
+
+  private endDrag(): void {
+    const id = this.drag?.id
+    this.drag = null
+    this.deps.canvas.classList.remove('dragging')
+    if (id !== undefined && this.deps.canvas.hasPointerCapture(id)) this.deps.canvas.releasePointerCapture(id)
   }
 
   private onResize = (): void => {
@@ -294,7 +381,14 @@ export class ReplayPlayer {
     const frame = this.index.frameAt(this.tick)
     // 相机：跟随或全景（地图中心）
     if (this.pixelRatio !== (window.devicePixelRatio || 1)) { this.resize(); return }
-    if (this.followRobotId !== null) {
+    if (this.spectator) {
+      this.spectator.update(frame.robots)
+      this.followRobotId = this.spectator.followId
+      const select = this.el['sp-follow'] as HTMLSelectElement | undefined
+      if (select) select.value = this.followRobotId === null ? '' : String(this.followRobotId)
+      const zoom = this.el['sp-zoom']
+      if (zoom) zoom.textContent = `${this.spectator.zoom.toFixed(1)}×`
+    } else if (this.followRobotId !== null) {
       this.cam.scale = Math.min(this.cam.cw / 40, this.cam.ch / 25)
       const r = frame.robots.find((x) => x.id === this.followRobotId)
       if (r && r.alive) this.cam.follow(r.pos.x, r.pos.y)
@@ -320,7 +414,8 @@ export class ReplayPlayer {
     this.pixelRatio = dpr
     this.bindRenderer()
     this.renderer?.resize(rect.width, rect.height, dpr)
-    this.cam.resize(rect.width, rect.height, this.map?.extent ?? 100)
+    if (this.spectator) this.spectator.resize(rect.width, rect.height, this.map?.extent ?? 100)
+    else this.cam.resize(rect.width, rect.height, this.map?.extent ?? 100)
     this.drawFrame()
   }
 
@@ -404,6 +499,7 @@ export class ReplayPlayer {
     this.disposed = true
     this.pause()
     cancelAnimationFrame(this.raf)
+    this.endDrag()
     this.events.abort()
     this.resizeObserver?.disconnect()
   }
