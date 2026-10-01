@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -141,6 +142,21 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	}
 	m.proj.SetNickMap(nicks)
 	m.proj.SetPartnerMap(partners)
+	if m.log != nil {
+		identities := make([]sim.MatchPlayer, 0, len(players))
+		for pid, info := range players {
+			rid := m.robotOf[pid]
+			identities = append(identities, sim.MatchPlayer{
+				RobotID: rid, PlayerID: pid, Nick: info.Nick,
+				Partner: partners[rid], Bot: info.Bot,
+			})
+		}
+		sort.Slice(identities, func(i, j int) bool { return identities[i].RobotID < identities[j].RobotID })
+		if err := m.log.SetPlayers(identities); err != nil {
+			_ = m.log.Close()
+			return nil, fmt.Errorf("match identities: %w", err)
+		}
+	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
 	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
@@ -166,6 +182,11 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 type glueSink struct{ m *Match }
 
 func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	if ev.GetMatchEnd() != nil {
+		// The final checkpoint is delivered after Sim emits this marker.
+		// Settle only then so RUNNER includes the last checkpoint interval.
+		return
+	}
 	g.m.proj.OnEvent(tick, ev)
 	// Sim emits under rc.mu; never reacquire it from the sink.
 	if g.m.activeLocked() {
@@ -175,7 +196,21 @@ func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 
 func (m *Match) newSink() sim.EventSink { return glueSink{m: m} }
 
-func (g glueSink) OnCheckpoint(state sim.Checkpoint) { g.m.proj.OnCheckpoint(state) }
+func (g glueSink) OnCheckpoint(state sim.Checkpoint) {
+	g.m.proj.OnCheckpoint(state)
+	if state.Tick != sim.MatchTicks {
+		return
+	}
+	end := settledMatchEnd(state.Tick, nil)
+	g.m.proj.OnEvent(state.Tick, end)
+	end = settledMatchEnd(state.Tick, g.m.proj.Final())
+	if g.m.log != nil {
+		g.m.log.OnEvent(state.Tick, end)
+	}
+	if g.m.activeLocked() {
+		g.m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
+	}
+}
 func (g glueSink) OnMatchInit(state sim.Checkpoint)  { g.m.proj.OnMatchInit(state) }
 func (g glueSink) OnInput(uint32, uint32, sim.Input) {}
 
@@ -189,6 +224,12 @@ type multiSink struct {
 }
 
 func (ms multiSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	if ev.GetMatchEnd() != nil {
+		// The glue sink records the populated end after the final checkpoint.
+		if _, ok := ms.secondary.(glueSink); ok {
+			return
+		}
+	}
 	ms.primary.OnEvent(tick, ev)
 	ms.secondary.OnEvent(tick, ev)
 }
@@ -479,20 +520,18 @@ func (m *Match) finishLocked(wv sim.WorldView) {
 		}
 	}
 	m.rc.Room.AddMatchResult(scores)
-	// 终局事件（含 13 称号）：可靠广播
-	end := &ombv1.ServerEvent{
-		Tick: m.tick,
-		Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: finalRowsOf(rows)},
-	}
-	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
 	m.rc.Room.EndMatch()
 	m.rc.broadcastRoomStateLocked()
+}
+
+func settledMatchEnd(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
+	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: finalRowsOf(rows)}}
 }
 
 func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
 	out := &ombv1.EvMatchEnd{}
 	for _, r := range rows {
-		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: 0, Score: r.Score, Titles: r.Titles})
+		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: r.RobotID, Score: r.Score, Titles: r.Titles})
 	}
 	return out
 }

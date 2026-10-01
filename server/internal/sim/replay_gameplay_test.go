@@ -174,6 +174,100 @@ func TestGameplayLogAndCheckpointReplay(t *testing.T) {
 	}
 }
 
+func TestWholeMatchReplayFromInitialAndMidpoint(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := NewMatchEventLogWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSim(77, []uint32{1, 2}, log)
+	if err := s.SetMap(gameMap()); err != nil {
+		t.Fatal(err)
+	}
+	for tick := uint32(1); tick <= MatchTicks; tick++ {
+		switch tick {
+		case 1:
+			s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000})
+		case 122:
+			s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisMove), MoveY: -1000})
+		case 420:
+			s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisMove)})
+		case CoreOpenTick + 10:
+			s.ApplyScriptCommands(2, ScriptCommands{Move: ptr(Vec2{0, 1}), Fire: ptr(true)})
+		case CoreOpenTick + 90:
+			s.ClearScriptAxes(2)
+		}
+		if tick == 240 || tick == CoreOpenTick+120 {
+			if !s.Say(1, "whole match") {
+				t.Fatal("say rejected")
+			}
+		}
+		s.Tick()
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadMatchEventLog(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 || records[0].Type != "match_start" {
+		t.Fatal("missing initial state")
+	}
+	var middle *Checkpoint
+	var expected []*ombv1.ServerEvent
+	phaseChanges, controls, checkpoints := 0, 0, 0
+	for _, rec := range records {
+		if rec.Type == "checkpoint" {
+			checkpoints++
+			if rec.Tick == CoreOpenTick {
+				middle = rec.State
+			}
+		}
+		if rec.Type == "control" {
+			controls++
+		}
+		if rec.Event != nil {
+			expected = append(expected, rec.Event)
+			if rec.Event.GetPhaseChange() != nil {
+				phaseChanges++
+			}
+		}
+	}
+	if middle == nil || checkpoints != int(MatchTicks/CheckpointInterval) || phaseChanges != 1 || controls < 4 || expected[len(expected)-1].GetMatchEnd() == nil {
+		t.Fatalf("incomplete match log: midpoint=%t checkpoints=%d phase=%d controls=%d", middle != nil, checkpoints, phaseChanges, controls)
+	}
+	want, err := json.Marshal(s.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cp := range []Checkpoint{*records[0].State, *middle} {
+		sink := &recordingSink{}
+		replay := restoreGameplay(t, cp, sink)
+		replayGameplay(t, replay, records, MatchTicks)
+		got, err := json.Marshal(replay.Snapshot())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(want, got) {
+			t.Fatalf("whole-match state diverged from checkpoint tick %d", cp.Tick)
+		}
+		index := 0
+		for _, ev := range expected {
+			if ev.Tick <= cp.Tick {
+				continue
+			}
+			if index >= len(sink.events) || !proto.Equal(ev, sink.events[index]) {
+				t.Fatalf("whole-match event mismatch from tick %d at index %d", cp.Tick, index)
+			}
+			index++
+		}
+		if index != len(sink.events) {
+			t.Fatalf("whole-match replay from tick %d emitted %d events, want %d", cp.Tick, len(sink.events), index)
+		}
+	}
+}
+
 func TestCheckpointDeepCopiesGameplayState(t *testing.T) {
 	s, _ := uplinkSim(t)
 	s.robots[0].Combat.Damagers = map[uint32]bool{2: true}

@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -254,6 +255,38 @@ func sameTitles(a, b []TitleID) bool {
 
 // TestGoldenTitles pin the exact 13-title outcome of the golden match so both
 // paths are asserted against design intent, not just mutual equality.
+func TestEmbeddedIdentityOverridesLegacyOptions(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := sim.NewMatchEventLogWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := []sim.MatchPlayer{
+		{RobotID: 1, PlayerID: 1001, Nick: "live host", Partner: 2},
+		{RobotID: 2, PlayerID: 1002, Nick: "live bot", Partner: 1, Bot: true},
+	}
+	if err := log.SetPlayers(identity); err != nil {
+		t.Fatal(err)
+	}
+	log.OnMatchInit(sim.Checkpoint{Robots: []sim.Robot{{ID: 1}, {ID: 2}}, Walls: []sim.Wall{}})
+	log.OnEvent(1, matchStart(1))
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "with-identity.jsonl")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := ReadReplay(path, ReadReplayOptions{Players: map[uint32]uint64{1: 9}, Nicks: map[uint32]string{1: "stale"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByRobot(p.Final())
+	if rows[1].PlayerID != 1001 || rows[1].Nick != "live host" || rows[2].PlayerID != 1002 || rows[2].Nick != "live bot" {
+		t.Fatalf("replay ignored embedded identity: %+v", rows)
+	}
+}
+
 func TestGoldenTitles(t *testing.T) {
 	events, checkpoints := goldenFeed()
 	path := writeGoldenLog(t, events, checkpoints)

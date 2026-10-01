@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -20,14 +21,25 @@ const (
 	maxLogLine    = 16 * 1024 * 1024
 )
 
+// MatchPlayer records the stable identity and pairing used by the live projector.
+// Older logs may omit Players and still be read with externally supplied tables.
+type MatchPlayer struct {
+	RobotID  uint32 `json:"robot_id"`
+	PlayerID uint64 `json:"player_id"`
+	Nick     string `json:"nick"`
+	Partner  uint32 `json:"partner,omitempty"`
+	Bot      bool   `json:"bot,omitempty"`
+}
+
 // LogRecord is the full log stream, not merely the online ServerEvent subset.
-// Type is event, match_start (initial state), input, or checkpoint. Exactly one
-// payload is populated. Record order within a tick is significant.
+// Type is event, match_start (initial state), input, control, or checkpoint.
+// Record order within a tick is significant.
 type LogRecord struct {
 	Type    string
 	Tick    uint32
 	Event   *ombv1.ServerEvent
 	State   *Checkpoint
+	Players []MatchPlayer
 	RobotID uint32
 	Input   *Input
 	Control *ControlRecord
@@ -42,6 +54,7 @@ type diskRecord struct {
 	Tick    uint32          `json:"tick"`
 	Event   json.RawMessage `json:"event,omitempty"`
 	State   *Checkpoint     `json:"state,omitempty"`
+	Players []MatchPlayer   `json:"players,omitempty"`
 	RobotID uint32          `json:"robot_id,omitempty"`
 	Input   *Input          `json:"input,omitempty"`
 	Control *ControlRecord  `json:"control,omitempty"`
@@ -58,6 +71,8 @@ type MatchEventLog struct {
 	err      error
 	closed   bool
 	lastTick uint32
+	players  []MatchPlayer
+	started  bool
 }
 
 var (
@@ -109,6 +124,32 @@ func NewMatchEventLogWriter(w io.Writer) (*MatchEventLog, error) {
 
 func (l *MatchEventLog) Err() error { return l.err }
 
+// SetPlayers attaches the assembly-time identity to the next match_start.
+// Call before the first simulation tick; a nil slice preserves legacy logs.
+func (l *MatchEventLog) SetPlayers(players []MatchPlayer) error {
+	if !l.writable() {
+		return l.err
+	}
+	if l.players != nil || l.started {
+		return errors.New("sim: identity already set or match started")
+	}
+	seen := make(map[uint32]bool, len(players))
+	for _, player := range players {
+		if player.RobotID == 0 || player.PlayerID == 0 || seen[player.RobotID] {
+			return errors.New("sim: invalid or duplicate match player")
+		}
+		seen[player.RobotID] = true
+	}
+	for _, player := range players {
+		if player.Partner != 0 && !seen[player.Partner] {
+			return errors.New("sim: unknown match partner")
+		}
+	}
+	l.players = append([]MatchPlayer{}, players...)
+	sort.Slice(l.players, func(i, j int) bool { return l.players[i].RobotID < l.players[j].RobotID })
+	return nil
+}
+
 func (l *MatchEventLog) writable() bool {
 	if l.closed && l.err == nil {
 		l.err = os.ErrClosed
@@ -136,7 +177,8 @@ func (l *MatchEventLog) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 }
 
 func (l *MatchEventLog) OnMatchInit(state Checkpoint) {
-	l.append(diskRecord{Type: "match_start", Tick: state.Tick, State: &state})
+	l.append(diskRecord{Type: "match_start", Tick: state.Tick, State: &state, Players: l.players})
+	l.started = true
 	_ = l.Flush()
 }
 
@@ -260,7 +302,7 @@ func (r *MatchEventLogReader) Read() (*LogRecord, error) {
 	if disk.Tick < r.lastTick {
 		return fail(errors.New("ticks moved backwards"))
 	}
-	record := &LogRecord{Type: disk.Type, Tick: disk.Tick, State: disk.State, RobotID: disk.RobotID, Input: disk.Input, Control: disk.Control}
+	record := &LogRecord{Type: disk.Type, Tick: disk.Tick, State: disk.State, Players: disk.Players, RobotID: disk.RobotID, Input: disk.Input, Control: disk.Control}
 	if disk.Type == "event" {
 		record.Event = &ombv1.ServerEvent{}
 		if err := protojson.Unmarshal(disk.Event, record.Event); err != nil {
@@ -317,6 +359,9 @@ func validateRecord(r diskRecord) error {
 	if r.Type != "control" && r.Control != nil {
 		return errors.New("sim: unexpected control payload")
 	}
+	if r.Type != "match_start" && len(r.Players) != 0 {
+		return errors.New("sim: unexpected match identity")
+	}
 	switch r.Type {
 	case "control":
 		if r.Control == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 || r.Input != nil {
@@ -338,6 +383,27 @@ func validateRecord(r diskRecord) error {
 		}
 		if r.State.SimulationVersion < 0 || r.State.SimulationVersion > SimulationVersion {
 			return fmt.Errorf("sim: unsupported simulation_version %d", r.State.SimulationVersion)
+		}
+		if r.Type == "match_start" && len(r.Players) != 0 {
+			known := make(map[uint32]bool, len(r.State.Robots))
+			for _, robot := range r.State.Robots {
+				known[robot.ID] = true
+			}
+			seen := make(map[uint32]bool, len(r.Players))
+			for _, player := range r.Players {
+				if player.RobotID == 0 || player.PlayerID == 0 || !known[player.RobotID] || seen[player.RobotID] {
+					return errors.New("sim: invalid match player identity")
+				}
+				seen[player.RobotID] = true
+			}
+			if len(seen) != len(known) {
+				return errors.New("sim: incomplete match player identity")
+			}
+			for _, player := range r.Players {
+				if player.Partner != 0 && !seen[player.Partner] {
+					return errors.New("sim: unknown match partner")
+				}
+			}
 		}
 	case "input":
 		if r.Input == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 ||

@@ -86,6 +86,52 @@ func TestMatchEventLogRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMatchEventLogPersistsIdentityAndRejectsCorruption(t *testing.T) {
+	var buffer bytes.Buffer
+	log, err := NewMatchEventLogWriter(&buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	players := []MatchPlayer{
+		{RobotID: 9, PlayerID: 1<<60 + 1, Nick: "host", Partner: 2},
+		{RobotID: 2, PlayerID: 1<<60 + 2, Nick: "test bot", Partner: 9, Bot: true},
+	}
+	if err := log.SetPlayers(players); err != nil {
+		t.Fatal(err)
+	}
+	players[0].Nick = "modified"
+	log.OnMatchInit(Checkpoint{Robots: []Robot{{ID: 2}, {ID: 9}}, Walls: []Wall{}})
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadMatchEventLog(bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || !reflect.DeepEqual(records[0].Players, []MatchPlayer{
+		{RobotID: 2, PlayerID: 1<<60 + 2, Nick: "test bot", Partner: 9, Bot: true},
+		{RobotID: 9, PlayerID: 1<<60 + 1, Nick: "host", Partner: 2},
+	}) {
+		t.Fatalf("match identity roundtrip: %+v", records)
+	}
+	if err := log.SetPlayers(players); err == nil {
+		t.Fatal("identity changed after match start")
+	}
+	for name, players := range map[string]string{
+		"unknown robot":   `[ {"robot_id":3,"player_id":1} ]`,
+		"duplicate":       `[ {"robot_id":2,"player_id":1}, {"robot_id":2,"player_id":2} ]`,
+		"missing player":  `[ {"robot_id":2,"player_id":1} ]`,
+		"unknown partner": `[ {"robot_id":2,"player_id":1,"partner":3}, {"robot_id":9,"player_id":2} ]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := fmt.Sprintf(`{"type":"match_start","tick":0,"state":{"tick":0,"robots":[{"id":2},{"id":9}],"walls":[]},"players":%s}`, players)
+			if _, err := ReadMatchEventLog(strings.NewReader("{\"schema_version\":1}\n" + record + "\n")); err == nil {
+				t.Fatal("corrupt identity accepted")
+			}
+		})
+	}
+}
+
 func TestMatchEventLogCheckpointAndReplay(t *testing.T) {
 	var buffer bytes.Buffer
 	log, err := NewMatchEventLogWriter(&buffer)

@@ -10,11 +10,9 @@ import (
 	sim "github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
-// ReadReplayOptions carries the glue-injected side tables that the JSONL log
-// cannot contain (identity and pairing live outside the event stream):
-// Players/Nicks/Partners mirror SetPlayerMap/SetNickMap/SetPartnerMap on the
-// live projector. Feeding the same tables to both paths keeps
-// "replay recalculation = live projection" exact, including BEST_PARTNER.
+// ReadReplayOptions supplies identity for legacy logs without a players table.
+// For new logs, the embedded match_start table takes precedence. These maps
+// mirror the live projector's SetPlayerMap/SetNickMap/SetPartnerMap.
 type ReadReplayOptions struct {
 	Players  map[uint32]uint64
 	Nicks    map[uint32]string
@@ -61,6 +59,21 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 		}
 		switch rec.Type {
 		case "match_start", "checkpoint":
+			if rec.Type == "match_start" && len(rec.Players) != 0 {
+				players := make(map[uint32]uint64, len(rec.Players))
+				nicks := make(map[uint32]string, len(rec.Players))
+				partners := make(map[uint32]uint32, len(rec.Players))
+				for _, identity := range rec.Players {
+					players[identity.RobotID] = identity.PlayerID
+					nicks[identity.RobotID] = identity.Nick
+					if identity.Partner != 0 {
+						partners[identity.RobotID] = identity.Partner
+					}
+				}
+				p.SetPlayerMap(players)
+				p.SetNickMap(nicks)
+				p.SetPartnerMap(partners)
+			}
 			if rec.State != nil {
 				p.OnCheckpoint(*rec.State)
 			}

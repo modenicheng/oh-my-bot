@@ -2,6 +2,9 @@ package glue
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -105,6 +108,103 @@ func TestMultiSinkForwardsControlsAndCheckpoints(t *testing.T) {
 	if projector.Live().Tick != sim.CheckpointInterval {
 		t.Fatalf("projector did not receive checkpoint: tick=%d", projector.Live().Tick)
 	}
+}
+
+func TestFormalMatchPersistsFinalCheckpointIdentityAndSettlement(t *testing.T) {
+	t.Chdir(t.TempDir())
+	h := NewHub()
+	rc := h.EnsureRoom("REPLAYTEST")
+	pilot, log := bindLogged(t, h, rc, "pilot")
+	players := map[uint64]SessionInfo{pilot.playerID: {PlayerID: pilot.playerID, Nick: pilot.nick, Color: pilot.color}}
+	m, err := NewMatch(rc, 42, 1, players, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopTestMatch(t, m) })
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+	// Advance the authoritative sim through the entire eight-minute match.
+	// Checkpoint and event sinks are the same ones used by the real loop.
+	rid := m.robotOf[pilot.playerID]
+	for i := uint32(0); i < sim.MatchTicks-1; i++ {
+		if i == sim.MatchTicks-121 {
+			m.sim.ApplyInput(rid, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(sim.AxisMove), MoveX: 1000})
+		}
+		m.sim.Tick()
+	}
+	m.tick = sim.MatchTicks - 1
+	m.step()
+	select {
+	case <-m.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("formal match did not finish")
+	}
+	if err := m.log.Err(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("data", "matches", "REPLAYTEST-1.jsonl")
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := sim.ReadMatchEventLog(file)
+	_ = file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 || records[0].Type != "match_start" || len(records[0].Players) != 1 {
+		t.Fatalf("missing match identity: %+v", records[:1])
+	}
+	if records[0].Players[0].RobotID != rid || records[0].Players[0].PlayerID != pilot.playerID {
+		t.Fatal("persisted identity differs from live match")
+	}
+	ends, finalCheckpoint := 0, 0
+	for _, record := range records {
+		if record.Type == "checkpoint" && record.Tick == sim.MatchTicks {
+			finalCheckpoint++
+		}
+		if record.Event != nil && record.Event.GetMatchEnd() != nil {
+			ends++
+			if record.Tick != sim.MatchTicks || len(record.Event.GetMatchEnd().Scores) != 1 || record.Event.GetMatchEnd().Scores[0].Robot != rid {
+				t.Fatalf("incorrect persisted final: %v", record.Event)
+			}
+		}
+	}
+	if ends != 1 || finalCheckpoint != 1 || records[len(records)-1].Event.GetMatchEnd() == nil {
+		t.Fatalf("final log order: ends=%d checkpoint=%d", ends, finalCheckpoint)
+	}
+	projected, err := stats.ReadReplay(path, stats.ReadReplayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(projected.Final(), m.proj.Final()) {
+		t.Fatalf("whole-match projected final differs: replay=%+v live=%+v", projected.Final(), m.proj.Final())
+	}
+	if rows := m.proj.Final(); len(rows) != 1 || !hasTitle(rows[0].Titles, ombv1.Title_RUNNER) {
+		t.Fatalf("final checkpoint movement missing RUNNER: %+v", rows)
+	}
+	broadcasts := 0
+	for _, sent := range log.take() {
+		if end := sent.msg.GetEvent().GetMatchEnd(); end != nil {
+			broadcasts++
+			if !sent.reliable || len(end.Scores) != 1 || end.Scores[0].Robot != rid || !reflect.DeepEqual(end, records[len(records)-1].Event.GetMatchEnd()) {
+				t.Fatalf("broadcast differs from persisted settlement: %v", end)
+			}
+		}
+	}
+	if broadcasts != 1 {
+		t.Fatalf("broadcast end count = %d", broadcasts)
+	}
+}
+
+func hasTitle(titles []ombv1.Title, title ombv1.Title) bool {
+	for _, candidate := range titles {
+		if candidate == title {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReconnectPreservesRobotAndConsumedSequence(t *testing.T) {
