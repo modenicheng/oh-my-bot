@@ -15,6 +15,10 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+// SimulationVersion distinguishes deterministic physics semantics in saved
+// states. Version 0 predates robot contact impulses.
+const SimulationVersion = 1
+
 const (
 	TickRate                   = 60
 	DT                         = 1.0 / TickRate
@@ -117,18 +121,19 @@ type Robot struct {
 // Checkpoint is the complete state of this stage, including static geometry,
 // held/pending controls, sequence guards and per-robot collision throttles.
 type Checkpoint struct {
-	Tick           uint32       `json:"tick"`
-	Seed           uint64       `json:"seed"`
-	Phase          ombv1.Phase  `json:"phase"`
-	Ended          bool         `json:"ended"`
-	Robots         []Robot      `json:"robots"`
-	Walls          []Wall       `json:"walls"`
-	Map            *MapDef      `json:"map,omitempty"`
-	RNG            uint64       `json:"rng"`
-	NextProjectile uint32       `json:"next_projectile"`
-	Projectiles    []Projectile `json:"projectiles"`
-	Cores          []CoreView   `json:"cores"`
-	Uplinks        []Uplink     `json:"uplinks"`
+	SimulationVersion int          `json:"simulation_version,omitempty"`
+	Tick              uint32       `json:"tick"`
+	Seed              uint64       `json:"seed"`
+	Phase             ombv1.Phase  `json:"phase"`
+	Ended             bool         `json:"ended"`
+	Robots            []Robot      `json:"robots"`
+	Walls             []Wall       `json:"walls"`
+	Map               *MapDef      `json:"map,omitempty"`
+	RNG               uint64       `json:"rng"`
+	NextProjectile    uint32       `json:"next_projectile"`
+	Projectiles       []Projectile `json:"projectiles"`
+	Cores             []CoreView   `json:"cores"`
+	Uplinks           []Uplink     `json:"uplinks"`
 }
 
 type consumedInput struct {
@@ -139,24 +144,25 @@ type consumedInput struct {
 // Sim never starts a goroutine/timer and never consults wall time. Tick is the
 // only clock. The sink owns wall timestamps and persistence latency/errors.
 type Sim struct {
-	seed           uint64
-	tick           uint32
-	phase          ombv1.Phase
-	ended          bool
-	robots         []Robot
-	index          map[uint32]int
-	walls          []Wall
-	sink           EventSink
-	events         []*ombv1.ServerEvent
-	consumed       []consumedInput
-	mapDef         *MapDef
-	rng            uint64
-	nextProjectile uint32
-	projectiles    []Projectile
-	cores          []CoreView
-	uplinks        []Uplink
-	view           atomic.Pointer[WorldView]
-	controlEvents  []controlRecord
+	simulationVersion int
+	seed              uint64
+	tick              uint32
+	phase             ombv1.Phase
+	ended             bool
+	robots            []Robot
+	index             map[uint32]int
+	walls             []Wall
+	sink              EventSink
+	events            []*ombv1.ServerEvent
+	consumed          []consumedInput
+	mapDef            *MapDef
+	rng               uint64
+	nextProjectile    uint32
+	projectiles       []Projectile
+	cores             []CoreView
+	uplinks           []Uplink
+	view              atomic.Pointer[WorldView]
+	controlEvents     []controlRecord
 }
 
 // NewSim uses player IDs as robot IDs. Zero/duplicate IDs panic, as they violate
@@ -173,7 +179,7 @@ func (s *Sim) SetRobotMeta(id uint32, nick, color string) {
 func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 	ids := append([]uint32(nil), playerIDs...)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	s := &Sim{seed: seed, rng: seed, nextProjectile: 1, phase: ombv1.Phase_OUTER_RING, sink: eventSink,
+	s := &Sim{simulationVersion: SimulationVersion, seed: seed, rng: seed, nextProjectile: 1, phase: ombv1.Phase_OUTER_RING, sink: eventSink,
 		robots: make([]Robot, len(ids)), index: make(map[uint32]int, len(ids)),
 		walls: make([]Wall, 0)}
 	for i, id := range ids {
@@ -209,7 +215,7 @@ func (s *Sim) Snapshot() Checkpoint {
 	for i, r := range s.robots {
 		robots[i] = cloneRobot(r)
 	}
-	return Checkpoint{Tick: s.tick, Seed: s.seed, Phase: s.phase, Ended: s.ended,
+	return Checkpoint{SimulationVersion: s.simulationVersion, Tick: s.tick, Seed: s.seed, Phase: s.phase, Ended: s.ended,
 		Robots: robots, Walls: append([]Wall{}, s.walls...), Map: cloneMap(s.mapDef), RNG: s.rng,
 		NextProjectile: s.nextProjectile, Projectiles: append([]Projectile{}, s.projectiles...),
 		Cores: append([]CoreView{}, s.cores...), Uplinks: cloneUplinks(s.uplinks)}

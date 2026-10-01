@@ -281,9 +281,31 @@ func (s *Sim) pushRobot(r *Robot, delta Vec2) {
 	r.Position = s.containInArena(r.Position.Add(delta.Scale(fraction)))
 }
 
+// A small restitution and per-contact velocity cap soften dash impacts.
+// Existing acceleration damping brings knocked, idle robots back to rest.
+const (
+	robotRestitution = 0.15
+	maxKnockSpeed    = 4.0
+)
+
+// robotContact records one tick's touch between overlapping robots before any
+// positional correction runs. normal points from a to b; closing is the
+// approach speed along it (zero or negative means stationary or separating).
+type robotContact struct {
+	a, b    int
+	normal  Vec2
+	closing float64
+}
+
+// Capture contacts before positional relaxation changes their normals. Apply
+// at most one impulse per pair per tick, not one per relaxation pass.
+// No collision damage, dash cancellation or partner exemption.
 func (s *Sim) softCollide() {
-	// A bounded positional relaxation, not an impulse: no damage, dash cancellation
-	// or partner exemption. Iteration and ID order make coincident starts stable.
+	var contacts []robotContact
+	if s.simulationVersion >= 1 {
+		contacts = s.captureRobotContacts()
+	}
+	// ID order stabilizes coincident starts; every correction is swept.
 	for pass := 0; pass < 3; pass++ {
 		for i := range s.robots {
 			a := &s.robots[i]
@@ -309,5 +331,55 @@ func (s *Sim) softCollide() {
 				s.pushRobot(b, push)
 			}
 		}
+	}
+	s.applyRobotImpulses(contacts)
+}
+
+// ID-sorted i<j order is deterministic. Coincident centers have no reliable
+// normal, so they receive positional separation only.
+func (s *Sim) captureRobotContacts() []robotContact {
+	var contacts []robotContact
+	for i := range s.robots {
+		a := &s.robots[i]
+		if a.State == Dead {
+			continue
+		}
+		for j := i + 1; j < len(s.robots); j++ {
+			b := &s.robots[j]
+			if b.State == Dead {
+				continue
+			}
+			delta := b.Position.Sub(a.Position)
+			distance := delta.Len()
+			if distance >= 2*RobotRadius-collisionEpsilon || distance <= collisionEpsilon {
+				continue
+			}
+			normal := delta.Scale(1 / distance)
+			closing := (a.Velocity.X-b.Velocity.X)*normal.X + (a.Velocity.Y-b.Velocity.Y)*normal.Y
+			if closing <= 0 {
+				continue
+			}
+			contacts = append(contacts, robotContact{a: i, b: j, normal: normal, closing: closing})
+		}
+	}
+	return contacts
+}
+
+// Bound each impulse by both incoming and current closing speed: an earlier
+// contact may already have slowed this pair. Using only incoming speeds adds
+// energy in crowds. Equal and opposite impulses preserve total momentum;
+// normal movement sweeps and acceleration damping apply on the next tick.
+func (s *Sim) applyRobotImpulses(contacts []robotContact) {
+	for _, c := range contacts {
+		a, b := &s.robots[c.a], &s.robots[c.b]
+		closing := (a.Velocity.X-b.Velocity.X)*c.normal.X + (a.Velocity.Y-b.Velocity.Y)*c.normal.Y
+		if closing <= 0 {
+			continue
+		}
+		knock := math.Min(maxKnockSpeed, (1+robotRestitution)*math.Min(c.closing, closing)/2)
+		a.Velocity.X -= c.normal.X * knock
+		a.Velocity.Y -= c.normal.Y * knock
+		b.Velocity.X += c.normal.X * knock
+		b.Velocity.Y += c.normal.Y * knock
 	}
 }

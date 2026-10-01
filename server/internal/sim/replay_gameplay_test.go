@@ -27,6 +27,7 @@ func restoreGameplay(t *testing.T, cp Checkpoint, sink EventSink) *Sim {
 		ids[i] = r.ID
 	}
 	s := NewSim(copy.Seed, ids, sink)
+	s.simulationVersion = copy.SimulationVersion
 	s.tick, s.phase, s.ended = copy.Tick, copy.Phase, copy.Ended
 	s.robots, s.walls, s.mapDef = copy.Robots, copy.Walls, copy.Map
 	s.rng, s.nextProjectile = copy.RNG, copy.NextProjectile

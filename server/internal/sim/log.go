@@ -336,6 +336,9 @@ func validateRecord(r diskRecord) error {
 		if r.State.Robots == nil || r.State.Walls == nil {
 			return errors.New("sim: state must include robot and wall arrays")
 		}
+		if r.State.SimulationVersion < 0 || r.State.SimulationVersion > SimulationVersion {
+			return fmt.Errorf("sim: unsupported simulation_version %d", r.State.SimulationVersion)
+		}
 	case "input":
 		if r.Input == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 ||
 			r.Input.MoveX < -1000 || r.Input.MoveX > 1000 || r.Input.MoveY < -1000 || r.Input.MoveY > 1000 || r.Input.AxisMask & ^allAxes != 0 || !finite(r.Input.Aim) {
