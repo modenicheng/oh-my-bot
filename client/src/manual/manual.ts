@@ -334,7 +334,7 @@ export class ManualView {
     const { body, fm } = splitFrontmatter(raw)
     const bodyEl = document.createElement('div')
     bodyEl.className = 'manual-body'
-    bodyEl.innerHTML = renderMarkdown(body)
+    bodyEl.innerHTML = renderMarkdown(body, path)
     const leadingHeading = bodyEl.firstElementChild?.tagName === 'H1' ? bodyEl.firstElementChild : null
     const title = fm.title ?? leadingHeading?.textContent ?? entry?.node.title ?? path
     leadingHeading?.remove()

@@ -111,6 +111,11 @@ func main() {
 	})
 	mux.HandleFunc("/api/manual/", func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, "/api/manual/")
+		// 图片白名单（PNG/WebP）：与 markdown 同前缀，供阅读器内嵌 <img> 使用。
+		if strings.HasSuffix(rel, ".png") || strings.HasSuffix(rel, ".webp") {
+			serveManualImage(w, r, manualSource, manualRoot)
+			return
+		}
 		if rel == "" || strings.Contains(rel, "..") {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return

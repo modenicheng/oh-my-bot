@@ -138,12 +138,49 @@ function renderTabGroup(head: Tokens.Code, panels: TabPanel[]): string {
 
 // ---- 对外 API ---------------------------------------------------------------
 
-/** 渲染完整 markdown 文档（已剥离 frontmatter）为 HTML 字符串。 */
-export function renderMarkdown(src: string): string {
+/** 将相对图片链接改写为手册 API 路径（与 markdown 文档同前缀）。 */
+export function manualImageURL(href: string, docPath: string): string {
+  // 绝对路径、data:、http(s):、锚点等保持原样；仅改写相对图片。
+  if (/^(https?:|data:|\/|#|mailto:)/i.test(href)) return href
+  // docPath 形如 reference/visual.md；图片相对该文档目录解析。
+  const dir = docPath.includes('/') ? docPath.slice(0, docPath.lastIndexOf('/')) : ''
+  const rel = dir ? `${dir}/${href}` : href
+  // 归一化 ./ 与多余分隔符；手册源不支持 .. （服务端会拒绝）。
+  return '/api/manual/' + rel.replace(/\/\./g, '/').replace(/\/{2,}/g, '/')
+}
+
+/** 渲染完整 markdown 文档（已剥离 frontmatter）为 HTML 字符串；相对图片改写为手册 API 路径。 */
+export function renderMarkdown(src: string, docPath = ''): string {
   // v18：静态 lex/parse 在 Marked 类上不可用，走实例携带的 Lexer/Parser
   const tokens = marked.Lexer.lex(src, { gfm: true })
   foldTabGroups(tokens)
+  // token 级改写 image.src：token 驱动而非 innerHTML 事后替换，避免内联 HTML 被二次处理。
+  for (const t of tokens) {
+    if (t.type === 'paragraph' || t.type === 'heading') {
+      walkImageTokens((t as Tokens.Generic).tokens, docPath)
+    } else if (t.type === 'image' || t.type === 'html') {
+      rewriteSingleToken(t as Tokens.Generic, docPath)
+    }
+  }
   return marked.Parser.parse(tokens, { gfm: true }) as string
+}
+
+function walkImageTokens(inlines: Token[] | undefined, docPath: string): void {
+  if (!inlines) return
+  for (const t of inlines) {
+    if (t.type === 'image') rewriteSingleToken(t as Tokens.Generic, docPath)
+    else if ((t as Tokens.Generic).tokens) walkImageTokens((t as Tokens.Generic).tokens, docPath)
+  }
+}
+
+function rewriteSingleToken(t: Tokens.Generic, docPath: string): void {
+  if (t.type === 'image' && typeof t.href === 'string' && /\.(png|webp)(\?|#|$)/i.test(t.href)) {
+    t.href = manualImageURL(t.href, docPath)
+  } else if (t.type === 'html' && typeof t.text === 'string' && t.text.includes('<img')) {
+    // 原生 HTML <img>：只改写相对 src，绝对/data 保持原样。
+    t.text = t.text.replace(/src="([^"]+)"/g, (m, src: string) =>
+      /\.(png|webp)(\?|#|$)/i.test(src) ? `src="${manualImageURL(src, docPath)}"` : m)
+  }
 }
 
 /** tab 点击切换（容器级事件委托，渲染容器绑定一次）。 */

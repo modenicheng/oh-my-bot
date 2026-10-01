@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>omb 手册资产截取</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: #070d14; color: #d8e6f2; font-family: "Fusion Pixel", ui-monospace, monospace; }
+  /* 每个 section 是一张 sprite sheet：白色卡片 + 1px 描边，保持像素风 */
+  .sheet { margin: 16px auto; padding: 20px 24px; width: fit-content; background: #101b25; border: 1px solid #1f2733; }
+  .sheet h2 { margin: 0 0 14px; font-size: 14px; font-weight: normal; color: #8aa3b8; letter-spacing: 2px; }
+  .row { display: flex; align-items: flex-end; gap: 36px; margin: 18px 0; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .cell span { font-size: 12px; color: #5f7889; }
+  canvas { background: #070d14; border: 1px solid #1f2733; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet-arena"><h2>场地 · ARENA</h2></div>
+<div class="sheet" id="sheet-robots"><h2>机器人与状态 · ROBOTS</h2></div>
+<div class="sheet" id="sheet-pickups"><h2>拾取物 · PICKUPS</h2></div>
+<div class="sheet" id="sheet-projectiles"><h2>子弹 · PROJECTILES</h2></div>
+<div class="sheet" id="sheet-icons"><h2>常用图标 · ICONS</h2></div>
+<script type="module" src="/src/game/capture.ts"></script>
+</body>
+</html>
