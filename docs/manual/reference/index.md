@@ -7,7 +7,7 @@ tags: [脚本, API]
 
 # API 总览
 
-这里是 Bot Script 的完整参考：**全部 14 个动作、全部数据结构、运行语义与陷阱**。写复杂 Bot、排查"为什么不生效"、或让 AI Agent 帮你改码时，查这里。
+这里是 Bot Script 的完整参考：**全部 13 个动作、全部数据结构、运行语义与陷阱**。写复杂 Bot、排查"为什么不生效"、或让 AI Agent 帮你改码时，查这里。
 
 入门教学（从零到第一个能跑的 Bot）在[写第一个 Bot](../code/bot-scripting.md)；本参考负责深度。
 
@@ -23,7 +23,7 @@ tags: [脚本, API]
 | 文档 | 内容 |
 |---|---|
 | [动作参考](actions.md) | L0 原语 7 个：move / aimAt / fire / dash / shield / interact / say。含"锁存"概念的完整讲解 |
-| [便利层参考](helpers.md) | L1 便利层 7 个：moveTo / aimAt(target) / nearestEnemy / nearestCore / nearestUplink / partner / pulseScan |
+| [便利层参考](helpers.md) | L1 便利层 6 个：moveTo / aimAt(target) / nearestEnemy / nearestCore / nearestUplink / pulseScan |
 | [数据结构](data.md) | Observation / RobotRef / Self / GameInfo 逐字段，TickContext 与 BotModule 生命周期 |
 | [模块语义与陷阱](modules.md) | 按主题拆解运行规则：tick 生命周期 / 感知 / 移动与战斗 / 目标交互 / 存活 / 通信，每个主题附陷阱清单 |
 
@@ -48,6 +48,6 @@ tags: [脚本, API]
 | `core-farmer.ts` | 捡 Core 得分 + 路过交火 |
 | `uplink-rusher.ts` | 减速站桩 + 引导计时与等待估算 |
 | `shield-brawler.ts` | 近战：护盾 / 位移 / 能量管理 |
-| `partner-duo.ts` | 搭档跟随与夹击走位 |
+| `flank-strike.ts` | 单人对敌侧翼走位与发现敌人时报点（原 partner-duo，现无搭档机制） |
 
 游戏内阅读器只展示 Markdown——示例源码请到仓库里看；各示例的关键片段已内嵌在[模块语义与陷阱](modules.md)对应小节里。

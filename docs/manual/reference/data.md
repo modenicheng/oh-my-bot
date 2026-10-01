@@ -63,7 +63,7 @@ interface GameInfo {
 ```ts
 interface Observation {
   tick: number        // 快照对应的帧号
-  robots: (RobotRef & { isPartner: boolean })[]
+  robots: RobotRef[]
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
   projectiles: (Vec2 & { id: number })[]
@@ -75,10 +75,10 @@ interface Observation {
 
 | 列表 | 可见性规则 |
 |---|---|
-| `robots` | 其他机器人：中心距 ≤ 20m **且**视线不被墙挡。**搭档恒在**（`isPartner: true`，无视距离与墙）；不含自己；死者过滤 |
+| `robots` | 其他机器人：中心距 ≤ 20m **且**视线不被墙挡；不含自己；死者过滤 |
 | `cores` | **全图存活资源**：不按距离裁剪，但只返回 `Alive=true` 的 Core；被拾取或尚未激活的资源不会出现在列表中 |
 | `uplinks` | **恒全量**：全图所有 Uplink。`ready` = 桩激活且无人正在引导；`holder` = 当前引导者的机器人 id（有人正在引导才有值） |
-| `projectiles` | 与 robots 同规则（20m + 不穿墙），但**没有搭档豁免**——搭档的弹丸照裁 |
+| `projectiles` | 与 robots 同规则（20m + 不穿墙） |
 | `walls` | **静态公开全量**：不随视野半径/遮挡裁剪，与碰撞几何一致的只读 AABB（改写返回值不影响地图） |
 
 **注意**：个人黑入冷却和喊话冷却不在 Observation 里。可用 `game.time` 控制请求间隔；黑入成功事件也不下发，所以黑入完成时间及冷却只能估算。
@@ -93,7 +93,7 @@ interface RobotRef {
 }
 ```
 
-`scan().robots`、`nearestEnemy()`、`partner()` 返回的都是这个形状（扫描列表里附带 `isPartner`）。
+`scan().robots`、`nearestEnemy()` 返回的都是这个形状。
 
 **刻意不提供**：速度和朝向。要做弹道预判，自己差分 `position`（这帧位置减上帧位置，除以帧时长 1/60）。
 
@@ -115,5 +115,5 @@ interface Vec2 { x: number; y: number }
 | 全图 Core 在哪 | `bot.scan().cores` 或 `bot.nearestCore()` |
 | 桩的状态（激活/被引导中） | `bot.scan().uplinks` 的 `ready` / `holder` |
 | 我在这桩的冷却剩几秒 | **没有**，只能按 `game.time` 估算 |
-| 搭档在哪 | `bot.partner()`（恒可见） |
+| 血包在哪 | 中环 4 个固定点、位置公开；`scan()` 尚未返回血包状态（即将接入），先按地图记点位 |
 | 谁在瞄我/弹道预测 | **没有**，自己从 `projectiles` 和位置差分算 |
