@@ -13,6 +13,8 @@ import (
 	"hash/fnv"
 	"log"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +41,10 @@ type Match struct {
 	proj   *stats.ProjectorImpl
 	log    *sim.MatchEventLog
 
+	// scoreboard 记录最近一次已广播的实时积分榜指纹与事件，用于变更时才重发与观战者 catch-up。
+	lastScoreboard     string
+	lastScoreboardTick uint32
+
 	encoders map[uint32]*snapshot.DeltaEncoder
 	wallIX   *snapshot.WallIndex
 
@@ -55,9 +61,11 @@ type Match struct {
 	specReliableFull map[uint64]bool
 	// finalEnd holds the settlement event after a naturally finished match so
 	// late joiners/reconnectors can be caught up (aborted matches stay nil).
-	finalEnd  *ombv1.ServerEvent
-	handle    *asyncHandle
-	startOnce sync.Once
+	finalEnd *ombv1.ServerEvent
+	// lastScoreboardEv 缓存最近一次实时积分榜事件：中途接入的观战者 catch-up 用。
+	lastScoreboardEv *ombv1.ServerEvent
+	handle           *asyncHandle
+	startOnce        sync.Once
 
 	tick       uint32
 	warmup     bool
@@ -296,6 +304,10 @@ func (m *Match) forceResyncLocked(pid uint64) {
 			enc.ForceFull()
 		}
 	}
+	// 重连玩家：补发最近一次实时积分榜（快照不含分数，不补则榜空到下一拍）。
+	if s := m.rc.sessions[pid]; s != nil && m.lastScoreboardEv != nil {
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.lastScoreboardEv}})
+	}
 }
 
 // SubmitScript 玩家脚本提交（编译失败保旧版——Hot Swap 语义）。
@@ -399,6 +411,10 @@ func (m *Match) bootstrapSpectatorLocked(s *Session) {
 	if m.activeLocked() {
 		m.sendMapBootstrapLocked(s)
 		m.forceSpectatorResyncLocked(s.playerID)
+		// 中途接入的观战者：补发最近一次实时积分榜，避免等到下一拍才看到名次。
+		if m.lastScoreboardEv != nil {
+			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.lastScoreboardEv}})
+		}
 		return
 	}
 	if m.finalEnd == nil {
@@ -586,6 +602,57 @@ func (m *Match) step() {
 		m.Stop()
 		return
 	}
+
+	m.maybeBroadcastScoreboard(wv)
+}
+
+// scoreboardEveryTicks 实时积分榜最小广播间隔（2s）：榜是低频信息，无需 60Hz；
+// 变化时立即重发，最多每 2s 一拍，兼顾带宽与新鲜度。
+const scoreboardEveryTicks = 2 * tickHz
+
+// maybeBroadcastScoreboard 在局内定期（或积分变化时）向全部玩家与观战者广播实时积分榜。
+// 不落 Match Event Log：榜属于低价值可再生态，重连/观战 catch-up 用 lastScoreboardEv。
+func (m *Match) maybeBroadcastScoreboard(wv sim.WorldView) {
+	if m.warmup {
+		return
+	}
+	// 每 2s 一拍；未到间隔且榜未变化则跳过，减少编码开销。
+	if m.tick-m.lastScoreboardTick < scoreboardEveryTicks && m.lastScoreboardTick != 0 {
+		return
+	}
+	snap := m.proj.Live()
+	fp := scoreboardFingerprint(snap.Rows)
+	if fp == m.lastScoreboard && m.lastScoreboardTick != 0 {
+		return // 榜未变化：跳过重发（首拍 lastScoreboardTick==0 必发）
+	}
+	m.lastScoreboard = fp
+	m.lastScoreboardTick = m.tick
+	ev := scoreboardEventOf(m.tick, snap.Rows)
+	m.lastScoreboardEv = ev
+	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}}) // 玩家 + 观战者，可靠通道（低频事件，不值得丢）
+}
+
+// scoreboardFingerprint 用 榜位+分数 序列做指纹：顺序或分数变化即视为变更。
+func scoreboardFingerprint(rows []stats.ScoreRow) string {
+	var b strings.Builder
+	for i, r := range rows {
+		if i > 0 {
+			b.WriteByte(';')
+		}
+		b.WriteString(strconv.FormatUint(uint64(r.RobotID), 10))
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatInt(int64(r.Score), 10))
+	}
+	return b.String()
+}
+
+// scoreboardEventOf 把 LiveSnapshot 转为 EvScoreboard 协议事件（复用 ScoreRow）。
+func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
+	out := make([]*ombv1.ScoreRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &ombv1.ScoreRow{Robot: r.RobotID, Score: int32(r.Score)})
+	}
+	return &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Scoreboard{Scoreboard: &ombv1.EvScoreboard{Rows: out, Tick: tick}}}
 }
 
 // runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
