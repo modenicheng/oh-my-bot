@@ -7,7 +7,7 @@ import type { WorldState } from './world'
 const tau = Math.PI * 2
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
 export type FeedbackKind = 'status' | 'kill' | 'uplink'
-type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'uplink' | 'dash' | 'death'
+type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'dash' | 'death'
 interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: number; color: string; seed: number; heading: number }
 
 /** Transient presentation follows confirmed events/state transitions; resyncs establish a quiet baseline. */
@@ -147,6 +147,17 @@ export class GameFeedback {
         else if (p) this.sound('corePickup', p, world)
         break
       }
+      case 'heal': {
+        const own = k.value.by === selfId
+        const p = k.value.at ?? map.healthPacks.find(pack => pack.id === k.value.id)?.pos
+          ?? world.robots.get(k.value.by)?.base?.pos
+        if (p) this.add('heal', p, green, k.value.id, 720)
+        if (own) {
+          audio.play('healthPickup')
+          this.message(`生命回灌 · +${(k.value.healX10 / 10).toFixed(k.value.healX10 % 10 ? 1 : 0)} HP`, 'status')
+        } else if (p) this.sound('healthPickup', p, world)
+        break
+      }
       case 'uplinkHack': {
         const p = map.uplinks.find(u => u.id === k.value.uplinkId)?.pos
         if (p) this.add('uplink', p, green, k.value.uplinkId, 1000)
@@ -231,7 +242,7 @@ export class GameFeedback {
       } else {
         const radius = (e.kind === 'uplink' ? 1.5 : 0.4) * cam.scale + motion * cam.scale * 1.4
         ctx.beginPath(); ctx.arc(x, y, radius, 0, tau); ctx.stroke()
-        if (e.kind === 'spawn' || e.kind === 'pickup') {
+        if (e.kind === 'spawn' || e.kind === 'pickup' || e.kind === 'heal') {
           for (let i = 0; i < 4; i++) {
             const a = i * tau / 4
             ctx.fillRect(Math.round(x + Math.cos(a) * radius) - 3, Math.round(y + Math.sin(a) * radius) - 3, 6, 6)

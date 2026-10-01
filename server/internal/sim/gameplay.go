@@ -45,7 +45,6 @@ type ControlState struct {
 
 type CombatState struct {
 	PulseRequested bool               `json:"pulse_requested"`
-	Partner        uint32             `json:"partner,omitempty"` // deprecated compatibility; live matches keep zero
 	FireReady      uint32             `json:"fire_ready"`
 	DashReady      uint32             `json:"dash_ready"`
 	DashUntil      uint32             `json:"dash_until"`

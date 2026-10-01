@@ -44,6 +44,7 @@ export interface ReplayFrame {
   bubbles: SayMark[]
   /** 最近关键帧携带的核心/弹丸（仅 checkpoint 粒度，供参考渲染）。 */
   cores: Array<{ id: number; pos: { x: number; y: number }; value: number; taken: boolean }>
+  healthPacks: ReplayCheckpoint['healthPacks']
   projectiles: Array<{ id: number; owner: number; pos: { x: number; y: number }; heading: number }>
 }
 
@@ -112,6 +113,7 @@ export class ReplayIndex {
     const bubbles: SayMark[] = []
     let finalScores: ScoreEntry[] | null = null
     let cores: ReplayCheckpoint['cores'] = []
+    let healthPacks: ReplayCheckpoint['healthPacks'] = []
     let projectiles: ReplayCheckpoint['projectiles'] = []
 
     const snapshot = (tick: number): FrameState => ({
@@ -122,6 +124,7 @@ export class ReplayIndex {
       finalScores: finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: bubbles.filter((b) => tick - b.tick <= BUBBLE_TTL),
       cores: cores.map((c) => ({ ...c, pos: { ...c.pos } })),
+      healthPacks: healthPacks.map((pack) => ({ ...pack, pos: { ...pack.pos } })),
       projectiles: projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     })
 
@@ -160,6 +163,7 @@ export class ReplayIndex {
         const st = rec.state
         phase = numOr(st.phase, phase)
         cores = st.cores.map((c) => ({ ...c }))
+        healthPacks = st.healthPacks.map((pack) => ({ ...pack, pos: { ...pack.pos } }))
         projectiles = st.projectiles.map((p) => ({ ...p }))
         robots.clear()
         for (const r of st.robots) {
@@ -187,7 +191,7 @@ export class ReplayIndex {
         commit(snapshot(nextSample))
         nextSample += KEYFRAME_EVERY
       }
-      applyEvent(ev, robots, scores, bubbles, this.marks, this.robots)
+      applyEvent(ev, robots, scores, healthPacks, bubbles, this.marks, this.robots)
       if (ev.kind === 'phase_change') phase = phaseNum(ev.payload?.to)
       if (ev.kind === 'match_end' && Array.isArray(ev.payload?.scores)) {
         finalScores = ev.payload.scores.map((row: { robot?: number; score?: number; titles?: Array<string | number> }) => ({
@@ -239,6 +243,7 @@ export class ReplayIndex {
       finalScores: kf.finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: kf.bubbles.filter((b) => q - b.tick <= BUBBLE_TTL),
       cores: kf.cores.map((c) => ({ ...c, pos: { ...c.pos } })),
+      healthPacks: kf.healthPacks.map((pack) => ({ ...pack, pos: { ...pack.pos } })),
       projectiles: kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     }
   }
@@ -252,6 +257,7 @@ interface FrameState {
   finalScores: ScoreEntry[] | null
   bubbles: SayMark[]
   cores: ReplayCheckpoint['cores']
+  healthPacks: ReplayCheckpoint['healthPacks']
   projectiles: ReplayCheckpoint['projectiles']
 }
 
@@ -292,6 +298,7 @@ function applyEvent(
   ev: ReplayEvent,
   robots: Map<number, RobotTickState>,
   scores: Map<number, ScoreAcc>,
+  healthPacks: ReplayCheckpoint['healthPacks'],
   bubbles: SayMark[],
   marks: TimelineMark[],
   roster: Map<number, RobotBrief>,
@@ -301,7 +308,10 @@ function applyEvent(
     case 'kill': {
       const killer = numOr(ev.payload?.killer, 0)
       const victim = numOr(ev.payload?.victim, 0)
-      const assist = numOr(ev.payload?.assist, 0)
+      const legacyAssist = numOr(ev.payload?.assist, 0)
+      const assists = Array.isArray(ev.payload?.assists)
+        ? ev.payload.assists.map((id: unknown) => numOr(id, 0)).filter((id: number) => id > 0)
+        : legacyAssist ? [legacyAssist] : []
       const v = robots.get(victim)
       if (v) {
         v.alive = false
@@ -309,14 +319,24 @@ function applyEvent(
         v.hp = 0
       }
       addScore(scores, killer, 'kill', SCORE_RULES.kill)
-      if (assist) addScore(scores, assist, 'assist', SCORE_RULES.assist)
+      for (const assist of assists) addScore(scores, assist, 'assist', SCORE_RULES.assist)
       marks.push({
         tick: ev.tick,
         kind: 'kill',
         color: KIND_COLOR.kill,
-        detail: `${nickOf(killer)} 击毁 ${nickOf(victim)}${assist ? `（助攻 ${nickOf(assist)}）` : ''}`,
+        detail: `${nickOf(killer)} 击毁 ${nickOf(victim)}${assists.length ? `（助攻 ${assists.map(nickOf).join('、')}）` : ''}`,
         robot: victim,
       })
+      break
+    }
+    case 'heal': {
+      const by = numOr(ev.payload?.by, 0)
+      const id = numOr(ev.payload?.id, 0)
+      const amount = numOr(ev.payload?.heal_x10 ?? ev.payload?.healX10, 0) / 10
+      const robot = robots.get(by)
+      if (robot) robot.hp = Math.min(100, robot.hp + amount)
+      const pack = healthPacks.find((item) => item.id === id)
+      if (pack) pack.readyAt = ev.tick + 30 * 60
       break
     }
     case 'hit': {

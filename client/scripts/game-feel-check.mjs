@@ -27,7 +27,7 @@ import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema, EvShotSchema, EvProjectileImpactSchema,
-  EvUplinkHackSchema, EvCorePickupSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
+  EvUplinkHackSchema, EvCorePickupSchema, EvHealSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
 } from '../../packages/protocol/src/index.ts'
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -70,6 +70,7 @@ const MAP_JSON = JSON.stringify({
   ],
   uplinks: [{ id: UPLINK_ID, pos: { X: 1.5, Y: 1.0 }, main: false, interact_r: 2.5, active_phase: 1 }],
   core_pads: [{ id: 1, pos: { X: 3, Y: 3 }, group: 0, value: 10 }],
+  health_packs: [{ id: 7, pos: { X: 20, Y: 0 } }],
   core_zone: { radius: 30, unlock_phase: 2 },
 })
 
@@ -89,10 +90,11 @@ function freshState() {
     phase: PHASE_OUTER,
     timeLeftS: 480,
     robots: [
-      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'feeltest', color: '#22d3ee', isPartner: false },
-      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'ENEMY-A', color: '#ff756d', isPartner: false },
+      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'feeltest', color: '#22d3ee' },
+      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'ENEMY-A', color: '#ff756d' },
     ],
     projectiles: [], cores: [],
+    healthPacks: [{ base: { id: 7, pos: { x: 20, y: 0 }, heading: 0 }, available: true, respawnInS: 0 }],
     uplinks: [{ base: { id: UPLINK_ID, pos: { x: 1.5, y: 1.0 }, heading: 0 }, ready: true, hackingId: 0, progressX10: 0, myCooldownS: 0 }],
     self: { robotId: SELF_ID, moveSrc: CS_HUMAN, turretSrc: CS_HUMAN, aiRoundsLeft: 0, aiTokensLeftK: 0, assistOn: false, dashReadyTick: 0, fireReadyTick: 0 },
     gone: { robots: [], projectiles: [], cores: [] },
@@ -168,7 +170,7 @@ class Fixture {
     const st = this.st
     const ack = this.inputs.length ? this.inputs[this.inputs.length - 1].seq : 0
     const robots = st.robots.map(r => full
-      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, nick: r.nick, color: r.color, isPartner: r.isPartner }
+      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, nick: r.nick, color: r.color }
       : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS })
     return create(SnapshotDeltaSchema, {
       tick: st.tick, ackSeq: ack, phase: st.phase, timeLeftS: st.timeLeftS,
@@ -176,6 +178,7 @@ class Fixture {
       robots, robotGone: st.gone.robots,
       projectiles: st.projectiles, projectileGone: st.gone.projectiles,
       cores: st.cores, coreGone: st.gone.cores,
+      healthPacks: st.healthPacks,
       uplinks: st.uplinks,
       self: st.self,
     })
@@ -699,6 +702,30 @@ async function bannerPass(browser, fix, reduced = false) {
     sound = await audioStarted(page)
     fix.bcast(pickup); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate pickup is silent')
+
+    await fix.step(st => {
+      st.robots[0].hpX10 = 700
+      st.healthPacks[0] = { ...st.healthPacks[0], available: true, respawnInS: 0 }
+      st.timeLeftS = 31
+    })
+    await shot(page, reduced ? '20-health-pack-reduced.png' : '18-health-pack-ready.png')
+    sound = await audioStarted(page)
+    await fix.step(st => {
+      st.robots[0].hpX10 = 1000
+      st.healthPacks[0] = { ...st.healthPacks[0], available: false, respawnInS: 30 }
+      st.timeLeftS = 31
+    })
+    const heal = fix.event('heal', EvHealSchema, { by: SELF_ID, id: 7, healX10: 300, at: { x: 20, y: 0 } })
+    fix.bcast(heal)
+    await until(async () => /生命回灌 · \+30 HP/.test(await hudMsgText(page)), 'health pickup banner')
+    assert.equal(await audioStarted(page), sound + 3, 'health pickup plays one distinct three-note cue')
+    assert.match(await page.locator('#hud-hp-text').innerText(), /100/)
+    await shot(page, reduced ? '21-health-pack-cooldown-reduced.png' : '19-health-pack-cooldown.png')
+    sound = await audioStarted(page)
+    fix.bcast(heal); await sleep(70)
+    assert.equal(await audioStarted(page), sound, 'duplicate health pickup is silent')
+    fix.sendFull(); await sleep(80)
+    assert.equal(await audioStarted(page), sound, 'health pack full resync stays silent')
 
     await fix.step(st => { st.robots[1].base.pos = { x: 25, y: 2 }; st.timeLeftS = 31 })
     const say = fix.event('say', EvSaySchema, { robot: ENEMY_ID, text: 'PIXEL SAY 气泡' })

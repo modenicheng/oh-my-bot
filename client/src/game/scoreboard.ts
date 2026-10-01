@@ -3,7 +3,7 @@ import type { RobotEnt } from './world'
 import './scoreboard.css'
 
 export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
-export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; partner: boolean; dead: boolean }
+export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean }
 
 export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
@@ -32,7 +32,7 @@ export class Scoreboard {
   display(robots: ReadonlyMap<number, RobotEnt>, self = -1): ScoreDisplay[] {
     return rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
       nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
-      partner: !!robots.get(row.robot)?.isPartner, dead: !!robots.get(row.robot)?.dead,
+      dead: !!robots.get(row.robot)?.dead,
     }))
   }
 }
@@ -48,10 +48,12 @@ export function titleName(title: number): string {
     case Title.PEACEMAKER: return '和平使者'
     case Title.AI_IDIOT: return '人工智障'
     case Title.BARRAGE: return '弹幕大师'
-    case Title.BEST_PARTNER: return '最佳搭档'
+    case Title.BEST_PARTNER: return '' // deprecated legacy replay value
     case Title.AI_REGULAR: return 'AI 常客'
     case Title.OLD_SCHOOL: return '古法编程'
     case Title.CNMB: return '充能面包'
+    case Title.KILL_STEAL: return '抢人头'
+    case Title.HEALER: return '耐活王'
     default: return ''
   }
 }
@@ -67,7 +69,7 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titles = 
   element.classList.toggle('score-self', row.self)
   element.classList.toggle('score-first', row.rank === 1)
   element.append(text('score-rank', String(row.rank)), text('score-name', row.nick), text('score-value', String(row.score)))
-  const state = [row.self ? '自己' : '', row.partner ? '搭档' : '', row.dead ? '重生中' : ''].filter(Boolean).join(' · ')
+  const state = [row.self ? '自己' : '', row.dead ? '重生中' : ''].filter(Boolean).join(' · ')
   if (state) element.append(text('score-state', state))
   if (titles) {
     const badges = document.createElement('div'); badges.className = 'score-titles'
@@ -87,7 +89,7 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
   for (const [i, row] of rankedScores(rows).entries()) {
-    list.append(scoreRow({ ...row, rank: i + 1, nick: names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, partner: false, dead: false }, 'li', true))
+    list.append(scoreRow({ ...row, rank: i + 1, nick: names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
   if (!rows.length) overlay.append(text('end-empty', '本局无得分记录'))
   else overlay.append(list)

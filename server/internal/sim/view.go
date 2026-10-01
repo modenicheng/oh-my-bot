@@ -12,7 +12,6 @@ type WorldView struct {
 	Cores       []CoreView
 	HealthPacks []HealthPackView
 	Uplinks     []UplinkView
-	Partners    map[uint32]uint32
 	Controls    map[uint32]ArbitratedInput
 	PulseScans  map[uint32]bool // active only on the successful pulse tick
 	AckSeqs     map[uint32]uint32
@@ -43,7 +42,7 @@ func cloneUplinks(src []Uplink) []Uplink {
 func (s *Sim) publishView() {
 	v := &WorldView{Frame: FrameView{Tick: s.tick, Phase: Phase(s.phase), TimeLeftS: secondsLeft(s.tick, MatchTicks), Map: s.mapDef},
 		Robots: make([]RobotView, len(s.robots)), Projectiles: make([]ProjView, len(s.projectiles)), Cores: append([]CoreView{}, s.cores...),
-		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)), Partners: make(map[uint32]uint32), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
+		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
 	if v.Frame.Map == nil && len(s.walls) != 0 {
 		v.Frame.Map = &MapDef{Walls: s.walls}
 	}
@@ -111,7 +110,6 @@ func cloneUplinkViews(in []UplinkView) []UplinkView {
 	return out
 }
 func (s *Sim) UplinkViews() []UplinkView            { return cloneUplinkViews(s.view.Load().Uplinks) }
-func (s *Sim) PartnerID(id uint32) uint32           { return s.view.Load().Partners[id] }
 func (s *Sim) Arbitrated(id uint32) ArbitratedInput { return s.view.Load().Controls[id] }
 
 // WorldView returns entity tables and metadata from ONE atomic publication;
@@ -125,10 +123,6 @@ func (s *Sim) WorldView() WorldView {
 	out.Cores = append([]CoreView{}, src.Cores...)
 	out.HealthPacks = append([]HealthPackView{}, src.HealthPacks...)
 	out.Uplinks = cloneUplinkViews(src.Uplinks)
-	out.Partners = make(map[uint32]uint32, len(src.Partners))
-	for id, p := range src.Partners {
-		out.Partners[id] = p
-	}
 	out.Controls = make(map[uint32]ArbitratedInput, len(src.Controls))
 	for id, c := range src.Controls {
 		out.Controls[id] = c

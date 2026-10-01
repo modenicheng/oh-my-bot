@@ -33,7 +33,6 @@ func enemySim(t *testing.T) (*Sim, *recordingSink) {
 	sink := &recordingSink{}
 	s := NewSim(7, []uint32{1, 2, 3, 4}, sink)
 	for i := range s.robots {
-		s.robots[i].Combat.Partner = 0
 		if err := s.SetSpawn(s.robots[i].ID, Vec2{float64(i) * 30, 50}, uint32(i)); err != nil {
 			t.Fatal(err)
 		}
@@ -237,12 +236,12 @@ func TestProjectileIntervalEnergySpeedAndRange(t *testing.T) {
 }
 func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 	for _, tc := range []struct {
-		name                     string
-		y                        float64
-		wall, partner, protected bool
-		damage                   float64
+		name            string
+		y               float64
+		wall, protected bool
+		damage          float64
 	}{
-		{name: "inside_radius", y: .59, damage: 12}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "legacy_partner_field_does_not_exempt", partner: true, damage: 12}, {name: "invulnerable", protected: true},
+		{name: "inside_radius", y: .59, damage: 12}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "invulnerable", protected: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, sink := enemySim(t)
@@ -250,9 +249,6 @@ func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 			s.robots[1].Position = Vec2{5, tc.y}
 			if tc.wall {
 				s.walls = []Wall{{ID: 99, Min: Vec2{2, -1}, Max: Vec2{2.01, 1}}}
-			}
-			if tc.partner {
-				s.robots[0].Combat.Partner = 2
 			}
 			s.robots[1].Combat.Invulnerable = tc.protected
 			s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisFire), Fire: true})
@@ -778,9 +774,8 @@ func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 	old.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 999
 	old.Robots[0].HpX10 = 0
 	old.Uplinks[0].PersonalCDs[1] = 99
-	old.Partners[1] = 999
 	fresh := s.WorldView()
-	if fresh.Robots[0].HpX10 != 1000 || fresh.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 || fresh.Uplinks[0].PersonalCDs[1] != 0 || fresh.Partners[1] != 0 {
+	if fresh.Robots[0].HpX10 != 1000 || fresh.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 || fresh.Uplinks[0].PersonalCDs[1] != 0 {
 		t.Fatal("published view aliases another view")
 	}
 	var wg sync.WaitGroup
@@ -794,7 +789,6 @@ func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 				v.Robots[0].HpX10 = 0
 				_ = s.View()
 				_ = s.RobotViews()
-				_ = s.PartnerID(1)
 				v.Observe(1)
 			}
 		}()

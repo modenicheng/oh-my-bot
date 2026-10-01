@@ -149,23 +149,17 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	}
 	m.proj.SetPlayerMap(playerMap)
 	nicks := make(map[uint32]string, len(players))
-	partners := make(map[uint32]uint32, len(players))
 	for pid, info := range players {
 		rid := m.robotOf[pid]
 		nicks[rid] = info.Nick
-		if robot, ok := m.sim.Robot(rid); ok && robot.Combat.Partner != 0 {
-			partners[rid] = robot.Combat.Partner
-		}
 	}
 	m.proj.SetNickMap(nicks)
-	m.proj.SetPartnerMap(partners)
 	if m.log != nil {
 		identities := make([]sim.MatchPlayer, 0, len(players))
 		for pid, info := range players {
 			rid := m.robotOf[pid]
 			identities = append(identities, sim.MatchPlayer{
-				RobotID: rid, PlayerID: pid, Nick: info.Nick,
-				Partner: partners[rid], Bot: info.Bot,
+				RobotID: rid, PlayerID: pid, Nick: info.Nick, Bot: info.Bot,
 			})
 		}
 		sort.Slice(identities, func(i, j int) bool { return identities[i].RobotID < identities[j].RobotID })
@@ -451,6 +445,7 @@ func (m *Match) spectatorReplayEndLocked(s *Session) {
 		Robots:      wv.Robots,
 		Projectiles: wv.Projectiles,
 		Cores:       wv.Cores,
+		HealthPacks: wv.HealthPacks,
 		Uplinks:     wv.Uplinks,
 	})
 	enc := m.specEncoders[s.playerID]
@@ -533,8 +528,9 @@ func (m *Match) step() {
 			Robots:      wv.Robots,
 			Projectiles: wv.Projectiles,
 			Cores:       wv.Cores,
+			HealthPacks: wv.HealthPacks,
 			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rv.ID, wv.Partners[rv.ID], wv.ScanRadius(rv.ID))
+		}, m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
 		robot, _ := m.sim.Robot(rv.ID)
@@ -566,6 +562,7 @@ func (m *Match) step() {
 			Robots:      wv.Robots,
 			Projectiles: wv.Projectiles,
 			Cores:       wv.Cores,
+			HealthPacks: wv.HealthPacks,
 			Uplinks:     wv.Uplinks,
 		})
 		for pid, s := range m.rc.spectators {
@@ -671,8 +668,9 @@ func (m *Match) runScripts(wv sim.WorldView) {
 			Robots:      wv.Robots,
 			Projectiles: wv.Projectiles,
 			Cores:       wv.Cores,
+			HealthPacks: wv.HealthPacks,
 			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rid, wv.Partners[rid], wv.ScanRadius(rid))
+		}, m.wallIX, rid, 0, wv.ScanRadius(rid))
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {

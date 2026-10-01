@@ -40,11 +40,6 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 		}
 		known[robot.ID], ids[i] = true, robot.ID
 	}
-	for _, robot := range cp.Robots {
-		if robot.Combat.Partner != 0 && !known[robot.Combat.Partner] {
-			return nil, fmt.Errorf("sim: unknown checkpoint partner")
-		}
-	}
 	for i, wall := range cp.Walls {
 		if wall.ID == 0 || (i > 0 && wall.ID <= cp.Walls[i-1].ID) || wall.Min.X >= wall.Max.X || wall.Min.Y >= wall.Max.Y {
 			return nil, fmt.Errorf("sim: invalid checkpoint wall %d", wall.ID)
@@ -179,7 +174,7 @@ func validateReplayContinuity(records []LogRecord) error {
 			}
 			for j, robot := range cp.Robots {
 				want := initial.Robots[j]
-				if robot.ID != want.ID || robot.Nick != want.Nick || robot.Color != want.Color || robot.Sector != want.Sector || robot.Combat.Partner != want.Combat.Partner {
+				if robot.ID != want.ID || robot.Nick != want.Nick || robot.Color != want.Color || robot.Sector != want.Sector {
 					return fmt.Errorf("sim: replay checkpoint changed robot identity")
 				}
 				seq := sequences[robot.ID]

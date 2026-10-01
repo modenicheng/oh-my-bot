@@ -109,16 +109,16 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		r := &obs.Robots[i]
 		nextRobots[r.ID] = stampRobot(r)
 		if full {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true))
+			delta.Robots = append(delta.Robots, encodeRobot(r, true))
 			continue
 		}
 		prev, seen := e.lastRobots[r.ID]
 		if !seen {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true)) // 新入 AOI：完整元数据
+			delta.Robots = append(delta.Robots, encodeRobot(r, true)) // 新入 AOI：完整元数据
 			continue
 		}
 		if prev != nextRobots[r.ID] {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), false))
+			delta.Robots = append(delta.Robots, encodeRobot(r, false))
 		}
 	}
 
@@ -228,7 +228,7 @@ func phaseToProto(p sim.Phase) ombv1.Phase {
 	return ombv1.Phase_OUTER_RING
 }
 
-func encodeRobot(r *sim.RobotView, isPartner, withMeta bool) *ombv1.RobotState {
+func encodeRobot(r *sim.RobotView, withMeta bool) *ombv1.RobotState {
 	rs := &ombv1.RobotState{
 		Base: &ombv1.EntityBase{
 			Id:      r.ID,
@@ -241,7 +241,7 @@ func encodeRobot(r *sim.RobotView, isPartner, withMeta bool) *ombv1.RobotState {
 		Dashing:    r.Dashing,
 		Dead:       r.Dead,
 		RespawnInS: r.RespawnInS,
-		IsPartner:  isPartner,
+		IsPartner:  false,
 	}
 	if withMeta {
 		rs.Nick = r.Nick

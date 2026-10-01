@@ -149,8 +149,9 @@ type UplinkView struct {
 
 // ============ Observation（T3 产、T2 消费；AOI 裁剪后的感知） ============
 
-// Observation 是某观察者视角的完整感知：视野 20m + 墙体遮挡 + Partner 豁免 +
-// Core/Uplink 恒全量。T2 脚本只允许吃这个，不得接触 Sim 内部状态。
+// Observation is one robot's read-only perception. Robots/projectiles follow range and
+// line-of-sight clipping; cores, health packs, and uplinks are public map objects.
+// PartnerID remains only as a zero-valued source-compatibility field for older integrations.
 type Observation struct {
 	Frame       FrameView
 	Robots      []RobotView // 按扫描半径与视线裁剪

@@ -40,6 +40,7 @@ export interface ReplayCheckpoint {
   ended: boolean
   robots: ReplayRobotState[]
   cores: Array<{ id: number; pos: { x: number; y: number }; value: number; taken: boolean }>
+  healthPacks: Array<{ id: number; pos: { x: number; y: number }; readyAt: number }>
   uplinks: Array<{ id: number; pos: { x: number; y: number }; hackingId: number }>
   projectiles: Array<{ id: number; owner: number; pos: { x: number; y: number }; heading: number }>
   /** MapDef 原始对象（json tag "map"；序列化为字符串供 parseMapDef）。 */
@@ -148,6 +149,11 @@ function normalizeCheckpoint(st: any): ReplayCheckpoint {
       pos: vec(c.Pos ?? c.pos),
       value: num(c.Value ?? c.value, 0),
       taken: !(c.Alive ?? c.alive ?? true),
+    })),
+    healthPacks: (st.health_packs || st.healthPacks || []).map((h: any) => ({
+      id: num(h.id ?? h.ID, 0),
+      pos: vec(h.pos ?? h.Pos),
+      readyAt: num(h.ready_at ?? h.readyAt ?? h.ReadyAt, 0),
     })),
     // Uplink{def, hacking_id}；def（UplinkDef）带 id/pos
     uplinks: (st.uplinks || []).map((u: any) => {

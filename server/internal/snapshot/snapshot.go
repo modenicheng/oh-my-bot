@@ -41,18 +41,11 @@ type World struct {
 	Uplinks     []sim.UplinkView
 }
 
-// BuildObservation 以 observerID 视角裁剪 w，产出契约定义的 Observation。
-// visionRadius 为本 tick 的感知半径：普通 scan 传 20m，成功 pulseScan 传 32m。
-//
-//   - Robots：观察者自身恒在（不受裁剪）；partnerID 恒在（豁免距离与遮挡，
-//     PartnerID 标记）；其余按中心距 ≤ visionRadius 且视线不被任何墙拦截裁剪。
-//   - Projectiles：同视野规则（无豁免）。
-//   - Cores / Uplinks：恒全量（地图对象）。
-//   - Uplinks.PersonalCDs 收敛为仅观察者自身条目（契约注释：观察者按需取
-//     自身；顺带避免把他人 CD 泄露给脚本）。
-//
-// ix 为 nil 时视作无墙（全部可见）。观察者不存在于 w.Robots 时，视野中心
-// 退化为 (0,0)（v1 无观战者，属调用方错误，不 panic）。
+// BuildObservation filters a frozen world from observerID's point of view.
+// Robots and projectiles require range plus line of sight; the observer is always visible.
+// Cores, health packs, and uplinks are public map objects. Uplink personal cooldowns
+// are reduced to the observer to avoid leaking other players' cooldown state.
+// The fourth parameter is retained for source compatibility and ignored.
 func BuildObservation(w World, ix *WallIndex, observerID, _ uint32, radii ...float64) sim.Observation {
 	visionRadius := defaultVisionRadius
 	if len(radii) > 0 && radii[0] > 0 && !math.IsNaN(radii[0]) && !math.IsInf(radii[0], 0) {

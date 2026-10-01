@@ -14,6 +14,7 @@ const sources = {
   turret: new URL('../assets/turret.svg', import.meta.url).href,
   core: new URL('../assets/core.svg', import.meta.url).href,
   uplink: new URL('../assets/uplink.svg', import.meta.url).href,
+  healthPack: new URL('../assets/health-pack.svg', import.meta.url).href,
 }
 const sprites = {} as Record<keyof typeof sources, HTMLImageElement>
 export const artReady = Promise.all([
@@ -126,7 +127,7 @@ export function drawCover(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
 }
 
 export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, heading: number,
-  color: string, selected: boolean, shield = false, dashing = false, partner = false, invulnerable = false, tick = 0): void {
+  color: string, selected: boolean, shield = false, dashing = false, invulnerable = false, tick = 0): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
   ctx.save()
@@ -155,10 +156,10 @@ export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number
       ctx.fillRect(Math.round(x + Math.cos(a) * sr) - 2, Math.round(y + Math.sin(a) * sr) - 2, 4, 4)
     }
   }
-  if (invulnerable || partner || dashing) {
-    ctx.lineWidth = 1; ctx.strokeStyle = partner ? ink.lime : ink.cyan
+  if (invulnerable || dashing) {
+    ctx.lineWidth = 1; ctx.strokeStyle = ink.cyan
     ctx.globalAlpha = invulnerable && !motion.matches ? 0.65 + 0.25 * Math.sin(tick / 12) : 0.85
-    if (partner || invulnerable) ctx.setLineDash([3, 4])
+    if (invulnerable) ctx.setLineDash([3, 4])
     circle(ctx, x, y, r + (dashing ? 9 : 5)); ctx.stroke()
   }
   ctx.restore()
@@ -172,6 +173,23 @@ export function drawCore(ctx: CanvasRenderingContext2D, cam: Camera, wx: number,
   ctx.beginPath(); ctx.ellipse(x, y + size * 0.5, size * 0.4, size * 0.14, 0, 0, tau); ctx.fill()
   sprite(ctx, 'core', x, y + bob, size)
   if (mega) { ctx.strokeStyle = ink.lime; ctx.lineWidth = 1; circle(ctx, x, y, size * 0.7); ctx.stroke() }
+  ctx.restore()
+}
+
+export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, available: boolean, respawnInS: number, tick = 0): void {
+  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, 1.45 * cam.scale)
+  if (!visible(cam, x, y)) return
+  const bob = available && !motion.matches ? Math.sin(tick / 18 + wx * 0.1) * Math.min(2, cam.scale * 0.05) : 0
+  ctx.save()
+  ctx.globalAlpha = available ? 1 : 0.32
+  ctx.fillStyle = '#020910a0'; ctx.beginPath(); ctx.ellipse(x, y + size * 0.48, size * 0.36, size * 0.12, 0, 0, tau); ctx.fill()
+  sprite(ctx, 'healthPack', x, y + bob, size)
+  if (available) {
+    ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.72); ctx.stroke()
+  } else if (respawnInS > 0) {
+    ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = `10px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+    ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)
+  }
   ctx.restore()
 }
 

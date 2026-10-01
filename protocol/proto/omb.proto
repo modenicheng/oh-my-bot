@@ -7,7 +7,7 @@ option go_package = "github.com/modenicheng/oh-my-bot/server/internal/protocol/g
 // 实体 id：房间内全局唯一、单调递增 uint32。
 // 定点约定：hp/energy ×10 存 sint32，输入方向存千分比 int32——避免浮点序列化抖动。
 // AOI：Robot/Projectile 按 20m 视野+墙体遮挡裁剪（与 scan() 同一规则）；
-//      Partner 不受裁剪，恒在快照中（is_partner 标记，ADR/v0.3 §7 视野规则唯一例外）。
+//      HealthPack/Core/Uplink are public map objects; Robot/Projectile use standard AOI only.
 //      Core/Uplink 为地图对象，恒全量下发（数量小、状态稀疏变化）。
 
 import "google/protobuf/timestamp.proto";
