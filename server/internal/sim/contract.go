@@ -113,6 +113,7 @@ type ProjView struct {
 	ID, Owner uint32
 	Pos       Vec2
 	Heading   float64
+	Color     string // 服务器权威射手颜色：射手离 AOI 后弹丸仍可自足着色（表现层专用）
 }
 
 type CoreView struct {
