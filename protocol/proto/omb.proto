@@ -38,6 +38,8 @@ message ClientInput {
 }
 
 message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
+// Read-only full-world connection; never allocates a player or robot.
+message SpectateRoom { string room_code = 1; }
 message LeaveRoom {}
 message AssistToggle {} // Space 按下：驾驶辅助总开关翻转（事件语义，非状态）
 message RoomAction {
@@ -61,6 +63,7 @@ message ClientMsg {
     AssistToggle assist_toggle = 8;
     ResyncRequest resync_request = 9;
     Say say = 10;
+    SpectateRoom spectate = 11;
   }
 }
 
