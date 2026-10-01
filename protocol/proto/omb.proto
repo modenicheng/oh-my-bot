@@ -155,6 +155,10 @@ message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/r
 message EvScriptError { uint32 robot = 1; string error = 2; uint32 script_rev = 3; } // 人工智障埋点
 message EvMatchEnd { repeated ScoreRow scores = 1; }
 message ScoreRow { uint32 robot = 1; sint32 score = 2; repeated Title titles = 3; }
+message EvScoreboard { // 局内实时积分榜（服务器权威，约 1s 一拍；不落 Match Event Log，仅下发）
+  repeated ScoreRow rows = 1;
+  uint32 tick = 2;
+}
 enum Title {
   TITLE_UNSPECIFIED = 0;
   WAR_MACHINE = 1;      // 战争机器：击毁最多
@@ -228,6 +232,7 @@ message ServerEvent {
     EvAiUsage ai_usage = 25;
     EvShot shot = 26;
     EvProjectileImpact projectile_impact = 27;
+    EvScoreboard scoreboard = 28; // 观战/回放可见；玩家同样可收（延迟 1s 内不影响作弊面）
   }
 }
 
