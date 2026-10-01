@@ -49,6 +49,7 @@ type CombatState struct {
 	DashReady      uint32             `json:"dash_ready"`
 	DashUntil      uint32             `json:"dash_until"`
 	DashDirection  Vec2               `json:"dash_direction"`
+	DashExhausted  bool               `json:"dash_exhausted"`
 	ShieldOn       bool               `json:"shield_on"`
 	PulseReady     uint32             `json:"pulse_ready"`
 	PulseTick      uint32             `json:"pulse_tick"`

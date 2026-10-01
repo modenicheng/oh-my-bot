@@ -343,8 +343,19 @@ func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 		s.robots[0].Energy = 0
 		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Dash: true})
 		s.Tick()
-		if s.robots[0].Combat.DashUntil != 0 || s.robots[0].Velocity.Len() > MaxSpeed {
+		if s.robots[0].Combat.DashUntil != 0 || !s.robots[0].Combat.DashExhausted || s.robots[0].Velocity.Len() > MaxSpeed {
 			t.Fatal("dash continued without one tick of energy")
+		}
+		stepTicks(s, 10)
+		if s.robots[0].Combat.DashUntil != 0 {
+			t.Fatal("held exhausted dash restarted from passive regeneration")
+		}
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisAbility), Dash: false})
+		s.Tick()
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 3, AxisMask: uint32(AxisAbility), Dash: true})
+		s.Tick()
+		if s.robots[0].Combat.DashUntil != s.tick+1 {
+			t.Fatal("dash did not restart after release")
 		}
 	})
 	t.Run("shield", func(t *testing.T) {

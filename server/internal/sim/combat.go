@@ -32,16 +32,26 @@ func (s *Sim) prepareCombat() {
 				r.Energy = math.Max(0, r.Energy-DashCost)
 				c.DashReady, c.DashUntil, c.DashDirection = s.tick+DashCooldown, s.tick+DashDuration, direction
 			}
-		} else if !in.Shield && in.Dash && r.Energy+collisionEpsilon >= DashCost*DT {
-			// Held Dash is continuous: every active tick pays the per-second
-			// drain, refreshes direction, and remains active for exactly this tick.
-			r.Energy = math.Max(0, r.Energy-DashCost*DT)
-			c.DashReady, c.DashUntil, c.DashDirection = s.tick, s.tick+1, dashDirection(in.Move, r.Heading)
 		} else {
-			// Release, shield intent, or insufficient energy stops immediately.
-			c.DashUntil = 0
-			if speed := r.Velocity.Len(); speed > MaxSpeed {
-				r.Velocity = r.Velocity.Scale(MaxSpeed / speed)
+			if !in.Dash {
+				c.DashExhausted = false
+			}
+			if !in.Shield && in.Dash && !c.DashExhausted && r.Energy+collisionEpsilon >= DashCost*DT {
+				// Held Dash is continuous: every active tick pays the per-second
+				// drain, refreshes direction, and remains active for exactly this tick.
+				r.Energy = math.Max(0, r.Energy-DashCost*DT)
+				c.DashReady, c.DashUntil, c.DashDirection = s.tick, s.tick+1, dashDirection(in.Move, r.Heading)
+			} else {
+				// Release, shield intent, or insufficient energy stops immediately.
+				// Exhaustion requires a release before Dash may start again, avoiding
+				// one-tick cue flicker as passive regeneration crosses the threshold.
+				if in.Dash && !in.Shield && r.Energy+collisionEpsilon < DashCost*DT {
+					c.DashExhausted = true
+				}
+				c.DashUntil = 0
+				if speed := r.Velocity.Len(); speed > MaxSpeed {
+					r.Velocity = r.Velocity.Scale(MaxSpeed / speed)
+				}
 			}
 		}
 		if c.PulseRequested && s.tick >= c.PulseReady && r.Energy+collisionEpsilon >= PulseCost {
