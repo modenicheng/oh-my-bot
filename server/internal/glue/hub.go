@@ -17,6 +17,10 @@ type Hub struct {
 	nextID uint64
 }
 
+// maxSpectators caps the read-only audience per room. Spectators are pure
+// consumers, so the cap protects publication bandwidth rather than gameplay.
+const maxSpectators = 64
+
 func NewHub() *Hub {
 	return &Hub{rooms: map[string]*RoomConn{}, player: map[uint64]*Session{}, nextID: 1000}
 }
@@ -42,12 +46,22 @@ func (h *Hub) Register(s *Session) {
 }
 
 // Unregister detaches only this connection. Membership and recovery identity survive.
+// Spectators are exact-connection removed and never touch membership or inputs.
 func (h *Hub) Unregister(s *Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if rc := s.rc; rc != nil {
 		rc.mu.Lock()
-		if rc.sessions[s.playerID] == s {
+		if s.spectator {
+			// Exact-connection removal: a spliced spectator id can never remove a
+			// newer spectator connection (spectators have no takeover semantics).
+			if rc.spectators[s.playerID] == s {
+				delete(rc.spectators, s.playerID)
+				if m := rc.match; m != nil {
+					m.dropSpectatorLocked(s.playerID)
+				}
+			}
+		} else if rc.sessions[s.playerID] == s {
 			if m := rc.match; m != nil && m.activeLocked() {
 				m.releaseHumanLocked(s.playerID)
 			}
@@ -69,6 +83,7 @@ type RoomConn struct {
 	// encoder state and publication. Launcher/Abort never acquire it under Room.mu.
 	mu         sync.Mutex
 	sessions   map[uint64]*Session
+	spectators map[uint64]*Session
 	identities map[string]SessionInfo
 	match      *Match
 	launcher   room.SimLauncher
@@ -76,7 +91,7 @@ type RoomConn struct {
 }
 
 func newRoomConn(code string) *RoomConn {
-	return &RoomConn{Code: code, Room: room.NewRoom(code, 0), sessions: map[uint64]*Session{}, identities: map[string]SessionInfo{}}
+	return &RoomConn{Code: code, Room: room.NewRoom(code, 0), sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{}}
 }
 
 type Session struct {
@@ -85,6 +100,7 @@ type Session struct {
 	playerID     uint64
 	nick, color  string
 	rc           *RoomConn
+	spectator    bool // read-only observer; never joins Room/identities/match players
 	SendReliable func(*ombv1.ServerMsg)
 	SendLossy    func(*ombv1.ServerMsg)
 }
@@ -138,14 +154,55 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 }
 func (s *Session) BindRoom(rc *RoomConn) { s.mu.Lock(); defer s.mu.Unlock(); s.rc = rc }
 
+// BindSpectator attaches a read-only observer. It uses the registered connection
+// id (the unique hub id) as its key but never joins Room members/identities, never
+// claims host rights and never changes any online/seat count.
+func (rc *RoomConn) BindSpectator(s *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if s.rc != nil {
+		return fmt.Errorf("session already bound")
+	}
+	if len(rc.spectators) >= maxSpectators {
+		return fmt.Errorf("spectator room full (%d)", maxSpectators)
+	}
+	s.spectator = true
+	s.nick, s.color = "", ""
+	s.rc = rc
+	rc.spectators[s.playerID] = s
+	if m := rc.match; m != nil {
+		m.bootstrapSpectatorLocked(s)
+	}
+	rc.broadcastRoomStateLocked()
+	return nil
+}
+
 // withRoom fences every upstream operation against a nickname takeover or detach.
+// Player actions additionally require membership in rc.sessions — spectators are
+// structurally absent from it, so every player path below is fenced for them.
 func (s *Session) withRoom(fn func(*RoomConn)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if rc := s.rc; rc != nil {
 		rc.mu.Lock()
 		defer rc.mu.Unlock()
-		if rc.sessions[s.playerID] == s {
+		if !s.spectator && rc.sessions[s.playerID] == s {
+			fn(rc)
+		}
+	}
+}
+
+// withSpectatorRoom fences the two spectator operations (resync, leave) against
+// detach while still holding the owner lock.
+func (s *Session) withSpectatorRoom(fn func(*RoomConn)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rc := s.rc; rc != nil {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		if s.spectator && rc.spectators[s.playerID] == s {
 			fn(rc)
 		}
 	}
@@ -212,6 +269,14 @@ func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
 	})
 }
 func (s *Session) Resync() {
+	if s.IsSpectator() {
+		s.withSpectatorRoom(func(rc *RoomConn) {
+			if m := rc.match; m != nil {
+				m.forceSpectatorResyncLocked(s.playerID)
+			}
+		})
+		return
+	}
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {
 			m.forceResyncLocked(s.playerID)
@@ -219,8 +284,22 @@ func (s *Session) Resync() {
 	})
 }
 
+// IsSpectator reports whether this connection is a read-only observer. The flag
+// is set once at bind time and never changes on a live session.
+func (s *Session) IsSpectator() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.spectator }
+
 // Explicit leave frees the seat and nickname; closing a socket uses Unregister instead.
+// A spectator leaving just detaches its read-only connection.
 func (s *Session) LeaveRoom() {
+	if s.IsSpectator() {
+		s.withSpectatorRoom(func(rc *RoomConn) {
+			delete(rc.spectators, s.playerID)
+			if m := rc.match; m != nil {
+				m.dropSpectatorLocked(s.playerID)
+			}
+		})
+		return
+	}
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {
 			m.releaseHumanLocked(s.playerID)
@@ -250,6 +329,9 @@ func (rc *RoomConn) Broadcast(msg *ombv1.ServerMsg) {
 }
 func (rc *RoomConn) broadcastLocked(msg *ombv1.ServerMsg) {
 	for _, s := range rc.sessions {
+		s.SendReliable(msg)
+	}
+	for _, s := range rc.spectators {
 		s.SendReliable(msg)
 	}
 }
@@ -334,6 +416,9 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	rc.match = m
 	for _, s := range rc.sessions {
 		m.bootstrapLocked(s)
+	}
+	for _, s := range rc.spectators {
+		m.bootstrapSpectatorLocked(s)
 	}
 	rc.broadcastRoomStateLocked()
 	m.start()

@@ -256,9 +256,36 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	if up == nil {
 		return
 	}
+	// Spectator sockets are strictly read-only: only resync and leave may flow.
+	// Everything else — including a second Spectate (no role-hop/rebind spam) or
+	// a player Join (no promotion) — is rejected up front.
+	if cur := (*sess); cur != nil && cur.IsSpectator() {
+		switch up.Payload.(type) {
+		case *ombv1.ClientMsg_ResyncRequest:
+			cur.Resync()
+			return
+		case *ombv1.ClientMsg_Leave:
+			cur.LeaveRoom()
+			hub.Unregister(cur)
+			*sess = nil
+			return
+		case *ombv1.ClientMsg_Join, *ombv1.ClientMsg_Spectate,
+			*ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput,
+			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
+			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
+			*ombv1.ClientMsg_AssistToggle:
+			sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+				Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: readonly spectator connection"}},
+			}}})
+			return
+		}
+		return
+	}
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
 		handleJoin(hub, p.Join, sendReliable, sendLossy, sess)
+	case *ombv1.ClientMsg_Spectate:
+		handleSpectate(hub, p.Spectate, sendReliable, sendLossy, sess)
 	case *ombv1.ClientMsg_Input:
 		if cur := (*sess); cur != nil {
 			cur.RouteInput(p.Input)
@@ -322,6 +349,30 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	*sessOut = sess
 	rc.BroadcastRoomState()
+}
+
+// handleSpectate attaches a read-only live observer. Reuses the established
+// "join failed:" robot-0 say prefix so the client RoomSession stops retrying
+// exactly like a rejected player join.
+func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
+	if spec == nil {
+		return
+	}
+	rc := hub.EnsureRoom(spec.GetRoomCode())
+	rc.EnsureLauncher()
+	sess := glue.NewSession(sendReliable, sendLossy)
+	hub.Register(sess)
+	if err := rc.BindSpectator(sess); err != nil {
+		hub.Unregister(sess)
+		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
+		}}})
+		return
+	}
+	if old := *sessOut; old != nil {
+		hub.Unregister(old)
+	}
+	*sessOut = sess
 }
 
 type manualNode struct {

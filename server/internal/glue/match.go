@@ -49,8 +49,15 @@ type Match struct {
 	playerOf     map[uint32]uint64 // robotID -> playerID
 	botRobots    map[uint32]bool
 	reliableFull map[uint64]bool
-	handle       *asyncHandle
-	startOnce    sync.Once
+	// Spectator state is keyed by connection id (hub id), never robot id, so a
+	// spectator feed can never collide with player encoders on this match.
+	specEncoders     map[uint64]*snapshot.DeltaEncoder
+	specReliableFull map[uint64]bool
+	// finalEnd holds the settlement event after a naturally finished match so
+	// late joiners/reconnectors can be caught up (aborted matches stay nil).
+	finalEnd  *ombv1.ServerEvent
+	handle    *asyncHandle
+	startOnce sync.Once
 
 	tick       uint32
 	warmup     bool
@@ -73,16 +80,18 @@ type SessionInfo struct {
 // 此处反查 Room.Seed()/SessionSeq() 会非重入死锁。
 func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo, warmup bool) (*Match, error) {
 	m := &Match{
-		rc:           rc,
-		proj:         stats.NewProjector(),
-		robotOf:      map[uint64]uint32{},
-		playerOf:     map[uint32]uint64{},
-		botRobots:    map[uint32]bool{},
-		reliableFull: map[uint64]bool{},
-		warmup:       warmup,
-		encoders:     map[uint32]*snapshot.DeltaEncoder{},
-		stop:         make(chan struct{}),
-		done:         make(chan struct{}),
+		rc:               rc,
+		proj:             stats.NewProjector(),
+		robotOf:          map[uint64]uint32{},
+		playerOf:         map[uint32]uint64{},
+		botRobots:        map[uint32]bool{},
+		reliableFull:     map[uint64]bool{},
+		specEncoders:     map[uint64]*snapshot.DeltaEncoder{},
+		specReliableFull: map[uint64]bool{},
+		warmup:           warmup,
+		encoders:         map[uint32]*snapshot.DeltaEncoder{},
+		stop:             make(chan struct{}),
+		done:             make(chan struct{}),
 	}
 
 	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
@@ -204,11 +213,15 @@ func (g glueSink) OnCheckpoint(state sim.Checkpoint) {
 	end := settledMatchEnd(state.Tick, nil)
 	g.m.proj.OnEvent(state.Tick, end)
 	end = settledMatchEnd(state.Tick, g.m.proj.Final())
+	g.m.finalEnd = end // frozen settlement for late spectator joiners
 	if g.m.log != nil {
 		g.m.log.OnEvent(state.Tick, end)
 	}
 	if g.m.activeLocked() {
-		g.m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
+		// Spectators receive settlement after their reliable final full frame.
+		for _, s := range g.m.rc.sessions {
+			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: end}})
+		}
 	}
 }
 func (g glueSink) OnMatchInit(state sim.Checkpoint)  { g.m.proj.OnMatchInit(state) }
@@ -367,11 +380,79 @@ func (m *Match) activeLocked() bool {
 	return m.rc.match == m && (m.handle == nil || (!m.handle.cancelled.Load() && m.rc.launch.Load() == m.handle))
 }
 func (m *Match) bootstrapLocked(s *Session) {
+	m.sendMapBootstrapLocked(s)
+	m.forceResyncLocked(s.playerID)
+}
+func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(m.mapDef)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
 	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer)}}}}})
-	m.forceResyncLocked(s.playerID)
+}
+
+// bootstrapSpectatorLocked attaches a read-only observer to this match.
+// Active match: map bootstrap now, reliable full on the next tick. A naturally
+// finished match replays map + frozen full + settlement immediately (there is
+// no next tick). Aborted/superseded matches bootstrap nothing — the spectator
+// waits for the next publication without any old-match feed.
+func (m *Match) bootstrapSpectatorLocked(s *Session) {
+	if m.activeLocked() {
+		m.sendMapBootstrapLocked(s)
+		m.forceSpectatorResyncLocked(s.playerID)
+		return
+	}
+	if m.finalEnd == nil {
+		return
+	}
+	m.spectatorReplayEndLocked(s)
+}
+
+// forceSpectatorResyncLocked marks the next spectator frame reliable+full.
+// On a finished match there is no next tick: resend the frozen feed instead.
+func (m *Match) forceSpectatorResyncLocked(pid uint64) {
+	if m.activeLocked() {
+		m.specReliableFull[pid] = true
+		if enc := m.specEncoders[pid]; enc != nil {
+			enc.ForceFull()
+		}
+		return
+	}
+	if m.finalEnd == nil {
+		return
+	}
+	if s := m.rc.spectators[pid]; s != nil {
+		m.spectatorReplayEndLocked(s)
+	}
+}
+
+// spectatorReplayEndLocked: map + frozen final full + settlement for a joiner
+// arriving after the match ended (no ticks will ever come from this match).
+func (m *Match) spectatorReplayEndLocked(s *Session) {
+	m.sendMapBootstrapLocked(s)
+	wv := m.sim.WorldView()
+	obs := snapshot.BuildSpectatorObservation(snapshot.World{
+		FrameView:   wv.Frame,
+		Robots:      wv.Robots,
+		Projectiles: wv.Projectiles,
+		Cores:       wv.Cores,
+		Uplinks:     wv.Uplinks,
+	})
+	enc := m.specEncoders[s.playerID]
+	if enc == nil {
+		enc = snapshot.NewEncoder()
+		m.specEncoders[s.playerID] = enc
+	}
+	enc.ForceFull()
+	delta := enc.Encode(wv.Frame.Tick, 0, wv.Frame.Phase, wv.Frame.TimeLeftS, obs, nil)
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.finalEnd}})
+}
+
+// dropSpectatorLocked frees the per-connection encoder and full flag. Safe on
+// any match state; never touches player input or encoders.
+func (m *Match) dropSpectatorLocked(pid uint64) {
+	delete(m.specEncoders, pid)
+	delete(m.specReliableFull, pid)
 }
 func (m *Match) run() {
 	defer close(m.done)
@@ -456,6 +537,47 @@ func (m *Match) step() {
 			delete(m.reliableFull, pid)
 		} else {
 			s.SendLossy(msg)
+		}
+	}
+
+	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
+	// encoders keyed by connection id. New mid-match joiners get reliable full on
+	// their next frame via specReliableFull.
+	ended := m.tick >= matchTicks && !m.warmup
+	if len(m.rc.spectators) > 0 {
+		obs := snapshot.BuildSpectatorObservation(snapshot.World{
+			FrameView:   wv.Frame,
+			Robots:      wv.Robots,
+			Projectiles: wv.Projectiles,
+			Cores:       wv.Cores,
+			Uplinks:     wv.Uplinks,
+		})
+		for pid, s := range m.rc.spectators {
+			enc := m.specEncoders[pid]
+			if enc == nil {
+				enc = snapshot.NewEncoder()
+				enc.ForceFull()
+				m.specEncoders[pid] = enc
+			}
+			if ended {
+				// No next tick can repair a dropped final frame.
+				enc.ForceFull()
+				delta := enc.Encode(m.tick, 0, wv.Frame.Phase, wv.Frame.TimeLeftS, obs, nil)
+				s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+				if m.finalEnd != nil {
+					s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.finalEnd}})
+				}
+				delete(m.specReliableFull, pid)
+				continue
+			}
+			delta := enc.Encode(m.tick, 0, wv.Frame.Phase, wv.Frame.TimeLeftS, obs, nil)
+			msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}
+			if m.specReliableFull[pid] {
+				s.SendReliable(msg)
+				delete(m.specReliableFull, pid)
+			} else {
+				s.SendLossy(msg)
+			}
 		}
 	}
 
