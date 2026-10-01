@@ -78,20 +78,19 @@ func TestRestoreCheckpointDetachesAndRejectsInvalidState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cp.Robots[0].Control.PendingScript.Move.X = -1
-	cp.Robots[0].Combat.Damagers = map[uint32]bool{2: true}
+	cp.Robots[0].Combat.DamageBy = map[uint32]float64{2: 12}
 	cp.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 0
 	if !reflect.DeepEqual(s.Snapshot(), restored.Snapshot()) {
 		t.Fatal("restored checkpoint aliases caller memory")
 	}
 	for name, corrupt := range map[string]func(*Checkpoint){
-		"robot identity":  func(c *Checkpoint) { c.Robots[1].ID = c.Robots[0].ID },
-		"version":         func(c *Checkpoint) { c.SimulationVersion = SimulationVersion + 1 },
-		"nonfinite":       func(c *Checkpoint) { c.Robots[0].Position.X = math.NaN() },
-		"ended":           func(c *Checkpoint) { c.Ended = true },
-		"phase":           func(c *Checkpoint) { c.Phase = ombv1.Phase_PHASE_UNSPECIFIED },
-		"core geometry":   func(c *Checkpoint) { c.Cores[0].Pos.X++ },
-		"core rules":      func(c *Checkpoint) { c.Map.CoreRules.PeriodTicks = 0 },
-		"unknown partner": func(c *Checkpoint) { c.Robots[0].Combat.Partner = 99 },
+		"robot identity": func(c *Checkpoint) { c.Robots[1].ID = c.Robots[0].ID },
+		"version":        func(c *Checkpoint) { c.SimulationVersion = SimulationVersion + 1 },
+		"nonfinite":      func(c *Checkpoint) { c.Robots[0].Position.X = math.NaN() },
+		"ended":          func(c *Checkpoint) { c.Ended = true },
+		"phase":          func(c *Checkpoint) { c.Phase = ombv1.Phase_PHASE_UNSPECIFIED },
+		"core geometry":  func(c *Checkpoint) { c.Cores[0].Pos.X++ },
+		"core rules":     func(c *Checkpoint) { c.Map.CoreRules.PeriodTicks = 0 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cp := s.Snapshot()

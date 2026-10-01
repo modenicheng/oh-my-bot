@@ -98,6 +98,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		Projectiles: make([]*ombv1.ProjectileState, 0, len(obs.Projectiles)),
 		Cores:       make([]*ombv1.CoreState, 0, len(obs.Cores)),
 		Uplinks:     make([]*ombv1.UplinkState, 0, len(obs.Uplinks)),
+		HealthPacks: make([]*ombv1.HealthPackState, 0, len(obs.HealthPacks)),
 	}
 	delta.Phase = phaseToProto(phase)
 	delta.TimeLeftS = timeLeftS
@@ -108,16 +109,16 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		r := &obs.Robots[i]
 		nextRobots[r.ID] = stampRobot(r)
 		if full {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true))
+			delta.Robots = append(delta.Robots, encodeRobot(r, true))
 			continue
 		}
 		prev, seen := e.lastRobots[r.ID]
 		if !seen {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), true)) // 新入 AOI：完整元数据
+			delta.Robots = append(delta.Robots, encodeRobot(r, true)) // 新入 AOI：完整元数据
 			continue
 		}
 		if prev != nextRobots[r.ID] {
-			delta.Robots = append(delta.Robots, encodeRobot(r, obs.IsPartner(r.ID), false))
+			delta.Robots = append(delta.Robots, encodeRobot(r, false))
 		}
 	}
 
@@ -175,6 +176,12 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	}
 	// Uplink 恒全量（地图对象）——proto 无 uplink_gone 字段。
 
+	// Health packs are four public map objects. Send the complete state every frame
+	// so reconnect and resync never depend on a missing tombstone.
+	for i := range obs.HealthPacks {
+		delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(&obs.HealthPacks[i]))
+	}
+
 	delta.Self = encodeSelf(self)
 
 	if !full {
@@ -221,7 +228,7 @@ func phaseToProto(p sim.Phase) ombv1.Phase {
 	return ombv1.Phase_OUTER_RING
 }
 
-func encodeRobot(r *sim.RobotView, isPartner, withMeta bool) *ombv1.RobotState {
+func encodeRobot(r *sim.RobotView, withMeta bool) *ombv1.RobotState {
 	rs := &ombv1.RobotState{
 		Base: &ombv1.EntityBase{
 			Id:      r.ID,
@@ -234,7 +241,7 @@ func encodeRobot(r *sim.RobotView, isPartner, withMeta bool) *ombv1.RobotState {
 		Dashing:    r.Dashing,
 		Dead:       r.Dead,
 		RespawnInS: r.RespawnInS,
-		IsPartner:  isPartner,
+		IsPartner:  false,
 	}
 	if withMeta {
 		rs.Nick = r.Nick
@@ -262,6 +269,13 @@ func encodeCore(c *sim.CoreView) *ombv1.CoreState {
 			Pos: &ombv1.Vec2{X: c.Pos.X, Y: c.Pos.Y},
 		},
 		Value: c.Value,
+	}
+}
+
+func encodeHealthPack(pack *sim.HealthPackView) *ombv1.HealthPackState {
+	return &ombv1.HealthPackState{
+		Base:      &ombv1.EntityBase{Id: pack.ID, Pos: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y}},
+		Available: pack.Available, RespawnInS: pack.RespawnInS,
 	}
 }
 

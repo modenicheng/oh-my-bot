@@ -4,7 +4,7 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawUplink, drawProjectile, drawVitals } from './art'
+import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
 const ROBOT_R = 0.6
 
 export function phaseName(p: number): string {
@@ -54,6 +54,10 @@ export class Renderer {
       const p = core.base?.pos
       if (p) drawCore(ctx, cam, p.x, p.y, core.value >= 25, world.tick)
     }
+    for (const def of map.healthPacks) {
+      const state = world.healthPacks.get(def.id)
+      drawHealthPack(ctx, cam, def.pos.x, def.pos.y, state?.available ?? true, state?.respawnInS ?? 0, world.tick)
+    }
     drawCover(ctx, map, cam)
     for (const p of world.projectiles.values()) {
       const b = p.base
@@ -70,7 +74,7 @@ export class Renderer {
       const self = b.id === world.self?.robotId
       const heading = self && extras.localAim !== undefined ? extras.localAim : b.heading
       drawRobot(ctx, cam, b.pos.x, b.pos.y, heading, r.color || ink.cyan, self,
-        r.shieldOn, r.dashing, r.isPartner, (r.invulnUntil ?? 0) > performance.now(), world.tick)
+        r.shieldOn, r.dashing, (r.invulnUntil ?? 0) > performance.now(), world.tick)
       drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn)
     }
     extras.feedback?.draw(ctx, cam)

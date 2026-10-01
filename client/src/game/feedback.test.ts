@@ -9,6 +9,7 @@ const sound = vi.hoisted(() => ({ play: vi.fn(), setUplink: vi.fn(), stopGame: v
 vi.mock('../audio', () => ({ audio: sound }))
 const map: MapDefParsed = { version: 1, generatorVer: 2, seed: 1, mapHash: '', extent: 80,
   walls: [], sectors: [], corePads: [{ id: 20, pos: { x: 43, y: 0 }, group: 0, value: 10 }],
+  healthPacks: [{ id: 1, pos: { x: 4, y: 5 } }],
   coreZone: { radius: 30, unlockPhase: 2 }, uplinks: [{ id: 10, pos: { x: 40, y: 0 }, main: false, activePhase: 1, interactR: 2.5 }] }
 function snap(tick: number, baseTick: number, full = false, hackingId = 0, cd = 0) {
   return create(SnapshotDeltaSchema, { tick, baseTick, full, phase: 1, timeLeftS: 480,
@@ -120,6 +121,23 @@ describe('confirmed feedback transitions', () => {
     expect(cueCount('uplinkCancel')).toBe(0)
     expect(cueCount('uplinkSuccess')).toBe(1)
     expect(f.message).toHaveBeenCalledExactlyOnceWith('黑入完成 · +15 分 · 本桩冷却 30s', 'uplink')
+  })
+
+  it('plays authoritative healing once and keeps resync or hidden delivery silent', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const heal = create(ServerEventSchema, { tick: 11, kind: { case: 'heal', value: { by: 1, id: 1, healX10: 50, at: { x: 40, y: 0 } } } })
+    f.feedback.event(heal, f.world, map, true); f.feedback.event(heal, f.world, map, true)
+    expect(cueCount('healthPickup')).toBe(1)
+    expect(f.message).toHaveBeenCalledExactlyOnceWith('生命回灌 · +5 HP', 'status')
+
+    f.feedback.reset(); vi.clearAllMocks(); f.consume(snap(20, 0, true))
+    const stale = create(ServerEventSchema, { tick: 20, kind: { case: 'heal', value: { by: 1, id: 1, healX10: 300, at: { x: 40, y: 0 } } } })
+    f.feedback.event(stale, f.world, map, true)
+    expect(sound.play).not.toHaveBeenCalled(); expect(f.message).not.toHaveBeenCalled()
+
+    vi.stubGlobal('document', { hidden: true })
+    f.feedback.event(create(ServerEventSchema, { tick: 21, kind: stale.kind }), f.world, map, true)
+    expect(sound.play).not.toHaveBeenCalled(); expect(f.message).not.toHaveBeenCalled()
   })
 
   it('plays self pickup once after a dynamic core tombstone, even with no remaining position', () => {

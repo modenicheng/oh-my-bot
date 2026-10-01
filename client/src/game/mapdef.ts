@@ -9,6 +9,7 @@ export interface MapWall { id: number; min: MapVec2; max: MapVec2 }
 export interface MapSector { id: number; spawnArea: MapRect; center: MapVec2 }
 export interface MapUplink { id: number; pos: MapVec2; main: boolean; interactR: number; activePhase: number }
 export interface MapCorePad { id: number; pos: MapVec2; group: number; value: number }
+export interface MapHealthPack { id: number; pos: MapVec2 }
 
 export interface MapDefParsed {
   version: number
@@ -19,6 +20,7 @@ export interface MapDefParsed {
   sectors: MapSector[]
   uplinks: MapUplink[]
   corePads: MapCorePad[]
+  healthPacks: MapHealthPack[]
   coreZone: { radius: number; unlockPhase: number }
   /** 地图外接半径（米）：相机钳制与全局参照用 */
   extent: number
@@ -87,6 +89,10 @@ export function parseMapDef(json: string): MapDefParsed {
     const o = asRaw(c)
     return { id: num(o['id'], i), pos: vec2(o['pos']), group: num(o['group']), value: num(o['value'], 10) }
   })
+  const healthPacks: MapHealthPack[] = arr(r['health_packs']).map((h, i) => {
+    const o = asRaw(h)
+    return { id: num(o['id'], i + 1), pos: vec2(o['pos']) }
+  })
   const cz = asRaw(r['core_zone'])
   const coreZone = { radius: num(cz['radius'], RING_CORE), unlockPhase: num(cz['unlock_phase'], 2) }
 
@@ -100,6 +106,7 @@ export function parseMapDef(json: string): MapDefParsed {
   }
   for (const u of uplinks) maxC = Math.max(maxC, Math.abs(u.pos.x), Math.abs(u.pos.y))
   for (const p of corePads) maxC = Math.max(maxC, Math.abs(p.pos.x), Math.abs(p.pos.y))
+  for (const h of healthPacks) maxC = Math.max(maxC, Math.abs(h.pos.x), Math.abs(h.pos.y))
 
   return {
     version: num(r['version'], 1),
@@ -110,6 +117,7 @@ export function parseMapDef(json: string): MapDefParsed {
     sectors,
     uplinks,
     corePads,
+    healthPacks,
     coreZone,
     extent: maxC,
   }

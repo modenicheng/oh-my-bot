@@ -120,6 +120,12 @@ type Robot struct {
 
 // Checkpoint is the complete state of this stage, including static geometry,
 // held/pending controls, sequence guards and per-robot collision throttles.
+type HealthPack struct {
+	ID      uint32 `json:"id"`
+	Pos     Vec2   `json:"pos"`
+	ReadyAt uint32 `json:"ready_at"`
+}
+
 type Checkpoint struct {
 	SimulationVersion int          `json:"simulation_version,omitempty"`
 	Tick              uint32       `json:"tick"`
@@ -133,6 +139,7 @@ type Checkpoint struct {
 	NextProjectile    uint32       `json:"next_projectile"`
 	Projectiles       []Projectile `json:"projectiles"`
 	Cores             []CoreView   `json:"cores"`
+	HealthPacks       []HealthPack `json:"health_packs"`
 	Uplinks           []Uplink     `json:"uplinks"`
 }
 
@@ -160,6 +167,7 @@ type Sim struct {
 	nextProjectile    uint32
 	projectiles       []Projectile
 	cores             []CoreView
+	healthPacks       []HealthPack
 	uplinks           []Uplink
 	view              atomic.Pointer[WorldView]
 	controlEvents     []controlRecord
@@ -193,7 +201,6 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 			s.nextProjectile = id + 1
 		}
 	}
-	s.pairPartners()
 	s.publishView()
 	return s
 }
@@ -218,7 +225,7 @@ func (s *Sim) Snapshot() Checkpoint {
 	return Checkpoint{SimulationVersion: s.simulationVersion, Tick: s.tick, Seed: s.seed, Phase: s.phase, Ended: s.ended,
 		Robots: robots, Walls: append([]Wall{}, s.walls...), Map: cloneMap(s.mapDef), RNG: s.rng,
 		NextProjectile: s.nextProjectile, Projectiles: append([]Projectile{}, s.projectiles...),
-		Cores: append([]CoreView{}, s.cores...), Uplinks: cloneUplinks(s.uplinks)}
+		Cores: append([]CoreView{}, s.cores...), HealthPacks: append([]HealthPack{}, s.healthPacks...), Uplinks: cloneUplinks(s.uplinks)}
 }
 
 // SetSpawn configures initial/respawn positions before the match starts.
@@ -309,6 +316,7 @@ func (s *Sim) Tick() {
 	s.stepProjectiles()
 	s.stepUplinks()
 	s.stepCores()
+	s.stepHealthPacks()
 	s.publishView()
 	s.emit(initial)
 	if s.tick%CheckpointInterval == 0 {

@@ -3,7 +3,7 @@
 import {
   ResyncRequestSchema, ClientMsgSchema,
   type ServerMsg, type SnapshotDelta, type SelfState,
-  type RobotState, type ProjectileState, type CoreState, type UplinkState,
+  type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState,
 } from '@omb/protocol'
 import { create } from '@bufbuild/protobuf'
 import { encodeClient } from '@omb/protocol'
@@ -17,6 +17,7 @@ export interface RobotEnt extends RobotState {
 export interface ProjEnt extends ProjectileState { seenAt: number }
 export interface CoreEnt extends CoreState { seenAt: number }
 export interface UplinkEnt extends UplinkState { seenAt: number }
+export interface HealthPackEnt extends HealthPackState { seenAt: number }
 
 export interface WorldState {
   tick: number
@@ -27,6 +28,7 @@ export interface WorldState {
   robots: Map<number, RobotEnt>
   projectiles: Map<number, ProjEnt>
   cores: Map<number, CoreEnt>
+  healthPacks: Map<number, HealthPackEnt>
   uplinks: Map<number, UplinkEnt>
   /** 最近 ack 的 input seq（服务器确认到哪） */
   ackSeq: number
@@ -35,7 +37,7 @@ export interface WorldState {
 export function emptyWorld(): WorldState {
   return {
     tick: 0, initialized: false, phase: 0, timeLeftS: 0,
-    robots: new Map(), projectiles: new Map(), cores: new Map(), uplinks: new Map(),
+    robots: new Map(), projectiles: new Map(), cores: new Map(), healthPacks: new Map(), uplinks: new Map(),
     ackSeq: 0,
   }
 }
@@ -55,6 +57,7 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     world.robots.clear()
     world.projectiles.clear()
     world.cores.clear()
+    world.healthPacks.clear()
     world.uplinks.clear()
   }
 
@@ -97,6 +100,9 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
 
   for (const u of snap.uplinks) {
     world.uplinks.set(u.base?.id ?? 0, { ...u, seenAt: now })
+  }
+  for (const pack of snap.healthPacks) {
+    world.healthPacks.set(pack.base?.id ?? 0, { ...pack, seenAt: now })
   }
 
   return 'applied'

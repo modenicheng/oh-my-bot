@@ -40,7 +40,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 4 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 5 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -83,6 +83,22 @@ func TestTopologyInvariants(t *testing.T) {
 				}
 				if a < lo || a > hi {
 					t.Fatalf("seed %d: sector %d spawn corner angle %.3f outside [%.1f,%.1f]", seed, k, a, lo, hi)
+				}
+			}
+		}
+		if len(def.HealthPacks) != 4 {
+			t.Fatalf("seed %d: health packs = %d, want 4", seed, len(def.HealthPacks))
+		}
+		for i, pack := range def.HealthPacks {
+			if pack.ID != uint32(i+1) {
+				t.Fatalf("seed %d: health pack %d has ID %d", seed, i, pack.ID)
+			}
+			if d := pack.Pos.Len(); math.Abs(d-43) > 1e-9 {
+				t.Fatalf("seed %d: health pack %d radius %.6f, want 43", seed, pack.ID, d)
+			}
+			for _, wall := range def.Walls {
+				if nearestDist2(wallRect(wall), pack.Pos) < 1.2*1.2 {
+					t.Fatalf("seed %d: health pack %d overlaps wall %+v", seed, pack.ID, wall)
 				}
 			}
 		}

@@ -249,14 +249,14 @@ try {
   await waitForWeights(outerWeights, 'inner ring selects final stage')
   assert.equal(await scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop).length), loopsBefore, 'stage changes do not restart looping sources')
   await scoring.screenshot({ path: resolve(shots, 'score-hud.png') })
-  const final = { scores: [{ robot: 101, score: 99, titles: [Title.WAR_MACHINE, Title.BEST_PARTNER] }, { robot: 202, score: 25 }] }
+  const final = { scores: [{ robot: 101, score: 99, titles: [Title.KILL_STEAL, Title.HEALER] }, { robot: 202, score: 25 }] }
   event('SCOR', 'matchEnd', EvMatchEndSchema, final, 121)
   event('SCOR', 'matchEnd', EvMatchEndSchema, final, 121)
   event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 122, rows: [{ robot: 101, score: 0 }] }, 122)
   await scoring.locator('.end-overlay').waitFor({ state: 'visible' })
   assert.equal(await scoring.locator('.end-overlay').count(), 1)
   assert.equal(await scoring.locator('.end-list .score-self .score-value').textContent(), '99')
-  assert.deepEqual(await scoring.locator('.end-list .score-self .score-title').allTextContents(), ['战争机器', '最佳搭档'])
+  assert.deepEqual(await scoring.locator('.end-list .score-self .score-title').allTextContents(), ['抢人头', '耐活王'])
   assert.equal(await scoring.locator('.end-list .score-no-title').textContent(), '暂无称号')
   await scoring.screenshot({ path: resolve(shots, 'settlement.png') })
   await scoring.locator('.end-back').click()
@@ -288,7 +288,7 @@ try {
     { type: 'event', tick: 60, event: { hit: { from: 101, to: 202 } } },
     { type: 'event', tick: 120, event: { phase_change: { from: 1, to: 2 } } },
     { type: 'event', tick: 125, event: { match_end: { scores: [
-      { robot: 101, score: 77, titles: ['WAR_MACHINE', 'BEST_PARTNER'] }, { robot: 202, score: 0 },
+      { robot: 101, score: 77, titles: ['KILL_STEAL', 'HEALER'] }, { robot: 202, score: 0 },
     ] } } },
   ].map(record => JSON.stringify(record)).join(String.fromCharCode(10))
   await replay.route('**/api/matches', route => route.fulfill({ json: ['SCOR-1'] }))
@@ -303,7 +303,7 @@ try {
     el.value = '125'; el.dispatchEvent(new Event('input', { bubbles: true }))
   })
   await replay.waitForFunction(() => document.querySelector('#rp-score .score-value')?.textContent === '77')
-  assert.deepEqual(await replay.locator('#rp-score .score-title').allTextContents(), ['战争机器', '最佳搭档'])
+  assert.deepEqual(await replay.locator('#rp-score .score-title').allTextContents(), ['抢人头', '耐活王'])
   assert.equal(await replay.locator('#rp-score b').count(), 0)
   await replay.locator('#rp-timeline').evaluate(el => {
     el.value = '60'; el.dispatchEvent(new Event('input', { bubbles: true }))

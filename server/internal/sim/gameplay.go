@@ -44,20 +44,19 @@ type ControlState struct {
 }
 
 type CombatState struct {
-	PulseRequested bool            `json:"pulse_requested"`
-	Partner        uint32          `json:"partner"`
-	FireReady      uint32          `json:"fire_ready"`
-	DashReady      uint32          `json:"dash_ready"`
-	DashUntil      uint32          `json:"dash_until"`
-	DashDirection  Vec2            `json:"dash_direction"`
-	ShieldOn       bool            `json:"shield_on"`
-	PulseReady     uint32          `json:"pulse_ready"`
-	PulseTick      uint32          `json:"pulse_tick"`
-	SayReady       uint32          `json:"say_ready"`
-	RespawnAt      uint32          `json:"respawn_at"`
-	Invulnerable   bool            `json:"invulnerable"`
-	InvulnUntil    uint32          `json:"invuln_until"`
-	Damagers       map[uint32]bool `json:"damagers,omitempty"`
+	PulseRequested bool               `json:"pulse_requested"`
+	FireReady      uint32             `json:"fire_ready"`
+	DashReady      uint32             `json:"dash_ready"`
+	DashUntil      uint32             `json:"dash_until"`
+	DashDirection  Vec2               `json:"dash_direction"`
+	ShieldOn       bool               `json:"shield_on"`
+	PulseReady     uint32             `json:"pulse_ready"`
+	PulseTick      uint32             `json:"pulse_tick"`
+	SayReady       uint32             `json:"say_ready"`
+	RespawnAt      uint32             `json:"respawn_at"`
+	Invulnerable   bool               `json:"invulnerable"`
+	InvulnUntil    uint32             `json:"invuln_until"`
+	DamageBy       map[uint32]float64 `json:"damage_by,omitempty"` // effective HP removed during this life
 }
 
 type Projectile struct {
@@ -86,21 +85,6 @@ func (s *Sim) random() uint64 {
 	return z ^ (z >> 31)
 }
 func (s *Sim) randomUnit() float64 { return float64(s.random()>>11) / (1 << 53) }
-
-func (s *Sim) pairPartners() {
-	order := make([]int, len(s.robots))
-	for i := range order {
-		order[i] = i
-	}
-	for i := len(order) - 1; i > 0; i-- {
-		j := int(s.random() % uint64(i+1))
-		order[i], order[j] = order[j], order[i]
-	}
-	for i := 0; i+1 < len(order); i += 2 {
-		a, b := &s.robots[order[i]], &s.robots[order[i+1]]
-		a.Combat.Partner, b.Combat.Partner = b.ID, a.ID
-	}
-}
 
 func secondsLeft(now, until uint32) uint32 {
 	if until <= now {

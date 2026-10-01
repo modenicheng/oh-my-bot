@@ -16,6 +16,7 @@ func cloneMap(m *MapDef) *MapDef {
 	out.Walls = append([]Wall{}, m.Walls...)
 	out.Uplinks = append([]UplinkDef{}, m.Uplinks...)
 	out.CorePads = append([]CorePadDef{}, m.CorePads...)
+	out.HealthPacks = append([]HealthPackDef{}, m.HealthPacks...)
 	out.CoreRules.GroupWeights = make(map[Phase][]float64, len(m.CoreRules.GroupWeights))
 	for phase, weights := range m.CoreRules.GroupWeights {
 		out.CoreRules.GroupWeights[phase] = append([]float64{}, weights...)
@@ -33,6 +34,7 @@ func (s *Sim) SetMap(def *MapDef) error {
 	sort.Slice(m.Walls, func(i, j int) bool { return m.Walls[i].ID < m.Walls[j].ID })
 	sort.Slice(m.Uplinks, func(i, j int) bool { return m.Uplinks[i].ID < m.Uplinks[j].ID })
 	sort.Slice(m.CorePads, func(i, j int) bool { return m.CorePads[i].ID < m.CorePads[j].ID })
+	sort.Slice(m.HealthPacks, func(i, j int) bool { return m.HealthPacks[i].ID < m.HealthPacks[j].ID })
 	validPhase := func(p Phase) bool { return p == PhaseOuterRing || p == PhaseCoreOpen }
 	if !finite(m.CoreZone.Radius) || m.CoreZone.Radius < 0 || (m.CoreZone.Radius > 0 && !validPhase(m.CoreZone.UnlockPhase)) {
 		return fmt.Errorf("sim: invalid core zone")
@@ -51,6 +53,16 @@ func (s *Sim) SetMap(def *MapDef) error {
 	for i, u := range m.Uplinks {
 		if u.ID == 0 || (i > 0 && m.Uplinks[i-1].ID == u.ID) || !u.Pos.finite() || !finite(u.InteractR) || u.InteractR <= 0 || !validPhase(u.ActivePhase) {
 			return fmt.Errorf("sim: invalid uplink %d", u.ID)
+		}
+	}
+	for i, h := range m.HealthPacks {
+		if h.ID == 0 || (i > 0 && m.HealthPacks[i-1].ID == h.ID) || !h.Pos.finite() || h.Pos.Len() < m.CoreZone.Radius+RobotRadius {
+			return fmt.Errorf("sim: invalid health pack %d", h.ID)
+		}
+		for _, wall := range m.Walls {
+			if overlapsWall(h.Pos, wall) {
+				return fmt.Errorf("sim: health pack %d overlaps wall %d", h.ID, wall.ID)
+			}
 		}
 	}
 	if len(m.CorePads) > 0 && (m.CoreRules.PeriodTicks <= 0 || uint64(m.CoreRules.PeriodTicks) > math.MaxUint32) {
@@ -93,9 +105,14 @@ func (s *Sim) SetMap(def *MapDef) error {
 	s.mapDef, s.walls, s.rng = m, m.Walls, candidate.rng
 	s.uplinks = make([]Uplink, len(m.Uplinks))
 	s.cores = make([]CoreView, len(m.CorePads))
+	s.healthPacks = make([]HealthPack, len(m.HealthPacks))
 	for i, p := range m.CorePads {
 		s.cores[i] = CoreView{ID: p.ID, Pos: p.Pos, Value: p.Value}
 		s.reserveID(p.ID)
+	}
+	for i, h := range m.HealthPacks {
+		s.healthPacks[i] = HealthPack{ID: h.ID, Pos: h.Pos}
+		s.reserveID(h.ID)
 	}
 	for i, u := range m.Uplinks {
 		s.uplinks[i] = Uplink{Def: u, ReadyAt: make(map[uint32]uint32)}
@@ -205,6 +222,33 @@ func (s *Sim) stepUplinks() {
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_UplinkHack{UplinkHack: &ombv1.EvUplinkHack{By: u.HackingID, UplinkId: u.Def.ID, Value: value}}})
 			u.ReadyAt[u.HackingID] = s.tick + HackCooldown
 			u.HackingID, u.ProgressTicks = 0, 0
+		}
+	}
+}
+
+const (
+	HealthPackHeal     = 30.0
+	HealthPackCooldown = 30 * TickRate
+)
+
+func (s *Sim) stepHealthPacks() {
+	for i := range s.healthPacks {
+		pack := &s.healthPacks[i]
+		if pack.ReadyAt > s.tick {
+			continue
+		}
+		for j := range s.robots {
+			r := &s.robots[j]
+			if r.State != Alive || r.HP >= MaxHP || r.Position.Sub(pack.Pos).Len() > RobotRadius {
+				continue
+			}
+			heal := math.Min(HealthPackHeal, MaxHP-r.HP)
+			r.HP += heal
+			pack.ReadyAt = s.tick + HealthPackCooldown
+			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Heal{Heal: &ombv1.EvHeal{
+				By: r.ID, Id: pack.ID, HealX10: int32(math.Round(heal * 10)), At: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y},
+			}}})
+			break
 		}
 	}
 }

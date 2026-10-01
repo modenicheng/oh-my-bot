@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -49,7 +50,7 @@ const (
 )
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
-const GeneratorVer = 4
+const GeneratorVer = 5
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
@@ -64,7 +65,8 @@ const (
 func Generate(seed uint64) (*sim.MapDef, error) {
 	uplinks := genUplinks(newRng(seed ^ saltUplinks))
 	pads := genCorePads(newRng(seed ^ saltPads))
-	walls, err := genWalls(newRng(seed^saltWalls), uplinks, pads)
+	healthPacks := genHealthPacks()
+	walls, err := genWalls(newRng(seed^saltWalls), uplinks, pads, healthPacks)
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: walls: %w", err)
 	}
@@ -77,6 +79,7 @@ func Generate(seed uint64) (*sim.MapDef, error) {
 		Sectors:      genSectors(),
 		Uplinks:      uplinks,
 		CorePads:     pads,
+		HealthPacks:  healthPacks,
 		CoreZone: sim.CoreZoneDef{
 			Radius:      coreZoneR,
 			UnlockPhase: sim.PhaseCoreOpen,
@@ -172,6 +175,17 @@ func genUplinks(r *rng) []sim.UplinkDef {
 // width. Outer/mid slots alternate inner and outer radial tracks. Antipodal
 // pairs share jitter, preserving central fairness without rejection holes.
 // Track separation also keeps pads at least 3m from the 40–45m Uplink band.
+func genHealthPacks() []sim.HealthPackDef {
+	const radius = 43.0
+	const diagonal = radius / math.Sqrt2
+	return []sim.HealthPackDef{
+		{ID: 1, Pos: sim.Vec2{X: diagonal, Y: diagonal}},
+		{ID: 2, Pos: sim.Vec2{X: -diagonal, Y: diagonal}},
+		{ID: 3, Pos: sim.Vec2{X: -diagonal, Y: -diagonal}},
+		{ID: 4, Pos: sim.Vec2{X: diagonal, Y: -diagonal}},
+	}
+}
+
 func genCorePads(r *rng) []sim.CorePadDef {
 	pads := make([]sim.CorePadDef, 0, padOuterN+padMidN+padCenterN)
 	for group, count := range []int{padOuterN, padMidN, padCenterN} {

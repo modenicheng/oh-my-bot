@@ -40,11 +40,6 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 		}
 		known[robot.ID], ids[i] = true, robot.ID
 	}
-	for _, robot := range cp.Robots {
-		if robot.Combat.Partner != 0 && !known[robot.Combat.Partner] {
-			return nil, fmt.Errorf("sim: unknown checkpoint partner")
-		}
-	}
 	for i, wall := range cp.Walls {
 		if wall.ID == 0 || (i > 0 && wall.ID <= cp.Walls[i-1].ID) || wall.Min.X >= wall.Max.X || wall.Min.Y >= wall.Max.Y {
 			return nil, fmt.Errorf("sim: invalid checkpoint wall %d", wall.ID)
@@ -57,7 +52,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 		if err := check.SetMap(cp.Map); err != nil {
 			return nil, fmt.Errorf("sim: checkpoint map: %w", err)
 		}
-		if len(cp.Walls) != len(check.walls) || len(cp.Cores) != len(check.cores) || len(cp.Uplinks) != len(check.uplinks) {
+		if len(cp.Walls) != len(check.walls) || len(cp.Cores) != len(check.cores) || len(cp.HealthPacks) != len(check.healthPacks) || len(cp.Uplinks) != len(check.uplinks) {
 			return nil, fmt.Errorf("sim: inconsistent checkpoint entities")
 		}
 		for i := range cp.Walls {
@@ -71,13 +66,19 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 				return nil, fmt.Errorf("sim: checkpoint core differs from map")
 			}
 		}
+		for i, pack := range cp.HealthPacks {
+			want := check.healthPacks[i]
+			if pack.ID != want.ID || pack.Pos != want.Pos {
+				return nil, fmt.Errorf("sim: checkpoint health pack differs from map")
+			}
+		}
 		for i, uplink := range cp.Uplinks {
 			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil ||
 				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
 				return nil, fmt.Errorf("sim: invalid checkpoint uplink")
 			}
 		}
-	} else if len(cp.Cores) != 0 || len(cp.Uplinks) != 0 {
+	} else if len(cp.Cores) != 0 || len(cp.HealthPacks) != 0 || len(cp.Uplinks) != 0 {
 		return nil, fmt.Errorf("sim: objectives require checkpoint map")
 	}
 	s := NewSim(cp.Seed, ids, sink)
@@ -85,7 +86,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	s.tick, s.phase, s.ended = cp.Tick, cp.Phase, cp.Ended
 	s.robots, s.walls, s.mapDef = cp.Robots, cp.Walls, cp.Map
 	s.rng, s.nextProjectile = cp.RNG, cp.NextProjectile
-	s.projectiles, s.cores, s.uplinks = cp.Projectiles, cp.Cores, cp.Uplinks
+	s.projectiles, s.cores, s.healthPacks, s.uplinks = cp.Projectiles, cp.Cores, cp.HealthPacks, cp.Uplinks
 	s.publishView()
 	return s, nil
 }
@@ -173,7 +174,7 @@ func validateReplayContinuity(records []LogRecord) error {
 			}
 			for j, robot := range cp.Robots {
 				want := initial.Robots[j]
-				if robot.ID != want.ID || robot.Nick != want.Nick || robot.Color != want.Color || robot.Sector != want.Sector || robot.Combat.Partner != want.Combat.Partner {
+				if robot.ID != want.ID || robot.Nick != want.Nick || robot.Color != want.Color || robot.Sector != want.Sector {
 					return fmt.Errorf("sim: replay checkpoint changed robot identity")
 				}
 				seq := sequences[robot.ID]

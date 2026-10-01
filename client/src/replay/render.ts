@@ -4,7 +4,7 @@ import type { MapDefParsed } from '../game/mapdef'
 import type { ReplayFrame } from './index'
 import { phaseNum } from './index'
 import { drawIcon } from '../icons'
-import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawUplink, drawProjectile, drawVitals } from '../game/art'
+import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
 const ROBOT_R = 0.6
 
 export class ReplayRenderer {
@@ -30,6 +30,10 @@ export class ReplayRenderer {
     for (const core of frame.cores) {
       if (!core.taken) drawCore(ctx, cam, core.pos.x, core.pos.y, core.value >= 25, frame.tick)
     }
+    for (const pack of frame.healthPacks) {
+      const respawnInS = Math.ceil(Math.max(0, pack.readyAt - frame.tick) / 60)
+      drawHealthPack(ctx, cam, pack.pos.x, pack.pos.y, pack.readyAt <= frame.tick, respawnInS, frame.tick)
+    }
     drawCover(ctx, map, cam)
     const colors = new Map(frame.robots.map(r => [r.id, r.color]))
     for (const p of frame.projectiles) drawProjectile(ctx, cam, p.pos.x, p.pos.y, p.heading, colors.get(p.owner) || ink.cyan)
@@ -42,7 +46,7 @@ export class ReplayRenderer {
         continue
       }
       const follow = r.id === followRobotId
-      drawRobot(ctx, cam, r.pos.x, r.pos.y, r.heading, r.color || ink.cyan, follow, false, false, false, r.invulnerable, frame.tick)
+      drawRobot(ctx, cam, r.pos.x, r.pos.y, r.heading, r.color || ink.cyan, follow, false, false, r.invulnerable, frame.tick)
       drawVitals(ctx, cam, r.pos.x, r.pos.y, r.hp, r.energy, r.nick, follow)
     }
     this.drawBubbles(frame, cam)

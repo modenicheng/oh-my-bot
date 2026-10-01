@@ -77,6 +77,36 @@ describe('ReplayIndex', () => {
     expect(f.scores.get(3)?.assist).toBe(1)
   })
 
+  it('新录像支持多人助攻，旧单 assist 仍兼容', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: { tick: 0, robots: [] } },
+      { type: 'event', tick: 60, event: { kill: { killer: 1, victim: 4, assists: [2, 3] } } },
+      { type: 'event', tick: 120, event: { kill: { killer: 4, victim: 1, assist: 2 } } },
+    ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
+    const frame = new ReplayIndex(data).frameAt(120)
+    expect(frame.scores.get(1)?.total).toBe(25)
+    expect(frame.scores.get(4)?.total).toBe(25)
+    expect(frame.scores.get(2)?.assist).toBe(2)
+    expect(frame.scores.get(3)?.assist).toBe(1)
+  })
+
+  it('回血事件可 seek 重建 HP 与血包 30 秒冷却', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: {
+        tick: 0, phase: 1,
+        robots: [{ id: 1, hp: 50, energy: 100, state: 'alive', position: { X: 0, Y: 0 } }],
+        health_packs: [{ id: 7, pos: { X: 4, Y: 5 }, ready_at: 0 }],
+      } },
+      { type: 'event', tick: 60, event: { heal: { by: 1, id: 7, heal_x10: 300, at: { x: 4, y: 5 } } } },
+    ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
+    const replay = new ReplayIndex(data)
+    expect(replay.frameAt(59).robots.find(r => r.id === 1)?.hp).toBe(50)
+    expect(replay.frameAt(59).healthPacks[0]?.readyAt).toBe(0)
+    expect(replay.frameAt(60).robots.find(r => r.id === 1)?.hp).toBe(80)
+    expect(replay.frameAt(60).healthPacks[0]?.readyAt).toBe(60 + 30 * 60)
+    expect(replay.frameAt(59).healthPacks[0]?.readyAt).toBe(0)
+  })
+
   it('uplink_hack 计分', () => {
     const f = idx.frameAt(330 * 60)
     expect(f.scores.get(4)?.uplink).toBe(1)
@@ -93,7 +123,7 @@ describe('ReplayIndex', () => {
       { type: 'match_start', tick: 0, state: { tick: 0, phase: 1, robots: [] } },
       { type: 'event', tick: 120, event: { kill: { killer: 1, victim: 2, assist: 0 } } },
       { type: 'event', tick: 125, event: { match_end: { scores: [
-        { robot: 1, score: 77, titles: ['WAR_MACHINE', 'BEST_PARTNER'] },
+        { robot: 1, score: 77, titles: ['KILL_STEAL', 'HEALER'] },
         { robot: 2, score: 0, titles: [Title.SURVIVOR] },
       ] } } },
     ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
@@ -103,12 +133,21 @@ describe('ReplayIndex', () => {
     expect(replay.frameAt(124).finalScores).toBeNull()
     const final = replay.frameAt(125)
     expect(final.scores.get(1)?.total).toBe(77)
-    expect(final.finalScores?.[0]?.titles).toEqual([Title.WAR_MACHINE, Title.BEST_PARTNER])
+    expect(final.finalScores?.[0]?.titles).toEqual([Title.KILL_STEAL, Title.HEALER])
     expect(final.finalScores?.[1]?.titles).toEqual([Title.SURVIVOR])
     final.scores.get(1)!.total = 999
     expect(replay.frameAt(125).scores.get(1)?.total).toBe(77)
     expect(replay.frameAt(60).finalScores).toBeNull()
     expect(replay.frameAt(60).scores.get(1)?.total ?? 0).toBe(0)
+  })
+
+  it('旧录像可读取 BEST_PARTNER 枚举但展示层隐藏', () => {
+    const data = parseReplayNDJSON([
+      { type: 'match_start', tick: 0, state: { tick: 0, robots: [] } },
+      { type: 'event', tick: 10, event: { match_end: { scores: [{ robot: 1, score: 9, titles: ['BEST_PARTNER'] }] } } },
+    ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
+    const final = new ReplayIndex(data).frameAt(10)
+    expect(final.finalScores?.[0]?.titles).toEqual([Title.BEST_PARTNER])
   })
 
   it('旧录像没有结算分时仍保留事件累计积分', () => {

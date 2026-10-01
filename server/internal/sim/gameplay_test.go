@@ -22,18 +22,90 @@ func gameMap() *MapDef {
 	}
 	return m
 }
+func healthPackMap() *MapDef {
+	m := gameMap()
+	m.HealthPacks = []HealthPackDef{{ID: 1, Pos: Vec2{X: 10, Y: 10}}}
+	return m
+}
+
 func enemySim(t *testing.T) (*Sim, *recordingSink) {
 	t.Helper()
 	sink := &recordingSink{}
 	s := NewSim(7, []uint32{1, 2, 3, 4}, sink)
 	for i := range s.robots {
-		s.robots[i].Combat.Partner = 0
 		if err := s.SetSpawn(s.robots[i].ID, Vec2{float64(i) * 30, 50}, uint32(i)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return s, sink
 }
+func TestHealthPackPickupRules(t *testing.T) {
+	s := NewSim(7, []uint32{2, 1}, nil)
+	if err := s.SetMap(healthPackMap()); err != nil {
+		t.Fatal(err)
+	}
+	pack := &s.healthPacks[0]
+	for i := range s.robots {
+		s.robots[i].Position = pack.Pos
+		s.robots[i].HP = MaxHP
+	}
+	s.stepHealthPacks()
+	if pack.ReadyAt != 0 || len(s.events) != 0 {
+		t.Fatalf("full health consumed pack: ready=%d events=%d", pack.ReadyAt, len(s.events))
+	}
+
+	first := &s.robots[s.index[1]]
+	second := &s.robots[s.index[2]]
+	first.HP = 95
+	second.HP = 40
+	s.stepHealthPacks()
+	if first.HP != MaxHP || second.HP != 40 || pack.ReadyAt != HealthPackCooldown {
+		t.Fatalf("bad single-consumer pickup: first=%.1f second=%.1f ready=%d", first.HP, second.HP, pack.ReadyAt)
+	}
+	heal := s.events[len(s.events)-1].GetHeal()
+	if heal == nil || heal.By != 1 || heal.Id != 1 || heal.HealX10 != 50 {
+		t.Fatalf("bad heal event: %+v", heal)
+	}
+
+	first.HP = 50
+	s.tick = HealthPackCooldown - 1
+	s.stepHealthPacks()
+	if first.HP != 50 {
+		t.Fatal("pack respawned early")
+	}
+	s.tick = HealthPackCooldown
+	first.State = Dead
+	second.HP = 80
+	s.stepHealthPacks()
+	if first.HP != 50 || second.HP != MaxHP || pack.ReadyAt != 2*HealthPackCooldown {
+		t.Fatalf("dead pickup or cooldown failure: first=%.1f second=%.1f ready=%d", first.HP, second.HP, pack.ReadyAt)
+	}
+}
+
+func TestHealthPackCheckpointRestoresCooldown(t *testing.T) {
+	s := NewSim(9, []uint32{1}, nil)
+	m := healthPackMap()
+	if err := s.SetMap(m); err != nil {
+		t.Fatal(err)
+	}
+	r := &s.robots[s.index[1]]
+	r.Position = s.healthPacks[0].Pos
+	r.HP = 60
+	s.stepHealthPacks()
+	cp := s.Snapshot()
+	if len(cp.HealthPacks) != 1 || cp.HealthPacks[0].ReadyAt != HealthPackCooldown {
+		t.Fatalf("checkpoint missing health cooldown: %+v", cp.HealthPacks)
+	}
+	restored, err := RestoreCheckpoint(cp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := restored.WorldView().HealthPacks
+	if len(view) != 1 || view[0].Available || view[0].RespawnInS != 30 {
+		t.Fatalf("restored health view mismatch: %+v", view)
+	}
+}
+
 func TestArbitrationAxisMaskTable(t *testing.T) {
 	script := ArbitratedInput{Move: Vec2{1, 0}, Aim: 1.2, Fire: true, Dash: true, Shield: true, Interact: true}
 	human := ArbitratedInput{Move: Vec2{}, Aim: 0, Fire: false, Dash: false, Shield: false, Interact: false}
@@ -162,14 +234,14 @@ func TestProjectileIntervalEnergySpeedAndRange(t *testing.T) {
 		t.Fatal("projectile survived 20m hard cap")
 	}
 }
-func TestProjectileDamageCircleWallsAndPartners(t *testing.T) {
+func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 	for _, tc := range []struct {
-		name                     string
-		y                        float64
-		wall, partner, protected bool
-		damage                   float64
+		name            string
+		y               float64
+		wall, protected bool
+		damage          float64
 	}{
-		{name: "inside_radius", y: .59, damage: 12}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "partner", partner: true}, {name: "invulnerable", protected: true},
+		{name: "inside_radius", y: .59, damage: 12}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "invulnerable", protected: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, sink := enemySim(t)
@@ -177,9 +249,6 @@ func TestProjectileDamageCircleWallsAndPartners(t *testing.T) {
 			s.robots[1].Position = Vec2{5, tc.y}
 			if tc.wall {
 				s.walls = []Wall{{ID: 99, Min: Vec2{2, -1}, Max: Vec2{2.01, 1}}}
-			}
-			if tc.partner {
-				s.robots[0].Combat.Partner = 2
 			}
 			s.robots[1].Combat.Invulnerable = tc.protected
 			s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisFire), Fire: true})
@@ -276,26 +345,57 @@ func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 		}
 	})
 }
-func TestKillAssistAndThreeSecondRespawn(t *testing.T) {
+func TestDamageShareAttributionAndThreeSecondRespawn(t *testing.T) {
+	tests := []struct {
+		name   string
+		damage []struct {
+			from   uint32
+			amount float64
+		}
+		wantKiller uint32
+		wantAssist []uint32
+		wantSteal  bool
+	}{
+		{name: "multiple_sub_half_contributors", damage: []struct {
+			from   uint32
+			amount float64
+		}{{2, 20}, {3, 30}, {1, 50}}, wantKiller: 1, wantAssist: []uint32{2, 3}},
+		{name: "exact_half_not_assist", damage: []struct {
+			from   uint32
+			amount float64
+		}{{2, 50}, {1, 50}}, wantKiller: 1},
+		{name: "finisher_sub_half_is_steal", damage: []struct {
+			from   uint32
+			amount float64
+		}{{2, 60}, {1, 40}}, wantKiller: 1, wantSteal: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewSim(7, []uint32{1, 2, 3, 4}, nil)
+			victim := &s.robots[3]
+			for _, hit := range tc.damage {
+				s.damage(hit.from, victim, hit.amount)
+			}
+			kill := s.events[len(s.events)-1].GetKill()
+			if kill == nil || kill.Killer != tc.wantKiller || kill.Victim != 4 || !reflect.DeepEqual(append([]uint32{}, kill.Assists...), append([]uint32{}, tc.wantAssist...)) || kill.KillSteal != tc.wantSteal || kill.Assist != 0 {
+				t.Fatalf("bad attribution %+v", kill)
+			}
+		})
+	}
+
 	s, sink := enemySim(t)
 	m := gameMap()
 	if err := s.SetMap(m); err != nil {
 		t.Fatal(err)
 	}
-	s.robots[0].Combat.Partner = 2
-	s.robots[1].Combat.Partner = 1
 	s.Tick()
 	s.events = nil
-	s.damage(2, &s.robots[2], 12)
-	for i := 0; i < 8; i++ {
-		s.damage(1, &s.robots[2], 12)
-	}
+	s.damage(2, &s.robots[2], 25)
+	s.robots[2].HP = 40 // healing does not clear lifetime damage ledger
+	s.damage(1, &s.robots[2], 40)
 	kill := s.events[len(s.events)-1].GetKill()
-	if kill == nil || kill.Killer != 1 || kill.Victim != 3 || kill.Assist != 2 {
-		t.Fatalf("bad assist kill %+v", kill)
-	}
-	if s.robots[2].HP != 0 || s.robots[2].State != Dead {
-		t.Fatal("nine 12 damage hits did not kill")
+	if kill == nil || kill.KillSteal || !reflect.DeepEqual(kill.Assists, []uint32{2}) {
+		t.Fatalf("healed lifetime attribution lost: %+v", kill)
 	}
 	if s.robots[2].Combat.RespawnAt != 181 {
 		t.Fatal("respawn deadline not 3s")
@@ -306,11 +406,34 @@ func TestKillAssistAndThreeSecondRespawn(t *testing.T) {
 	}
 	s.Tick()
 	r := s.robots[2]
-	if r.State != Alive || r.HP != 100 || r.Energy != 100 || !r.Combat.Invulnerable || !m.Sectors[2].SpawnArea.Contains(r.Position) {
+	if r.State != Alive || r.HP != 100 || r.Energy != 100 || !r.Combat.Invulnerable || len(r.Combat.DamageBy) != 0 || !m.Sectors[2].SpawnArea.Contains(r.Position) {
 		t.Fatalf("bad respawn %+v", r)
 	}
 	if sink.events[len(sink.events)-1].GetRespawn() == nil {
 		t.Fatal("missing respawn event")
+	}
+}
+
+func TestDamageLedgerCountsOnlyEffectiveEnemyDamage(t *testing.T) {
+	s := NewSim(0, []uint32{1, 2}, nil)
+	victim := &s.robots[1]
+	victim.HP = 10
+	s.damage(1, victim, 100)
+	closeFloat(t, victim.Combat.DamageBy[1], 10)
+
+	s = NewSim(0, []uint32{1, 2}, nil)
+	victim = &s.robots[1]
+	victim.Combat.ShieldOn = true
+	s.damage(1, victim, 12)
+	closeFloat(t, victim.Combat.DamageBy[1], 12*ShieldDamageScale)
+
+	s = NewSim(0, []uint32{1, 2}, nil)
+	victim = &s.robots[1]
+	victim.Combat.Invulnerable = true
+	s.damage(1, victim, 12)
+	s.damage(2, victim, 12)
+	if len(victim.Combat.DamageBy) != 0 {
+		t.Fatalf("ineffective/self damage entered ledger: %v", victim.Combat.DamageBy)
 	}
 }
 func TestInvulnerabilityThreeRulesAndDeathAxes(t *testing.T) {
@@ -366,29 +489,17 @@ func TestInvulnerabilityThreeRulesAndDeathAxes(t *testing.T) {
 		t.Fatal("stale fire escaped respawn")
 	}
 }
-func TestPartnersFixedFriendlyFireSoftCollisionAndSay(t *testing.T) {
-	a := NewSim(99, []uint32{4, 1, 3, 2}, nil)
-	b := NewSim(99, []uint32{1, 2, 3, 4}, nil)
-	if !reflect.DeepEqual(a.WorldView().Partners, b.WorldView().Partners) {
-		t.Fatal("pairing not deterministic")
-	}
-	pairs := a.WorldView().Partners
-	for id, p := range pairs {
-		if p == 0 || p == id || pairs[p] != id {
-			t.Fatal("invalid reciprocal pair")
-		}
-	}
+func TestAllRobotsAreEnemiesAndSay(t *testing.T) {
 	s := NewSim(0, []uint32{1, 2}, nil)
 	s.Tick()
 	if s.robots[0].Position.Sub(s.robots[1].Position).Len() < 1.2-1e-8 {
-		t.Fatal("partners did not soft separate")
+		t.Fatal("robots did not soft separate")
 	}
 	s.damage(1, &s.robots[1], 12)
-	closeFloat(t, s.robots[1].HP, 100)
-	s.Respawn(1)
-	s.Tick()
-	if s.PartnerID(1) != 2 {
-		t.Fatal("pair changed after respawn")
+	closeFloat(t, s.robots[1].HP, 88)
+	obs, ok := s.WorldView().Observe(1)
+	if !ok || obs.PartnerID != 0 || obs.IsPartner(2) {
+		t.Fatalf("live partner mechanism remains: %+v", obs)
 	}
 	sink := &recordingSink{}
 	s = NewSim(1, []uint32{1}, sink)
@@ -663,9 +774,8 @@ func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 	old.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] = 999
 	old.Robots[0].HpX10 = 0
 	old.Uplinks[0].PersonalCDs[1] = 99
-	old.Partners[1] = 999
 	fresh := s.WorldView()
-	if fresh.Robots[0].HpX10 != 1000 || fresh.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 || fresh.Uplinks[0].PersonalCDs[1] != 0 || fresh.Partners[1] != 2 {
+	if fresh.Robots[0].HpX10 != 1000 || fresh.Frame.Map.CoreRules.GroupWeights[PhaseOuterRing][0] != 1 || fresh.Uplinks[0].PersonalCDs[1] != 0 {
 		t.Fatal("published view aliases another view")
 	}
 	var wg sync.WaitGroup
@@ -679,7 +789,6 @@ func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 				v.Robots[0].HpX10 = 0
 				_ = s.View()
 				_ = s.RobotViews()
-				_ = s.PartnerID(1)
 				v.Observe(1)
 			}
 		}()

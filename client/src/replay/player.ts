@@ -438,7 +438,7 @@ export class ReplayPlayer {
       if (signature !== this.scoreMarkup) {
         scoreEl.replaceChildren(...rows.map((row, i) => {
           const element = scoreRow({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
-            self: false, partner: false, dead: false }, 'div', frame.finalScores !== null)
+            self: false, dead: false }, 'div', frame.finalScores !== null)
           const score = frame.scores.get(row.robot)
           if (score) {
             const detail = document.createElement('span'); detail.className = 'score-state'

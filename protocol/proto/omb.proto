@@ -7,7 +7,7 @@ option go_package = "github.com/modenicheng/oh-my-bot/server/internal/protocol/g
 // 实体 id：房间内全局唯一、单调递增 uint32。
 // 定点约定：hp/energy ×10 存 sint32，输入方向存千分比 int32——避免浮点序列化抖动。
 // AOI：Robot/Projectile 按 20m 视野+墙体遮挡裁剪（与 scan() 同一规则）；
-//      Partner 不受裁剪，恒在快照中（is_partner 标记，ADR/v0.3 §7 视野规则唯一例外）。
+//      HealthPack/Core/Uplink are public map objects; Robot/Projectile use standard AOI only.
 //      Core/Uplink 为地图对象，恒全量下发（数量小、状态稀疏变化）。
 
 import "google/protobuf/timestamp.proto";
@@ -85,7 +85,7 @@ message RobotState {
   uint32 respawn_in_s = 7; // dead=true 时有效
   string nick = 8;         // 仅 full 快照携带
   string color = 9;        // 仅 full 快照携带
-  bool is_partner = 10;    // 本机搭档（AOI 豁免，恒在场）
+  bool is_partner = 10 [deprecated = true]; // 旧客户端兼容；新对局恒 false
 }
 
 message ProjectileState {
@@ -105,6 +105,12 @@ message UplinkState {
   uint32 hacking_id = 3;     // 正在引导的 robot id（0=无人）
   sint32 progress_x10 = 4;   // 引导进度 0–8.0s ×10
   uint32 my_cooldown_s = 5;  // 本机玩家对该桩的剩余个人 CD（每玩家每桩独立 30s）
+}
+
+message HealthPackState {
+  EntityBase base = 1;
+  bool available = 2;
+  uint32 respawn_in_s = 3;
 }
 
 // 自机私有状态（不下发他机）
@@ -134,15 +140,24 @@ message SnapshotDelta {
   repeated uint32 core_gone = 12;
   repeated UplinkState uplinks = 13;
   SelfState self = 14;
+  repeated HealthPackState health_packs = 15;
 }
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
 
-message EvKill { uint32 killer = 1; uint32 victim = 2; uint32 assist = 3; Vec2 at = 4; }
+message EvKill {
+  uint32 killer = 1;
+  uint32 victim = 2;
+  uint32 assist = 3 [deprecated = true]; // 旧录像兼容；新实现使用 assists
+  Vec2 at = 4;
+  repeated uint32 assists = 5; // 按 robot id 升序，允许多人
+  bool kill_steal = 6; // 终结者本生命伤害份额严格小于 50%
+}
 message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
 message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
+message EvHeal { uint32 by = 1; uint32 id = 2; sint32 heal_x10 = 3; Vec2 at = 4; }
 message EvSay { uint32 robot = 1; string text = 2; }
 message EvHit { uint32 from = 1; uint32 to = 2; sint32 dmg = 3; } // 每次命中（含 +1 分依据）
 // 表现事件只报告已发生的攻击，客户端不从弹丸消失推断命中。
@@ -171,10 +186,12 @@ enum Title {
   PEACEMAKER = 7;       // 和平使者
   AI_IDIOT = 8;         // 人工智障
   BARRAGE = 9;          // 弹幕大师
-  BEST_PARTNER = 10;    // 最佳搭档
+  BEST_PARTNER = 10 [deprecated = true]; // 保留旧录像枚举，不再授予
   AI_REGULAR = 11;      // AI 常客
   OLD_SCHOOL = 12;      // 古法编程
   CNMB = 13;            // 充能面包：被击毁最多
+  KILL_STEAL = 14;      // 抢人头：抢头次数最多
+  HEALER = 15;          // 耐活王：累计实际回血最多
 }
 
 message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，仅下发）
@@ -235,6 +252,7 @@ message ServerEvent {
     EvProjectileImpact projectile_impact = 27;
     EvScoreboard scoreboard = 28; // 观战/回放可见；玩家同样可收（延迟 1s 内不影响作弊面）
     EvScriptLog script_log = 29; // 仅脚本 owner session 可见，不进入 Match Event Log
+    EvHeal heal = 30;
   }
 }
 

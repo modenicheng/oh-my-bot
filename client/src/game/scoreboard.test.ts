@@ -57,8 +57,10 @@ describe('authoritative scoreboard', () => {
     expect(board.display(new Map())[0]?.titles).toEqual([])
   })
 
-  it('maps all thirteen settlement titles and ignores unknown ids', () => {
-    expect(Array.from({ length: 13 }, (_, i) => titleName(i + 1)).every(Boolean)).toBe(true)
-    expect(titleName(999)).toBe('')
+  it('maps active settlement titles while hiding deprecated BEST_PARTNER', () => {
+    const active = [...Array.from({ length: 9 }, (_, i) => i + 1), 11, 12, 13, 14, 15]
+    expect(active.every((id) => titleName(id as Title).length > 0)).toBe(true)
+    expect(titleName(Title.BEST_PARTNER)).toBe('')
+    expect(titleName(999 as Title)).toBe('')
   })
 })

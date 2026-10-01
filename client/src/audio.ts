@@ -6,7 +6,7 @@ import { bgm } from './music/bgm'
 
 export type SoundCue =
   | 'shot' | 'hit' | 'shieldHit' | 'wallHit' | 'dash' | 'shieldOn' | 'shieldOff'
-  | 'coreSpawn' | 'corePickup' | 'uplinkEnter' | 'uplinkStart' | 'uplinkCancel' | 'uplinkSuccess'
+  | 'coreSpawn' | 'corePickup' | 'healthPickup' | 'uplinkEnter' | 'uplinkStart' | 'uplinkCancel' | 'uplinkSuccess'
   | 'matchStart' | 'matchEnd' | 'phase' | 'innerOpen' | 'countdownWarning' | 'countdownTick'
   | 'respawn' | 'death' | 'assist' | 'deny' | 'hover' | 'click'
 
@@ -37,6 +37,11 @@ const CUE: Record<SoundCue, Note[]> = {
     { t: 'sine', f: 880, d: 0.2, g: 0.28, at: 0.2 },
   ],
   corePickup: [{ t: 'square', f: 784, d: 0.06, g: 0.19 }, { t: 'triangle', f: 1047, d: 0.1, g: 0.27, at: 0.05 }],
+  healthPickup: [
+    { t: 'triangle', f: 392, to: 523, d: 0.12, g: 0.18, filter: { type: 'lowpass', f: 1500 } },
+    { t: 'sine', f: 659, to: 988, d: 0.18, g: 0.24, at: 0.06 },
+    { t: 'sine', f: 1319, d: 0.08, g: 0.12, at: 0.18 },
+  ],
   uplinkEnter: [{ t: 'sine', f: 220, to: 262, d: 0.16, g: 0.24 }],
   uplinkStart: [{ t: 'square', f: 980, to: 1245, d: 0.09, g: 0.2 }],
   uplinkCancel: [{ t: 'square', f: 620, to: 300, d: 0.14, g: 0.2 }],
@@ -74,7 +79,7 @@ const CUE: Record<SoundCue, Note[]> = {
 
 const PRIORITY_CUES = new Set<SoundCue>([
   'innerOpen', 'countdownWarning', 'countdownTick', 'matchStart', 'matchEnd',
-  'uplinkEnter', 'uplinkStart', 'uplinkCancel', 'uplinkSuccess', 'corePickup', 'respawn', 'assist', 'deny',
+  'uplinkEnter', 'uplinkStart', 'uplinkCancel', 'uplinkSuccess', 'corePickup', 'healthPickup', 'respawn', 'assist', 'deny',
 ])
 const AMBIENT_VOICES = 24
 const MAX_VOICES = 32

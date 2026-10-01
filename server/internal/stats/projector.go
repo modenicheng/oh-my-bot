@@ -16,15 +16,6 @@ const (
 	ScoreHit    int32 = 1
 )
 
-// BEST_PARTNER pair cooperation score weights (v1 stats definition, see
-// titles.go): every kill by a duo member contributes pairCoopKill; a kill
-// whose assist IS the killer's partner (shared assist, v0.3 §7) additionally
-// contributes pairCoopMutualAssist.
-const (
-	pairCoopKill         int32 = 1
-	pairCoopMutualAssist int32 = 2
-)
-
 // movementSlack widens the per-interval physical distance cap (sim.MaxSpeed
 // over the elapsed ticks) so float rounding can never reject a legit delta;
 // teleports (respawn without a seen EvRespawn) still exceed it.
@@ -40,6 +31,8 @@ type robotStats struct {
 	kills        int32
 	deaths       int32
 	assists      int32
+	killSteals   int32
+	healedX10    int32
 	hitsLanded   int32 // EvHit `from` count — v1 BARRAGE proxy for shots
 	cores        int32
 	uplinks      int32
@@ -53,6 +46,8 @@ type robotStats struct {
 	snippetUses int32
 
 	killsAt        uint32
+	killStealsAt   uint32
+	healedAt       uint32
 	deathsAt       uint32
 	hitsAt         uint32
 	coresAt        uint32
@@ -74,13 +69,6 @@ type robotStats struct {
 	maxSurvAt    uint32
 }
 
-type pairKey struct{ lo, hi uint32 }
-
-type pairCoop struct {
-	score int32
-	at    uint32 // tick of the last score increment (first-achiever tie-break)
-}
-
 // ProjectorImpl is the v1 Projector. It is a sequential, single-goroutine
 // consumer (same threading contract as sim.EventSink): glue feeds it from the
 // room/sim loop; tests feed it synchronously. It doubles as a
@@ -89,13 +77,9 @@ type pairCoop struct {
 type ProjectorImpl struct {
 	robots map[uint32]*robotStats
 
-	// Glue-injected side tables (after EvMatchStart). The JSONL log has no
-	// partner/identity payload, so replay recalculation re-injects them via
-	// ReadReplayOptions; See completion report.
-	players  map[uint32]uint64
-	nicks    map[uint32]string
-	partners map[uint32]uint32
-	pairs    map[pairKey]*pairCoop
+	// Glue-injected identity tables (after EvMatchStart).
+	players map[uint32]uint64
+	nicks   map[uint32]string
 
 	seen map[string]struct{} // event dedup (tick + kind + payload)
 
@@ -119,12 +103,10 @@ var (
 // NewProjector creates an empty projector for one match.
 func NewProjector() *ProjectorImpl {
 	return &ProjectorImpl{
-		robots:   make(map[uint32]*robotStats),
-		players:  make(map[uint32]uint64),
-		nicks:    make(map[uint32]string),
-		partners: make(map[uint32]uint32),
-		pairs:    make(map[pairKey]*pairCoop),
-		seen:     make(map[string]struct{}),
+		robots:  make(map[uint32]*robotStats),
+		players: make(map[uint32]uint64),
+		nicks:   make(map[uint32]string),
+		seen:    make(map[string]struct{}),
 	}
 }
 
@@ -145,16 +127,9 @@ func (p *ProjectorImpl) SetNickMap(m map[uint32]string) {
 	}
 }
 
-// SetPartnerMap injects the fixed random pairing (v0.3 §7: fixed for the whole match, cannot hurt each other, shared assists).
-// It is bidirectional glue data, absent from the event log by design; both the
-// live projector and ReadReplay receive the same map, keeping
-// "replay recalculation = live projection" exact for BEST_PARTNER.
-func (p *ProjectorImpl) SetPartnerMap(m map[uint32]uint32) {
-	p.partners = make(map[uint32]uint32, len(m))
-	for k, v := range m {
-		p.partners[k] = v
-	}
-}
+// SetPartnerMap is retained as a no-op for callers and legacy replay options.
+// Live matches no longer have partner mechanics or BEST_PARTNER settlement.
+func (p *ProjectorImpl) SetPartnerMap(map[uint32]uint32) {}
 
 func (p *ProjectorImpl) robot(id uint32) *robotStats {
 	if r, ok := p.robots[id]; ok {
@@ -209,6 +184,12 @@ func (p *ProjectorImpl) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 			r.score += ScoreHit
 			r.hitsLanded++
 			r.hitsAt = tick
+		}
+	case *ombv1.ServerEvent_Heal:
+		if e := k.Heal; e != nil && e.HealX10 > 0 {
+			r := p.robot(e.By)
+			r.healedX10 += e.HealX10
+			r.healedAt = tick
 		}
 	case *ombv1.ServerEvent_Respawn:
 		if e := k.Respawn; e != nil {
@@ -277,27 +258,21 @@ func (p *ProjectorImpl) onKill(tick uint32, e *ombv1.EvKill) {
 		killer.kills++
 		killer.killsAt = tick
 		killer.score += ScoreKill
-		if e.Assist != 0 && e.Assist != e.Killer {
-			a := p.robot(e.Assist)
+		assists := e.Assists
+		if len(assists) == 0 && e.Assist != 0 {
+			assists = []uint32{e.Assist} // legacy replay compatibility
+		}
+		for _, assist := range assists {
+			if assist == 0 || assist == e.Killer {
+				continue
+			}
+			a := p.robot(assist)
 			a.assists++
 			a.score += ScoreAssist
 		}
-		// BEST_PARTNER: kills by a duo member (+1), mutual assist bonus (+2).
-		if partner, ok := p.partners[e.Killer]; ok && partner != e.Killer {
-			pk := pairKey{lo: e.Killer, hi: partner}
-			if pk.lo > pk.hi {
-				pk.lo, pk.hi = pk.hi, pk.lo
-			}
-			pc := p.pairs[pk]
-			if pc == nil {
-				pc = &pairCoop{}
-				p.pairs[pk] = pc
-			}
-			pc.score += pairCoopKill
-			if e.Assist != 0 && e.Assist == partner {
-				pc.score += pairCoopMutualAssist
-			}
-			pc.at = tick
+		if e.KillSteal {
+			killer.killSteals++
+			killer.killStealsAt = tick
 		}
 	}
 }
@@ -442,7 +417,7 @@ func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
 	switch k := ev.Kind.(type) {
 	case *ombv1.ServerEvent_Kill:
 		if e := k.Kill; e != nil {
-			return fmt.Sprintf("%d|k|%d|%d|%d", tick, e.Killer, e.Victim, e.Assist)
+			return fmt.Sprintf("%d|k|%d|%d|%d|%v|%t", tick, e.Killer, e.Victim, e.Assist, e.Assists, e.KillSteal)
 		}
 	case *ombv1.ServerEvent_CorePickup:
 		if e := k.CorePickup; e != nil {
@@ -455,6 +430,10 @@ func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
 	case *ombv1.ServerEvent_Hit:
 		if e := k.Hit; e != nil {
 			return fmt.Sprintf("%d|h|%d|%d|%d", tick, e.From, e.To, e.Dmg)
+		}
+	case *ombv1.ServerEvent_Heal:
+		if e := k.Heal; e != nil {
+			return fmt.Sprintf("%d|heal|%d|%d|%d", tick, e.By, e.Id, e.HealX10)
 		}
 	case *ombv1.ServerEvent_Respawn:
 		if e := k.Respawn; e != nil {
