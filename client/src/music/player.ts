@@ -48,10 +48,16 @@ interface VoiceNodes {
 }
 
 export interface StageSwitch {
-  /** Seconds for the fade. <= 0.005 uses a 5ms cut starting on the bar line. */
+  /** Seconds for the fade. <= 0.005 uses a 5ms cut starting on the grid line. */
   fade?: number;
-  /** Quantize to a bar with sufficient fade lead (default); false skips the wait. */
-  quantize?: boolean;
+  /**
+   * Quantize the switch onto the musical grid using AudioContext.currentTime
+   * and the tune's tempo (default). The fade centres on the next beat line at
+   * least half a beat away — scheduled early so the boundary is never missed —
+   * which keeps the wait under 1.5 beats, well inside one bar. `'bar'` targets
+   * bar lines instead; `false` starts after a short scheduling lead.
+   */
+  quantize?: boolean | 'bar';
 }
 
 const SPACE_SECONDS = 1.7;
@@ -67,6 +73,14 @@ const DRIFT_BASE = 0.22;
 const DRIFT_PER_SPACE = 0.35;
 /** Minimum de-click ramp; cuts start at the boundary rather than straddling it. */
 const CUT_SECONDS = 0.005;
+/** Hard floor for scheduling anything into the audio future. */
+const SCHEDULE_LEAD = 0.02;
+/** Timer handles work in the browser and under Node test runners alike. */
+const timers: Window = typeof window !== 'undefined'
+    ? window
+    : (globalThis as unknown as Window);
+const setTimer = (fn: () => void, ms: number): number => timers.setTimeout(fn, ms) as unknown as number;
+const clearTimer = (id: number): void => { timers.clearTimeout(id as unknown as ReturnType<typeof setTimeout>) };
 
 export class ChipMusic {
   private ctx: AudioContext | null = null;
@@ -94,6 +108,10 @@ export class ChipMusic {
   private startedAt = 0;
   private pausedFrame = 0;
   private switchTimer: number | null = null;
+  /** Target of the in-flight quantized switch; the latest request wins. */
+  private pending: StageId | null = null;
+  /** Absolute audio time at which the pending switch settles. */
+  private switchEnd = 0;
   /** Notified once the switch settles; paused selections settle immediately. */
   onStage: ((stage: StageId) => void) | null = null;
 
@@ -124,6 +142,16 @@ export class ChipMusic {
 
   get stage(): StageId {
     return this.render?.stages[this.stageIndex] ?? 'title';
+  }
+
+  /** Stage a quantized switch is currently ramping towards, if any. */
+  get pendingStage(): StageId | null {
+    return this.pending;
+  }
+
+  /** Absolute audio time when the pending switch settles; null when none. */
+  get switchEndsAt(): number | null {
+    return this.pending === null ? null : this.switchEnd;
   }
 
   /** Frames into the loop, whether playing or parked. */
@@ -166,8 +194,12 @@ export class ChipMusic {
       return this.ctx;
     }
     try {
-      const Ctor: typeof AudioContext =
-        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const scope = typeof window !== 'undefined'
+        ? window
+        : (globalThis as unknown as { AudioContext?: typeof AudioContext });
+      const Ctor = scope?.AudioContext
+        ?? (scope as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
       this.wire(new Ctor({ latencyHint: 'interactive' }));
       this.ownsContext = true;
     } catch {
@@ -299,8 +331,12 @@ export class ChipMusic {
   }
 
   /**
-   * Change stage without restarting sources. Musical fades are centred on a bar
-   * with enough lead time for the entire fade; late requests wait another bar.
+   * Change stage without restarting sources. Switches are quantized onto the
+   * musical grid: the fade centres on the next beat (or bar) line at least
+   * half a beat away, scheduled from AudioContext.currentTime and the tune's
+   * tempo, so the boundary is never missed and the wait stays under one bar.
+   * A request landing mid-fade replaces the pending one — only the latest
+   * scene survives — and `onStage` reports what actually settled.
    * Unquantized fades start after a short scheduling lead. Returns milliseconds
    * until the scheduled end (assuming the audio clock keeps running).
    */
@@ -309,29 +345,35 @@ export class ChipMusic {
     const ctx = this.ctx;
     if (!render) return 0;
     const index = render.stages.indexOf(stage);
-    if (index < 0 || index === this.stageIndex) return 0;
+    if (index < 0) return 0;
 
     this.cancelSwitchTimer();
-    this.stageIndex = index;
-    if (!ctx || !this.playing) {
+    if (!ctx || !this.playing || index === this.stageIndex) {
+      // No live fade in flight: adopt the selection outright. A paused player
+      // applies it the next time it plays, so stale scenes never surface after
+      // suspend/resume or mute toggles.
+      this.pending = null;
+      this.stageIndex = index;
       this.onStage?.(stage);
       return 0;
     }
 
     const fade = Math.max(CUT_SECONDS, options.fade ?? 0.05);
     const active = ctx.currentTime;
-    const earliest = active + 0.02;
+    const earliest = active + SCHEDULE_LEAD;
     let start = earliest;
     if (options.quantize !== false) {
-      const barSeconds = render.frames / render.sampleRate / render.bars;
-      let at = this.nextBarTime();
-      if (fade > CUT_SECONDS) {
-        const shortfall = earliest + fade / 2 - at;
-        if (shortfall > 0) at += Math.ceil(shortfall / barSeconds) * barSeconds;
-        start = at - fade / 2;
-      } else {
-        start = at;
-      }
+      const beat = 60 / render.bpm;
+      const gridSeconds = options.quantize === 'bar' ? beat * render.beatsPerBar : beat;
+      // Next grid line with enough lead: half a beat in beat mode (so the ramp
+      // is fully inside the audio clock's future and never misses the
+      // boundary, bounding the wait by 1.5 beats), the scheduling floor in
+      // bar mode (bounding the wait by one bar).
+      let at = this.gridTime(gridSeconds);
+      if (at - active < (options.quantize === 'bar' ? SCHEDULE_LEAD : beat / 2)) at += gridSeconds;
+      const shortfall = earliest + fade / 2 - at;
+      if (shortfall > 0) at += Math.ceil(shortfall / gridSeconds) * gridSeconds;
+      start = Math.max(active + CUT_SECONDS, at - fade / 2);
     }
     const end = start + fade;
 
@@ -360,18 +402,24 @@ export class ChipMusic {
       }
     }
 
+    this.stageIndex = index;
+    this.pending = stage;
+    this.switchEnd = end;
     const delay = Math.max(0, (end - active) * 1000);
     const settled = () => {
       const remaining = (end - ctx.currentTime) * 1000;
       if (remaining > 0) {
-        // Timers keep running when the audio context is suspended.
-        this.switchTimer = window.setTimeout(settled, Math.max(10, remaining));
+        // Timers keep running when the audio clock is suspended; re-check on wake.
+        this.switchTimer = setTimer(settled, Math.max(10, remaining));
         return;
       }
       this.switchTimer = null;
-      this.onStage?.(stage);
+      if (this.pending === stage) {
+        this.pending = null;
+        this.onStage?.(stage);
+      }
     };
-    this.switchTimer = window.setTimeout(settled, delay);
+    this.switchTimer = setTimer(settled, delay);
     return delay;
   }
 
@@ -425,17 +473,28 @@ export class ChipMusic {
   /** Absolute audio-context time of the next bar, with at least 50ms lead. */
   nextBarTime(): number {
     const render = this.render;
+    if (!render) return 0;
+    return this.gridTime(render.frames / render.sampleRate / render.bars);
+  }
+
+  /**
+   * Absolute audio-context time of the next grid line (beat/bar/step), with at
+   * least 50ms of scheduling lead. Derived purely from `AudioContext.currentTime`,
+   * the loop origin and the tempo, so it never drifts from the audio clock.
+   */
+  gridTime(gridSeconds: number): number {
+    const render = this.render;
     const ctx = this.ctx;
     if (!render || !ctx) return 0;
-    const barSeconds = render.frames / render.sampleRate / render.bars;
     const origin = this.playing ? this.startedAt : ctx.currentTime - this.pausedFrame / render.sampleRate;
-    const bars = Math.floor((ctx.currentTime + 0.05 - origin) / barSeconds) + 1;
-    return origin + bars * barSeconds;
+    const steps = Math.floor((ctx.currentTime + 0.05 - origin) / gridSeconds) + 1;
+    return origin + steps * gridSeconds;
   }
 
   private cancelSwitchTimer(): void {
-    if (this.switchTimer !== null) window.clearTimeout(this.switchTimer);
+    if (this.switchTimer !== null) clearTimer(this.switchTimer);
     this.switchTimer = null;
+    this.pending = null;
   }
 
   private startVoices(startFrame: number, fade: number): void {

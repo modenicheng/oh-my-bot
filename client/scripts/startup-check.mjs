@@ -214,6 +214,19 @@ try {
   await entered(scoring)
   await scoring.waitForFunction(() => window.__musicSources.filter(entry => entry.source.loop && entry.started && !entry.stopped).length > 0)
   const weights = () => scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop && !entry.stopped).map(entry => entry.gain.value.toFixed(3)).join(','))
+  /** Wait (bounded) until stage gains settle to new values — quantized switches
+   *  land on the next beat (≤1.5 beats ≈ 0.81s @ 112bpm), so poll for the
+   *  change instead of sleeping a fixed second. */
+  const waitForWeights = async (before, label) => {
+    let current = ''
+    for (let i = 0; i < 40; i++) {
+      current = await weights()
+      if (current !== before) break
+      await scoring.waitForTimeout(100)
+    }
+    assert.notEqual(current, before, label)
+    return current
+  }
   const titleWeights = await weights()
   const loopsBefore = await scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop).length)
   assert.ok(await scoring.evaluate(() => window.__musicSources.some(entry => entry.source.loop && entry.source.buffer.getChannelData(0).some(sample => Math.abs(sample) > 0.001))), 'music contains rendered audio')
@@ -229,14 +242,11 @@ try {
   assert.equal(await scoring.locator('#hud-score-rows .score-row').count(), 3)
   assert.equal(await scoring.locator('#hud-score-rows .score-name').first().textContent(), '<b>NO HTML</b>')
   assert.equal(await scoring.locator('#hud-score-rows b').count(), 0)
-  await scoring.waitForTimeout(1000)
-  const outerWeights = await weights()
-  assert.notEqual(outerWeights, titleWeights, 'outer ring selects arena stage')
+  const outerWeights = await waitForWeights(titleWeights, 'outer ring selects arena stage')
   snapshot('SCOR', 120, 2)
   event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 120, rows: [{ robot: 101, score: 80 }, { robot: 202, score: 25 }, { robot: 303, score: 10 }] }, 120)
   await scoring.waitForFunction(() => document.querySelector('#hud-self-score strong')?.textContent === '80')
-  await scoring.waitForTimeout(1000)
-  assert.notEqual(await weights(), outerWeights, 'inner ring selects final stage')
+  await waitForWeights(outerWeights, 'inner ring selects final stage')
   assert.equal(await scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop).length), loopsBefore, 'stage changes do not restart looping sources')
   await scoring.screenshot({ path: resolve(shots, 'score-hud.png') })
   const final = { scores: [{ robot: 101, score: 99, titles: [Title.WAR_MACHINE, Title.BEST_PARTNER] }, { robot: 202, score: 25 }] }
@@ -251,7 +261,10 @@ try {
   await scoring.screenshot({ path: resolve(shots, 'settlement.png') })
   await scoring.locator('.end-back').click()
   await scoring.locator('#view-room').waitFor({ state: 'visible' })
-  await scoring.waitForTimeout(1000)
+  for (let i = 0; i < 40; i++) {
+    if (await weights() === titleWeights) break
+    await scoring.waitForTimeout(100)
+  }
   assert.equal(await weights(), titleWeights, 'returning to lobby restores title stage')
   await scoring.locator('#audio-settings summary').click()
   await scoring.locator('#audio-mute').click()
