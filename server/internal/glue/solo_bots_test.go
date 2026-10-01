@@ -1,6 +1,7 @@
 package glue
 
 import (
+	"math"
 	"os"
 	"reflect"
 	"testing"
@@ -288,5 +289,83 @@ func TestSoloBotActuallyCollectsCoreAndCompletesHack(t *testing.T) {
 	}
 	if cores != 1 || hacks != 1 {
 		t.Fatalf("actual objectives: %d cores, %d uplinks; robot=%+v", cores, hacks, world.Snapshot().Robots[0])
+	}
+}
+
+// 主动避障：机器人与目标之间隔一堵墙时，不得持续朝墙直行；
+// 必须选择切向绕行向量（与直行方向有显著夹角）。
+func TestSoloBotSteersAroundWall(t *testing.T) {
+	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+	defer rt.Close()
+	if err := rt.Load(soloBotSource(3)); err != nil {
+		t.Fatal(err)
+	}
+	// 机器人位于 (0,-5)，目标核心在 (0,5)，中间横亘一堵墙 y∈[-1,1]。
+	frame := sim.ScriptFrame{
+		Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 0, Y: -5}, HpX10: 1000, EnergyX10: 1000},
+		Obs: sim.Observation{
+			Frame: sim.FrameView{Phase: sim.PhaseOuterRing, Map: &sim.MapDef{
+				Seed: 42,
+				Walls: []sim.Wall{
+					{ID: 1, Min: sim.Vec2{X: -8, Y: -1}, Max: sim.Vec2{X: 8, Y: 1}},
+				},
+			}},
+			Cores: []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 0, Y: 5}, Alive: true}},
+		},
+	}
+	run := func() sim.ScriptCommands {
+		t.Helper()
+		cmd, err := rt.Tick(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame.Obs.Frame.Tick++
+		return soloBotCommands(cmd)
+	}
+	first := run()
+	if first.Move.Y > 0.5 {
+		t.Fatalf("bot drives straight into wall: %+v", first.Move)
+	}
+	// 直行方向 (0,1) 与实际移动方向的夹角应显著（>30°），说明已绕行。
+	ang := math.Atan2(first.Move.Y, first.Move.X)
+	if math.Abs(ang-math.Pi/2) < 30*math.Pi/180 {
+		t.Fatalf("no meaningful steering: %+v ang=%v", first.Move, ang)
+	}
+	// 持续行进不回退到直行顶墙：模拟多帧位置推进，方向始终有横向分量。
+	pos := frame.Self.Pos
+	for i := 0; i < 40; i++ {
+		frame.Self.Pos = sim.Vec2{X: pos.X + first.Move.X*0.5*float64(i+1), Y: pos.Y + first.Move.Y*0.5*float64(i+1)}
+		c := run()
+		if c.Move.Len() == 0 {
+			continue
+		}
+		// 越过墙的 y 区间前，不得出现几乎纯 +Y 的持续顶墙。
+		if frame.Self.Pos.Y < -1.6 && c.Move.Y > 0.9 && math.Abs(c.Move.X) < 0.45 {
+			t.Fatalf("bot reverts to head-on wall pushing at %v: %+v", frame.Self.Pos, c.Move)
+		}
+	}
+}
+
+// 锁区关闭时贴边绕行不因新增避障逻辑退化：无墙场景直行不受影响。
+func TestSoloBotNoWallStillDirect(t *testing.T) {
+	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+	defer rt.Close()
+	if err := rt.Load(soloBotSource(3)); err != nil {
+		t.Fatal(err)
+	}
+	frame := sim.ScriptFrame{
+		Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 0, Y: 0}, HpX10: 1000, EnergyX10: 1000},
+		Obs: sim.Observation{
+			Frame: sim.FrameView{Phase: sim.PhaseCoreOpen, Map: &sim.MapDef{Seed: 42}},
+			Cores: []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 30, Y: 0}, Alive: true}},
+		},
+	}
+	cmd, err := rt.Tick(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := soloBotCommands(cmd)
+	if c.Move.X < 0.9 || math.Abs(c.Move.Y) > 0.1 {
+		t.Fatalf("open-field direct movement regressed: %+v", c.Move)
 	}
 }

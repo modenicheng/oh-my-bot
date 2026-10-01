@@ -64,6 +64,7 @@ const OBSERVATION_MEMBERS: CompletionSeed[] = [
   { label: 'cores', insert: 'cores', kind: 'property', detail: 'cores: Vec2[] — 可见核心' },
   { label: 'uplinks', insert: 'uplinks', kind: 'property', detail: 'uplinks: — 可见上行桩（ready/holder）' },
   { label: 'projectiles', insert: 'projectiles', kind: 'property', detail: 'projectiles: Vec2[] — 可见弹体' },
+  { label: 'walls', insert: 'walls', kind: 'property', detail: 'walls: WallRef[] — 静态墙 AABB（公开全量，不随视野裁剪）' },
 ]
 
 // 标识符前缀 / 空白处触发的顶层种子。TS worker 已能补全被推断的成员；

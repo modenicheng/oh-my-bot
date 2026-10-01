@@ -6,13 +6,18 @@ export interface Vec2 { x: number; y: number }
 
 export interface RobotRef { id: number; position: Vec2; hp: number }
 
-/** scan() 返回的感知快照：服务器按视野+墙体遮挡裁剪后的可见实体。 */
+/** 静态墙 AABB（公开地图结构，不随视野/遮挡裁剪；与碰撞几何一致，只读）。 */
+export interface WallRef { id: number; min: Vec2; max: Vec2 }
+
+/** scan() 返回的感知快照：动态实体按视野+墙体遮挡裁剪；walls 为静态公开全量。 */
 export interface Observation {
   tick: number
   robots: (RobotRef & { isPartner: boolean })[]
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
   projectiles: (Vec2 & { id: number })[]
+  /** 静态墙列表（可能为空数组，不会为 undefined）。修改返回值不影响地图。 */
+  walls: WallRef[]
 }
 
 export interface Self {
