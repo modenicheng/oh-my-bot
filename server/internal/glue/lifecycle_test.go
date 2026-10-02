@@ -320,8 +320,11 @@ func TestSkillStateAndConfirmedShotSurviveReconnect(t *testing.T) {
 	m.step()
 	msgs := log.take()
 	snap := lastSnapshot(t, msgs)
-	if snap.Self.GetDashReadyTick() <= snap.Tick || snap.Self.GetFireReadyTick() <= snap.Tick {
-		t.Fatalf("accepted skills missing authoritative cooldown: %v", snap.Self)
+	// Sustained Dash has no future cooldown in simulation v2: an accepted held
+	// Dash reports the current authoritative tick, while fire still reports its
+	// next ready tick. Both values must survive reconnect below.
+	if snap.Self.GetDashReadyTick() != snap.Tick || snap.Self.GetFireReadyTick() <= snap.Tick {
+		t.Fatalf("accepted skills missing authoritative state: tick=%d self=%v", snap.Tick, snap.Self)
 	}
 	shot := false
 	for _, msg := range msgs {
