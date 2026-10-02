@@ -16,3 +16,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Buf packages may already be pinned before Dependabot's default 3-day
+    # cooldown expires; excluding the scope lets pnpm regenerate the lockfile.
+    cooldown:
+      exclude:
+        - "@bufbuild/*"
