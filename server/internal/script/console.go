@@ -15,11 +15,6 @@ import (
 const (
 	maxConsoleMessageBytes       = 1024
 	maxConsoleArgs               = 32
-	maxConsoleMessagesTick       = 12
-	maxConsoleBytesTick          = 4 * 1024
-	maxConsoleMessagesSec        = 40
-	maxConsoleBytesSec           = 16 * 1024
-	maxConsoleBuffered           = 128
 	maxConsoleSnapshotDepth      = 4
 	maxConsoleSnapshotProperties = 48
 	maxConsolePropertyNameBytes  = 64
@@ -41,18 +36,7 @@ type ScriptLog struct {
 type consoleState struct {
 	revision uint32
 	tick     uint32
-
-	tickMessages int
-	tickBytes    int
-	secStartTick uint32
-	secMessages  int
-	secBytes     int
-
-	droppedMessages int
-	droppedBytes    int
-	noticeTick      uint32
-	noticeSent      bool
-	entries         []ScriptLog
+	entries  []ScriptLog
 }
 
 func (c *consoleState) reset(revision uint32) {
@@ -61,58 +45,20 @@ func (c *consoleState) reset(revision uint32) {
 
 func (c *consoleState) beginTick(tick uint32) {
 	c.tick = tick
-	c.tickMessages = 0
-	c.tickBytes = 0
-	if tick < c.secStartTick || tick-c.secStartTick >= 60 {
-		c.secStartTick = tick
-		c.secMessages = 0
-		c.secBytes = 0
-	}
 }
 
 func (c *consoleState) append(level, text string, truncated bool) {
-	bytes := len(text)
-	if c.tickMessages >= maxConsoleMessagesTick || c.tickBytes+bytes > maxConsoleBytesTick ||
-		c.secMessages >= maxConsoleMessagesSec || c.secBytes+bytes > maxConsoleBytesSec ||
-		len(c.entries) >= maxConsoleBuffered {
-		c.droppedMessages++
-		c.droppedBytes += bytes
-		return
-	}
-	c.tickMessages++
-	c.tickBytes += bytes
-	c.secMessages++
-	c.secBytes += bytes
 	c.entries = append(c.entries, ScriptLog{
 		Revision: c.revision, Tick: c.tick, Level: level, Text: text, Truncated: truncated,
 	})
 }
 
 func (c *consoleState) drain() []ScriptLog {
-	emitNotice := c.droppedMessages > 0 && (!c.noticeSent || c.tick < c.noticeTick || c.tick-c.noticeTick >= 60)
-	n := len(c.entries)
-	if emitNotice {
-		n++
-	}
-	if n == 0 {
+	if len(c.entries) == 0 {
 		return nil
 	}
-	out := make([]ScriptLog, 0, n)
-	out = append(out, c.entries...)
-	if emitNotice {
-		out = append(out, ScriptLog{
-			Revision:  c.revision,
-			Tick:      c.tick,
-			Level:     "warn",
-			Text:      fmt.Sprintf("console limit reached: dropped %d message(s), %d byte(s)", c.droppedMessages, c.droppedBytes),
-			Truncated: true,
-		})
-		c.droppedMessages = 0
-		c.droppedBytes = 0
-		c.noticeTick = c.tick
-		c.noticeSent = true
-	}
-	c.entries = c.entries[:0]
+	out := c.entries
+	c.entries = make([]ScriptLog, 0, 16)
 	return out
 }
 

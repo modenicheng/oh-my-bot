@@ -474,8 +474,8 @@ function tick(bot) {
 	}
 }
 
-func TestConsoleFloodIsBoundedAndReportsDrops(t *testing.T) {
-	rt := NewGojaRuntime(Config{})
+func TestConsoleFloodPreservesAllRuntimeLogs(t *testing.T) {
+	rt := NewGojaRuntime(Config{TickTimeout: time.Second})
 	defer rt.Close()
 	if err := rt.Load(`function tick(bot){ for (let i=0; i<1000; i++) console.debug("m"+i); bot.fire(); }`); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -485,12 +485,11 @@ func TestConsoleFloodIsBoundedAndReportsDrops(t *testing.T) {
 		t.Fatalf("flood must not break commands: cmds=%+v err=%v", cmds, err)
 	}
 	logs := rt.DrainLogs()
-	if len(logs) != maxConsoleMessagesTick+1 {
-		t.Fatalf("want %d bounded entries plus notice, got %d", maxConsoleMessagesTick, len(logs))
+	if len(logs) != 1000 {
+		t.Fatalf("want all 1000 runtime logs, got %d", len(logs))
 	}
-	last := logs[len(logs)-1]
-	if !last.Truncated || last.Level != "warn" || !strings.Contains(last.Text, "dropped 988 message(s)") {
-		t.Fatalf("missing drop notice: %+v", last)
+	if logs[0].Text != "m0" || logs[len(logs)-1].Text != "m999" {
+		t.Fatalf("runtime log order mismatch: first=%+v last=%+v", logs[0], logs[len(logs)-1])
 	}
 }
 
