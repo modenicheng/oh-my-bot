@@ -35,6 +35,7 @@ type ControlState struct {
 	Human         ArbitratedInput `json:"human"`
 	Script        ArbitratedInput `json:"script"`
 	ScriptAxes    AxisMask        `json:"script_axes"`
+	SnippetAxes   AxisMask        `json:"snippet_axes"` // 本 tick 脚本意图中由 Snippet 产生的轴（回放确定性保留）
 	Output        ArbitratedInput `json:"output"`
 	PendingScript *ScriptCommands `json:"pending_script,omitempty"`
 	PendingSay    string          `json:"pending_say,omitempty"`

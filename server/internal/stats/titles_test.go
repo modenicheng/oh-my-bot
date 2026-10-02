@@ -273,9 +273,9 @@ func TestTitleAiRegular(t *testing.T) {
 	}
 }
 
-// 12. OLD_SCHOOL — zero AI rounds and zero snippet usage. v1 has no snippet
-// event source (snippet runtime unimplemented), so the snippet gate holds at
-// zero by construction — asserted structurally here.
+// 12. OLD_SCHOOL — zero AI rounds and zero snippet usage. Snippet usage is fed
+// by real EvSnippetUsage telemetry (see snippet_titles_test.go); configuration
+// alone never blocks the title.
 func TestTitleOldSchool(t *testing.T) {
 	p := NewProjector()
 	p.OnEvent(10, aiUsage(10, 1, 2)) // r1 uses AI → disqualified

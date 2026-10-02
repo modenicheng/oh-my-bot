@@ -7,11 +7,11 @@ tags: [脚本, L1]
 
 # 便利层参考（L1）
 
-L1 是 6 个常用组合动作，帮你省掉重复样板代码。它们最终都落到 [L0 原语](actions.md)上——比如 `moveTo` 内部就是归一化的 `move`。
+L1 是 7 个常用便利方法，帮你省掉重复样板代码。大多数直接组合 [L0 原语](actions.md)；`navigateTo` 由服务器计算确定性的静态 A* 路径，再输出移动意图。
 
 ## moveTo(pos)
 
-**做什么**：朝目标点移动。内部把"我到目标点的连线"归一成方向，调用 `move(dx/L, dy/L)`。
+**做什么**：沿当前位置到目标点的直线移动。内部把"我到目标点的连线"归一成方向，调用 `move(dx/L, dy/L)`；不会检查或绕开障碍。
 
 | 参数 | 类型 | 含义 |
 |---|---|---|
@@ -23,13 +23,12 @@ L1 是 6 个常用组合动作，帮你省掉重复样板代码。它们最终�
 朝最近的 Core 移动。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const core = bot.nearestCore()
-    if (core) bot.moveTo(core)
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const core = bot.nearestCore()
+  if (core) bot.moveTo(core)
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -48,7 +47,28 @@ void tick(Context bot) {
 
 **常见坑**：
 
+- 期待自动绕墙：`moveTo` 是直线移动，墙、竞技场边界或尚未开放的中央区会挡住它；需要静态寻路时用 `navigateTo`。
 - 期待"贴点停靠"：`moveTo` 只表达"朝这走"，不会自动刹车，也不保证到达。到点判定自己写——留个阈值（比如距离 < 2m 就算到了），再留一拍延迟的余量。示例库 `patrol.ts` 是标准写法。
+
+## navigateTo(pos)
+
+**做什么**：由服务器在静态地图上计算确定性的 A* 路径，并沿路径朝目标点移动。
+
+| 参数 | 类型 | 含义 |
+|---|---|---|
+| `pos` | `{ x, y }` | 目标点世界坐标 |
+
+```ts
+/** @param {import('@omb/bot-api').BotContext} bot */
+function tick(bot) {
+  const core = bot.nearestCore()
+  if (core) bot.navigateTo(core)
+}
+```
+
+**游戏规则**：寻路网格和邻居顺序由服务器固定，因此相同地图、起点、目标和阶段会产生相同路径。它避开实体墙、竞技场边界，以及 4:00 前尚未解锁的中央区；中央区开放后会按当前阶段重新寻路。资源仍靠移动接触自动拾取，没有 `pickup()`。
+
+**明确边界**：`moveTo` 是直线移动；`navigateTo` 是服务器确定性的静态 A*，避开实体墙、竞技场边界和尚未解锁的中央区；它不执行动态机器人避障、威胁评估或弹道预测。路线中的机器人可能造成拥堵或碰撞；到点和刹车仍由脚本按距离阈值控制。
 
 ## aimAt(target)
 
@@ -72,16 +92,15 @@ void tick(Context bot) {
 看到敌人才转向开火。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const enemy = bot.nearestEnemy()
-    if (enemy) {
-      bot.aimAt(enemy)
-      bot.fire()
-    }
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const enemy = bot.nearestEnemy()
+  if (enemy) {
+    bot.aimAt(enemy)
+    bot.fire()
+  }
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -115,14 +134,13 @@ void tick(Context bot) {
 全图 Core 都可见：直接朝最近的去。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const core = bot.nearestCore()
-    if (core) bot.moveTo(core)
-    else bot.move(0, 0) // 暂无 Core，原地待刷
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const core = bot.nearestCore()
+  if (core) bot.navigateTo(core)
+  else bot.move(0, 0) // 暂无 Core，原地待刷
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -152,17 +170,16 @@ void tick(Context bot) {
 接近最近激活桩并刹车引导；成功后真实冷却仍由服务器强制。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const uplink = bot.nearestUplink()
-    if (!uplink) { bot.move(0, 0); return }
-    const me = bot.self.position
-    const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
-    if (dist > 1) bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
-    else { bot.move(0, 0); bot.interact() }
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const uplink = bot.nearestUplink()
+  if (!uplink) { bot.move(0, 0); return }
+  const me = bot.self.position
+  const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
+  if (dist > 1) bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+  else { bot.move(0, 0); bot.interact() }
 }
-export default bot
 ```
 ```py
 def tick(bot):

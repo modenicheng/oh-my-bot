@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { parseFrontmatterBlock, splitFrontmatter, type ManualNode } from './manual'
+import { MOCK_DOCS, parseFrontmatterBlock, splitFrontmatter, type ManualNode } from './manual'
 import { normalizeManualTree, sortManualNodes } from './manual-order'
+
+describe('manual fallback fixtures', () => {
+  it('uses flat BotContext examples instead of legacy context aliases', () => {
+    const fixture = MOCK_DOCS['reference/actions.md']
+    expect(fixture).toContain('bot.scan()')
+    expect(fixture).toContain('bot.self.position')
+    expect(fixture).toContain('bot.aimAt')
+    expect(fixture).not.toMatch(/\bctx\.(?:api|obs)\b|\bself\.pos\b|pickup\s*\(/)
+  })
+})
 
 describe('splitFrontmatter', () => {
   it('returns no metadata for header-less and body-only docs', () => {

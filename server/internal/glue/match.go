@@ -23,6 +23,7 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/script"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 	"github.com/modenicheng/oh-my-bot/server/internal/snapshot"
+	"github.com/modenicheng/oh-my-bot/server/internal/snippet"
 	"github.com/modenicheng/oh-my-bot/server/internal/stats"
 )
 
@@ -67,6 +68,9 @@ type Match struct {
 	handle           *asyncHandle
 	startOnce        sync.Once
 
+	// ai is the room-scoped code assistant for this match; nil disables AI safely.
+	ai *AIService
+
 	tick       uint32
 	eventSeq   uint64 // projected-event identity for OnEventRecord dedup
 	warmup     bool
@@ -82,12 +86,16 @@ type SessionInfo struct {
 	Nick     string
 	Color    string
 	Bot      bool
+	// Snippets is an immutable deep-copied launch snapshot. NewMatch assembles
+	// outside rc.mu and must never read the live RoomConn.snippets map.
+	Snippets []snippet.Setting
 }
 
 // NewMatch only assembles. Publication sends bootstrap before start runs the clock.
 // seed/matchSeq 必须由调用方传入：room.HostCommand 持 room.mu 调 Launch，
 // 此处反查 Room.Seed()/SessionSeq() 会非重入死锁。
-func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo, warmup bool) (*Match, error) {
+// aiSvc 可为 nil（未配置 key）：AI 提示走禁用回执，其余链路不受影响。
+func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]SessionInfo, warmup bool, aiSvc *AIService) (*Match, error) {
 	m := &Match{
 		rc:               rc,
 		proj:             stats.NewProjector(),
@@ -101,7 +109,11 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		encoders:         map[uint32]*snapshot.DeltaEncoder{},
 		stop:             make(chan struct{}),
 		done:             make(chan struct{}),
+		ai:               aiSvc,
 	}
+
+	// The room launcher owns quota-cycle resets so warmup and its following
+	// scored match share one budget as required by ADR-0010.
 
 	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
 	def, err := mapgen.Generate(seed)
@@ -186,6 +198,9 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		m.runtimes[rid] = rt
 		m.sim.AssistToggle(rid)
 	}
+	// 房间保存的 Snippet 配置应用到新局 runtime（warmup→running、Restart
+	// 保留；snippet-only 玩家由此获得 runtime）。
+	m.applySavedSnippets(players)
 
 	return m, nil
 }
@@ -277,14 +292,6 @@ func (ms multiSink) OnControl(tick, robotID uint32, control sim.ControlRecord) {
 }
 
 var _ sim.GameplayReplaySink = multiSink{}
-
-// HandleAiPrompt v1 最小实现：AI 服务接入前的占位回执（quota 未配 key 时提示）。
-// 完整链（QuotaService→Provider→改码→ScriptSubmit）在 AI 运营配置就绪后启用。
-func (m *Match) HandleAiPrompt(pid uint64, text string) {
-	m.rc.Broadcast(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-		Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "AI agent: not configured (set DEEPSEEK_API_KEY) — prompt: " + text}},
-	}}})
-}
 
 // ForceResync 下 tick 全量快照。
 func (m *Match) ForceResync(pid uint64) {
@@ -393,6 +400,7 @@ func (m *Match) activeLocked() bool {
 func (m *Match) bootstrapLocked(s *Session) {
 	m.sendMapBootstrapLocked(s)
 	m.forceResyncLocked(s.playerID)
+	m.sendSnippetStateLocked(s)
 }
 func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(m.mapDef)
@@ -549,6 +557,9 @@ func (m *Match) step() {
 			AssistOn:      robot.Control.Assist,
 			DashReadyTick: robot.Combat.DashReady,
 			FireReadyTick: robot.Combat.FireReady,
+		}
+		if m.ai != nil && m.ai.quota != nil {
+			self.AiRounds, self.AiTokensK, _ = m.ai.quota.Snapshot(pid)
 		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
 		msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}

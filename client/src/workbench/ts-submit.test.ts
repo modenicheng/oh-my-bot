@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { INITIAL_SOURCE, INITIAL_SOURCE_TS } from './workbench'
 import {
   cleanEmittedJs,
   draftKeyFor,
@@ -10,12 +11,30 @@ import {
   pickEmitJs,
 } from './ts-submit'
 
+describe('default editor templates', () => {
+  it.each([
+    ['JavaScript', INITIAL_SOURCE],
+    ['TypeScript', INITIAL_SOURCE_TS],
+  ])('%s uses the flat BotContext API and health-pack priority', (_language, source) => {
+    expect(source).toContain('navigateTo')
+    expect(source).toContain('healthPacks')
+    expect(source).toContain('bot.scan()')
+    expect(source).toContain('bot.self.position')
+    expect(source).not.toMatch(/\bctx\.(?:api|obs)\b|\bself\.pos\b|pickup\s*\(/)
+  })
+
+  it('keeps the intended JS JSDoc and TS type import', () => {
+    expect(INITIAL_SOURCE).toContain("@param {import('@omb/bot-api').BotContext} bot")
+    expect(INITIAL_SOURCE_TS).toContain("import type { BotContext } from '@omb/bot-api'")
+  })
+})
+
 describe('cleanEmittedJs', () => {
   it('strips the export marker TS emits for type-only imports (ESNext module)', () => {
     // module: ESNext 时仅有类型导入的文件会发射 export {};，服务器
     // stripModuleSyntax 只剥关键字，不处理这种整行，必须客户端清理。
-    expect(cleanEmittedJs('export {};\nfunction tick(ctx) {\n  ctx.api.moveTo(ctx.self.pos)\n}\n')).toBe(
-      'function tick(ctx) {\n  ctx.api.moveTo(ctx.self.pos)\n}',
+    expect(cleanEmittedJs('export {};\nfunction tick(bot) {\n  bot.navigateTo(bot.self.position)\n}\n')).toBe(
+      'function tick(bot) {\n  bot.navigateTo(bot.self.position)\n}',
     )
   })
 
@@ -25,23 +44,23 @@ describe('cleanEmittedJs', () => {
   })
 
   it('keeps export keywords before declarations for the server to strip', () => {
-    const js = 'export function tick(ctx) {\n  ctx.api.shield(false)\n}\n'
-    expect(cleanEmittedJs(js)).toBe('export function tick(ctx) {\n  ctx.api.shield(false)\n}')
+    const js = 'export function tick(bot) {\n  bot.shield(false)\n}\n'
+    expect(cleanEmittedJs(js)).toBe('export function tick(bot) {\n  bot.shield(false)\n}')
   })
 
   it('does not touch object literals or destructuring that merely contain braces', () => {
-    const js = 'function tick(ctx) {\n  const { x, y } = ctx.self.pos\n  ctx.api.move(x, y)\n}\n'
+    const js = 'function tick(bot) {\n  const { x, y } = bot.self.position\n  bot.move(x, y)\n}\n'
     expect(cleanEmittedJs(js)).toBe(js.trim())
   })
 })
 
 describe('formatTsErrors', () => {
-  const source = 'import type { TickContext } from "@omb/bot-api"\n\nfunction tick(ctx: TickContext) {\n  const n: number = ctx.api.nearestCore()\n}\n'
+  const source = 'import type { BotContext } from "@omb/bot-api"\n\nfunction tick(bot: BotContext) {\n  const n: number = bot.nearestCore()\n}\n'
 
   it('reports errors at original TS line and column numbers', () => {
     // 第 3 行 “function tick(ctx: TickContext) {” 中的注解起点。
     const starts = lineStarts(source)
-    const annotationStart = source.indexOf('TickContext) {')
+    const annotationStart = source.indexOf('BotContext) {')
     const position = offsetToLineColumn(annotationStart, starts)
     expect(position.line).toBe(3)
     const lines = formatTsErrors(source, [

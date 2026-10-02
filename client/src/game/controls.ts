@@ -72,7 +72,7 @@ export class GameController {
   private readonly chatKey = (event: KeyboardEvent) => {
     if (event.isComposing || event.keyCode === 229) return
     if (event.code === 'Escape') { event.preventDefault(); this.closeChat(true) }
-    if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+    if (event.code === 'Enter') {
       event.preventDefault()
       if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) this.submitChat(event)
     }

@@ -58,7 +58,10 @@ func TestSoloBotScriptIntents(t *testing.T) {
 	}
 	frame := sim.ScriptFrame{
 		Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 40}, HpX10: 1000, EnergyX10: 1000},
-		Obs:  sim.Observation{Frame: sim.FrameView{Phase: sim.PhaseOuterRing}},
+		Obs: sim.Observation{Frame: sim.FrameView{
+			Phase: sim.PhaseOuterRing,
+			Map:   &sim.MapDef{GeneratorVer: 2, CoreZone: sim.CoreZoneDef{Radius: 28, UnlockPhase: sim.PhaseCoreOpen}},
+		}},
 	}
 	run := func() sim.ScriptCommands {
 		t.Helper()
@@ -100,11 +103,12 @@ func TestSoloBotScriptIntents(t *testing.T) {
 	if c := run(); *c.Interact || c.Move.X <= 0 {
 		t.Fatal("bot did not release completed Uplink during personal cooldown")
 	}
-	// A target across the locked center should produce a tangential route.
+	// A target across the locked center should produce a deterministic upper detour,
+	// not the direct inward heading used once the core opens.
 	frame.Obs.Uplinks = nil
 	frame.Obs.Cores[0].Pos = sim.Vec2{X: -40}
-	if c := run(); c.Move.Y <= 0 || c.Move.X != 0 {
-		t.Fatalf("bot drives through locked center: %+v", *c.Move)
+	if c := run(); c.Move.X >= -0.1 || c.Move.Y <= 0.1 {
+		t.Fatalf("bot does not detour around locked center: %+v", *c.Move)
 	}
 	frame.Obs.Frame.Phase = sim.PhaseCoreOpen
 	if c := run(); c.Move.X >= 0 || c.Move.Y != 0 {
@@ -122,7 +126,7 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 	s, _ := bindLogged(t, h, rc, "host")
 	players := map[uint64]SessionInfo{s.playerID: {PlayerID: s.playerID, Nick: s.nick, Color: s.color}}
 	addSoloBots(players, 3)
-	m, err := NewMatch(rc, 42, 1, players, false)
+	m, err := NewMatch(rc, 42, 1, players, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +230,7 @@ func TestSoloBotsCancelledAssemblyClosesRuntimes(t *testing.T) {
 	rc := h.EnsureRoom("BOTSTOP")
 	players := map[uint64]SessionInfo{}
 	addSoloBots(players, 3)
-	m, err := NewMatch(rc, 42, 1, players, true)
+	m, err := NewMatch(rc, 42, 1, players, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

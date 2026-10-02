@@ -1,5 +1,5 @@
 export type View = 'join' | 'room' | 'game' | 'manual' | 'replays' | 'replay-player' | 'spectator' | 'live'
-export type WorkbenchPanel = 'docs' | 'editor'
+export type WorkbenchPanel = 'docs' | 'editor' | 'snippets' | 'ai'
 export interface RouteExtra { doc?: string; replay?: string; panels?: WorkbenchPanel[] }
 export interface JoinProfile { roomCode: string; nick: string; color: string }
 const profileKey = 'omb.join'
@@ -13,7 +13,7 @@ export function readRoute(url = new URL(location.href)): { roomCode: string; vie
     view: views.includes(view) ? view : 'room',
     doc: url.searchParams.get('doc') || undefined,
     replay: url.searchParams.get('replay') || undefined,
-    panels: (['docs', 'editor'] as const).filter(panel => (url.searchParams.get('panels') ?? '').split(',').includes(panel)),
+    panels: (['docs', 'editor', 'snippets', 'ai'] as const).filter(panel => (url.searchParams.get('panels') ?? '').split(',').includes(panel)),
   }
 }
 

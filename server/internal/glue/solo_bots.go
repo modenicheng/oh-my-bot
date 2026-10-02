@@ -58,44 +58,16 @@ func soloBotCommands(cmd sim.ScriptCommands) sim.ScriptCommands {
 // observer's ordinary script API and stable robot identity. Resolved commands
 // (including timeouts) are recorded by the existing gameplay replay sink.
 func soloBotSource(id uint32) string {
-	return fmt.Sprintf("const botID = %d, personality = %d, bodyRadius = %g;\n", id, id%3, sim.RobotRadius) + `
-let last = null, stuck = 0, escapeUntil = 0, held = 0;
+	return fmt.Sprintf("const botID = %d, personality = %d;\n", id, id%3) + `
+let held = 0;
 const cooldowns = {};
-// 用带机体半径的整段路径检测，终点在墙外也不能跨过薄墙。
-const LOOKAHEAD = 1.2;
-function pathBlocked(walls, p, vx, vy, length, unlocked) {
-  const dx = vx * length, dy = vy * length;
-  if (Math.hypot(p.x + dx, p.y + dy) > 80 - bodyRadius) return true;
-  if (!unlocked) {
-    const t = Math.max(0, Math.min(1, -(p.x * dx + p.y * dy) / (length * length)));
-    if (Math.hypot(p.x + t * dx, p.y + t * dy) < 30 + bodyRadius) return true;
-  }
-  const pad = bodyRadius + 0.05;
-  for (const w of walls) {
-    const ox = p.x - Math.max(w.min.x, Math.min(w.max.x, p.x));
-    const oy = p.y - Math.max(w.min.y, Math.min(w.max.y, p.y));
-    // 已贴墙时仍允许沿墙/远离墙移动，避免安全余量把机体困住。
-    if (Math.hypot(ox, oy) >= bodyRadius - 0.000001 && ox * dx + oy * dy >= 0) continue;
-    let enter = 0, exit = 1;
-    for (const [start, delta, min, max] of [[p.x, dx, w.min.x - pad, w.max.x + pad], [p.y, dy, w.min.y - pad, w.max.y + pad]]) {
-      if (Math.abs(delta) < 0.000001) { if (start < min || start > max) { enter = 2; break; } }
-      else {
-        const a = (min - start) / delta, b = (max - start) / delta;
-        enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
-      }
-    }
-    if (enter <= exit) return true;
-  }
-  return false;
-}
-function tick(ctx) {
-  const api = ctx.api, p = ctx.self.position, now = ctx.game.time;
-  const scan = ctx.scan();
-  const walls = scan.walls || [];
+function tick(bot) {
+  const p = bot.self.position, now = bot.game.time;
+  const scan = bot.scan();
   const dist = q => Math.hypot(q.x - p.x, q.y - p.y);
-  const unlocked = ctx.game.phase === "CORE_OPEN";
+  const unlocked = bot.game.phase === "CORE_OPEN";
   const reachable = q => unlocked || Math.hypot(q.x, q.y) > 29;
-  const enemy = api.nearestEnemy();
+  const enemy = bot.nearestEnemy();
   if (held && !scan.uplinks.some(u => u.id === held && u.holder === botID)) {
     cooldowns[held] = now + 30; held = 0;
   }
@@ -108,40 +80,15 @@ function tick(ctx) {
   const preferUplink = personality === 0 || Math.floor(now / 20) % 3 === personality;
   if (uplink && dist(uplink) < 1.5) {
     if (uplink.holder === botID) held = uplink.id;
-    api.move(0,0); api.interact(); last = null; stuck = 0; return;
+    bot.move(0,0); bot.interact(); return;
   }
-  if (enemy && ctx.self.energy > 20) { api.aimAt(enemy); api.fire(); }
+  if (enemy && bot.self.energy > 20) { bot.aimAt(enemy); bot.fire(); }
   let target = (preferUplink && uplink) || cores[0] || uplink || (enemy && enemy.position);
   if (!target) {
     const angle = now / 12 + personality * 2.094;
     target = {x: 48 * Math.cos(angle), y: 48 * Math.sin(angle)};
   }
-  let dx = target.x-p.x, dy = target.y-p.y;
-  // Route around the locked disk rather than continually driving into it.
-  const length2 = dx*dx+dy*dy;
-  const t = length2 ? Math.max(0, Math.min(1, -(p.x*dx+p.y*dy)/length2)) : 0;
-  if (!unlocked && Math.hypot(p.x+t*dx, p.y+t*dy) < 30) {
-    const r = Math.hypot(p.x,p.y), sign = personality === 1 ? -1 : 1;
-    const outward = Math.max(0, 34-r);
-    dx = -p.y*sign + p.x*outward; dy = p.x*sign + p.y*outward;
-  }
-  if (last && Math.hypot(p.x-last.x,p.y-last.y) < 0.015) stuck++; else stuck = 0;
-  if (stuck > 20) { escapeUntil = now + 0.8; stuck = 0; }
-  if (now < escapeUntil) { const x = dx; dx = -dy; dy = x; }
-  const length = Math.hypot(dx,dy);
-  if (length > 0.1 && pathBlocked(walls, p, dx/length, dy/length, LOOKAHEAD, unlocked)) {
-    const base = Math.atan2(dy, dx), sign = personality === 1 ? -1 : 1;
-    let chose = null;
-    // 固定绕行侧，切向候选使长墙不会退化为左右来回顶墙。
-    for (const turn of [Math.PI/2, Math.PI/3, 2*Math.PI/3, Math.PI, -Math.PI/2, -Math.PI/3, -2*Math.PI/3]) {
-      const nx = Math.cos(base + sign * turn), ny = Math.sin(base + sign * turn);
-      if (!pathBlocked(walls, p, nx, ny, LOOKAHEAD, unlocked)) { chose = {x: nx, y: ny}; break; }
-    }
-    dx = chose ? chose.x : 0; dy = chose ? chose.y : 0;
-  }
-  const len2 = Math.hypot(dx,dy);
-  api.move(len2 > 0.1 ? dx/len2 : 0, len2 > 0.1 ? dy/len2 : 0);
-  last = {x:p.x,y:p.y};
+  bot.navigateTo(target);
 }
 `
 }

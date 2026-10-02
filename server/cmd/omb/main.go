@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
 	"github.com/modenicheng/oh-my-bot/server/internal/listen"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
@@ -92,6 +93,20 @@ func main() {
 	}
 
 	hub := glue.NewHub()
+	serverCfg, cfgErr := ai.LoadServerConfig("")
+	if cfgErr != nil {
+		log.Printf("AI disabled: configuration error: %v", cfgErr)
+	} else if serverCfg.AI.Enabled && serverCfg.APIKey != "" {
+		manualCorpus := loadAIManualCorpusFS(manualSource, manualRoot)
+		hub.SetAIService(func() *glue.AIService {
+			return glue.NewAIService(serverCfg, manualCorpus)
+		})
+		log.Printf("AI enabled: model=%s manual_sections=%d rounds=%d player_tokens=%d global_tokens=%d concurrency=%d",
+			serverCfg.AI.Model, len(manualCorpus), serverCfg.Quota.PlayerRounds, serverCfg.Quota.PlayerTokens,
+			serverCfg.Quota.GlobalTokens, serverCfg.Quota.MaxConcurrency)
+	} else {
+		log.Printf("AI disabled: set ai.enabled=true in config.yaml and DEEPSEEK_API_KEY in .env")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -305,7 +320,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput,
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
-			*ombv1.ClientMsg_AssistToggle:
+			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig:
 			sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 				Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: readonly spectator connection"}},
 			}}})
@@ -351,6 +366,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	case *ombv1.ClientMsg_AssistToggle:
 		if cur := (*sess); cur != nil {
 			cur.ToggleAssist()
+		}
+	case *ombv1.ClientMsg_SnippetConfig:
+		if cur := (*sess); cur != nil {
+			cur.ConfigureSnippets(p.SnippetConfig)
 		}
 	case *ombv1.ClientMsg_ResyncRequest:
 		if cur := (*sess); cur != nil {

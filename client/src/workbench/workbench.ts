@@ -1,24 +1,44 @@
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, encodeClient, type EvScriptLog, type EvScriptResult } from '@omb/protocol'
+import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, encodeClient,
+         type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type SnippetSetting } from '@omb/protocol'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
 import { DEFAULT_CONSOLE_HEIGHT, ScriptConsoleView } from './script-console'
 import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from './ts-submit'
+import { SnippetPanelView } from './snippet-panel'
+import { AiPanelView } from './ai-panel'
+import { AI_SCRIPT_RESULT_ID } from './ai-assist'
 import './workbench.css'
 
-const INITIAL_SOURCE_TS = `import type { BotContext } from '@omb/bot-api'
+export const INITIAL_SOURCE_TS = `import type { BotContext } from '@omb/bot-api'
 
 export function tick(bot: BotContext) {
-  const core = bot.nearestCore()
-  if (core) bot.moveTo(core)
+  let target = bot.nearestCore()
+  if (bot.self.hp <= 45) {
+    let nearest = Infinity
+    for (const pack of bot.scan().healthPacks) {
+      if (!pack.available) continue
+      const distance = Math.hypot(pack.x - bot.self.position.x, pack.y - bot.self.position.y)
+      if (distance < nearest) { nearest = distance; target = pack }
+    }
+  }
+  if (target) bot.navigateTo(target)
 }
 `
-const INITIAL_SOURCE = `/** @param {import('@omb/bot-api').BotContext} bot */
+export const INITIAL_SOURCE = `/** @param {import('@omb/bot-api').BotContext} bot */
 function tick(bot) {
-  const core = bot.nearestCore()
-  if (core) bot.moveTo(core)
+  let target = bot.nearestCore()
+  if (bot.self.hp <= 45) {
+    let nearest = Infinity
+    for (const pack of bot.scan().healthPacks) {
+      if (!pack.available) continue
+      const distance = Math.hypot(pack.x - bot.self.position.x, pack.y - bot.self.position.y)
+      if (distance < nearest) { nearest = distance; target = pack }
+    }
+  }
+  if (target) bot.navigateTo(target)
 }
 `
 
@@ -35,7 +55,7 @@ interface WorkbenchDeps {
   editorButton: HTMLButtonElement
   initial: RouteExtra
   onLayout: () => void
-  send: (frame: Uint8Array) => void
+  send: (frame: Uint8Array) => boolean
   toggleAssist: () => void
 }
 
@@ -53,6 +73,7 @@ export class Workbench {
   private online = false
   private inMatch = false
   private assistOn = false
+  private identity = { roomCode: '', nick: '' }
   private nextScriptId = 0
   private compiling = false
   private pending?: { id: number; source: string; timer: ReturnType<typeof setTimeout> }
@@ -71,6 +92,10 @@ export class Workbench {
   private readonly draftStatus: HTMLElement
   private readonly languageButtons: HTMLButtonElement[]
   private readonly scriptConsole: ScriptConsoleView
+  private readonly snippetPanel: SnippetPanelView
+  private readonly aiPanel: AiPanelView
+  private snippetPane!: HTMLElement
+  private aiPane!: HTMLElement
 
   constructor(private readonly deps: WorkbenchDeps) {
     this.docPath = deps.initial.doc ?? 'index.md'
@@ -88,6 +113,8 @@ export class Workbench {
       <nav class="workbench-tools" aria-label="侧栏窗口">
         <button type="button" data-panel="docs" aria-controls="workbench-docs"><span data-icon="book"></span>文档</button>
         <button type="button" data-panel="editor" aria-controls="workbench-editor"><span data-icon="code"></span>编辑器</button>
+        <button type="button" data-panel="snippets" aria-controls="workbench-snippets" title="Snippet 驾驶辅助开关面板；战场画布获焦时 Space 或小键盘 Enter 切换辅助总开关"><span data-icon="target"></span>辅助</button>
+        <button type="button" data-panel="ai" aria-controls="workbench-ai" title="AI 助手：自然语言修改脚本；配额内自动热更"><span data-icon="energy"></span>AI</button>
         <button type="button" id="workbench-close"><span data-icon="back"></span>返回战场</button>
       </nav>
       <section id="workbench-docs" class="workbench-pane" tabindex="-1" aria-label="文档">
@@ -112,7 +139,7 @@ export class Workbench {
               <button type="button" data-lang="ts" aria-pressed="false" title="编辑 TypeScript，提交前在浏览器内编译为 JavaScript">TS</button>
             </span>
             <button type="button" id="workbench-submit" class="primary" disabled title="提交当前草稿（Ctrl / ⌘ + Enter）"><span data-icon="play"></span>提交</button>
-            <button type="button" id="workbench-assist" aria-pressed="false" disabled>辅助 OFF</button>
+            <button type="button" id="workbench-assist" aria-pressed="false" disabled aria-keyshortcuts="Space">辅助 OFF</button>
             <button type="button" id="workbench-console-toggle" aria-expanded="true" aria-controls="workbench-console">Console <span data-console-trigger-count>0</span></button>
           </div>
           <button type="button" data-panel="editor" aria-label="收起编辑器"><span data-icon="collapse"></span></button>
@@ -123,7 +150,9 @@ export class Workbench {
         </div>
         <div class="workbench-editor-meta"><span id="workbench-diagnostics" role="status">JavaScript · Bot API 补全</span><span>Ctrl / ⌘ + Enter 提交</span></div>
         <section id="workbench-console" class="script-console" aria-label="脚本 Console"></section>
-      </section>`
+      </section>
+      <section id="workbench-snippets" class="workbench-pane workbench-tool-pane" tabindex="-1" aria-label="Snippet 驾驶辅助"></section>
+      <section id="workbench-ai" class="workbench-pane workbench-tool-pane" tabindex="-1" aria-label="AI 助手"></section>`
     mountIcons(deps.root)
     this.docsPane = this.el('workbench-docs')
     this.editorPane = this.el('workbench-editor')
@@ -145,6 +174,19 @@ export class Workbench {
         this.consoleHeight = height
         this.saveLayout()
       },
+    })
+    this.snippetPane = this.el('workbench-snippets')
+    this.aiPane = this.el('workbench-ai')
+    this.snippetPanel = new SnippetPanelView({
+      root: this.snippetPane,
+      send: settings => this.sendSnippetConfig(settings),
+      availability: () => ({ online: this.online, inMatch: this.inMatch }),
+    })
+    this.aiPanel = new AiPanelView({
+      root: this.aiPane,
+      send: text => this.sendAiPrompt(text),
+      availability: () => ({ online: this.online, inMatch: this.inMatch }),
+      editorDirty: () => !this.loaded || this.loaded.source !== this.source,
     })
     for (const button of this.languageButtons) {
       button.addEventListener('click', () => this.setLanguage((button.dataset.lang as BotLanguage) === 'ts' ? 'ts' : 'js'))
@@ -208,18 +250,25 @@ export class Workbench {
 
   activate(): void {
     this.renderSizes()
-    if (this.isOpen && window.matchMedia('(max-width: 760px)').matches) this.focusPanel(this.panels.has('docs') ? 'docs' : 'editor')
+    if (this.isOpen && window.matchMedia('(max-width: 760px)').matches) this.focusPanel(this.primaryPanel())
     if (this.panels.has('docs')) void this.manual.open(this.docPath)
     if (this.panels.has('editor')) void this.ensureEditor()
+    if (this.panels.has('snippets') || this.panels.has('ai')) this.renderToolPanels()
   }
 
   toggle(panel: WorkbenchPanel): void {
-    const pane = panel === 'docs' ? this.docsPane : this.editorPane
+    const pane = this.paneOf(panel)
     const needsFocus = pane.contains(document.activeElement) || document.activeElement === this.splitHandle
     if (this.panels.has(panel)) {
       this.panels.delete(panel)
       if (panel === 'docs') this.manual.close()
+    } else if (panel === 'snippets' || panel === 'ai') {
+      if (this.panels.has('docs')) this.manual.close()
+      this.panels.clear()
+      this.panels.add(panel)
     } else {
+      this.panels.delete('snippets')
+      this.panels.delete('ai')
       this.panels.add(panel)
     }
     this.renderLayout()
@@ -227,12 +276,28 @@ export class Workbench {
     if (this.panels.has(panel)) {
       this.focusPanel(panel)
       if (panel === 'docs') void this.manual.open(this.docPath)
-      else void this.ensureEditor()
+      else if (panel === 'editor') void this.ensureEditor()
     } else if (!this.isOpen) {
       this.focusCanvas()
     } else if (needsFocus) {
-      this.focusPanel(this.panels.has('docs') ? 'docs' : 'editor')
+      this.focusPanel(this.primaryPanel())
     }
+  }
+
+  /** 当前可见面板的首选回焦目标（关闭焦点所在面板后）。 */
+  private primaryPanel(): WorkbenchPanel {
+    if (this.panels.has('docs')) return 'docs'
+    if (this.panels.has('editor')) return 'editor'
+    if (this.panels.has('snippets')) return 'snippets'
+    if (this.panels.has('ai')) return 'ai'
+    return 'docs'
+  }
+
+  private paneOf(panel: WorkbenchPanel): HTMLElement {
+    if (panel === 'docs') return this.docsPane
+    if (panel === 'editor') return this.editorPane
+    if (panel === 'snippets') return this.snippetPane
+    return this.aiPane
   }
 
   close(): void {
@@ -248,10 +313,12 @@ export class Workbench {
   }
 
   private focusPanel(panel: WorkbenchPanel): void {
-    const target = panel === 'docs' ? this.el('workbench-doc-content') : this.editorPane
+    const target = panel === 'docs' ? this.el('workbench-doc-content') : this.paneOf(panel)
     if (!target.getClientRects().length) return
     target.focus({ preventScroll: true })
     if (panel === 'editor') this.editor?.focus()
+    else if (panel === 'snippets') this.snippetPanel.focus()
+    else if (panel === 'ai') this.aiPanel.focus()
   }
 
   private renderLayout(): void {
@@ -260,7 +327,17 @@ export class Workbench {
     this.deps.gameView.classList.toggle('has-workbench', this.isOpen)
     this.docsPane.hidden = !this.panels.has('docs')
     this.editorPane.hidden = !this.panels.has('editor')
-    this.splitHandle.hidden = this.panels.size !== 2
+    this.snippetPane.hidden = !this.panels.has('snippets')
+    this.aiPane.hidden = !this.panels.has('ai')
+    // 上下分幅仅对「文档 + 编辑器」同开有意义；工具面板整列展示。
+    const splitRelevant = this.panels.size === 2 && this.panels.has('docs') && this.panels.has('editor')
+    this.splitHandle.hidden = !splitRelevant
+    if (this.panels.has('snippets') || this.panels.has('ai')) {
+      // 辅助/AI 占整列时隐藏文档与编辑器，避免四层堆叠挤压。
+      this.docsPane.hidden = true
+      this.editorPane.hidden = true
+      this.splitHandle.hidden = true
+    }
     this.renderSizes()
     for (const [button, panel] of [[this.deps.docsButton, 'docs'], [this.deps.editorButton, 'editor']] as const) {
       button.setAttribute('aria-expanded', String(this.panels.has(panel)))
@@ -293,7 +370,7 @@ export class Workbench {
     this.splitHandle.setAttribute('aria-valuetext', `文档 ${this.ratio}%，编辑器 ${100 - this.ratio}%`)
     const restoreFocus = document.activeElement === this.resizeHandle
     this.resizeHandle.hidden = window.matchMedia('(max-width: 760px)').matches
-    if (restoreFocus && this.resizeHandle.hidden && this.isOpen) this.focusPanel(this.panels.has('docs') ? 'docs' : 'editor')
+    if (restoreFocus && this.resizeHandle.hidden && this.isOpen) this.focusPanel(this.primaryPanel())
   }
 
   private saveLayout(): void {
@@ -371,10 +448,18 @@ export class Workbench {
     if (this.draftKey) this.saveLanguagePref()
     this.draftKey = ''
     this.prefKey = ''
+    this.identity = { roomCode: '', nick: '' }
+    this.snippetPanel.setIdentity('', '')
+    this.aiPanel.resetSession('identity')
     this.resetMatch()
   }
 
   setIdentity(roomCode: string, nick: string): void {
+    this.snippetPanel.setIdentity(roomCode, nick)
+    if (this.identity.roomCode !== roomCode || this.identity.nick !== nick) {
+      this.identity = { roomCode, nick }
+      this.aiPanel.resetSession('identity')
+    }
     const prefKey = languagePrefKey(roomCode, nick)
     if (this.draftKey) this.saveLanguagePref()
     let language = this.language
@@ -486,10 +571,13 @@ export class Workbench {
       this.clearPending()
       this.scriptConsole.clear()
       if (hadPending) this.scriptConsole.appendClient('warn', '连接中断，提交结果未知；重连后可重新提交。')
+      this.snippetPanel.markOffline()
+      this.aiPanel.markOffline()
     }
     this.online = online
     this.inMatch = inMatch
     this.renderButtons()
+    this.renderToolPanels()
   }
 
   resetMatch(): void {
@@ -500,7 +588,10 @@ export class Workbench {
     this.inMatch = false
     this.scriptConsole.clear()
     if (wasPending) this.scriptConsole.appendClient('warn', '对局已切换，提交已取消；草稿仍保留。')
+    this.snippetPanel.markMatchEnded()
+    this.aiPanel.markMatchEnded()
     this.renderButtons()
+    this.renderToolPanels()
   }
 
   setAssist(on: boolean): void {
@@ -515,6 +606,7 @@ export class Workbench {
     this.assistButton.disabled = !this.online || !this.inMatch
     this.assistButton.textContent = `辅助 ${this.assistOn ? 'ON' : 'OFF'}`
     this.assistButton.setAttribute('aria-pressed', String(this.assistOn))
+    this.assistButton.title = !this.online ? '连接恢复后可切换' : !this.inMatch ? '进入热身或正式对局后可切换（战场画布获焦时 Space / 小键盘 Enter）' : '战场画布获焦时按 Space 或小键盘 Enter 切换'
     this.editorPane.dataset.dirty = String(!this.loaded || this.loaded.source !== this.source)
   }
 
@@ -574,6 +666,12 @@ export class Workbench {
   }
 
   acceptResult(result: EvScriptResult): void {
+    if (result.clientScriptId === AI_SCRIPT_RESULT_ID) {
+      // 服务器保留 id 0：AI 改码回执（非玩家提交）。成功热更交 AI 面板，
+      // 失败已走 robot=0 定向说明；两种都不碰玩家提交 pending。
+      if (result.ok) this.aiPanel.acceptHotSwap()
+      return
+    }
     if (!this.pending || result.clientScriptId !== this.pending.id) return
     const source = this.pending.source
     this.clearPending()
@@ -584,6 +682,52 @@ export class Workbench {
       this.scriptConsole.appendClient('error', `加载失败：${result.error || '服务器拒绝了脚本'}。原脚本保持不变。`)
     }
     this.renderButtons()
+  }
+
+  /** SnippetConfig 上行（仅在线对局中；帧超限防护与脚本提交一致）。 */
+  sendSnippetConfig(settings: SnippetSetting[]): boolean {
+    if (!this.online || !this.inMatch) return false
+    const frame = encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'snippetConfig', value: create(SnippetConfigSchema, { snippets: settings }) },
+    }))
+    if (frame.byteLength > 32768) return false
+    return this.deps.send(frame)
+  }
+
+  /** AiPrompt 上行（单玩家串行；AI 面板 pending 时已禁用发送）。 */
+  sendAiPrompt(text: string): void {
+    if (!this.online || !this.inMatch) return
+    this.deps.send(encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'aiPrompt', value: create(AiPromptSchema, { text }) },
+    })))
+  }
+
+  acceptSnippetResult(result: EvSnippetResult): void {
+    this.snippetPanel.acceptResult(result)
+  }
+
+  acceptAiQuota(quota: EvAiQuota): void {
+    this.aiPanel.acceptQuota(quota)
+  }
+
+  acceptAiUsage(usage: EvAiUsage): void {
+    this.aiPanel.acceptUsage(usage)
+  }
+
+  /** 快照 SelfState 的配额初值（重连/进入对局时的权威基线）。 */
+  acceptSelfAiQuota(roundsLeft: number, tokensLeftK: number): void {
+    // SelfState 给的是“剩余”，面板文案用“剩余”；全局护栏只由定向回执提供。
+    this.aiPanel.acceptQuota({ roundsLeft, tokensLeftK })
+  }
+
+  /** robot=0 定向说明：AI 面板 pending 时优先消费，否则返回 false 走系统通道。 */
+  consumeAiDirectedSay(text: string): boolean {
+    return this.aiPanel.acceptDirectedSay(text)
+  }
+
+  private renderToolPanels(): void {
+    this.snippetPanel.render()
+    this.aiPanel.render()
   }
 
   private clearPending(): void {

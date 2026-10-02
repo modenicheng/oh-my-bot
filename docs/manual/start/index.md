@@ -10,5 +10,5 @@ order: 1
 
 1. [进房前准备](prepare.md) —— 进房方式、热身限制、界面布局
 2. [你的第一局](first-match.md) —— 手操移动、抢资源与战斗
-3. [Snippet 驾驶辅助](snippet.md) —— 当前辅助开关和六条辅助的规划
-4. [AI Agent](ai-agent.md) —— 接入状态、配额组件与改码限制
+3. [Snippet 驾驶辅助](snippet.md) —— 八条官方模块、参数与分轴组合
+4. [AI Agent](ai-agent.md) —— 自然语言改码、热更、配额与安全边界

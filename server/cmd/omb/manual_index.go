@@ -10,9 +10,10 @@ import (
 )
 
 type manualMeta struct {
-	Title string
-	Tags  []string
-	Order *float64
+	Title    string
+	Audience string
+	Tags     []string
+	Order    *float64
 }
 
 type manualNode struct {
@@ -73,6 +74,8 @@ func manualFrontmatter(raw string) manualMeta {
 		switch strings.TrimSpace(key) {
 		case "title":
 			meta.Title = manualScalar(value)
+		case "audience":
+			meta.Audience = strings.ToLower(manualScalar(value))
 		case "order":
 			if n, err := strconv.ParseFloat(manualScalar(value), 64); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
 				meta.Order = &n
@@ -217,4 +220,25 @@ func buildManualTreeFS(fsys fs.FS, root string) []manualNode {
 		return out
 	}
 	return walk(root)
+}
+
+// loadAIManualCorpusFS loads only chapters explicitly marked audience: both.
+// The source is the same embedded/on-disk manual served to players, so AI and
+// human documentation cannot silently drift apart. Frontmatter is retained: it
+// is harmless context and keeps each chapter self-describing.
+func loadAIManualCorpusFS(fsys fs.FS, root string) []string {
+	var corpus []string
+	_ = fs.WalkDir(fsys, root, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(name, ".md") {
+			return nil
+		}
+		raw, err := fs.ReadFile(fsys, name)
+		if err != nil || manualFrontmatter(string(raw)).Audience != "both" {
+			return nil
+		}
+		corpus = append(corpus, string(raw))
+		return nil
+	})
+	sort.Strings(corpus)
+	return corpus
 }

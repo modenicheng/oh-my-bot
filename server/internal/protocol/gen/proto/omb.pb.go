@@ -124,6 +124,73 @@ func (ControlSource) EnumDescriptor() ([]byte, []int) {
 	return file_proto_omb_proto_rawDescGZIP(), []int{1}
 }
 
+type SnippetKind int32
+
+const (
+	SnippetKind_SNIPPET_UNSPECIFIED        SnippetKind = 0
+	SnippetKind_SNIPPET_AUTO_AIM           SnippetKind = 1 // 自动瞄准（提前量开关）
+	SnippetKind_SNIPPET_AUTO_FIRE          SnippetKind = 2 // 自动开火（射程阈值 m）
+	SnippetKind_SNIPPET_AUTO_PICKUP        SnippetKind = 3 // 自动拾取（拾取半径 m）
+	SnippetKind_SNIPPET_EMERGENCY_SHIELD   SnippetKind = 4 // 紧急护盾（HP 阈值 0..100）
+	SnippetKind_SNIPPET_DANGER_AVOID       SnippetKind = 5 // 危险规避（威胁半径 m）
+	SnippetKind_SNIPPET_PATROL             SnippetKind = 6 // 简单巡逻（路径点 "x,y;x,y"）
+	SnippetKind_SNIPPET_GLOBAL_CORE        SnippetKind = 7 // 全局 Core 拾取（无参数，朝最近存活 Core 移动）
+	SnippetKind_SNIPPET_LOW_HP_HEALTH_PACK SnippetKind = 8 // 低血量自动拾取血包（HP 阈值 1..100）
+)
+
+// Enum value maps for SnippetKind.
+var (
+	SnippetKind_name = map[int32]string{
+		0: "SNIPPET_UNSPECIFIED",
+		1: "SNIPPET_AUTO_AIM",
+		2: "SNIPPET_AUTO_FIRE",
+		3: "SNIPPET_AUTO_PICKUP",
+		4: "SNIPPET_EMERGENCY_SHIELD",
+		5: "SNIPPET_DANGER_AVOID",
+		6: "SNIPPET_PATROL",
+		7: "SNIPPET_GLOBAL_CORE",
+		8: "SNIPPET_LOW_HP_HEALTH_PACK",
+	}
+	SnippetKind_value = map[string]int32{
+		"SNIPPET_UNSPECIFIED":        0,
+		"SNIPPET_AUTO_AIM":           1,
+		"SNIPPET_AUTO_FIRE":          2,
+		"SNIPPET_AUTO_PICKUP":        3,
+		"SNIPPET_EMERGENCY_SHIELD":   4,
+		"SNIPPET_DANGER_AVOID":       5,
+		"SNIPPET_PATROL":             6,
+		"SNIPPET_GLOBAL_CORE":        7,
+		"SNIPPET_LOW_HP_HEALTH_PACK": 8,
+	}
+)
+
+func (x SnippetKind) Enum() *SnippetKind {
+	p := new(SnippetKind)
+	*p = x
+	return p
+}
+
+func (x SnippetKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SnippetKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_omb_proto_enumTypes[2].Descriptor()
+}
+
+func (SnippetKind) Type() protoreflect.EnumType {
+	return &file_proto_omb_proto_enumTypes[2]
+}
+
+func (x SnippetKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SnippetKind.Descriptor instead.
+func (SnippetKind) EnumDescriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{2}
+}
+
 type Title int32
 
 const (
@@ -197,11 +264,11 @@ func (x Title) String() string {
 }
 
 func (Title) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[2].Descriptor()
+	return file_proto_omb_proto_enumTypes[3].Descriptor()
 }
 
 func (Title) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[2]
+	return &file_proto_omb_proto_enumTypes[3]
 }
 
 func (x Title) Number() protoreflect.EnumNumber {
@@ -210,7 +277,7 @@ func (x Title) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Title.Descriptor instead.
 func (Title) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{2}
+	return file_proto_omb_proto_rawDescGZIP(), []int{3}
 }
 
 type RoomAction_Kind int32
@@ -255,11 +322,11 @@ func (x RoomAction_Kind) String() string {
 }
 
 func (RoomAction_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[3].Descriptor()
+	return file_proto_omb_proto_enumTypes[4].Descriptor()
 }
 
 func (RoomAction_Kind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[3]
+	return &file_proto_omb_proto_enumTypes[4]
 }
 
 func (x RoomAction_Kind) Number() protoreflect.EnumNumber {
@@ -307,11 +374,11 @@ func (x EvRoomState_State) String() string {
 }
 
 func (EvRoomState_State) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[4].Descriptor()
+	return file_proto_omb_proto_enumTypes[5].Descriptor()
 }
 
 func (EvRoomState_State) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[4]
+	return &file_proto_omb_proto_enumTypes[5]
 }
 
 func (x EvRoomState_State) Number() protoreflect.EnumNumber {
@@ -320,7 +387,7 @@ func (x EvRoomState_State) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EvRoomState_State.Descriptor instead.
 func (EvRoomState_State) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{39, 0}
+	return file_proto_omb_proto_rawDescGZIP(), []int{43, 0}
 }
 
 type Vec2 struct {
@@ -758,6 +825,129 @@ func (x *ScriptSubmit) GetSource() string {
 	return ""
 }
 
+// 单条 Snippet 开关与参数。参数最多 2 个：浮点参数走 p1/p2，
+// 路径点等字符串参数走 s1（范围校验在服务端 catalog，坏值整条拒绝保旧）。
+type SnippetSetting struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          SnippetKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=omb.v1.SnippetKind" json:"kind,omitempty"`
+	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	P1            float64                `protobuf:"fixed64,3,opt,name=p1,proto3" json:"p1,omitempty"` // 参数1（bool 语义用 0/1；阈值/半径/射程）
+	P2            float64                `protobuf:"fixed64,4,opt,name=p2,proto3" json:"p2,omitempty"` // 参数2（预留：第二条数值参数）
+	S1            string                 `protobuf:"bytes,5,opt,name=s1,proto3" json:"s1,omitempty"`   // 字符串参数（patrol 路径点 "x,y;x,y"）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnippetSetting) Reset() {
+	*x = SnippetSetting{}
+	mi := &file_proto_omb_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnippetSetting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnippetSetting) ProtoMessage() {}
+
+func (x *SnippetSetting) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnippetSetting.ProtoReflect.Descriptor instead.
+func (*SnippetSetting) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SnippetSetting) GetKind() SnippetKind {
+	if x != nil {
+		return x.Kind
+	}
+	return SnippetKind_SNIPPET_UNSPECIFIED
+}
+
+func (x *SnippetSetting) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SnippetSetting) GetP1() float64 {
+	if x != nil {
+		return x.P1
+	}
+	return 0
+}
+
+func (x *SnippetSetting) GetP2() float64 {
+	if x != nil {
+		return x.P2
+	}
+	return 0
+}
+
+func (x *SnippetSetting) GetS1() string {
+	if x != nil {
+		return x.S1
+	}
+	return ""
+}
+
+// 整机 Snippet 配置上行：全量替换语义（enabled=false 的条目可省略）。
+type SnippetConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Snippets      []*SnippetSetting      `protobuf:"bytes,1,rep,name=snippets,proto3" json:"snippets,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnippetConfig) Reset() {
+	*x = SnippetConfig{}
+	mi := &file_proto_omb_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnippetConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnippetConfig) ProtoMessage() {}
+
+func (x *SnippetConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnippetConfig.ProtoReflect.Descriptor instead.
+func (*SnippetConfig) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SnippetConfig) GetSnippets() []*SnippetSetting {
+	if x != nil {
+		return x.Snippets
+	}
+	return nil
+}
+
 type AiPrompt struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -767,7 +957,7 @@ type AiPrompt struct {
 
 func (x *AiPrompt) Reset() {
 	*x = AiPrompt{}
-	mi := &file_proto_omb_proto_msgTypes[8]
+	mi := &file_proto_omb_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +969,7 @@ func (x *AiPrompt) String() string {
 func (*AiPrompt) ProtoMessage() {}
 
 func (x *AiPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[8]
+	mi := &file_proto_omb_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +982,7 @@ func (x *AiPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AiPrompt.ProtoReflect.Descriptor instead.
 func (*AiPrompt) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{8}
+	return file_proto_omb_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AiPrompt) GetText() string {
@@ -811,7 +1001,7 @@ type Say struct {
 
 func (x *Say) Reset() {
 	*x = Say{}
-	mi := &file_proto_omb_proto_msgTypes[9]
+	mi := &file_proto_omb_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -823,7 +1013,7 @@ func (x *Say) String() string {
 func (*Say) ProtoMessage() {}
 
 func (x *Say) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[9]
+	mi := &file_proto_omb_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -836,7 +1026,7 @@ func (x *Say) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Say.ProtoReflect.Descriptor instead.
 func (*Say) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{9}
+	return file_proto_omb_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Say) GetText() string {
@@ -854,7 +1044,7 @@ type ResyncRequest struct {
 
 func (x *ResyncRequest) Reset() {
 	*x = ResyncRequest{}
-	mi := &file_proto_omb_proto_msgTypes[10]
+	mi := &file_proto_omb_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +1056,7 @@ func (x *ResyncRequest) String() string {
 func (*ResyncRequest) ProtoMessage() {}
 
 func (x *ResyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[10]
+	mi := &file_proto_omb_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +1069,7 @@ func (x *ResyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResyncRequest.ProtoReflect.Descriptor instead.
 func (*ResyncRequest) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{10}
+	return file_proto_omb_proto_rawDescGZIP(), []int{12}
 }
 
 type ClientMsg struct {
@@ -897,6 +1087,7 @@ type ClientMsg struct {
 	//	*ClientMsg_ResyncRequest
 	//	*ClientMsg_Say
 	//	*ClientMsg_Spectate
+	//	*ClientMsg_SnippetConfig
 	Payload       isClientMsg_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -904,7 +1095,7 @@ type ClientMsg struct {
 
 func (x *ClientMsg) Reset() {
 	*x = ClientMsg{}
-	mi := &file_proto_omb_proto_msgTypes[11]
+	mi := &file_proto_omb_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -916,7 +1107,7 @@ func (x *ClientMsg) String() string {
 func (*ClientMsg) ProtoMessage() {}
 
 func (x *ClientMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[11]
+	mi := &file_proto_omb_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -929,7 +1120,7 @@ func (x *ClientMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientMsg.ProtoReflect.Descriptor instead.
 func (*ClientMsg) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{11}
+	return file_proto_omb_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ClientMsg) GetPayload() isClientMsg_Payload {
@@ -1038,6 +1229,15 @@ func (x *ClientMsg) GetSpectate() *SpectateRoom {
 	return nil
 }
 
+func (x *ClientMsg) GetSnippetConfig() *SnippetConfig {
+	if x != nil {
+		if x, ok := x.Payload.(*ClientMsg_SnippetConfig); ok {
+			return x.SnippetConfig
+		}
+	}
+	return nil
+}
+
 type isClientMsg_Payload interface {
 	isClientMsg_Payload()
 }
@@ -1086,6 +1286,10 @@ type ClientMsg_Spectate struct {
 	Spectate *SpectateRoom `protobuf:"bytes,11,opt,name=spectate,proto3,oneof"`
 }
 
+type ClientMsg_SnippetConfig struct {
+	SnippetConfig *SnippetConfig `protobuf:"bytes,12,opt,name=snippet_config,json=snippetConfig,proto3,oneof"` // 驾驶辅助配置（仅房间玩家、active match）
+}
+
 func (*ClientMsg_Input) isClientMsg_Payload() {}
 
 func (*ClientMsg_WarmupInput) isClientMsg_Payload() {}
@@ -1108,6 +1312,8 @@ func (*ClientMsg_Say) isClientMsg_Payload() {}
 
 func (*ClientMsg_Spectate) isClientMsg_Payload() {}
 
+func (*ClientMsg_SnippetConfig) isClientMsg_Payload() {}
+
 type EntityBase struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1119,7 +1325,7 @@ type EntityBase struct {
 
 func (x *EntityBase) Reset() {
 	*x = EntityBase{}
-	mi := &file_proto_omb_proto_msgTypes[12]
+	mi := &file_proto_omb_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1131,7 +1337,7 @@ func (x *EntityBase) String() string {
 func (*EntityBase) ProtoMessage() {}
 
 func (x *EntityBase) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[12]
+	mi := &file_proto_omb_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1144,7 +1350,7 @@ func (x *EntityBase) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityBase.ProtoReflect.Descriptor instead.
 func (*EntityBase) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{12}
+	return file_proto_omb_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *EntityBase) GetId() uint32 {
@@ -1187,7 +1393,7 @@ type RobotState struct {
 
 func (x *RobotState) Reset() {
 	*x = RobotState{}
-	mi := &file_proto_omb_proto_msgTypes[13]
+	mi := &file_proto_omb_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1199,7 +1405,7 @@ func (x *RobotState) String() string {
 func (*RobotState) ProtoMessage() {}
 
 func (x *RobotState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[13]
+	mi := &file_proto_omb_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1212,7 +1418,7 @@ func (x *RobotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RobotState.ProtoReflect.Descriptor instead.
 func (*RobotState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{13}
+	return file_proto_omb_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RobotState) GetBase() *EntityBase {
@@ -1297,7 +1503,7 @@ type ProjectileState struct {
 
 func (x *ProjectileState) Reset() {
 	*x = ProjectileState{}
-	mi := &file_proto_omb_proto_msgTypes[14]
+	mi := &file_proto_omb_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1309,7 +1515,7 @@ func (x *ProjectileState) String() string {
 func (*ProjectileState) ProtoMessage() {}
 
 func (x *ProjectileState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[14]
+	mi := &file_proto_omb_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1322,7 +1528,7 @@ func (x *ProjectileState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectileState.ProtoReflect.Descriptor instead.
 func (*ProjectileState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{14}
+	return file_proto_omb_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ProjectileState) GetBase() *EntityBase {
@@ -1356,7 +1562,7 @@ type CoreState struct {
 
 func (x *CoreState) Reset() {
 	*x = CoreState{}
-	mi := &file_proto_omb_proto_msgTypes[15]
+	mi := &file_proto_omb_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1368,7 +1574,7 @@ func (x *CoreState) String() string {
 func (*CoreState) ProtoMessage() {}
 
 func (x *CoreState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[15]
+	mi := &file_proto_omb_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1381,7 +1587,7 @@ func (x *CoreState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CoreState.ProtoReflect.Descriptor instead.
 func (*CoreState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{15}
+	return file_proto_omb_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CoreState) GetBase() *EntityBase {
@@ -1411,7 +1617,7 @@ type UplinkState struct {
 
 func (x *UplinkState) Reset() {
 	*x = UplinkState{}
-	mi := &file_proto_omb_proto_msgTypes[16]
+	mi := &file_proto_omb_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1423,7 +1629,7 @@ func (x *UplinkState) String() string {
 func (*UplinkState) ProtoMessage() {}
 
 func (x *UplinkState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[16]
+	mi := &file_proto_omb_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1436,7 +1642,7 @@ func (x *UplinkState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UplinkState.ProtoReflect.Descriptor instead.
 func (*UplinkState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{16}
+	return file_proto_omb_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UplinkState) GetBase() *EntityBase {
@@ -1485,7 +1691,7 @@ type HealthPackState struct {
 
 func (x *HealthPackState) Reset() {
 	*x = HealthPackState{}
-	mi := &file_proto_omb_proto_msgTypes[17]
+	mi := &file_proto_omb_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1497,7 +1703,7 @@ func (x *HealthPackState) String() string {
 func (*HealthPackState) ProtoMessage() {}
 
 func (x *HealthPackState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[17]
+	mi := &file_proto_omb_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +1716,7 @@ func (x *HealthPackState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthPackState.ProtoReflect.Descriptor instead.
 func (*HealthPackState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{17}
+	return file_proto_omb_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HealthPackState) GetBase() *EntityBase {
@@ -1554,7 +1760,7 @@ type SelfState struct {
 
 func (x *SelfState) Reset() {
 	*x = SelfState{}
-	mi := &file_proto_omb_proto_msgTypes[18]
+	mi := &file_proto_omb_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1566,7 +1772,7 @@ func (x *SelfState) String() string {
 func (*SelfState) ProtoMessage() {}
 
 func (x *SelfState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[18]
+	mi := &file_proto_omb_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1579,7 +1785,7 @@ func (x *SelfState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelfState.ProtoReflect.Descriptor instead.
 func (*SelfState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{18}
+	return file_proto_omb_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SelfState) GetRobotId() uint32 {
@@ -1682,7 +1888,7 @@ type SnapshotDelta struct {
 
 func (x *SnapshotDelta) Reset() {
 	*x = SnapshotDelta{}
-	mi := &file_proto_omb_proto_msgTypes[19]
+	mi := &file_proto_omb_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1694,7 +1900,7 @@ func (x *SnapshotDelta) String() string {
 func (*SnapshotDelta) ProtoMessage() {}
 
 func (x *SnapshotDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[19]
+	mi := &file_proto_omb_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1707,7 +1913,7 @@ func (x *SnapshotDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotDelta.ProtoReflect.Descriptor instead.
 func (*SnapshotDelta) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{19}
+	return file_proto_omb_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SnapshotDelta) GetTick() uint32 {
@@ -1830,7 +2036,7 @@ type EvKill struct {
 
 func (x *EvKill) Reset() {
 	*x = EvKill{}
-	mi := &file_proto_omb_proto_msgTypes[20]
+	mi := &file_proto_omb_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1842,7 +2048,7 @@ func (x *EvKill) String() string {
 func (*EvKill) ProtoMessage() {}
 
 func (x *EvKill) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[20]
+	mi := &file_proto_omb_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1855,7 +2061,7 @@ func (x *EvKill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvKill.ProtoReflect.Descriptor instead.
 func (*EvKill) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{20}
+	return file_proto_omb_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EvKill) GetKiller() uint32 {
@@ -1912,7 +2118,7 @@ type EvCorePickup struct {
 
 func (x *EvCorePickup) Reset() {
 	*x = EvCorePickup{}
-	mi := &file_proto_omb_proto_msgTypes[21]
+	mi := &file_proto_omb_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1924,7 +2130,7 @@ func (x *EvCorePickup) String() string {
 func (*EvCorePickup) ProtoMessage() {}
 
 func (x *EvCorePickup) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[21]
+	mi := &file_proto_omb_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1937,7 +2143,7 @@ func (x *EvCorePickup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvCorePickup.ProtoReflect.Descriptor instead.
 func (*EvCorePickup) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{21}
+	return file_proto_omb_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *EvCorePickup) GetBy() uint32 {
@@ -1972,7 +2178,7 @@ type EvUplinkHack struct {
 
 func (x *EvUplinkHack) Reset() {
 	*x = EvUplinkHack{}
-	mi := &file_proto_omb_proto_msgTypes[22]
+	mi := &file_proto_omb_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1984,7 +2190,7 @@ func (x *EvUplinkHack) String() string {
 func (*EvUplinkHack) ProtoMessage() {}
 
 func (x *EvUplinkHack) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[22]
+	mi := &file_proto_omb_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1997,7 +2203,7 @@ func (x *EvUplinkHack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvUplinkHack.ProtoReflect.Descriptor instead.
 func (*EvUplinkHack) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{22}
+	return file_proto_omb_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *EvUplinkHack) GetBy() uint32 {
@@ -2031,7 +2237,7 @@ type EvPhaseChange struct {
 
 func (x *EvPhaseChange) Reset() {
 	*x = EvPhaseChange{}
-	mi := &file_proto_omb_proto_msgTypes[23]
+	mi := &file_proto_omb_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2043,7 +2249,7 @@ func (x *EvPhaseChange) String() string {
 func (*EvPhaseChange) ProtoMessage() {}
 
 func (x *EvPhaseChange) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[23]
+	mi := &file_proto_omb_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2056,7 +2262,7 @@ func (x *EvPhaseChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvPhaseChange.ProtoReflect.Descriptor instead.
 func (*EvPhaseChange) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{23}
+	return file_proto_omb_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *EvPhaseChange) GetFrom() Phase {
@@ -2083,7 +2289,7 @@ type EvRespawn struct {
 
 func (x *EvRespawn) Reset() {
 	*x = EvRespawn{}
-	mi := &file_proto_omb_proto_msgTypes[24]
+	mi := &file_proto_omb_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2095,7 +2301,7 @@ func (x *EvRespawn) String() string {
 func (*EvRespawn) ProtoMessage() {}
 
 func (x *EvRespawn) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[24]
+	mi := &file_proto_omb_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2108,7 +2314,7 @@ func (x *EvRespawn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvRespawn.ProtoReflect.Descriptor instead.
 func (*EvRespawn) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{24}
+	return file_proto_omb_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *EvRespawn) GetRobot() uint32 {
@@ -2137,7 +2343,7 @@ type EvHeal struct {
 
 func (x *EvHeal) Reset() {
 	*x = EvHeal{}
-	mi := &file_proto_omb_proto_msgTypes[25]
+	mi := &file_proto_omb_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2149,7 +2355,7 @@ func (x *EvHeal) String() string {
 func (*EvHeal) ProtoMessage() {}
 
 func (x *EvHeal) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[25]
+	mi := &file_proto_omb_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2162,7 +2368,7 @@ func (x *EvHeal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvHeal.ProtoReflect.Descriptor instead.
 func (*EvHeal) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{25}
+	return file_proto_omb_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *EvHeal) GetBy() uint32 {
@@ -2203,7 +2409,7 @@ type EvSay struct {
 
 func (x *EvSay) Reset() {
 	*x = EvSay{}
-	mi := &file_proto_omb_proto_msgTypes[26]
+	mi := &file_proto_omb_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2215,7 +2421,7 @@ func (x *EvSay) String() string {
 func (*EvSay) ProtoMessage() {}
 
 func (x *EvSay) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[26]
+	mi := &file_proto_omb_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2228,7 +2434,7 @@ func (x *EvSay) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvSay.ProtoReflect.Descriptor instead.
 func (*EvSay) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{26}
+	return file_proto_omb_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *EvSay) GetRobot() uint32 {
@@ -2256,7 +2462,7 @@ type EvHit struct {
 
 func (x *EvHit) Reset() {
 	*x = EvHit{}
-	mi := &file_proto_omb_proto_msgTypes[27]
+	mi := &file_proto_omb_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2268,7 +2474,7 @@ func (x *EvHit) String() string {
 func (*EvHit) ProtoMessage() {}
 
 func (x *EvHit) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[27]
+	mi := &file_proto_omb_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2281,7 +2487,7 @@ func (x *EvHit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvHit.ProtoReflect.Descriptor instead.
 func (*EvHit) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{27}
+	return file_proto_omb_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *EvHit) GetFrom() uint32 {
@@ -2319,7 +2525,7 @@ type EvShot struct {
 
 func (x *EvShot) Reset() {
 	*x = EvShot{}
-	mi := &file_proto_omb_proto_msgTypes[28]
+	mi := &file_proto_omb_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2331,7 +2537,7 @@ func (x *EvShot) String() string {
 func (*EvShot) ProtoMessage() {}
 
 func (x *EvShot) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[28]
+	mi := &file_proto_omb_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2344,7 +2550,7 @@ func (x *EvShot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvShot.ProtoReflect.Descriptor instead.
 func (*EvShot) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{28}
+	return file_proto_omb_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *EvShot) GetProjectile() uint32 {
@@ -2397,7 +2603,7 @@ type EvProjectileImpact struct {
 
 func (x *EvProjectileImpact) Reset() {
 	*x = EvProjectileImpact{}
-	mi := &file_proto_omb_proto_msgTypes[29]
+	mi := &file_proto_omb_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2409,7 +2615,7 @@ func (x *EvProjectileImpact) String() string {
 func (*EvProjectileImpact) ProtoMessage() {}
 
 func (x *EvProjectileImpact) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[29]
+	mi := &file_proto_omb_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2422,7 +2628,7 @@ func (x *EvProjectileImpact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvProjectileImpact.ProtoReflect.Descriptor instead.
 func (*EvProjectileImpact) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{29}
+	return file_proto_omb_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *EvProjectileImpact) GetProjectile() uint32 {
@@ -2484,7 +2690,7 @@ type EvMatchStart struct {
 
 func (x *EvMatchStart) Reset() {
 	*x = EvMatchStart{}
-	mi := &file_proto_omb_proto_msgTypes[30]
+	mi := &file_proto_omb_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2496,7 +2702,7 @@ func (x *EvMatchStart) String() string {
 func (*EvMatchStart) ProtoMessage() {}
 
 func (x *EvMatchStart) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[30]
+	mi := &file_proto_omb_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2509,7 +2715,7 @@ func (x *EvMatchStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvMatchStart.ProtoReflect.Descriptor instead.
 func (*EvMatchStart) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{30}
+	return file_proto_omb_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *EvMatchStart) GetMapSeed() uint64 {
@@ -2537,7 +2743,7 @@ type EvWallHit struct {
 
 func (x *EvWallHit) Reset() {
 	*x = EvWallHit{}
-	mi := &file_proto_omb_proto_msgTypes[31]
+	mi := &file_proto_omb_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2549,7 +2755,7 @@ func (x *EvWallHit) String() string {
 func (*EvWallHit) ProtoMessage() {}
 
 func (x *EvWallHit) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[31]
+	mi := &file_proto_omb_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2562,7 +2768,7 @@ func (x *EvWallHit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvWallHit.ProtoReflect.Descriptor instead.
 func (*EvWallHit) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{31}
+	return file_proto_omb_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *EvWallHit) GetRobot() uint32 {
@@ -2597,7 +2803,7 @@ type EvScriptError struct {
 
 func (x *EvScriptError) Reset() {
 	*x = EvScriptError{}
-	mi := &file_proto_omb_proto_msgTypes[32]
+	mi := &file_proto_omb_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2609,7 +2815,7 @@ func (x *EvScriptError) String() string {
 func (*EvScriptError) ProtoMessage() {}
 
 func (x *EvScriptError) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[32]
+	mi := &file_proto_omb_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2622,7 +2828,7 @@ func (x *EvScriptError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvScriptError.ProtoReflect.Descriptor instead.
 func (*EvScriptError) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{32}
+	return file_proto_omb_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *EvScriptError) GetRobot() uint32 {
@@ -2655,7 +2861,7 @@ type EvMatchEnd struct {
 
 func (x *EvMatchEnd) Reset() {
 	*x = EvMatchEnd{}
-	mi := &file_proto_omb_proto_msgTypes[33]
+	mi := &file_proto_omb_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2667,7 +2873,7 @@ func (x *EvMatchEnd) String() string {
 func (*EvMatchEnd) ProtoMessage() {}
 
 func (x *EvMatchEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[33]
+	mi := &file_proto_omb_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2680,7 +2886,7 @@ func (x *EvMatchEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvMatchEnd.ProtoReflect.Descriptor instead.
 func (*EvMatchEnd) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{33}
+	return file_proto_omb_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *EvMatchEnd) GetScores() []*ScoreRow {
@@ -2701,7 +2907,7 @@ type ScoreRow struct {
 
 func (x *ScoreRow) Reset() {
 	*x = ScoreRow{}
-	mi := &file_proto_omb_proto_msgTypes[34]
+	mi := &file_proto_omb_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2713,7 +2919,7 @@ func (x *ScoreRow) String() string {
 func (*ScoreRow) ProtoMessage() {}
 
 func (x *ScoreRow) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[34]
+	mi := &file_proto_omb_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2726,7 +2932,7 @@ func (x *ScoreRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScoreRow.ProtoReflect.Descriptor instead.
 func (*ScoreRow) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{34}
+	return file_proto_omb_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ScoreRow) GetRobot() uint32 {
@@ -2760,7 +2966,7 @@ type EvScoreboard struct {
 
 func (x *EvScoreboard) Reset() {
 	*x = EvScoreboard{}
-	mi := &file_proto_omb_proto_msgTypes[35]
+	mi := &file_proto_omb_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2772,7 +2978,7 @@ func (x *EvScoreboard) String() string {
 func (*EvScoreboard) ProtoMessage() {}
 
 func (x *EvScoreboard) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[35]
+	mi := &file_proto_omb_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2785,7 +2991,7 @@ func (x *EvScoreboard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvScoreboard.ProtoReflect.Descriptor instead.
 func (*EvScoreboard) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{35}
+	return file_proto_omb_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *EvScoreboard) GetRows() []*ScoreRow {
@@ -2814,7 +3020,7 @@ type EvScriptResult struct {
 
 func (x *EvScriptResult) Reset() {
 	*x = EvScriptResult{}
-	mi := &file_proto_omb_proto_msgTypes[36]
+	mi := &file_proto_omb_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2826,7 +3032,7 @@ func (x *EvScriptResult) String() string {
 func (*EvScriptResult) ProtoMessage() {}
 
 func (x *EvScriptResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[36]
+	mi := &file_proto_omb_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2839,7 +3045,7 @@ func (x *EvScriptResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvScriptResult.ProtoReflect.Descriptor instead.
 func (*EvScriptResult) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{36}
+	return file_proto_omb_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *EvScriptResult) GetClientScriptId() uint32 {
@@ -2870,6 +3076,158 @@ func (x *EvScriptResult) GetScriptRev() uint32 {
 	return 0
 }
 
+type SnippetSourceView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          SnippetKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=omb.v1.SnippetKind" json:"kind,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // 官方模块源码（与服务器组合执行的同一定稿）
+	DefaultP1     float64                `protobuf:"fixed64,4,opt,name=default_p1,json=defaultP1,proto3" json:"default_p1,omitempty"`
+	DefaultS1     string                 `protobuf:"bytes,5,opt,name=default_s1,json=defaultS1,proto3" json:"default_s1,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnippetSourceView) Reset() {
+	*x = SnippetSourceView{}
+	mi := &file_proto_omb_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnippetSourceView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnippetSourceView) ProtoMessage() {}
+
+func (x *SnippetSourceView) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnippetSourceView.ProtoReflect.Descriptor instead.
+func (*SnippetSourceView) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *SnippetSourceView) GetKind() SnippetKind {
+	if x != nil {
+		return x.Kind
+	}
+	return SnippetKind_SNIPPET_UNSPECIFIED
+}
+
+func (x *SnippetSourceView) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *SnippetSourceView) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *SnippetSourceView) GetDefaultP1() float64 {
+	if x != nil {
+		return x.DefaultP1
+	}
+	return 0
+}
+
+func (x *SnippetSourceView) GetDefaultS1() string {
+	if x != nil {
+		return x.DefaultS1
+	}
+	return ""
+}
+
+type EvSnippetResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                           // 拒绝原因（参数越界/未知 kind/非法路径点）
+	Applied       []*SnippetSetting      `protobuf:"bytes,3,rep,name=applied,proto3" json:"applied,omitempty"`                       // 生效中的完整配置（失败时 = 旧配置）
+	ScriptRev     uint32                 `protobuf:"varint,4,opt,name=script_rev,json=scriptRev,proto3" json:"script_rev,omitempty"` // 重新组合后的脚本版本（组合失败保旧时为旧 rev）
+	Sources       []*SnippetSourceView   `protobuf:"bytes,5,rep,name=sources,proto3" json:"sources,omitempty"`                       // 当前服务器 catalog 全量官方源码（客户端可直接展示）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EvSnippetResult) Reset() {
+	*x = EvSnippetResult{}
+	mi := &file_proto_omb_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EvSnippetResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EvSnippetResult) ProtoMessage() {}
+
+func (x *EvSnippetResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EvSnippetResult.ProtoReflect.Descriptor instead.
+func (*EvSnippetResult) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *EvSnippetResult) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *EvSnippetResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *EvSnippetResult) GetApplied() []*SnippetSetting {
+	if x != nil {
+		return x.Applied
+	}
+	return nil
+}
+
+func (x *EvSnippetResult) GetScriptRev() uint32 {
+	if x != nil {
+		return x.ScriptRev
+	}
+	return 0
+}
+
+func (x *EvSnippetResult) GetSources() []*SnippetSourceView {
+	if x != nil {
+		return x.Sources
+	}
+	return nil
+}
+
 type EvMapBootstrap struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	MapJson          string                 `protobuf:"bytes,1,opt,name=map_json,json=mapJson,proto3" json:"map_json,omitempty"` // MapDef 序列化（与 mapgen.Generate 同源）
@@ -2881,7 +3239,7 @@ type EvMapBootstrap struct {
 
 func (x *EvMapBootstrap) Reset() {
 	*x = EvMapBootstrap{}
-	mi := &file_proto_omb_proto_msgTypes[37]
+	mi := &file_proto_omb_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2893,7 +3251,7 @@ func (x *EvMapBootstrap) String() string {
 func (*EvMapBootstrap) ProtoMessage() {}
 
 func (x *EvMapBootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[37]
+	mi := &file_proto_omb_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2906,7 +3264,7 @@ func (x *EvMapBootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvMapBootstrap.ProtoReflect.Descriptor instead.
 func (*EvMapBootstrap) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{37}
+	return file_proto_omb_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *EvMapBootstrap) GetMapJson() string {
@@ -2942,7 +3300,7 @@ type EvAiUsage struct {
 
 func (x *EvAiUsage) Reset() {
 	*x = EvAiUsage{}
-	mi := &file_proto_omb_proto_msgTypes[38]
+	mi := &file_proto_omb_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2954,7 +3312,7 @@ func (x *EvAiUsage) String() string {
 func (*EvAiUsage) ProtoMessage() {}
 
 func (x *EvAiUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[38]
+	mi := &file_proto_omb_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2967,7 +3325,7 @@ func (x *EvAiUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvAiUsage.ProtoReflect.Descriptor instead.
 func (*EvAiUsage) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{38}
+	return file_proto_omb_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *EvAiUsage) GetRobot() uint32 {
@@ -3010,7 +3368,7 @@ type EvRoomState struct {
 
 func (x *EvRoomState) Reset() {
 	*x = EvRoomState{}
-	mi := &file_proto_omb_proto_msgTypes[39]
+	mi := &file_proto_omb_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3022,7 +3380,7 @@ func (x *EvRoomState) String() string {
 func (*EvRoomState) ProtoMessage() {}
 
 func (x *EvRoomState) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[39]
+	mi := &file_proto_omb_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3035,7 +3393,7 @@ func (x *EvRoomState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvRoomState.ProtoReflect.Descriptor instead.
 func (*EvRoomState) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{39}
+	return file_proto_omb_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *EvRoomState) GetState() EvRoomState_State {
@@ -3077,7 +3435,7 @@ type EvAiQuota struct {
 
 func (x *EvAiQuota) Reset() {
 	*x = EvAiQuota{}
-	mi := &file_proto_omb_proto_msgTypes[40]
+	mi := &file_proto_omb_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3089,7 +3447,7 @@ func (x *EvAiQuota) String() string {
 func (*EvAiQuota) ProtoMessage() {}
 
 func (x *EvAiQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[40]
+	mi := &file_proto_omb_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3102,7 +3460,7 @@ func (x *EvAiQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvAiQuota.ProtoReflect.Descriptor instead.
 func (*EvAiQuota) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{40}
+	return file_proto_omb_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *EvAiQuota) GetRoundsLeft() uint32 {
@@ -3153,6 +3511,8 @@ type ServerEvent struct {
 	//	*ServerEvent_Scoreboard
 	//	*ServerEvent_ScriptLog
 	//	*ServerEvent_Heal
+	//	*ServerEvent_SnippetUsage
+	//	*ServerEvent_SnippetResult
 	Kind          isServerEvent_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3160,7 +3520,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_omb_proto_msgTypes[41]
+	mi := &file_proto_omb_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3172,7 +3532,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[41]
+	mi := &file_proto_omb_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3185,7 +3545,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{41}
+	return file_proto_omb_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ServerEvent) GetTick() uint32 {
@@ -3398,6 +3758,24 @@ func (x *ServerEvent) GetHeal() *EvHeal {
 	return nil
 }
 
+func (x *ServerEvent) GetSnippetUsage() *EvSnippetUsage {
+	if x != nil {
+		if x, ok := x.Kind.(*ServerEvent_SnippetUsage); ok {
+			return x.SnippetUsage
+		}
+	}
+	return nil
+}
+
+func (x *ServerEvent) GetSnippetResult() *EvSnippetResult {
+	if x != nil {
+		if x, ok := x.Kind.(*ServerEvent_SnippetResult); ok {
+			return x.SnippetResult
+		}
+	}
+	return nil
+}
+
 type isServerEvent_Kind interface {
 	isServerEvent_Kind()
 }
@@ -3486,6 +3864,14 @@ type ServerEvent_Heal struct {
 	Heal *EvHeal `protobuf:"bytes,30,opt,name=heal,proto3,oneof"`
 }
 
+type ServerEvent_SnippetUsage struct {
+	SnippetUsage *EvSnippetUsage `protobuf:"bytes,31,opt,name=snippet_usage,json=snippetUsage,proto3,oneof"` // OLD_SCHOOL 埋点：某轴最终采用 CS_SNIPPET（0.5s 节流/robot）
+}
+
+type ServerEvent_SnippetResult struct {
+	SnippetResult *EvSnippetResult `protobuf:"bytes,32,opt,name=snippet_result,json=snippetResult,proto3,oneof"` // SnippetConfig 定向回执（不落事件日志，仅 owner 下发）
+}
+
 func (*ServerEvent_Kill) isServerEvent_Kind() {}
 
 func (*ServerEvent_CorePickup) isServerEvent_Kind() {}
@@ -3528,6 +3914,10 @@ func (*ServerEvent_ScriptLog) isServerEvent_Kind() {}
 
 func (*ServerEvent_Heal) isServerEvent_Kind() {}
 
+func (*ServerEvent_SnippetUsage) isServerEvent_Kind() {}
+
+func (*ServerEvent_SnippetResult) isServerEvent_Kind() {}
+
 type EvScriptLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RobotId       uint32                 `protobuf:"varint,1,opt,name=robot_id,json=robotId,proto3" json:"robot_id,omitempty"`
@@ -3542,7 +3932,7 @@ type EvScriptLog struct {
 
 func (x *EvScriptLog) Reset() {
 	*x = EvScriptLog{}
-	mi := &file_proto_omb_proto_msgTypes[42]
+	mi := &file_proto_omb_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3554,7 +3944,7 @@ func (x *EvScriptLog) String() string {
 func (*EvScriptLog) ProtoMessage() {}
 
 func (x *EvScriptLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[42]
+	mi := &file_proto_omb_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3567,7 +3957,7 @@ func (x *EvScriptLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EvScriptLog.ProtoReflect.Descriptor instead.
 func (*EvScriptLog) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{42}
+	return file_proto_omb_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *EvScriptLog) GetRobotId() uint32 {
@@ -3612,6 +4002,58 @@ func (x *EvScriptLog) GetTruncated() bool {
 	return false
 }
 
+type EvSnippetUsage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Robot         uint32                 `protobuf:"varint,1,opt,name=robot,proto3" json:"robot,omitempty"`
+	Axes          uint32                 `protobuf:"varint,2,opt,name=axes,proto3" json:"axes,omitempty"` // 本 tick 最终采用 CS_SNIPPET 的轴位图（bit0 move/bit1 aim/bit2 fire/bit3 ability）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EvSnippetUsage) Reset() {
+	*x = EvSnippetUsage{}
+	mi := &file_proto_omb_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EvSnippetUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EvSnippetUsage) ProtoMessage() {}
+
+func (x *EvSnippetUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EvSnippetUsage.ProtoReflect.Descriptor instead.
+func (*EvSnippetUsage) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *EvSnippetUsage) GetRobot() uint32 {
+	if x != nil {
+		return x.Robot
+	}
+	return 0
+}
+
+func (x *EvSnippetUsage) GetAxes() uint32 {
+	if x != nil {
+		return x.Axes
+	}
+	return 0
+}
+
 type ServerMsg struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
@@ -3625,7 +4067,7 @@ type ServerMsg struct {
 
 func (x *ServerMsg) Reset() {
 	*x = ServerMsg{}
-	mi := &file_proto_omb_proto_msgTypes[43]
+	mi := &file_proto_omb_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3637,7 +4079,7 @@ func (x *ServerMsg) String() string {
 func (*ServerMsg) ProtoMessage() {}
 
 func (x *ServerMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[43]
+	mi := &file_proto_omb_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3650,7 +4092,7 @@ func (x *ServerMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMsg.ProtoReflect.Descriptor instead.
 func (*ServerMsg) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{43}
+	return file_proto_omb_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ServerMsg) GetPayload() isServerMsg_Payload {
@@ -3733,12 +4175,20 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\tSOLO_BOTS\x10\x05\"P\n" +
 	"\fScriptSubmit\x12(\n" +
 	"\x10client_script_id\x18\x01 \x01(\rR\x0eclientScriptId\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\"\x1e\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\"\x83\x01\n" +
+	"\x0eSnippetSetting\x12'\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x13.omb.v1.SnippetKindR\x04kind\x12\x18\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x0e\n" +
+	"\x02p1\x18\x03 \x01(\x01R\x02p1\x12\x0e\n" +
+	"\x02p2\x18\x04 \x01(\x01R\x02p2\x12\x0e\n" +
+	"\x02s1\x18\x05 \x01(\tR\x02s1\"C\n" +
+	"\rSnippetConfig\x122\n" +
+	"\bsnippets\x18\x01 \x03(\v2\x16.omb.v1.SnippetSettingR\bsnippets\"\x1e\n" +
 	"\bAiPrompt\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x19\n" +
 	"\x03Say\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x0f\n" +
-	"\rResyncRequest\"\xc7\x04\n" +
+	"\rResyncRequest\"\x87\x05\n" +
 	"\tClientMsg\x12+\n" +
 	"\x05input\x18\x01 \x01(\v2\x13.omb.v1.ClientInputH\x00R\x05input\x128\n" +
 	"\fwarmup_input\x18\x02 \x01(\v2\x13.omb.v1.ClientInputH\x00R\vwarmupInput\x12&\n" +
@@ -3752,7 +4202,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x0eresync_request\x18\t \x01(\v2\x15.omb.v1.ResyncRequestH\x00R\rresyncRequest\x12\x1f\n" +
 	"\x03say\x18\n" +
 	" \x01(\v2\v.omb.v1.SayH\x00R\x03say\x122\n" +
-	"\bspectate\x18\v \x01(\v2\x14.omb.v1.SpectateRoomH\x00R\bspectateB\t\n" +
+	"\bspectate\x18\v \x01(\v2\x14.omb.v1.SpectateRoomH\x00R\bspectate\x12>\n" +
+	"\x0esnippet_config\x18\f \x01(\v2\x15.omb.v1.SnippetConfigH\x00R\rsnippetConfigB\t\n" +
 	"\apayload\"V\n" +
 	"\n" +
 	"EntityBase\x12\x0e\n" +
@@ -3913,7 +4364,22 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1d\n" +
 	"\n" +
-	"script_rev\x18\x04 \x01(\rR\tscriptRev\"s\n" +
+	"script_rev\x18\x04 \x01(\rR\tscriptRev\"\xa8\x01\n" +
+	"\x11SnippetSourceView\x12'\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x13.omb.v1.SnippetKindR\x04kind\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x1d\n" +
+	"\n" +
+	"default_p1\x18\x04 \x01(\x01R\tdefaultP1\x12\x1d\n" +
+	"\n" +
+	"default_s1\x18\x05 \x01(\tR\tdefaultS1\"\xbd\x01\n" +
+	"\x0fEvSnippetResult\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x120\n" +
+	"\aapplied\x18\x03 \x03(\v2\x16.omb.v1.SnippetSettingR\aapplied\x12\x1d\n" +
+	"\n" +
+	"script_rev\x18\x04 \x01(\rR\tscriptRev\x123\n" +
+	"\asources\x18\x05 \x03(\v2\x19.omb.v1.SnippetSourceViewR\asources\"s\n" +
 	"\x0eEvMapBootstrap\x12\x19\n" +
 	"\bmap_json\x18\x01 \x01(\tR\amapJson\x12\x19\n" +
 	"\bmap_hash\x18\x02 \x01(\tR\amapHash\x12+\n" +
@@ -3938,7 +4404,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\vrounds_left\x18\x01 \x01(\rR\n" +
 	"roundsLeft\x12\"\n" +
 	"\rtokens_used_k\x18\x02 \x01(\rR\vtokensUsedK\x12/\n" +
-	"\x14global_tokens_left_k\x18\x03 \x01(\rR\x11globalTokensLeftK\"\x93\t\n" +
+	"\x14global_tokens_left_k\x18\x03 \x01(\rR\x11globalTokensLeftK\"\x94\n" +
+	"\n" +
 	"\vServerEvent\x12\x12\n" +
 	"\x04tick\x18\x01 \x01(\rR\x04tick\x12.\n" +
 	"\x04wall\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04wall\x12$\n" +
@@ -3970,7 +4437,9 @@ const file_proto_omb_proto_rawDesc = "" +
 	"scoreboard\x124\n" +
 	"\n" +
 	"script_log\x18\x1d \x01(\v2\x13.omb.v1.EvScriptLogH\x00R\tscriptLog\x12$\n" +
-	"\x04heal\x18\x1e \x01(\v2\x0e.omb.v1.EvHealH\x00R\x04healB\x06\n" +
+	"\x04heal\x18\x1e \x01(\v2\x0e.omb.v1.EvHealH\x00R\x04heal\x12=\n" +
+	"\rsnippet_usage\x18\x1f \x01(\v2\x16.omb.v1.EvSnippetUsageH\x00R\fsnippetUsage\x12@\n" +
+	"\x0esnippet_result\x18  \x01(\v2\x17.omb.v1.EvSnippetResultH\x00R\rsnippetResultB\x06\n" +
 	"\x04kind\"\xa3\x01\n" +
 	"\vEvScriptLog\x12\x19\n" +
 	"\brobot_id\x18\x01 \x01(\rR\arobotId\x12\x1d\n" +
@@ -3979,7 +4448,10 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x04tick\x18\x03 \x01(\rR\x04tick\x12\x14\n" +
 	"\x05level\x18\x04 \x01(\tR\x05level\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x1c\n" +
-	"\ttruncated\x18\x06 \x01(\bR\ttruncated\"x\n" +
+	"\ttruncated\x18\x06 \x01(\bR\ttruncated\":\n" +
+	"\x0eEvSnippetUsage\x12\x14\n" +
+	"\x05robot\x18\x01 \x01(\rR\x05robot\x12\x12\n" +
+	"\x04axes\x18\x02 \x01(\rR\x04axes\"x\n" +
 	"\tServerMsg\x123\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x15.omb.v1.SnapshotDeltaH\x00R\bsnapshot\x12+\n" +
 	"\x05event\x18\x02 \x01(\v2\x13.omb.v1.ServerEventH\x00R\x05eventB\t\n" +
@@ -3994,7 +4466,17 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\bCS_HUMAN\x10\x01\x12\r\n" +
 	"\tCS_SCRIPT\x10\x02\x12\x0e\n" +
 	"\n" +
-	"CS_SNIPPET\x10\x03*\x80\x02\n" +
+	"CS_SNIPPET\x10\x03*\xf1\x01\n" +
+	"\vSnippetKind\x12\x17\n" +
+	"\x13SNIPPET_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10SNIPPET_AUTO_AIM\x10\x01\x12\x15\n" +
+	"\x11SNIPPET_AUTO_FIRE\x10\x02\x12\x17\n" +
+	"\x13SNIPPET_AUTO_PICKUP\x10\x03\x12\x1c\n" +
+	"\x18SNIPPET_EMERGENCY_SHIELD\x10\x04\x12\x18\n" +
+	"\x14SNIPPET_DANGER_AVOID\x10\x05\x12\x12\n" +
+	"\x0eSNIPPET_PATROL\x10\x06\x12\x17\n" +
+	"\x13SNIPPET_GLOBAL_CORE\x10\a\x12\x1e\n" +
+	"\x1aSNIPPET_LOW_HP_HEALTH_PACK\x10\b*\x80\x02\n" +
 	"\x05Title\x12\x15\n" +
 	"\x11TITLE_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vWAR_MACHINE\x10\x01\x12\r\n" +
@@ -4032,130 +4514,144 @@ func file_proto_omb_proto_rawDescGZIP() []byte {
 	return file_proto_omb_proto_rawDescData
 }
 
-var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_proto_omb_proto_goTypes = []any{
 	(Phase)(0),                    // 0: omb.v1.Phase
 	(ControlSource)(0),            // 1: omb.v1.ControlSource
-	(Title)(0),                    // 2: omb.v1.Title
-	(RoomAction_Kind)(0),          // 3: omb.v1.RoomAction.Kind
-	(EvRoomState_State)(0),        // 4: omb.v1.EvRoomState.State
-	(*Vec2)(nil),                  // 5: omb.v1.Vec2
-	(*ClientInput)(nil),           // 6: omb.v1.ClientInput
-	(*JoinRoom)(nil),              // 7: omb.v1.JoinRoom
-	(*SpectateRoom)(nil),          // 8: omb.v1.SpectateRoom
-	(*LeaveRoom)(nil),             // 9: omb.v1.LeaveRoom
-	(*AssistToggle)(nil),          // 10: omb.v1.AssistToggle
-	(*RoomAction)(nil),            // 11: omb.v1.RoomAction
-	(*ScriptSubmit)(nil),          // 12: omb.v1.ScriptSubmit
-	(*AiPrompt)(nil),              // 13: omb.v1.AiPrompt
-	(*Say)(nil),                   // 14: omb.v1.Say
-	(*ResyncRequest)(nil),         // 15: omb.v1.ResyncRequest
-	(*ClientMsg)(nil),             // 16: omb.v1.ClientMsg
-	(*EntityBase)(nil),            // 17: omb.v1.EntityBase
-	(*RobotState)(nil),            // 18: omb.v1.RobotState
-	(*ProjectileState)(nil),       // 19: omb.v1.ProjectileState
-	(*CoreState)(nil),             // 20: omb.v1.CoreState
-	(*UplinkState)(nil),           // 21: omb.v1.UplinkState
-	(*HealthPackState)(nil),       // 22: omb.v1.HealthPackState
-	(*SelfState)(nil),             // 23: omb.v1.SelfState
-	(*SnapshotDelta)(nil),         // 24: omb.v1.SnapshotDelta
-	(*EvKill)(nil),                // 25: omb.v1.EvKill
-	(*EvCorePickup)(nil),          // 26: omb.v1.EvCorePickup
-	(*EvUplinkHack)(nil),          // 27: omb.v1.EvUplinkHack
-	(*EvPhaseChange)(nil),         // 28: omb.v1.EvPhaseChange
-	(*EvRespawn)(nil),             // 29: omb.v1.EvRespawn
-	(*EvHeal)(nil),                // 30: omb.v1.EvHeal
-	(*EvSay)(nil),                 // 31: omb.v1.EvSay
-	(*EvHit)(nil),                 // 32: omb.v1.EvHit
-	(*EvShot)(nil),                // 33: omb.v1.EvShot
-	(*EvProjectileImpact)(nil),    // 34: omb.v1.EvProjectileImpact
-	(*EvMatchStart)(nil),          // 35: omb.v1.EvMatchStart
-	(*EvWallHit)(nil),             // 36: omb.v1.EvWallHit
-	(*EvScriptError)(nil),         // 37: omb.v1.EvScriptError
-	(*EvMatchEnd)(nil),            // 38: omb.v1.EvMatchEnd
-	(*ScoreRow)(nil),              // 39: omb.v1.ScoreRow
-	(*EvScoreboard)(nil),          // 40: omb.v1.EvScoreboard
-	(*EvScriptResult)(nil),        // 41: omb.v1.EvScriptResult
-	(*EvMapBootstrap)(nil),        // 42: omb.v1.EvMapBootstrap
-	(*EvAiUsage)(nil),             // 43: omb.v1.EvAiUsage
-	(*EvRoomState)(nil),           // 44: omb.v1.EvRoomState
-	(*EvAiQuota)(nil),             // 45: omb.v1.EvAiQuota
-	(*ServerEvent)(nil),           // 46: omb.v1.ServerEvent
-	(*EvScriptLog)(nil),           // 47: omb.v1.EvScriptLog
-	(*ServerMsg)(nil),             // 48: omb.v1.ServerMsg
-	(*timestamppb.Timestamp)(nil), // 49: google.protobuf.Timestamp
+	(SnippetKind)(0),              // 2: omb.v1.SnippetKind
+	(Title)(0),                    // 3: omb.v1.Title
+	(RoomAction_Kind)(0),          // 4: omb.v1.RoomAction.Kind
+	(EvRoomState_State)(0),        // 5: omb.v1.EvRoomState.State
+	(*Vec2)(nil),                  // 6: omb.v1.Vec2
+	(*ClientInput)(nil),           // 7: omb.v1.ClientInput
+	(*JoinRoom)(nil),              // 8: omb.v1.JoinRoom
+	(*SpectateRoom)(nil),          // 9: omb.v1.SpectateRoom
+	(*LeaveRoom)(nil),             // 10: omb.v1.LeaveRoom
+	(*AssistToggle)(nil),          // 11: omb.v1.AssistToggle
+	(*RoomAction)(nil),            // 12: omb.v1.RoomAction
+	(*ScriptSubmit)(nil),          // 13: omb.v1.ScriptSubmit
+	(*SnippetSetting)(nil),        // 14: omb.v1.SnippetSetting
+	(*SnippetConfig)(nil),         // 15: omb.v1.SnippetConfig
+	(*AiPrompt)(nil),              // 16: omb.v1.AiPrompt
+	(*Say)(nil),                   // 17: omb.v1.Say
+	(*ResyncRequest)(nil),         // 18: omb.v1.ResyncRequest
+	(*ClientMsg)(nil),             // 19: omb.v1.ClientMsg
+	(*EntityBase)(nil),            // 20: omb.v1.EntityBase
+	(*RobotState)(nil),            // 21: omb.v1.RobotState
+	(*ProjectileState)(nil),       // 22: omb.v1.ProjectileState
+	(*CoreState)(nil),             // 23: omb.v1.CoreState
+	(*UplinkState)(nil),           // 24: omb.v1.UplinkState
+	(*HealthPackState)(nil),       // 25: omb.v1.HealthPackState
+	(*SelfState)(nil),             // 26: omb.v1.SelfState
+	(*SnapshotDelta)(nil),         // 27: omb.v1.SnapshotDelta
+	(*EvKill)(nil),                // 28: omb.v1.EvKill
+	(*EvCorePickup)(nil),          // 29: omb.v1.EvCorePickup
+	(*EvUplinkHack)(nil),          // 30: omb.v1.EvUplinkHack
+	(*EvPhaseChange)(nil),         // 31: omb.v1.EvPhaseChange
+	(*EvRespawn)(nil),             // 32: omb.v1.EvRespawn
+	(*EvHeal)(nil),                // 33: omb.v1.EvHeal
+	(*EvSay)(nil),                 // 34: omb.v1.EvSay
+	(*EvHit)(nil),                 // 35: omb.v1.EvHit
+	(*EvShot)(nil),                // 36: omb.v1.EvShot
+	(*EvProjectileImpact)(nil),    // 37: omb.v1.EvProjectileImpact
+	(*EvMatchStart)(nil),          // 38: omb.v1.EvMatchStart
+	(*EvWallHit)(nil),             // 39: omb.v1.EvWallHit
+	(*EvScriptError)(nil),         // 40: omb.v1.EvScriptError
+	(*EvMatchEnd)(nil),            // 41: omb.v1.EvMatchEnd
+	(*ScoreRow)(nil),              // 42: omb.v1.ScoreRow
+	(*EvScoreboard)(nil),          // 43: omb.v1.EvScoreboard
+	(*EvScriptResult)(nil),        // 44: omb.v1.EvScriptResult
+	(*SnippetSourceView)(nil),     // 45: omb.v1.SnippetSourceView
+	(*EvSnippetResult)(nil),       // 46: omb.v1.EvSnippetResult
+	(*EvMapBootstrap)(nil),        // 47: omb.v1.EvMapBootstrap
+	(*EvAiUsage)(nil),             // 48: omb.v1.EvAiUsage
+	(*EvRoomState)(nil),           // 49: omb.v1.EvRoomState
+	(*EvAiQuota)(nil),             // 50: omb.v1.EvAiQuota
+	(*ServerEvent)(nil),           // 51: omb.v1.ServerEvent
+	(*EvScriptLog)(nil),           // 52: omb.v1.EvScriptLog
+	(*EvSnippetUsage)(nil),        // 53: omb.v1.EvSnippetUsage
+	(*ServerMsg)(nil),             // 54: omb.v1.ServerMsg
+	(*timestamppb.Timestamp)(nil), // 55: google.protobuf.Timestamp
 }
 var file_proto_omb_proto_depIdxs = []int32{
-	3,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
-	6,  // 1: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
-	6,  // 2: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
-	7,  // 3: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
-	9,  // 4: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
-	11, // 5: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
-	12, // 6: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
-	13, // 7: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
-	10, // 8: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
-	15, // 9: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
-	14, // 10: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
-	8,  // 11: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
-	5,  // 12: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
-	17, // 13: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
-	17, // 14: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
-	17, // 15: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
-	17, // 16: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
-	17, // 17: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
-	1,  // 18: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
-	1,  // 19: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
-	1,  // 20: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
-	1,  // 21: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
-	0,  // 22: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
-	18, // 23: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
-	19, // 24: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
-	20, // 25: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
-	21, // 26: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
-	23, // 27: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
-	22, // 28: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
-	5,  // 29: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
-	0,  // 30: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
-	0,  // 31: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
-	5,  // 32: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
-	5,  // 33: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
-	5,  // 34: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
-	5,  // 35: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
-	39, // 36: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
-	2,  // 37: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
-	39, // 38: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
-	4,  // 39: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
-	49, // 40: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
-	25, // 41: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
-	26, // 42: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
-	27, // 43: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
-	28, // 44: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
-	29, // 45: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
-	31, // 46: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
-	32, // 47: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
-	38, // 48: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
-	44, // 49: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
-	45, // 50: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
-	41, // 51: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
-	35, // 52: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
-	36, // 53: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
-	37, // 54: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
-	42, // 55: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
-	43, // 56: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
-	33, // 57: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
-	34, // 58: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
-	40, // 59: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
-	47, // 60: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
-	30, // 61: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
-	24, // 62: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
-	46, // 63: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
-	64, // [64:64] is the sub-list for method output_type
-	64, // [64:64] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	4,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
+	2,  // 1: omb.v1.SnippetSetting.kind:type_name -> omb.v1.SnippetKind
+	14, // 2: omb.v1.SnippetConfig.snippets:type_name -> omb.v1.SnippetSetting
+	7,  // 3: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
+	7,  // 4: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
+	8,  // 5: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
+	10, // 6: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
+	12, // 7: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
+	13, // 8: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
+	16, // 9: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
+	11, // 10: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
+	18, // 11: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
+	17, // 12: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
+	9,  // 13: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
+	15, // 14: omb.v1.ClientMsg.snippet_config:type_name -> omb.v1.SnippetConfig
+	6,  // 15: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
+	20, // 16: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
+	20, // 17: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
+	20, // 18: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
+	20, // 19: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
+	20, // 20: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
+	1,  // 21: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
+	1,  // 22: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
+	1,  // 23: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
+	1,  // 24: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
+	0,  // 25: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
+	21, // 26: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
+	22, // 27: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
+	23, // 28: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
+	24, // 29: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
+	26, // 30: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
+	25, // 31: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
+	6,  // 32: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
+	0,  // 33: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
+	0,  // 34: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
+	6,  // 35: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
+	6,  // 36: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
+	6,  // 37: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
+	6,  // 38: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
+	42, // 39: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
+	3,  // 40: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
+	42, // 41: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
+	2,  // 42: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
+	14, // 43: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
+	45, // 44: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
+	5,  // 45: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
+	55, // 46: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
+	28, // 47: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
+	29, // 48: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
+	30, // 49: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
+	31, // 50: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
+	32, // 51: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
+	34, // 52: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
+	35, // 53: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
+	41, // 54: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
+	49, // 55: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
+	50, // 56: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
+	44, // 57: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
+	38, // 58: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
+	39, // 59: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
+	40, // 60: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
+	47, // 61: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
+	48, // 62: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
+	36, // 63: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
+	37, // 64: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
+	43, // 65: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
+	52, // 66: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
+	33, // 67: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
+	53, // 68: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
+	46, // 69: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
+	27, // 70: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
+	51, // 71: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
+	72, // [72:72] is the sub-list for method output_type
+	72, // [72:72] is the sub-list for method input_type
+	72, // [72:72] is the sub-list for extension type_name
+	72, // [72:72] is the sub-list for extension extendee
+	0,  // [0:72] is the sub-list for field type_name
 }
 
 func init() { file_proto_omb_proto_init() }
@@ -4163,7 +4659,7 @@ func file_proto_omb_proto_init() {
 	if File_proto_omb_proto != nil {
 		return
 	}
-	file_proto_omb_proto_msgTypes[11].OneofWrappers = []any{
+	file_proto_omb_proto_msgTypes[13].OneofWrappers = []any{
 		(*ClientMsg_Input)(nil),
 		(*ClientMsg_WarmupInput)(nil),
 		(*ClientMsg_Join)(nil),
@@ -4175,9 +4671,10 @@ func file_proto_omb_proto_init() {
 		(*ClientMsg_ResyncRequest)(nil),
 		(*ClientMsg_Say)(nil),
 		(*ClientMsg_Spectate)(nil),
+		(*ClientMsg_SnippetConfig)(nil),
 	}
-	file_proto_omb_proto_msgTypes[18].OneofWrappers = []any{}
-	file_proto_omb_proto_msgTypes[41].OneofWrappers = []any{
+	file_proto_omb_proto_msgTypes[20].OneofWrappers = []any{}
+	file_proto_omb_proto_msgTypes[45].OneofWrappers = []any{
 		(*ServerEvent_Kill)(nil),
 		(*ServerEvent_CorePickup)(nil),
 		(*ServerEvent_UplinkHack)(nil),
@@ -4199,8 +4696,10 @@ func file_proto_omb_proto_init() {
 		(*ServerEvent_Scoreboard)(nil),
 		(*ServerEvent_ScriptLog)(nil),
 		(*ServerEvent_Heal)(nil),
+		(*ServerEvent_SnippetUsage)(nil),
+		(*ServerEvent_SnippetResult)(nil),
 	}
-	file_proto_omb_proto_msgTypes[43].OneofWrappers = []any{
+	file_proto_omb_proto_msgTypes[48].OneofWrappers = []any{
 		(*ServerMsg_Snapshot)(nil),
 		(*ServerMsg_Event)(nil),
 	}
@@ -4209,8 +4708,8 @@ func file_proto_omb_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_omb_proto_rawDesc), len(file_proto_omb_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   44,
+			NumEnums:      6,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

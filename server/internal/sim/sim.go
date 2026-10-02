@@ -118,6 +118,9 @@ type Robot struct {
 	RespawnPending  bool         `json:"respawn_pending"`
 	LastWallHitTick uint32       `json:"last_wall_hit_tick"`
 	HasWallHit      bool         `json:"has_wall_hit"`
+	// Snippet 埋点节流：与 WallHit 同粒度思路，避免 60Hz 刷屏事件。
+	LastSnippetUseTick uint32 `json:"last_snippet_use_tick"`
+	HasSnippetUse      bool   `json:"has_snippet_use"`
 }
 
 // Checkpoint is the complete state of this stage, including static geometry,

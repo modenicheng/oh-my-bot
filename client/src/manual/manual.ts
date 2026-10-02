@@ -51,8 +51,8 @@ const MOCK_TREE: ManualNode[] = [
       { path: 'start/index.md', title: '快速上手', order: 1, children: [] },
       { path: 'start/prepare.md', title: '进房前准备', order: 11, children: [] },
       { path: 'start/first-match.md', title: '你的第一局', order: 12, children: [] },
-      { path: 'start/snippet.md', title: 'Snippet 驾驶辅助（规划）', order: 13, children: [] },
-      { path: 'start/ai-agent.md', title: 'AI Agent（接入状态与规划）', order: 14, children: [] },
+      { path: 'start/snippet.md', title: 'Snippet 驾驶辅助', order: 13, children: [] },
+      { path: 'start/ai-agent.md', title: 'AI Agent', order: 14, children: [] },
     ],
   },
   {
@@ -88,9 +88,9 @@ const MOCK_TREE: ManualNode[] = [
   },
 ]
 
-const MOCK_DOCS: Record<string, string> = {
+export const MOCK_DOCS: Record<string, string> = {
   'reference/actions.md': [
-    '---\ntitle: 动作参考（L0 原语）\naudience: coder\n---\n\n# 动作参考（L0 原语）\n\nmock 回退示例页：多语言 tab 组渲染。\n\n```ts|py|java\n三个语言实现如下。\n```\n\n```ts\nconst bot = {\n  tick(ctx) {\n    const core = ctx.api.nearestCore()\n    if (core) ctx.api.moveTo(core)\n  },\n}\nexport default bot\n```\n\n```py\ndef tick(ctx):\n    core = ctx.api.nearest_core()\n    if core:\n        ctx.api.move_to(core)\n```\n\n```java\nvoid tick(Context ctx) {\n    Vec2 core = ctx.api.nearestCore();\n    if (core != null) ctx.api.moveTo(core);\n}\n```\n\n普通代码块（无 tab）：\n\n```ts\nconst x: number = 1\n```\n',
+    '---\ntitle: 动作参考（L0 原语）\naudience: coder\n---\n\n# 动作参考（L0 原语）\n\nmock 回退示例页：多语言 tab 组渲染。\n\n```ts|py|java\n三个语言实现如下。\n```\n\n```ts\nconst bot = {\n  tick(bot) {\n    const enemy = bot.scan().robots[0]\n    if (enemy) bot.aimAt(enemy)\n    const core = bot.nearestCore()\n    if (core) bot.navigateTo(core)\n    console.log(bot.self.position)\n  },\n}\nexport default bot\n```\n\n```py\ndef tick(bot):\n    robots = bot.scan().robots\n    if robots:\n        bot.aimAt(robots[0])\n    print(bot.self.position)\n```\n\n```java\nvoid tick(BotContext bot) {\n    RobotRef enemy = bot.scan().robots().stream().findFirst().orElse(null);\n    if (enemy != null) bot.aimAt(enemy);\n    System.out.println(bot.self.position);\n}\n```\n\n普通代码块（无 tab）：\n\n```ts\nconst x: number = 1\n```\n',
   ].join(''),
 }
 

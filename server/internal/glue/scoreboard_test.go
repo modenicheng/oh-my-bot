@@ -86,7 +86,7 @@ func TestMatchBroadcastsScoreboardDuringPlay(t *testing.T) {
 	_ = spec // 观战者只需存在并收包，无需后续交互
 
 	players := map[uint64]SessionInfo{pilot.playerID: {PlayerID: pilot.playerID, Nick: pilot.nick, Color: pilot.color}}
-	m, err := NewMatch(rc, 42, 1, players, false)
+	m, err := NewMatch(rc, 42, 1, players, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestScoreboardCatchUpOnResync(t *testing.T) {
 	pilot, pilotLog := bindLogged(t, h, rc, "pilot")
 
 	players := map[uint64]SessionInfo{pilot.playerID: {PlayerID: pilot.playerID, Nick: pilot.nick, Color: pilot.color}}
-	m, err := NewMatch(rc, 42, 1, players, false)
+	m, err := NewMatch(rc, 42, 1, players, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

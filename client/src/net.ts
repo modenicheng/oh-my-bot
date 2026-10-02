@@ -95,20 +95,22 @@ export class RoomSession {
     this.startAttempt()
   }
 
-  /** 上行发送：未在线直接丢弃（不排队、不回放）；在线发送失败转入重连。 */
-  send(msg: Uint8Array): void {
-    if (this.state !== 'online' || !this.transport) return
+  /** 上行发送：返回是否已交给在线 transport；不排队、不回放。 */
+  send(msg: Uint8Array): boolean {
+    if (this.state !== 'online' || !this.transport) return false
     if (this.opts?.spectator) {
       try {
-        if (msg[0] !== frame.up) return
+        if (msg[0] !== frame.up) return false
         const payload = fromBinary(ClientMsgSchema, msg.subarray(1)).payload.case
-        if (payload !== 'resyncRequest' && payload !== 'leave') return
-      } catch { return }
+        if (payload !== 'resyncRequest' && payload !== 'leave') return false
+      } catch { return false }
     }
     try {
       this.transport.send(msg)
+      return true
     } catch {
       this.loseConnection(this.gen, '连接已中断')
+      return false
     }
   }
 

@@ -20,15 +20,15 @@ func TestFrameBudgetTypicalScripts(t *testing.T) {
 	const N = 64
 	src := `
 let last = null
-function tick(ctx) {
-  const enemies = ctx.obs.robots.filter(function(r){ return r.id !== ctx.self.id })
+function tick(bot) {
+  const enemies = bot.scan().robots.filter(function(r){ return r.id !== bot.self.id })
   if (enemies.length > 0) {
     const e = enemies[0]
-    const dx = e.pos.x - ctx.self.pos.x
-    const dy = e.pos.y - ctx.self.pos.y
-    ctx.api.aim(Math.atan2(dy, dx))
-    ctx.api.fire()
-    ctx.api.move(dx > 0 ? 1 : -1, 0)
+    const dx = e.position.x - bot.self.position.x
+    const dy = e.position.y - bot.self.position.y
+    bot.aimAt(Math.atan2(dy, dx))
+    bot.fire()
+    bot.move(dx > 0 ? 1 : -1, 0)
   }
 }`
 	for i := 0; i < N; i++ {

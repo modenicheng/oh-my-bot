@@ -50,7 +50,7 @@ func (m *MockProvider) Complete(ctx context.Context, pc PromptContext) (Result, 
 	}
 	res := m.Result
 	if res.NewScript == "" {
-		res.NewScript = "export default { tick(ctx) { ctx.api.moveTo({x: 0, y: 0}) } }"
+		res.NewScript = "function tick(bot) { bot.navigateTo({x: 0, y: 0}) }"
 	}
 	return res, m.Usage, nil
 }

@@ -176,6 +176,10 @@ type ScriptFrame struct {
 // ScriptCommands 是脚本的单 tick 输出意图。指针语义 = 本 tick 脚本
 // 明确操作过该轴；nil = 本 tick 不操作该轴，不会延续到下一 tick。
 // 人类按键的持续态由 ClientInput 单独维护；Aim 未操作时物理炮塔朝向保持。
+//
+// SnippetAxes：本 tick 意图中由官方 Snippet 模块（非玩家源码）产生的轴
+// 位图（v0.3 §9-2：Snippet 本质是官方 Bot Script，与玩家源码同一运行时
+// 组合执行）。非序列化——回放/检查点经 ControlState.SnippetAxes 落盘。
 type ScriptCommands struct {
 	Move      *Vec2    // 单位向量 × 速度意向
 	Aim       *float64 // 炮塔目标角（弧度）
@@ -185,6 +189,8 @@ type ScriptCommands struct {
 	Interact  *bool
 	Say       *string // 3s 冷却、自由文本
 	PulseScan bool    // 主动脉冲（12 能量、2s CD、32m、不穿墙）
+
+	SnippetAxes AxisMask // 本 tick 由 Snippet 模块操作过的轴（归因用，不参与序列化）
 }
 
 // Runtime 是脚本运行时抽象（goja 为 v1 唯一实现；多语言运行时预留）。
@@ -210,6 +216,14 @@ const (
 	AxisAbility // dash/shield/interact
 )
 
+// control source 字节标记（SelfState *_src 的 sim 侧编码；快照层映射回枚举）。
+const (
+	SrcHuman  = 'H' // 手操
+	SrcScript = 'S' // 玩家 Bot Script
+	SrcSnip   = 'N' // 官方 Snippet 模块（CS_SNIPPET）
+	SrcNone   = '-' // 本 tick 无来源
+)
+
 // ArbitratedInput：仲裁后的最终控制输入（Sim 物理层唯一消费）。
 type ArbitratedInput struct {
 	Move     Vec2
@@ -219,5 +233,6 @@ type ArbitratedInput struct {
 	Shield   bool
 	Interact bool
 	// 来源标记（下发 SelfState.move_src/turret_src/fire_src/ability_src 供 UI 显示）。
-	MoveSrc, TurretSrc, FireSrc, AbilitySrc byte // 'H' human / 'S' script / '-' none
+	// 'H' human / 'S' script / 'N' snippet / '-' none；人类仍最高优先。
+	MoveSrc, TurretSrc, FireSrc, AbilitySrc byte
 }

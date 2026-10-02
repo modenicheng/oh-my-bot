@@ -29,7 +29,7 @@ func spectatorMatch(t *testing.T, warmup bool) (*Hub, *RoomConn, *Session, *mess
 	player, log := bindLogged(t, h, rc, "alice")
 	players := map[uint64]SessionInfo{player.playerID: {PlayerID: player.playerID, Nick: player.nick, Color: player.color}}
 	addSoloBots(players, 3)
-	m, err := NewMatch(rc, 42, 1, players, warmup)
+	m, err := NewMatch(rc, 42, 1, players, warmup, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestSpectatorWaitsThroughAbortAndMapReplacement(t *testing.T) {
 	log.take() // The later observer's bind also broadcasts room state to this one.
 	players := map[uint64]SessionInfo{player.playerID: {PlayerID: player.playerID, Nick: player.nick}}
 	addSoloBots(players, 3)
-	next, err := NewMatch(rc, 77, 2, players, true)
+	next, err := NewMatch(rc, 77, 2, players, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

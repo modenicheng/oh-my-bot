@@ -15,16 +15,18 @@ const fence = "```"
 // systemInstruction 输出契约与写作纪律（最高优先级段）+ API 摘要。
 func systemInstruction() string {
 	var b strings.Builder
-	b.WriteString("你是 oh-my-bot 游戏的 Bot Script 编程助手。玩家会给你一份当前 Bot Script（TypeScript）和一条自然语言修改指令，你要产出修改后的完整新版脚本。\n\n")
+	b.WriteString("你是 oh-my-bot 游戏的 Bot Script 编程助手。玩家会给你一份当前 Bot Script（JavaScript）和一条自然语言修改指令，你要产出修改后的完整新版脚本。\n\n")
 
 	b.WriteString("## 输出要求（最高优先级）\n\n")
-	b.WriteString("只输出完整新版脚本代码：一个以 " + fence + "ts 开头、" + fence + " 结尾的代码块，不要输出任何其他解释、前言或结语。代码必须是完整可独立运行的模块（默认导出 BotModule），不得输出片段、省略号或“其余不变”。\n\n")
+	b.WriteString("只输出完整新版 JavaScript：一个以 " + fence + "js 开头、" + fence + " 结尾的代码块，不要输出任何其他解释、前言或结语。服务器直接加载 JavaScript，不会编译 TypeScript：禁止类型注解、interface、enum、as 类型断言。入口必须是顶层 `function tick(bot) { ... }`，或 `const bot = { tick(bot) { ... } }; export default bot`；不要输出内联 `export default { ... }`。不得输出片段、省略号或‘其余不变’。\n\n")
 
 	b.WriteString("## Bot Script 运行模型\n\n")
-	b.WriteString("脚本导出 `export default { tick(ctx) { ... } }`，tick 每秒调用 60 次（60Hz，与模拟同频）；模块级顶层变量跨 tick 存活（记忆状态放顶层变量，不要挂全局单例）；单 tick 预算 10ms，超时该 tick 被强制中断且机器人 idle——禁止死循环与长计算。\n\n")
+	b.WriteString("脚本入口是顶层 `function tick(bot) { ... }`，或先定义 `const bot = { tick(bot) { ... } }` 再单独 `export default bot`。tick 每秒调用 60 次（60Hz，与模拟同频）；模块级顶层变量跨 tick 存活（记忆状态放顶层变量，不要挂全局单例）；单 tick 预算 10ms，超时该 tick 被强制中断且机器人 idle——禁止死循环与长计算。\n\n")
 
 	b.WriteString("## 脚本 API（@omb/bot-api）\n\n")
 	b.WriteString(botAPITypes())
+
+	b.WriteString("\nUse the flat API: call `bot.scan()` for observations, read `bot.self.position`, and call `bot.navigateTo()` / `bot.move()` / `bot.aimAt()` / `bot.fire()` directly. Never generate `ctx.api`, `ctx.obs`, `self.pos`, or `api.aim`. Prefer `navigateTo` for movement goals. Health packs are collected by movement contact; there is no `pickup()`.\n")
 
 	b.WriteString("\n能量：上限 100、回复 10/s。开火 5/发、dash 20/s、shield 约 18/s、pulseScan 12。动作只对当前 tick 生效；持续动作要每 tick 调用。shield 与 dash 互斥且 shield 优先。\n\n")
 	b.WriteString("刻意不提供（不要幻想调用）：寻路、弹道预测、威胁评估、检测玩家是否在手操（脚本感知不到手操状态，分轴仲裁已处理）。API 之外不存在任何全局函数或对象。\n")
@@ -37,11 +39,10 @@ func botAPITypes() string {
   self: Self           // 自己的状态
   game: GameInfo       // 局时、阶段
   scan(): Observation  // 免费感知：服务器已按视野 20m + 墙体遮挡裁剪好的最近快照，零成本任意频次
-  api: L0 & L1         // 旧语法兼容别名；新代码使用 bot.xxx()
 }
 
 interface Vec2 { x: number; y: number }
-interface RobotRef { id: number; position: Vec2; hp: number }
+interface RobotRef { id: number; position: Vec2; velocity: Vec2; hp: number }
 
 interface Self { hp: number; energy: number; position: Vec2; velocity: Vec2 }
 interface GameInfo { time: number; timeLeft: number; phase: 'OUTER_RING' | 'CORE_OPEN'; mapSeed: number }
@@ -69,12 +70,13 @@ interface L0 {
 
 // L1 便利层
 interface L1 {
+  navigateTo(pos: Vec2): void
   moveTo(pos: Vec2): void
   aimAt(target: RobotRef): void
   nearestEnemy(): RobotRef | null     // 最近可见敌人
   nearestCore(): Vec2 | null
   nearestUplink(): Vec2 | null
-  pulseScan(): Observation | null     // 半径 32m、耗能 12、CD 2s，仍不穿墙
+  pulseScan(): Observation     // 半径 32m、耗能 12、CD 2s，仍不穿墙
 }
 `
 }

@@ -206,12 +206,18 @@ func buildSystemPrompt(manual []string) string {
 	return b.String()
 }
 
-// buildUserPrompt 组装 user prompt：当前脚本 + 玩家指令。
+// buildUserPrompt 组装 user prompt：当前脚本 + 当前玩家合法感知 + 指令。
 func buildUserPrompt(pc PromptContext) string {
 	var b strings.Builder
-	b.WriteString("## 当前脚本（rev " + fmt.Sprint(pc.ScriptRev) + "）\n\n```ts\n")
+	b.WriteString("## 当前脚本（rev " + fmt.Sprint(pc.ScriptRev) + "）\n\n```js\n")
 	b.WriteString(pc.CurrentScript)
-	b.WriteString("\n```\n\n## 玩家指令\n\n")
+	b.WriteString("\n```\n")
+	if pc.Perception != "" {
+		b.WriteString("\n## 当前玩家感知快照（只读 JSON）\n\n```json\n")
+		b.WriteString(pc.Perception)
+		b.WriteString("\n```\n")
+	}
+	b.WriteString("\n## 玩家指令\n\n")
 	b.WriteString(pc.Instruction)
 	return b.String()
 }

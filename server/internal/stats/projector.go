@@ -41,9 +41,9 @@ type robotStats struct {
 	aiRounds     int32
 	aiTokensK    int32
 	scriptErrors int32
-	// snippetUses counts CS_SNIPPET-sourced control activity. v1 has no
-	// snippet event source (snippet runtime unimplemented), so it stays 0;
-	// OLD_SCHOOL asserts on it anyway so the gate is future-proof.
+	// snippetUses counts CS_SNIPPET-sourced control activity from the
+	// throttled EvSnippetUsage telemetry sim emits when a final output axis
+	// actually resolved to snippet control (config alone never counts).
 	snippetUses int32
 
 	killsAt        uint32
@@ -258,6 +258,11 @@ func (p *ProjectorImpl) applyEvent(tick uint32, ev *ombv1.ServerEvent) {
 			r := p.robot(e.Robot)
 			r.scriptErrors++
 			r.scriptErrorsAt = tick
+		}
+	case *ombv1.ServerEvent_SnippetUsage:
+		if e := k.SnippetUsage; e != nil {
+			r := p.robot(e.Robot)
+			r.snippetUses++
 		}
 	case *ombv1.ServerEvent_MatchStart:
 		if e := k.MatchStart; e != nil {
@@ -524,6 +529,10 @@ func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
 	case *ombv1.ServerEvent_ScriptResult:
 		if e := k.ScriptResult; e != nil {
 			return fmt.Sprintf("%d|sr|%d|%t|%s|%d", tick, e.ClientScriptId, e.Ok, e.Error, e.ScriptRev)
+		}
+	case *ombv1.ServerEvent_SnippetUsage:
+		if e := k.SnippetUsage; e != nil {
+			return fmt.Sprintf("%d|nu|%d|%d", tick, e.Robot, e.Axes)
 		}
 	case *ombv1.ServerEvent_MapBootstrap:
 		if e := k.MapBootstrap; e != nil {

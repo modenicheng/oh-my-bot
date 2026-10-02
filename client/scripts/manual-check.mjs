@@ -12,7 +12,7 @@ import { resolve, dirname, join } from 'node:path'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
-import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, EvRoomStateSchema, RoomAction_Kind, EvMapBootstrapSchema, SnapshotDeltaSchema } from '../../packages/protocol/src/index.ts'
+import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, EvRoomStateSchema, RoomAction_Kind, EvMapBootstrapSchema, SnapshotDeltaSchema } from '../../packages/protocol/src/gen/proto/omb_pb.ts'
 
 const shots = resolve(import.meta.dirname, '../../.artifacts/manual')
 mkdirSync(shots, { recursive: true })
@@ -220,7 +220,7 @@ try {
 
   // start 章节子页顺序：index 落地页在前，之后按 order（非字典序）。
   const startItems = await page.locator('#manual-sidebar .toc-section', { hasText: '快速上手' }).locator('.toc-children a').allTextContents()
-  assert.deepEqual(startItems.map(s => s.trim()), ['快速上手', '进房前准备', '你的第一局', 'Snippet 驾驶辅助（规划）', 'AI Agent（接入状态与规划）'],
+  assert.deepEqual(startItems.map(s => s.trim()), ['快速上手', '进房前准备', '你的第一局', 'Snippet 驾驶辅助', 'AI Agent'],
     `start children order = ${JSON.stringify(startItems)}`)
 
   // 点击章节首页（目录导航，非字典序验证：点击“游戏规则”章节落地页）。

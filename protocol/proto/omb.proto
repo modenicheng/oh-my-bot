@@ -47,6 +47,35 @@ message RoomAction {
   Kind kind = 1;
 }
 message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
+
+// ============ Snippet 驾驶辅助（v0.3 §9-2：官方 Bot Script 模块，可查看源码） ============
+
+enum SnippetKind {
+  SNIPPET_UNSPECIFIED = 0;
+  SNIPPET_AUTO_AIM = 1;         // 自动瞄准（提前量开关）
+  SNIPPET_AUTO_FIRE = 2;        // 自动开火（射程阈值 m）
+  SNIPPET_AUTO_PICKUP = 3;      // 自动拾取（拾取半径 m）
+  SNIPPET_EMERGENCY_SHIELD = 4; // 紧急护盾（HP 阈值 0..100）
+  SNIPPET_DANGER_AVOID = 5;     // 危险规避（威胁半径 m）
+  SNIPPET_PATROL = 6;           // 简单巡逻（路径点 "x,y;x,y"）
+  SNIPPET_GLOBAL_CORE = 7;      // 全局 Core 拾取（无参数，朝最近存活 Core 移动）
+  SNIPPET_LOW_HP_HEALTH_PACK = 8; // 低血量自动拾取血包（HP 阈值 1..100）
+}
+
+// 单条 Snippet 开关与参数。参数最多 2 个：浮点参数走 p1/p2，
+// 路径点等字符串参数走 s1（范围校验在服务端 catalog，坏值整条拒绝保旧）。
+message SnippetSetting {
+  SnippetKind kind = 1;
+  bool enabled = 2;
+  double p1 = 3; // 参数1（bool 语义用 0/1；阈值/半径/射程）
+  double p2 = 4; // 参数2（预留：第二条数值参数）
+  string s1 = 5; // 字符串参数（patrol 路径点 "x,y;x,y"）
+}
+
+// 整机 Snippet 配置上行：全量替换语义（enabled=false 的条目可省略）。
+message SnippetConfig {
+  repeated SnippetSetting snippets = 1;
+}
 message AiPrompt { string text = 1; } // AI Agent 配额内改码请求
 message Say { string text = 1; } // 手动全场发言；与脚本 say 共用 3s 冷却，最多 160 字符
 message ResyncRequest {} // 客户端检测快照缺口（base_tick 断链）时请求全量重同步
@@ -64,6 +93,7 @@ message ClientMsg {
     ResyncRequest resync_request = 9;
     Say say = 10;
     SpectateRoom spectate = 11;
+    SnippetConfig snippet_config = 12; // 驾驶辅助配置（仅房间玩家、active match）
   }
 }
 
@@ -204,6 +234,22 @@ message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，�
   uint32 script_rev = 4; // 服务器侧版本号（单调递增）
 }
 
+message SnippetSourceView { // 单条官方 Snippet 的可查看源码（当教材）
+  SnippetKind kind = 1;
+  string title = 2;
+  string source = 3; // 官方模块源码（与服务器组合执行的同一定稿）
+  double default_p1 = 4;
+  string default_s1 = 5;
+}
+
+message EvSnippetResult { // SnippetConfig 的定向回执（不落事件日志，仅下发）
+  bool ok = 1;
+  string error = 2;               // 拒绝原因（参数越界/未知 kind/非法路径点）
+  repeated SnippetSetting applied = 3; // 生效中的完整配置（失败时 = 旧配置）
+  uint32 script_rev = 4;          // 重新组合后的脚本版本（组合失败保旧时为旧 rev）
+  repeated SnippetSourceView sources = 5; // 当前服务器 catalog 全量官方源码（客户端可直接展示）
+}
+
 message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务器为唯一 owner）
   string map_json = 1;         // MapDef 序列化（与 mapgen.Generate 同源）
   string map_hash = 2;        // 一致性校验
@@ -256,6 +302,8 @@ message ServerEvent {
     EvScoreboard scoreboard = 28; // 观战/回放可见；玩家同样可收（延迟 1s 内不影响作弊面）
     EvScriptLog script_log = 29; // 仅脚本 owner session 可见，不进入 Match Event Log
     EvHeal heal = 30;
+    EvSnippetUsage snippet_usage = 31; // OLD_SCHOOL 埋点：某轴最终采用 CS_SNIPPET（0.5s 节流/robot）
+    EvSnippetResult snippet_result = 32; // SnippetConfig 定向回执（不落事件日志，仅 owner 下发）
   }
 }
 
@@ -266,6 +314,11 @@ message EvScriptLog {
   string level = 4;
   string text = 5;
   bool truncated = 6;
+}
+
+message EvSnippetUsage { // 古法编程（OLD_SCHOOL）埋点：真实 snippet 控制活动
+  uint32 robot = 1;
+  uint32 axes = 2; // 本 tick 最终采用 CS_SNIPPET 的轴位图（bit0 move/bit1 aim/bit2 fire/bit3 ability）
 }
 
 message ServerMsg {

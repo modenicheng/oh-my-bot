@@ -20,7 +20,90 @@ func newCommandCollector() *commandCollector { return &commandCollector{} }
 
 func (c *commandCollector) commands() sim.ScriptCommands { return c.out }
 
-// ---- L0 ----
+// axes 迄今实际操作过的轴位图（snippet 阶段丢弃判定用）。
+func (c *commandCollector) axes() sim.AxisMask { return effectiveAxes(c.out) }
+
+// snippetCollector 官方 snippet 模块的受限收集器：玩家本 tick 已操作
+// 的轴直接丢弃（组合规则：玩家源码优先）；其余正常记录并归因 N。
+// Snippet 与玩家脚本共享公开 bot API 和 L1 便利层；便利层最终仍调用
+// 这些 L0 setter，因此同样受逐轴丢弃与来源归因约束。
+type snippetCollector struct {
+	commandCollector
+	playerAxes sim.AxisMask
+	snipAxes   sim.AxisMask
+}
+
+func newSnippetCollector(playerAxes sim.AxisMask) *snippetCollector {
+	return &snippetCollector{playerAxes: playerAxes}
+}
+
+func (c *snippetCollector) snippetAxes() sim.AxisMask { return c.snipAxes }
+
+func (c *snippetCollector) mark(axis sim.AxisMask, ok *bool) {
+	if c.playerAxes&axis != 0 {
+		*ok = false
+		return
+	}
+	c.snipAxes |= axis
+}
+
+// ---- L0（snippet 视图：受玩家轴丢弃约束）----
+
+func (c *snippetCollector) setMove(vx, vy float64) {
+	ok := true
+	c.mark(sim.AxisMove, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setMove(vx, vy)
+}
+
+func (c *snippetCollector) setAim(angle float64) {
+	ok := true
+	c.mark(sim.AxisAim, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setAim(angle)
+}
+
+func (c *snippetCollector) setFire() {
+	ok := true
+	c.mark(sim.AxisFire, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setFire()
+}
+
+func (c *snippetCollector) setDash() {
+	ok := true
+	c.mark(sim.AxisAbility, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setDash()
+}
+
+func (c *snippetCollector) setShield(on bool) {
+	ok := true
+	c.mark(sim.AxisAbility, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setShield(on)
+}
+
+func (c *snippetCollector) setInteract() {
+	ok := true
+	c.mark(sim.AxisAbility, &ok)
+	if !ok {
+		return
+	}
+	c.commandCollector.setInteract()
+}
+
+// ---- L0（玩家收集器）----
 
 func (c *commandCollector) setMove(vx, vy float64) {
 	v := sim.Vec2{X: vx, Y: vy}
@@ -71,12 +154,13 @@ func toJSVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {
 	return o
 }
 
-// toJSRobotRef RobotView → RobotRef { id, position, hp }。
+// toJSRobotRef RobotView → RobotRef { id, position, hp, velocity }。
 func toJSRobotRef(vm *goja.Runtime, ro sim.RobotView) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("id", float64(ro.ID))
 	_ = o.Set("position", toJSVec2(vm, ro.Pos))
 	_ = o.Set("hp", x10ToFloat(ro.HpX10))
+	_ = o.Set("velocity", toJSVec2(vm, ro.Vel))
 	return o
 }
 

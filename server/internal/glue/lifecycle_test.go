@@ -59,7 +59,7 @@ func stopTestMatch(t *testing.T, m *Match) {
 }
 func assembledTestMatch(t *testing.T, rc *RoomConn, s *Session) *Match {
 	t.Helper()
-	m, err := NewMatch(rc, 42, 1, map[uint64]SessionInfo{s.playerID: {PlayerID: s.playerID, Nick: s.nick, Color: s.color}}, true)
+	m, err := NewMatch(rc, 42, 1, map[uint64]SessionInfo{s.playerID: {PlayerID: s.playerID, Nick: s.nick, Color: s.color}}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestFormalMatchPersistsFinalCheckpointIdentityAndSettlement(t *testing.T) {
 	rc := h.EnsureRoom("REPLAYTEST")
 	pilot, log := bindLogged(t, h, rc, "pilot")
 	players := map[uint64]SessionInfo{pilot.playerID: {PlayerID: pilot.playerID, Nick: pilot.nick, Color: pilot.color}}
-	m, err := NewMatch(rc, 42, 1, players, false)
+	m, err := NewMatch(rc, 42, 1, players, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

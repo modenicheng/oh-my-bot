@@ -327,6 +327,8 @@ func ctrlSrc(b byte) ombv1.ControlSource {
 		return ombv1.ControlSource_CS_HUMAN
 	case 'S':
 		return ombv1.ControlSource_CS_SCRIPT
+	case 'N':
+		return ombv1.ControlSource_CS_SNIPPET
 	default:
 		return ombv1.ControlSource_CS_UNSPECIFIED
 	}

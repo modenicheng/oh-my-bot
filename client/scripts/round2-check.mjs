@@ -285,25 +285,25 @@ try {
   await page.locator('.suggest-widget.visible').waitFor()
   await until(() => page.locator('.suggest-widget.visible').textContent().then(t => t.includes('moveTo')), 'Bot API completion')
   await page.keyboard.press('Escape')
-  const validSource = `let layoutLog = 0\nconsole.info('JS load console')\n${prelude}function tick(bot) { if (layoutLog < 600) console.debug('layout-log', layoutLog++); bot.shield(true); bot.say('脚本 say 正常') }\n`
+  const validSource = `let layoutLog = 0\nconsole.info('JS load console')\n${prelude}function tick(bot) { if (layoutLog < 3600) console.debug('layout-log', layoutLog++); bot.shield(true); bot.say('脚本 say 正常') }\n`
   await replaceSource(validSource)
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'valid JS diagnostics', 20000)
   const energyBefore = robots.get(id).energyX10
   assert.equal(await editorInput.evaluate(el => el === document.activeElement), true, 'Monaco focused before submit')
   await page.keyboard.press('ControlOrMeta+Enter')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r1')), 'script success')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本 r1')), 'script success')
   await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('JS load console')), 'real server console log')
   assert.equal(await editorInput.evaluate(el => el === document.activeElement), true, 'console follow never steals Monaco focus')
-  await page.click('.script-console-toggle')
-  assert.equal(await page.locator('.script-console-toggle').getAttribute('aria-expanded'), 'false', 'console collapses')
+  await page.click('#workbench-console-toggle')
+  assert.equal(await page.locator('#workbench-console-toggle').getAttribute('aria-expanded'), 'false', 'console collapses')
   assert.equal(await page.locator('.script-console-body').isHidden(), true, 'collapsed console does not cover editor')
-  await page.click('.script-console-toggle')
-  assert.equal(await page.locator('.script-console-toggle').getAttribute('aria-expanded'), 'true', 'console expands')
+  await page.click('#workbench-console-toggle')
+  assert.equal(await page.locator('#workbench-console-toggle').getAttribute('aria-expanded'), 'true', 'console expands')
   const cleared = await page.evaluate(() => {
     document.querySelector('.script-console-clear').click()
-    return { text: document.querySelector('.script-console-list').textContent, count: document.querySelector('[data-console-count]').textContent }
+    return { text: document.querySelector('.script-console-list').textContent, count: document.querySelector('.script-console-tab [data-console-count]').textContent }
   })
-  assert.equal(cleared.text, '', 'console clear removes buffered lines')
+  assert.equal(cleared.text, '等待脚本输出 · 使用 console.log(...) 调试', 'console clear restores empty-state hint')
   assert.equal(cleared.count, '0', 'console count resets after clear')
   assert.equal(submissions.at(-1).source, validSource)
   assert.equal(receipts.at(-1).clientScriptId, submissions.at(-1).clientScriptId)
@@ -311,7 +311,7 @@ try {
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'authoritative assist on')
   await until(() => robots.get(id).energyX10 < energyBefore - 20, 'submitted script runs on server')
   await until(() => messages.some(m => m.robot === id && m.text === '脚本 say 正常'), 'script say shares public broadcast path')
-  await until(() => page.locator('[data-console-count]').textContent().then(t => Number(t) === 300), 'console fills bounded browser buffer', 25000)
+  await until(() => page.locator('.script-console-tab [data-console-count]').textContent().then(t => Number(t) === 300), 'console fills bounded browser buffer', 25000)
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   assert.equal(await page.locator('#workbench-docs').isVisible(), true, 'docs and editor remain visible with full console')
   for (const width of [400, 320]) {
@@ -339,26 +339,26 @@ try {
   }
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.locator('.workbench-tools [data-panel="docs"]').click()
+  const oldScriptTick = await page.locator('.script-console-line').last().getAttribute('data-tick')
   await replaceSource('function tick( {')
   await page.click('#workbench-submit')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('加载失败')), 'load failure')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('加载失败')), 'load failure')
   assert.equal(receipts.at(-1).ok, false)
   assert.equal(receipts.at(-1).scriptRev, 1, 'failed load retains previous revision')
-  const energyAfterFailure = robots.get(id).energyX10
-  await until(() => robots.get(id).energyX10 < energyAfterFailure - 10, 'old script remains active after failure')
+  await until(() => page.locator('.script-console-line').last().getAttribute('data-tick').then(t => t !== oldScriptTick), 'old script remains active after failure')
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'false'), 'assist off')
   const beforeOversize = submissions.length
   await replaceSource(`// ${'超'.repeat(11000)}\nfunction tick() {}`)
   await page.click('#workbench-submit')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('32 KiB')), 'UTF-8 message size guard')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('32 KiB')), 'UTF-8 message size guard')
   assert.equal(submissions.length, beforeOversize, 'oversized source never reaches websocket')
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)
   const legacySource = `console.info('legacy ctx.api load')\nfunction tick(ctx) { ctx.api.shield(true); ctx.api.say('旧 ctx.api 正常') }\n`
   await replaceSource(legacySource)
   await page.keyboard.press('ControlOrMeta+Enter')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r2')), 'legacy ctx.api loads on real server')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本 r2')), 'legacy ctx.api loads on real server')
   await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('legacy ctx.api load') && t.includes('script r2')), 'legacy load console reaches owner')
   await page.click('#workbench-assist')
   await until(() => page.locator('#workbench-assist').getAttribute('aria-pressed').then(v => v === 'true'), 'assist on for legacy script')
@@ -376,7 +376,7 @@ try {
   await page.screenshot({ path: join(shots, 'workbench-ts.png') })
   const jsBeforeTs = submissions.length
   await page.keyboard.press('ControlOrMeta+Enter')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('服务器已加载 r3')), 'TS compiles and submits JS', 20000)
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本 r3')), 'TS compiles and submits JS', 20000)
   assert.equal(submissions.length, jsBeforeTs + 1, 'TS submit sends exactly one message')
   const tsPayload = submissions.at(-1).source
   assert.ok(!tsPayload.includes(': BotContext'), 'submitted source is compiled, not TS')
@@ -389,8 +389,8 @@ try {
   // 编译失败：不发送任何帧，旧脚本继续运行。
   await replaceSource('function tick(bot: { moveTo(p: { x: number, y: number }): void }) { bot.moveTo() }\n', tsDraftKey)
   await page.keyboard.press('ControlOrMeta+Enter')
-  await until(() => page.locator('#workbench-result').textContent().then(t => t.includes('TypeScript 编译失败')), 'compile failure surfaces TS errors', 20000)
-  assert.ok(await page.locator('#workbench-result').textContent().then(t => t.includes('第 1 行')), 'compile errors carry original TS line numbers')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('TypeScript 编译失败')), 'compile failure surfaces TS errors', 20000)
+  assert.ok(await page.locator('.script-console-list').textContent().then(t => t.includes('第 1 行')), 'compile errors carry original TS line numbers')
   assert.equal(submissions.length, jsBeforeTs + 1, 'compile failure sends nothing')
   await until(() => messages.some(m => m.robot === id && m.text === 'TS 脚本运行正常'), 'old compiled script keeps running', 100)
   assert.equal(receipts.at(-1).scriptRev, 3, 'compile failure leaves server revision untouched')
@@ -402,6 +402,27 @@ try {
   await page.click('#workbench-lang-switch [data-lang="js"]')
   assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), legacySource, 'switching back restores the latest JS draft')
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'JS diagnostics after switching back', 20000)
+
+  // Snippet tool pane: bootstrap publishes all eight official sources; custom
+  // switches/range controls apply over the real websocket and never stay pending.
+  await page.locator('.workbench-tools [data-panel="snippets"]').click()
+  await page.locator('#workbench-snippets').waitFor({ state: 'visible' })
+  await until(() => page.locator('.snippet-source-count').textContent().then(t => t?.includes('8 / 8')), 'official snippet sources', 20000)
+  assert.equal(await page.locator('.snippet-row').count(), 8, 'eight official snippet cards render')
+  assert.equal(await page.locator('.snippet-switch').count(), 8, 'all cards use custom switches')
+  assert.ok(await page.locator('.snippet-range-shell').count() >= 4, 'numeric modules use custom sliders')
+  await page.locator('.snippet-row[data-kind="autoAim"] .snippet-toggle').click()
+  await page.locator('.snippet-row[data-kind="autoFire"] .snippet-toggle').click()
+  await page.locator('.snippet-row[data-kind="autoFire"] .snippet-range-input').fill('12')
+  await page.locator('.snippet-apply').click()
+  await until(() => page.locator('.snippet-status').textContent().then(t => /已生效|配置已保存/.test(t || '')), 'snippet config ack', 12000)
+  assert.notEqual(await page.locator('.snippet-status').getAttribute('data-phase'), 'pending', 'snippet apply leaves pending state')
+  await page.locator('.snippet-row[data-kind="autoAim"] .snippet-source-toggle').click()
+  assert.match(await page.locator('.snippet-row[data-kind="autoAim"] .snippet-source pre').textContent(), /function snippetTick/, 'official source is visible')
+  await page.screenshot({ path: join(shots, 'workbench-snippets.png') })
+  // Tool panes are exclusive; explicitly restore the prior docs+editor layout
+  // before the reload/persistence assertions below.
+  await page.locator('.workbench-tools [data-panel="editor"]').click()
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   const submittedCount = submissions.length
   latest = undefined

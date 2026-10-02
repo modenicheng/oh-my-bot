@@ -26,7 +26,7 @@ func TestScriptConsoleIsOwnerOnlyAcrossLoadAndTick(t *testing.T) {
 		owner.playerID:    {PlayerID: owner.playerID, Nick: owner.nick, Color: owner.color},
 		opponent.playerID: {PlayerID: opponent.playerID, Nick: opponent.nick, Color: opponent.color},
 	}
-	m, err := NewMatch(rc, 42, 1, players, true)
+	m, err := NewMatch(rc, 42, 1, players, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

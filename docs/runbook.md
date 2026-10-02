@@ -197,5 +197,5 @@ go test ./server/internal/snapshot/ -bench . -benchtime 100x
 | 对局中对方消失 | AOI 裁剪（20m 出视野） | 设计行为；搭档除外 |
 | WS 连不上（dev 模式） | upstream 不符或后端未启动 | 核对 `OMB_DEV_UPSTREAM`（默认 `127.0.0.1:27182`）与后端进程 |
 | 手册 tab 不显示 | md 围栏语法错 | 首块语言标注须为 `ts\|py\|java` 形式 |
-| AI 提示 "not configured" | 当前房间链路尚未接入 AI 组件 | 设置 key 也不会启用；接入状态见 [AI Agent](manual/start/ai-agent.md) |
+| AI 提示“未启用” | `ai.enabled` 未开启或服务器未读取到 `DEEPSEEK_API_KEY` | 检查可执行文件同目录 / 当前工作目录的 `config.yaml` 与 `.env`，确认服务日志只显示启用状态不显示密钥；配置见 [部署指南](deploy.md#ai-agent-配置) |
 | 日志目录无新对局 | 热身场不落盘 | 设计行为；正式局才有 |

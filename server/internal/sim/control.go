@@ -1,6 +1,10 @@
 package sim
 
-import "math"
+import (
+	"math"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+)
 
 const allAxes = AxisMove | AxisAim | AxisFire | AxisAbility
 
@@ -133,17 +137,31 @@ func (c *ControlState) resolve() ArbitratedInput {
 	out := ArbitratedInput{MoveSrc: '-', TurretSrc: '-', FireSrc: '-', AbilitySrc: '-'}
 	if c.Assist {
 		setAxes(&out, c.Script, c.ScriptAxes)
+		// 同 tick 的轴来源细分：Snippet 产生的轴标记 'N'，其余玩家源码 'S'。
+		// 两者同层（同一运行时组合执行），人类轴在下方无条件覆盖——仍最高优先。
 		if c.ScriptAxes&AxisMove != 0 {
 			out.MoveSrc = 'S'
+			if c.SnippetAxes&AxisMove != 0 {
+				out.MoveSrc = 'N'
+			}
 		}
 		if c.ScriptAxes&AxisAim != 0 {
 			out.TurretSrc = 'S'
+			if c.SnippetAxes&AxisAim != 0 {
+				out.TurretSrc = 'N'
+			}
 		}
 		if c.ScriptAxes&AxisFire != 0 {
 			out.FireSrc = 'S'
+			if c.SnippetAxes&AxisFire != 0 {
+				out.FireSrc = 'N'
+			}
 		}
 		if c.ScriptAxes&AxisAbility != 0 {
 			out.AbilitySrc = 'S'
+			if c.SnippetAxes&AxisAbility != 0 {
+				out.AbilitySrc = 'N'
+			}
 		}
 	}
 	setAxes(&out, c.Human, c.HumanAxes)
@@ -192,6 +210,10 @@ func (c *ControlState) acceptScript(in *ScriptCommands) AxisMask {
 		mask |= AxisAbility
 	}
 	c.ScriptAxes |= mask
+	// 分轴归因：本 tick 真正生效的 Snippet 轴 = 组合意图中的 Snippet 轴
+	// 与实际写入轴的交集（玩家源码后执行可覆盖同轴值，但归因以最终写入者
+	// 为准——组合器保证“玩家源码优先”，被覆盖的轴不记 N）。
+	c.SnippetAxes |= in.SnippetAxes & mask
 	return mask
 }
 
@@ -259,6 +281,7 @@ func (s *Sim) consumeInputs() {
 		// stateful. Version 0/1 checkpoints retain the historical latch semantics.
 		if s.simulationVersion >= 2 {
 			c.Script, c.ScriptAxes = ArbitratedInput{}, 0
+			c.SnippetAxes = 0
 		}
 		if c.ScriptPending {
 			if c.ScriptFailed {
@@ -283,6 +306,28 @@ func (s *Sim) consumeInputs() {
 		}
 		if r.Combat.InvulnUntil != 0 && s.tick >= r.Combat.InvulnUntil {
 			r.Combat.Invulnerable, r.Combat.InvulnUntil = false, 0
+		}
+		// Snippet 真实使用埋点（OLD_SCHOOL 门）：本 tick 最终输出中某轴
+		// 来源为 N 才计——仅配置未启用轴不计。边沿触发 + 每 robot 节流
+		//（同 WallHit 的 0.5s 粒度），事件流与回放确定性不受影响。
+		if out := c.Output; out.MoveSrc == 'N' || out.TurretSrc == 'N' || out.FireSrc == 'N' || out.AbilitySrc == 'N' {
+			if !r.HasSnippetUse || s.tick-r.LastSnippetUseTick >= WallHitInterval {
+				r.LastSnippetUseTick, r.HasSnippetUse = s.tick, true
+				axes := uint32(0)
+				if out.MoveSrc == 'N' {
+					axes |= uint32(AxisMove)
+				}
+				if out.TurretSrc == 'N' {
+					axes |= uint32(AxisAim)
+				}
+				if out.FireSrc == 'N' {
+					axes |= uint32(AxisFire)
+				}
+				if out.AbilitySrc == 'N' {
+					axes |= uint32(AxisAbility)
+				}
+				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_SnippetUsage{SnippetUsage: &ombv1.EvSnippetUsage{Robot: r.ID, Axes: axes}}})
+			}
 		}
 	}
 }

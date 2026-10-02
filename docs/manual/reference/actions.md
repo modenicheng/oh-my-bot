@@ -37,12 +37,11 @@ L0 是 7 个最基础的动作指令：`move`、`aimAt`、`fire`、`dash`、`shi
 朝一个方向满速移动，以及追踪一个目标点的写法。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    bot.move(1, 0) // 每帧都喊"向右满速"
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  bot.move(1, 0) // 每帧都喊"向右满速"
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -80,14 +79,13 @@ bot.move(dx, dy) // 向量长度 >1 时归一为满速，否则按比例减速
 两种用法：按角度瞄准，和按敌人实体瞄准。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    bot.aimAt(Math.PI / 2) // 炮口转到 π/2 方向
-    const enemy = bot.nearestEnemy()
-    if (enemy) bot.aimAt(enemy) // 传实体：直接瞄它
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  bot.aimAt(Math.PI / 2) // 炮口转到 π/2 方向
+  const enemy = bot.nearestEnemy()
+  if (enemy) bot.aimAt(enemy) // 传实体：直接瞄它
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -135,16 +133,15 @@ void tick(Context bot) {
 最简单的输出循环：看到敌人就转炮塔并保持全自动射击。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const enemy = bot.nearestEnemy()
-    if (enemy) {
-      bot.aimAt(enemy)
-      bot.fire() // 条件成立的每个 tick 调用；游戏每 250ms 最多一发
-    }
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const enemy = bot.nearestEnemy()
+  if (enemy) {
+    bot.aimAt(enemy)
+    bot.fire() // 条件成立的每个 tick 调用；游戏每 250ms 最多一发
+  }
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -183,13 +180,12 @@ void tick(Context bot) {
 向后撤的同时触发冲刺：先给 move 方向，再调 dash。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    bot.move(-1, 0) // 这帧的移动方向 = 冲刺方向
-    if (bot.self.hp < 30) bot.dash() // 残血期间每 tick 持续冲刺
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  bot.move(-1, 0) // 这帧的移动方向 = 冲刺方向
+  if (bot.self.hp < 30) bot.dash() // 残血期间每 tick 持续冲刺
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -226,12 +222,11 @@ void tick(Context bot) {
 条件开盾：血量低于 30 就举盾，否则省着能量。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    bot.shield(bot.self.hp < 30)
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  bot.shield(bot.self.hp < 30)
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -264,21 +259,20 @@ void tick(Context bot) {
 逐步减速到桩旁，显式停止移动后持续引导；此片段不判断成功或冷却。
 ```
 ```ts
-const bot = {
-  tick(bot) {
-    const uplink = bot.nearestUplink()
-    if (!uplink) return
-    const me = bot.self.position
-    const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
-    if (dist > 1) {
-      bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
-    } else {
-      bot.move(0, 0) // 刹车
-      bot.interact() // 站桩期间每 tick 调用
-    }
-  },
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const uplink = bot.nearestUplink()
+  if (!uplink) return
+  const me = bot.self.position
+  const dist = Math.hypot(uplink.x - me.x, uplink.y - me.y)
+  if (dist > 1) {
+    bot.move((uplink.x - me.x) / 3, (uplink.y - me.y) / 3)
+  } else {
+    bot.move(0, 0) // 刹车
+    bot.interact() // 站桩期间每 tick 调用
+  }
 }
-export default bot
 ```
 ```py
 def tick(bot):
@@ -332,18 +326,17 @@ void tick(Context bot) {
 发现敌人时喊话，自记 3.5 秒间隔，避免每帧广播。
 ```
 ```ts
+import type { BotContext } from '@omb/bot-api'
+
 let lastSay = -99 // 上次喊话时间（秒）
 
-const bot = {
-  tick(bot) {
-    const enemy = bot.nearestEnemy()
-    if (enemy && bot.game.time - lastSay > 3.5) {
-      bot.say('enemies near core ' + enemy.id)
-      lastSay = bot.game.time
-    }
-  },
+function tick(bot: BotContext) {
+  const enemy = bot.nearestEnemy()
+  if (enemy && bot.game.time - lastSay > 3.5) {
+    bot.say('enemies near core ' + enemy.id)
+    lastSay = bot.game.time
+  }
 }
-export default bot
 ```
 ```py
 last_say = -99  # 上次喊话时间（秒）

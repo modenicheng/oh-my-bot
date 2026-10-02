@@ -13,28 +13,28 @@ tags: [脚本, 语义]
 
 **怎么运行**：游戏以 60Hz（与模拟同频）调用你的 `tick(bot)`。一帧的标准流程：读感知 → 决策 → 调 API 表达意图。
 
-- `ctx` 每帧重建：`self`、`game`、`scan()` 都是本帧快照，帧间不复用；
-- **模块级状态跨帧存活**：写在 `const bot = {...}` 外面/里面的变量就是你的记忆（计数器、路标索引、自记冷却）。热更新成功后程序重建、状态清零；
+- `bot` 每帧重建：`bot.self`、`bot.game`、`bot.scan()` 都是本帧快照，帧间不复用；
+- **模块级状态跨帧存活**：写在 `tick` 外面的变量就是你的记忆（计数器、路标索引、自记冷却）。热更新成功后程序重建、状态清零；
 - **每帧预算 10ms**：超时该帧脚本动作被清空（人的手操不受影响），下一帧照常恢复——是打断，不是禁赛；
 - **一拍延迟**：第 T 帧读到的世界是 T 时刻的，产出的指令 T+1 帧才生效。所有"到点判定"留阈值。
 
 示例库 `patrol.ts` 是本模块的标准教材——模块级状态加距离阈值：
 
 ```ts
+import type { BotContext } from '@omb/bot-api'
+
 let idx = 0 // 模块级状态：当前目标路标（写 tick 里就每帧清零了）
 
-const bot = {
-  tick(bot) {
-    const me = bot.self.position
-    const target = waypoints[idx]
-    const dx = target.x - me.x
-    const dy = target.y - me.y
-    if (dx * dx + dy * dy < 4) {
-      idx = (idx + 1) % waypoints.length // 距离 < 2m 算到点，切下一个
-      return
-    }
-    bot.moveTo(target)
-  },
+function tick(bot: BotContext) {
+  const me = bot.self.position
+  const target = waypoints[idx]
+  const dx = target.x - me.x
+  const dy = target.y - me.y
+  if (dx * dx + dy * dy < 4) {
+    idx = (idx + 1) % waypoints.length // 距离 < 2m 算到点，切下一个
+    return
+  }
+  bot.moveTo(target)
 }
 ```
 
@@ -59,9 +59,10 @@ const bot = {
 
 ## 3. 移动与战斗
 
-**怎么运行**：`move` 表达期望速度方向、`aimAt` 定炮口、`fire` 发射；`moveTo` 是"朝点走"的糖。
+**怎么运行**：`move` 表达期望速度方向、`aimAt` 定炮口、`fire` 发射；`moveTo` 沿直线朝点走，`navigateTo` 使用服务器确定性的静态 A*。
 
 - **`move(vx, vy)` 是期望速度向量**，不是位移：两个数合起来 ≤1 按比例走、>1 自动归一成满速。实际速度受加速度 24 m/s² 与限速 8 m/s 约束，起步和转向有惯性，没有瞬移；
+- **移动边界**：`moveTo` 是直线移动；`navigateTo` 是服务器确定性的静态 A*，避开实体墙、竞技场边界和尚未解锁的中央区；它不执行动态机器人避障、威胁评估或弹道预测。
 - **开火节流是游戏强制的**：250ms 一发。脚本连点无效；能量不足 5 时安静地不打；
 - **有效射程 16m，弹丸最大 20m**：超过 16m 弹道开始散布（最大 ±0.12 弧度），**伤害不衰减**（每发都是 12）。远距命中率靠距离换，伤害不打折也打不准；
 - **开盾期间不能开火**：二选一。
@@ -75,9 +76,10 @@ const bot = {
 
 ## 4. 目标交互
 
-**怎么运行**：Core 走近自动捡（+10，Mega +25）；Uplink 要站桩引导黑入（+15，主桩 +25）。
+**怎么运行**：Core 和可用血包都靠机器人移动接触自动拾取；Uplink 要站桩引导黑入（+15，主桩 +25）。Bot API 没有 `pickup()`。
 
-- **Core**：走到机器人半径 0.6m 内自动拾取，**无需任何 API**。`nearestCore()` 给全图最近存活 Core——利用全局可见性规划顺路；
+- **Core**：走到机器人半径 0.6m 内自动拾取（+10，Mega +25），**无需任何 API**。`nearestCore()` 给全图最近存活 Core，可配合 `navigateTo()` 绕开静态障碍；
+- **血包**：受伤且存活时接触可用血包自动恢复 30 HP；位置和可用状态在 `bot.scan().healthPacks`，满血不会消耗；
 - **Uplink 黑入**：距桩 ≤2.5m（主桩 3m），持续引导 **8 秒**。期间每帧都要满足：存活、interact 按住、**未开火**、未出圈。中断则进度**清零重来**，不进冷却；
 - **个人冷却 30 秒**：黑入成功后，**你**对这根桩 30s 内不能再黑。按机器人记、跨桩独立、**死亡不清**；
 - **`nearestUplink()` 不含 ready/冷却信息**：它只给位置。桩的激活状态查 `scan().uplinks` 的 `ready`；你的个人冷却自记。

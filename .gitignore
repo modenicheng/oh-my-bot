@@ -25,3 +25,9 @@ server/cmd/omb/manual/*
 server/cmd/omb/web/*
 !server/cmd/omb/web/.gitkeep
 server/tmp/
+
+# Local server configuration and secrets (copy from the tracked examples).
+/config.yaml
+/.env
+/server/config.yaml
+/server/.env

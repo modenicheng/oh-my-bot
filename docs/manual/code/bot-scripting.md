@@ -7,7 +7,7 @@ tags: [脚本, 入门]
 
 # 写第一个 Bot
 
-Bot Script 是你为机器人写的 **JS/TS 控制程序**。进入热身或正式对局后，点击顶部 **编辑器**，即可在浏览器中编辑代码；TS 会先在本地编译成 JS 再提交给服务器运行。这页介绍编辑器用法、脚本入口与运行规则；游戏内 AI 改码入口尚未接入。
+Bot Script 是你为机器人写的 **JS/TS 控制程序**。进入热身或正式对局后，点击顶部 **编辑器**，即可在浏览器中编辑代码；TS 会先在本地编译成 JS 再提交给服务器运行。这页介绍编辑器用法、脚本入口与运行规则；也可以从 AI 面板用自然语言修改当前玩家代码。
 
 ## 先建立心智模型：程序 = 每秒被念 60 遍的清单
 
@@ -23,11 +23,12 @@ Bot Script 是你为机器人写的 **JS/TS 控制程序**。进入热身或正�
 
 ## 五行代码起步
 
-```js
-/** @param {import('@omb/bot-api').BotContext} bot */
-function tick(bot) {
+```ts
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
   const core = bot.nearestCore()
-  if (core) bot.moveTo(core)
+  if (core) bot.navigateTo(core)
 }
 ```
 
@@ -35,11 +36,11 @@ function tick(bot) {
 
 | 代码 | 人话 |
 |---|---|
-| `/** @param {import('@omb/bot-api').BotContext} bot */` | 用 JSDoc 注释告诉编辑器 `bot` 的类型，获得检查和补全；这不会在运行时导入模块 |
-| `function tick(bot) {` | 每帧游戏会调用这个叫 tick 的函数，`bot` 是唯一、清晰的当帧控制对象 |
-| `bot.nearestCore()` | 问 `bot`："离我最近的 Core 在哪？"（找不到返回 null，即"没有"） |
-| `if (core) ...` | "如果找到了（core 不是 null），就……" |
-| `bot.moveTo(core)` | "……朝它走。" |
+| `import type { BotContext } ...` | 只给编辑器和 TypeScript 编译器提供类型；服务器运行的是编译后的 JS |
+| `function tick(bot: BotContext) {` | 每帧游戏会调用这个 `tick` 函数，`bot` 是唯一、清晰的当帧控制对象 |
+| `bot.nearestCore()` | 问 `bot`："离我最近的 Core 在哪？"（找不到返回 `null`） |
+| `if (core) ...` | "如果找到了，就……" |
+| `bot.navigateTo(core)` | "……按服务器确定的静态路径朝它走。"接触 Core 后自动拾取 |
 
 ## 在网页编辑和提交
 
@@ -111,7 +112,8 @@ obs.tick         // 快照对应的帧号
 
 | 方法 | 说明 |
 |---|---|
-| `moveTo(pos)` | 朝目标点走 |
+| `moveTo(pos)` | 沿直线朝目标点走，不绕障碍 |
+| `navigateTo(pos)` | 服务器确定性静态 A*：避开墙、竞技场边界和未解锁中央区 |
 | `aimAt(target)` | 直接瞄一个机器人（传实体，不用算角度） |
 | `nearestEnemy()` | 视野内最近的敌人，没有则 `null` |
 | `nearestCore()` | 全图最近的存活 Core 坐标 |
@@ -120,9 +122,11 @@ obs.tick         // 快照对应的帧号
 
 每个 API 的完整参数、游戏裁定规则和常见坑：见 [动作参考](../reference/actions.md) 和 [便利层参考](../reference/helpers.md)。
 
-### 刻意不提供的东西
+### 移动与策略边界
 
-寻路（自动绕墙）、弹道预测（提前量计算）、威胁评估（谁在瞄你）——游戏都不给。这些是留给你自己写的天花板，也是高手脚本和模板的差距所在。
+`moveTo` 是直线移动；`navigateTo` 是服务器确定性的静态 A*，避开实体墙、竞技场边界和尚未解锁的中央区；它不执行动态机器人避障、威胁评估或弹道预测。
+
+Core 和血包都靠移动接触自动拾取，Bot API 没有 `pickup()`。
 
 ## 能量预算
 
@@ -170,10 +174,10 @@ obs.tick         // 快照对应的帧号
 
 1. **五行捡 Core**（上文第一个例子）。
 2. **加开火**：找到敌人的每个 tick 都瞄准并调用 `fire()`；敌人消失后不再调用，脚本开火意图立即停止。
-3. **加阶段判断**：`game.phase === 'CORE_OPEN'` 后再往中央去。
-4. **加状态机**：巡逻点序列、残血撤退（`self.hp < 30` 开盾跑路）。
+3. **加阶段判断**：`bot.game.phase === 'CORE_OPEN'` 后再往中央去。
+4. **加状态机**：巡逻点序列、残血撤退（`bot.self.hp < 30` 开盾跑路）。
 5. **精细弹道**：自己算提前量预测（游戏不给你，乐趣也在这）。
 
 完整可跑的成品在示例库（仓库 `docs/manual/examples/`，每个不超过 60 行、带教学点注释）：hello-bot 最小闭环、patrol 巡逻、core-farmer 捡分、uplink-rusher 抢桩、shield-brawler 近战。关键片段已内嵌在[模块语义与陷阱](../reference/modules.md)各节里。
 
-游戏内改码助手的接入状态见 [AI Agent](../start/ai-agent.md)。
+游戏内改码助手的使用方式见 [AI Agent](../start/ai-agent.md)。

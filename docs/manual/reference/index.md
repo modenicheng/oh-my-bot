@@ -23,7 +23,7 @@ tags: [脚本, API]
 | 文档 | 内容 |
 |---|---|
 | [动作参考](actions.md) | L0 原语 7 个：move / aimAt / fire / dash / shield / interact / say。含每 tick 意图规则 |
-| [便利层参考](helpers.md) | L1 便利层 6 个：moveTo / aimAt(target) / nearestEnemy / nearestCore / nearestUplink / pulseScan |
+| [便利层参考](helpers.md) | L1 便利层 7 个：moveTo / navigateTo / aimAt(target) / nearestEnemy / nearestCore / nearestUplink / pulseScan |
 | [数据结构](data.md) | Observation / RobotRef / Self / GameInfo 逐字段，TickContext 与 BotModule 生命周期 |
 | [模块语义与陷阱](modules.md) | 按主题拆解运行规则：tick 生命周期 / 感知 / 移动与战斗 / 目标交互 / 存活 / 通信，每个主题附陷阱清单 |
 | [图鉴：界面与实体](visual.md) | 真实渲染的场地 / 机器人 / 拾取物 / 子弹 / 图标 sprite 与界面截图 |

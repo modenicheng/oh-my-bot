@@ -10,6 +10,7 @@ import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
+import { battleKeyAction } from './game/shortcut'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
@@ -196,7 +197,7 @@ const workbench = new Workbench({
   editorButton: $<HTMLButtonElement>('btn-game-editor'),
   initial: initialRoute,
   onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
-  send: frame => { if (session?.state === 'online') session.send(frame) },
+  send: frame => session?.state === 'online' ? session.send(frame) : false,
   toggleAssist: () => game?.toggleAssist(),
 })
 
@@ -253,8 +254,12 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
+    if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
+    if (ev.kind.case === 'aiQuota') { workbench.acceptAiQuota(ev.kind.value); return }
+    if (ev.kind.case === 'aiUsage') workbench.acceptAiUsage(ev.kind.value)
     if (ev.kind.case === 'scriptLog') { workbench.acceptScriptLog(ev.kind.value); return }
     if (ev.kind.case === 'matchEnd') workbench.resetMatch()
+    if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && workbench.consumeAiDirectedSay(ev.kind.value.text)) return
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
       connectionNotice.hidden = true
       awaitingFull = false
@@ -320,6 +325,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     game?.onMessage(msg)
     const snap = extractSnapshot(msg)
     if (snap?.self?.assistOn !== undefined) workbench.setAssist(snap.self.assistOn)
+    if (snap?.self) workbench.acceptSelfAiQuota(snap.self.aiRoundsLeft, snap.self.aiTokensLeftK)
     if (snap?.full && game) {
       awaitingFull = false
       connectionNotice.hidden = true
@@ -402,8 +408,9 @@ window.addEventListener('keydown', (e) => {
     else if (!viewGame.hidden) { e.preventDefault(); workbench.toggle('docs') }
     else if (!viewRoom.hidden) { e.preventDefault(); screens.openManual() }
   } else if (game && !viewGame.hidden && document.activeElement === gameCanvas) {
-    if (e.code === 'Space') { e.preventDefault(); game.toggleAssist() }
-    else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); game.openChat() }
+    const action = battleKeyAction(e.code)
+    if (action === 'assist') { e.preventDefault(); game.toggleAssist() }
+    else if (action === 'chat') { e.preventDefault(); game.openChat() }
   }
 })
 

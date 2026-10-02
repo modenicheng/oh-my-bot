@@ -205,9 +205,41 @@ tar xzf omb-0.2.0-linux-amd64.tar.gz && ./omb -version   # 应输出 v0.2.0
 - 仓库已有历史 `v0.1.0` tag，但它早于版本注入与 Release workflow，仅作为源码基线，不支持用新流水线回填二进制；首个自动 release 从其后的提交生成。
 - 本地已验证五平台交叉编译、归档、SHA256SUMS 和版本/healthz smoke；Actions 真实运行、release PR 自动晋级与 GitHub Release 上传由推送后的远端演练确认。
 
-## AI Agent 接入状态
+## AI Agent 配置
 
-当前房间链路仍返回 `not configured` 占位提示，网页也没有 AI 对话入口；仅设置 `DEEPSEEK_API_KEY` 不会启用改码。仓库的 DeepSeek Provider 和配额组件已有实现，尚需完成房间及客户端接入。默认配额与限制见 [AI Agent 接入状态](manual/start/ai-agent.md)。
+AI 默认关闭。服务器启动时依次查找**可执行文件同目录**和**当前工作目录**中的 `config.yaml` / `.env`；先找到包含配置文件的目录即使用。取值优先级是：进程环境变量 > `.env` > `config.yaml` > 默认值。
+
+从仓库样例复制：
+
+```bash
+cp config.example.yaml config.yaml
+cp .env.example .env
+```
+
+`config.yaml` 只放非秘密配置：
+
+```yaml
+ai:
+  enabled: true
+  model: deepseek-chat
+  endpoint: https://api.deepseek.com/chat/completions
+  timeout_seconds: 30
+quota:
+  rounds: 20
+  player_tokens: 300000
+  global_tokens: 2000000
+  max_concurrency: 20
+```
+
+`.env` 只在服务器本机保存密钥：
+
+```dotenv
+DEEPSEEK_API_KEY=你的密钥
+```
+
+请将 `.env` 权限限制为服务用户可读（Linux 可用 `chmod 600 .env`），不要写进 `config.yaml`、systemd unit、镜像层、日志或版本库。仓库已忽略根目录和 `server/` 下的实际配置文件；样例文件可提交。
+
+启用条件是 `ai.enabled: true` 且存在 `DEEPSEEK_API_KEY`。缺任一项时服务器安全禁用 AI，Snippet、手操和玩家脚本不受影响。AI 默认配额为每人 20 轮 / 300k token、单局全场 2M token、全局并发 20；热身与紧接其后的正式局共享额度。可用环境变量 `AI_ENABLED`、`AI_MODEL`、`AI_ENDPOINT`、`AI_TIMEOUT_SECONDS`、`QUOTA_ROUNDS`、`QUOTA_PLAYER_TOKENS`、`QUOTA_GLOBAL_TOKENS`、`QUOTA_MAX_CONCURRENCY` 覆盖文件值。玩家操作见 [AI Agent](manual/start/ai-agent.md)。
 
 ## 数据与备份
 

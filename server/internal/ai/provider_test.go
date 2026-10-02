@@ -17,11 +17,11 @@ import (
 func TestMockProviderRecordsAndProgrammable(t *testing.T) {
 	m := &MockProvider{
 		Delay:  5 * time.Millisecond,
-		Result: Result{NewScript: "export default { tick() {} }", Explain: "no-op"},
+		Result: Result{NewScript: "function tick(bot) {}", Explain: "no-op"},
 		Usage:  Usage{TokensDelta: 4321},
 	}
 	res, usage, err := m.Complete(context.Background(), PromptContext{Instruction: "改一下"})
-	if err != nil || res.NewScript != "export default { tick() {} }" || usage.TokensDelta != 4321 {
+	if err != nil || res.NewScript != "function tick(bot) {}" || usage.TokensDelta != 4321 {
 		t.Fatalf("res=%+v usage=%+v err=%v", res, usage, err)
 	}
 	calls := m.Calls()
@@ -60,7 +60,7 @@ func TestMockProviderCtxCancelDuringDelay(t *testing.T) {
 
 func TestBuildSystemPromptIncludesCorpus(t *testing.T) {
 	sys := buildSystemPrompt([]string{"## Bot Script 编程指南\n正文A", "## AI Agent\n正文B"})
-	for _, want := range []string{"只输出完整新版脚本代码", "Bot Script", "正文A", "正文B", "pulseScan"} {
+	for _, want := range []string{"只输出完整新版 JavaScript", "function tick(bot)", "禁止类型注解", "Bot Script", "正文A", "正文B", "pulseScan(): Observation", "navigateTo", "bot.scan()", "bot.self.position"} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt missing %q", want)
 		}
@@ -68,12 +68,15 @@ func TestBuildSystemPromptIncludesCorpus(t *testing.T) {
 	if strings.Contains(sys, "DEEPSEEK") {
 		t.Error("system prompt must not leak provider details")
 	}
+	if strings.Contains(sys, "pulseScan(): Observation | null") {
+		t.Error("system prompt must describe pulseScan as non-nullable")
+	}
 }
 
 func TestBuildUserPrompt(t *testing.T) {
-	pc := PromptContext{ScriptRev: 7, CurrentScript: "const x = 1", Instruction: "加开火"}
+	pc := PromptContext{ScriptRev: 7, CurrentScript: "const x = 1", Perception: `{"tick":42,"robots":[]}`, Instruction: "加开火"}
 	u := buildUserPrompt(pc)
-	for _, want := range []string{"rev 7", "const x = 1", "加开火"} {
+	for _, want := range []string{"rev 7", "```js", "const x = 1", "当前玩家感知快照", `"tick":42`, "加开火"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("user prompt missing %q", want)
 		}
@@ -87,10 +90,10 @@ func TestExtractScript(t *testing.T) {
 		name, in, wantScript, wantExplain string
 		wantOK                            bool
 	}{
-		{"fenced", "改动说明：\n```ts\nexport default {}\n```", "export default {}", "改动说明：", true},
-		{"plain", "export default { tick() {} }", "export default { tick() {} }", "", true},
-		{"multi-block-last-wins", "示例：\n```ts\nconst demo = 1\n```\n正式：\n```ts\nexport default {}\n```", "export default {}", "示例：", true},
-		{"unclosed", "```ts\nexport default {}", "export default {}", "", true}, {"empty", "", "", "", false},
+		{"fenced", "改动说明：\n```js\nfunction tick(bot) {}\n```", "function tick(bot) {}", "改动说明：", true},
+		{"plain", "const botModule = { tick(bot) {} }; export default botModule", "const botModule = { tick(bot) {} }; export default botModule", "", true},
+		{"multi-block-last-wins", "示例：\n```js\nfunction demo() {}\n```\n正式：\n```js\nconst botModule = { tick(bot) {} }; export default botModule\n```", "const botModule = { tick(bot) {} }; export default botModule", "示例：", true},
+		{"unclosed", "```js\nfunction tick(bot) {}", "function tick(bot) {}", "", true}, {"empty", "", "", "", false},
 	}
 	for _, c := range cases {
 		s, e, ok := extractScript(c.in)
@@ -134,17 +137,17 @@ func okBody(content string, ptok, ctok int) map[string]any {
 }
 
 func TestDeepSeekCompleteSuccess(t *testing.T) {
-	_, p := newTestServer(t, 200, okBody("说明X\n```ts\nexport default { tick(ctx) { ctx.api.fire() } }\n```", 1000, 200))
+	_, p := newTestServer(t, 200, okBody("说明X\n```js\nfunction tick(bot) { bot.fire() }\n```", 1000, 200))
 	res, usage, err := p.Complete(context.Background(), PromptContext{
 		Instruction:   "加开火",
 		Manual:        []string{"手册"},
-		CurrentScript: "export default {}",
+		CurrentScript: "function tick(bot) {}",
 		ScriptRev:     3,
 	})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if res.NewScript != "export default { tick(ctx) { ctx.api.fire() } }" {
+	if res.NewScript != "function tick(bot) { bot.fire() }" {
 		t.Fatalf("script = %q", res.NewScript)
 	}
 	if usage.TokensDelta != 1200 {
@@ -158,13 +161,13 @@ func TestDeepSeekRequestShape(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode: %v", err)
 		}
-		resp := "{\"choices\":[{\"message\":{\"content\":\"" + fence + "ts\\nexport default {}\\n" + fence + "\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"
+		resp := "{\"choices\":[{\"message\":{\"content\":\"" + fence + "js\\nfunction tick(bot) {}\\n" + fence + "\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"
 		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
 	p := NewDeepSeekProvider("test-key")
 	p.Endpoint = srv.URL
-	_, _, err := p.Complete(context.Background(), PromptContext{Instruction: "指令", CurrentScript: "旧脚本"})
+	_, _, err := p.Complete(context.Background(), PromptContext{Instruction: "指令", CurrentScript: "旧脚本", Perception: `{"tick":1}`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +177,11 @@ func TestDeepSeekRequestShape(t *testing.T) {
 	if len(gotBody.Messages) != 2 || gotBody.Messages[0].Role != "system" || gotBody.Messages[1].Role != "user" {
 		t.Fatalf("messages = %+v", gotBody.Messages)
 	}
-	if !strings.Contains(gotBody.Messages[0].Content, "只输出完整新版脚本代码") {
+	if !strings.Contains(gotBody.Messages[0].Content, "只输出完整新版 JavaScript") {
 		t.Error("system prompt missing instruction")
 	}
-	if !strings.Contains(gotBody.Messages[1].Content, "旧脚本") || !strings.Contains(gotBody.Messages[1].Content, "指令") {
-		t.Error("user prompt missing script/instruction")
+	if !strings.Contains(gotBody.Messages[1].Content, "旧脚本") || !strings.Contains(gotBody.Messages[1].Content, "指令") || !strings.Contains(gotBody.Messages[1].Content, `"tick":1`) {
+		t.Error("user prompt missing script/perception/instruction")
 	}
 }
 
@@ -244,7 +247,7 @@ func TestDeepSeekKeyFromEnv(t *testing.T) {
 	var auth atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth.Store(r.Header.Get("Authorization"))
-		body := `{"choices":[{"message":{"content":"` + fence + `ts\\nexport default {}\\n` + fence + `"}}],"usage":{"prompt_tokens":3,"completion_tokens":4}}`
+		body := `{"choices":[{"message":{"content":"` + fence + `js\\nfunction tick(bot) {}\\n` + fence + `"}}],"usage":{"prompt_tokens":3,"completion_tokens":4}}`
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()

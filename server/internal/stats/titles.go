@@ -61,9 +61,9 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 	p.awardPeacemaker(sorted, award)
 
 	// ---- OLD_SCHOOL: zero AI rounds AND zero snippet uses, finished the
-	// match (present at match end). v1 has no snippet source (snippet runtime
-	// unimplemented) so snippetUses is structurally 0 — asserted anyway so the
-	// gate covers the P2 snippet event without a rewrite.
+	// match (present at match end). Snippet use is fed by the real
+	// EvSnippetUsage telemetry (a final output axis resolved to CS_SNIPPET),
+	// so merely configuring snippets never blocks the title.
 	for _, r := range sorted {
 		if r.aiRounds == 0 && r.snippetUses == 0 {
 			award(r.id, ombv1.Title_OLD_SCHOOL)

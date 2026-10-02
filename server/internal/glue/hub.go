@@ -8,6 +8,7 @@ import (
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
+	"github.com/modenicheng/oh-my-bot/server/internal/snippet"
 )
 
 type Hub struct {
@@ -15,6 +16,9 @@ type Hub struct {
 	rooms  map[string]*RoomConn
 	player map[uint64]*Session
 	nextID uint64
+
+	// aiNew 每房间派生 AIService（从同一 ServerConfig 构造；nil = 禁用）。
+	aiNew func() *AIService
 }
 
 // maxSpectators caps the read-only audience per room. Spectators are pure
@@ -24,6 +28,10 @@ const maxSpectators = 64
 func NewHub() *Hub {
 	return &Hub{rooms: map[string]*RoomConn{}, player: map[uint64]*Session{}, nextID: 1000}
 }
+
+// SetAIService 注入 AI 服务工厂（main 启动时调用；nil 或返回 nil = 禁用）。
+// 每房间一个 AIService：配额是房间/局作用域，跨房间不相干扰。
+func (h *Hub) SetAIService(newSvc func() *AIService) { h.aiNew = newSvc }
 func (h *Hub) EnsureRoom(code string) *RoomConn {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -31,6 +39,9 @@ func (h *Hub) EnsureRoom(code string) *RoomConn {
 		return rc
 	}
 	rc := newRoomConn(code)
+	if h.aiNew != nil {
+		rc.ai = h.aiNew()
+	}
 	h.rooms[code] = rc
 	return rc
 }
@@ -85,13 +96,21 @@ type RoomConn struct {
 	sessions   map[uint64]*Session
 	spectators map[uint64]*Session
 	identities map[string]SessionInfo
-	match      *Match
-	launcher   room.SimLauncher
-	launch     atomic.Pointer[asyncHandle]
+	// snippets 按玩家保存的 Snippet 驾驶辅助配置（已验证、已排序）。
+	// 生命周期绑定身份而非连接：warmup→running、Restart、断线重连都保留；
+	// 显式离开（LeaveRoom 释放身份）时清理。
+	snippets map[uint64][]snippet.Setting
+	match    *Match
+	launcher room.SimLauncher
+	launch   atomic.Pointer[asyncHandle]
+
+	// ai is shared by warmup and its following scored match, so both consume
+	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
+	ai *AIService
 }
 
 func newRoomConn(code string) *RoomConn {
-	return &RoomConn{Code: code, Room: room.NewRoom(code, 0), sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{}}
+	return &RoomConn{Code: code, Room: room.NewRoom(code, 0), sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{}, snippets: map[uint64][]snippet.Setting{}}
 }
 
 type Session struct {
@@ -264,7 +283,7 @@ func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
 	}
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {
-			rc.broadcastLocked(say("AI agent: not configured (set DEEPSEEK_API_KEY) — prompt: " + p.GetText()))
+			m.handleAiPromptLocked(s.playerID, p.GetText())
 		}
 	})
 }
@@ -306,6 +325,7 @@ func (s *Session) LeaveRoom() {
 		}
 		delete(rc.sessions, s.playerID)
 		delete(rc.identities, s.nick)
+		delete(rc.snippets, s.playerID) // 身份释放：驾驶辅助配置随之丢弃
 		_ = rc.Room.Leave(s.playerID)
 		if s.hub != nil {
 			s.hub.mu.Lock()
@@ -376,17 +396,24 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 	for _, info := range rc.identities {
 		for _, id := range ids {
 			if id == info.PlayerID {
+				info.Snippets = append([]snippet.Setting{}, rc.snippets[id]...)
 				players[id] = info
 				break
 			}
 		}
 	}
 	addSoloBots(players, botCount)
+	aiSvc := rc.ai
+	// Warmup starts a new quota cycle. A direct scored start from idle does too;
+	// starting from an active warmup deliberately keeps the same budget.
+	if aiSvc != nil && (warmup || rc.match == nil || !rc.match.warmup) {
+		aiSvc.Restart()
+	}
 	rc.mu.Unlock()
 	if a.cancelled.Load() || rc.launch.Load() != a {
 		return
 	}
-	m, err := NewMatch(rc, seed, int(seed&0xffffffff), players, warmup)
+	m, err := NewMatch(rc, seed, int(seed&0xffffffff), players, warmup, aiSvc)
 	if err != nil {
 		rc.mu.Lock()
 		if rc.launch.Load() == a && !a.cancelled.Load() {
@@ -413,6 +440,7 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 		rc.match.Stop()
 	}
 	m.handle = a
+	m.syncRoomSnippetsLocked()
 	rc.match = m
 	for _, s := range rc.sessions {
 		m.bootstrapLocked(s)

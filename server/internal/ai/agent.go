@@ -38,10 +38,11 @@ type HandleOutcome struct {
 //
 // Manual 语料（audience=both 手册章节）在构造时注入，组装进 system prompt。
 type Agent struct {
-	quota    QuotaService
-	provider Provider
-	scripts  Scripts // 可为 nil：跳过脚本读写（配额+Provider 链路测试用）
-	manual   []string
+	quota      QuotaService
+	provider   Provider
+	scripts    Scripts // 可为 nil：跳过脚本读写（配额+Provider 链路测试用）
+	manual     []string
+	perception string // 当前玩家可见的只读感知快照（紧凑 JSON）
 }
 
 // NewAgent 组装 Agent。
@@ -51,6 +52,10 @@ func NewAgent(q QuotaService, p Provider, s Scripts) *Agent {
 
 // SetManual 注入手册语料（docs/manual 中 audience=both 章节，glue 启动时加载）。
 func (a *Agent) SetManual(corpus []string) { a.manual = corpus }
+
+// SetPerception 注入本次请求开始时的玩家可见快照。它只用于模型上下文，
+// 不参与脚本落地或配额记账；空串表示当前无可用快照。
+func (a *Agent) SetPerception(snapshot string) { a.perception = snapshot }
 
 // HandlePrompt 处理一次玩家 AI 改码请求。
 //
@@ -77,6 +82,7 @@ func (a *Agent) HandlePrompt(ctx context.Context, playerID uint64, instruction s
 		Manual:        a.manual,
 		CurrentScript: curScript,
 		ScriptRev:     curRev,
+		Perception:    a.perception,
 	}
 
 	lease, err := a.quota.TryAcquire(ctx, playerID)
@@ -86,27 +92,33 @@ func (a *Agent) HandlePrompt(ctx context.Context, playerID uint64, instruction s
 
 	result, usage, perr := a.provider.Complete(ctx, pc)
 	if perr != nil {
-		// 失败也必须 Commit：释放串行位与并发位（token 记 0，无用量可报）。
-		a.quota.Commit(lease, Usage{})
-		return HandleOutcome{}, perr
+		// 失败也必须 Commit：释放串行位与并发位。轮次在 TryAcquire 时已
+		// 预留，所以 Commit 成功时仍返回一轮 usage 事实（token 为 0）。
+		out := a.commitOutcome(playerID, lease, HandleOutcome{}, Usage{})
+		return out, perr
 	}
 
-	out := HandleOutcome{Result: result, Usage: usage}
+	out := HandleOutcome{Result: result}
 	if a.scripts != nil {
 		newRev, accepted, serr := a.scripts.SubmitSource(playerID, pc.ScriptRev, result.NewScript)
+		out.Accepted, out.NewRev = accepted, newRev
 		if serr != nil {
-			a.quota.Commit(lease, usage)
+			out = a.commitOutcome(playerID, lease, out, usage)
 			return out, fmt.Errorf("script submit: %w", serr)
 		}
-		out.Accepted, out.NewRev = accepted, newRev
 	} else {
 		out.Accepted = true
 	}
-	a.quota.Commit(lease, usage)
+	return a.commitOutcome(playerID, lease, out, usage), nil
+}
 
-	// 回填 EvAiUsage 载荷：轮次固定 1，护栏余量取记账后快照。
+func (a *Agent) commitOutcome(playerID uint64, lease Lease, out HandleOutcome, usage Usage) HandleOutcome {
+	if !a.quota.Commit(lease, usage) {
+		out.Usage = Usage{} // 跨局迟到：不得把旧局用量归入新局。
+		return out
+	}
+	out.Usage = usage
 	out.Usage.RoundsDelta = 1
-	_, _, globalLeftK := a.quota.Snapshot(playerID)
-	out.Usage.GlobalLeftK = globalLeftK
-	return out, nil
+	_, _, out.Usage.GlobalLeftK = a.quota.Snapshot(playerID)
+	return out
 }

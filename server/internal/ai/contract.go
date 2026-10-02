@@ -62,9 +62,10 @@ type Provider interface {
 type PromptContext struct {
 	PlayerID      uint64
 	Instruction   string   // 玩家自然语言指令
-	Manual        []string // docs/manual 相关章节（按 audience=ai 注入）
+	Manual        []string // docs/manual 中 audience=both 的相关章节
 	CurrentScript string   // 当前 Bot Script 源码
 	ScriptRev     uint32   // 当前版本（AI 结果落地时校验，被超越则丢弃）
+	Perception    string   // 当前玩家的只读感知快照（紧凑 JSON；不含他人私有数据）
 }
 
 type Result struct {

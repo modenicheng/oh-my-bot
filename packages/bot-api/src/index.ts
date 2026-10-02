@@ -1,10 +1,10 @@
 // @omb/bot-api — 玩家脚本 API（v0.3 §11）。
-// L0 原语 + L1 便利层，到此为止：不提供寻路/弹道预测/威胁评估（那是玩家的天花板）。
+// L0 原语 + L1 便利层；navigateTo 提供服务器确定性静态寻路，不提供弹道预测/威胁评估。
 // 本包是双受众语料：玩家手册 docs/manual/ 引用此处签名，AI Agent 注入此类型定义。
 
 export interface Vec2 { readonly x: number; readonly y: number }
 
-export interface RobotRef { readonly id: number; readonly position: Vec2; readonly hp: number }
+export interface RobotRef { readonly id: number; readonly position: Vec2; readonly hp: number; readonly velocity: Vec2 }
 
 /** 静态墙 AABB（公开地图结构，不随视野/遮挡裁剪；与碰撞几何一致，只读）。 */
 export interface WallRef { readonly id: number; readonly min: Vec2; readonly max: Vec2 }
@@ -64,7 +64,10 @@ export interface L0 {
 
 // ---- L1 便利层 ----
 export interface L1 {
+  /** 保持直线移动语义，不避障。 */
   moveTo(pos: Vec2): void
+  /** 使用服务器确定性静态寻路，避开墙、竞技场边界与未开放中央锁区。 */
+  navigateTo(pos: Vec2): void
   aimAt(target: RobotRef): void
   nearestEnemy(): RobotRef | null
   nearestCore(): Vec2 | null

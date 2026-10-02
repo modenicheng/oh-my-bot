@@ -91,8 +91,9 @@ Room（房间，房主创建/邀请）
 四层控制，逐级进阶：
 
 1. **手操**：WASD 移动 + 鼠标瞄准/射击（网页端唯一 v1 目标平台，桌面键鼠）。
-2. **Snippet 驾驶辅助**：官方预置行为组件（本质是官方 Bot Script 模块，可查看源码当教材）。v1 六条定稿，每条 1–2 个参数：
-   - 自动瞄准（提前量开关）/ 自动开火（射程阈值）/ 自动拾取（拾取半径）/ 紧急护盾（HP 阈值）/ 危险规避（威胁半径）/ 简单巡逻（路径点）。
+2. **Snippet 驾驶辅助**：官方预置行为组件（本质是官方 Bot Script 模块，可查看源码当教材）。v1 八条定稿，每条 0–2 个参数：
+   - 自动瞄准（提前量开关）/ 自动开火（射程阈值）/ 自动拾取（拾取半径）/ 紧急护盾（HP 阈值）/ 危险规避（威胁半径）/ 简单巡逻（路径点）；
+   - 全局 Core 拾取（无参数：服务器 A* 寻路前往全图最近存活 Core，被抢走后自动换目标）/ 低血量自动拾取血包（HP 阈值：低于阈值时寻路前往最近可用血包，接触自动回血）。
 3. **Bot Script**：玩家自写 JS/TS（唯一脚本语言，ADR-0002）。
 4. **AI Agent**：平台内嵌代理，自然语言 → 改本玩家代码 → 热更生效（ADR-0010）。
 
@@ -112,16 +113,20 @@ Room（房间，房主创建/邀请）
 
 ```ts
 // L0 原语
-move(vx, vy); aimAt(angle); fire(); dash(); shield(on); interact(); say(text) // 3s 冷却，自由文本
+bot.move(vx, vy); bot.aimAt(angle); bot.fire(); bot.dash(); bot.shield(on); bot.interact(); bot.say(text) // 3s 冷却，自由文本
 // L1 便利
-moveTo(pos); aimAt(entity); nearestEnemy(); nearestCore(); nearestUplink(); partner()
+bot.moveTo(pos); bot.navigateTo(pos); bot.aimAt(entity); bot.nearestEnemy(); bot.nearestCore(); bot.nearestUplink(); bot.partner()
 // 感知与环境
-scan();              // → Observation（可见 robots / cores / uplinks / projectiles）
-game.time; game.timeLeft; game.phase;   // "OUTER_RING" | "CORE_OPEN"
-self.hp; self.energy; self.position;
+bot.scan();              // → Observation（可见 robots / cores / uplinks / projectiles）
+bot.game.time; bot.game.timeLeft; bot.game.phase;   // "OUTER_RING" | "CORE_OPEN"
+bot.self.hp; bot.self.energy; bot.self.position;
 ```
 
-**不提供**（这是玩家要自己写的天花板）：寻路、弹道预测、威胁评估。v0.1 的 `turn/turnTo` 随全向底盘删除。
+**移动语义**：`moveTo` 是直线移动；`navigateTo` 是服务器确定性的静态 A*，避开实体墙、竞技场边界和尚未解锁的中央区；它不执行动态机器人避障、威胁评估或弹道预测。
+
+**不提供**（这是玩家要自己写的天花板）：动态机器人避障、弹道预测、威胁评估。v0.1 的 `turn/turnTo` 随全向底盘删除。
+
+> 2026-10-02 修订：新增 `navigateTo` 与两条导航类 Snippet（全局 Core 拾取、低血量自动拾取血包），覆盖此前"不提供寻路"的旧基线；提供的寻路仅指静态障碍上的确定性 A*，动态避障、威胁评估、弹道预测仍属"不提供"。
 
 ## 12. 技术架构
 
@@ -157,7 +162,7 @@ self.hp; self.energy; self.position;
 
 ## 14. v1 明确不做
 
-公开匹配 / 账号系统 / 移动端 / Drone 补位 / 观战位 / 内容审核（互信群体）/ 规模化反作弊 / 装备·职业·科技树 / 阶段变规则 / 寻路预测等高层 API / 浏览器端完整模拟器 / 跨房间持久数据。
+公开匹配 / 账号系统 / 移动端 / Drone 补位 / 观战位 / 内容审核（互信群体）/ 规模化反作弊 / 装备·职业·科技树 / 阶段变规则 / 机器人动态避障、弹道预测等高层 API / 浏览器端完整模拟器 / 跨房间持久数据。
 
 ## 15. 遗留待定（实测后定）
 

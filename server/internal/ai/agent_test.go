@@ -106,8 +106,12 @@ func TestAgentProviderErrorStillCommits(t *testing.T) {
 	mock := &MockProvider{Fail: errors.New("boom")}
 	a := NewAgent(q, mock, nil)
 
-	if _, err := a.HandlePrompt(context.Background(), 5, "x"); err == nil {
+	out, err := a.HandlePrompt(context.Background(), 5, "x")
+	if err == nil {
 		t.Fatal("want provider error")
+	}
+	if out.Usage.RoundsDelta != 1 || out.Usage.TokensDelta != 0 {
+		t.Fatalf("failed usage = %+v", out.Usage)
 	}
 	// 关键：失败后串行位/并发位必须释放——同玩家可立即重试。
 	if mock.CompleteCount() != 1 {
@@ -117,9 +121,9 @@ func TestAgentProviderErrorStillCommits(t *testing.T) {
 	if _, err := a.HandlePrompt(context.Background(), 5, "retry"); err != nil {
 		t.Fatalf("retry after failure: %v", err)
 	}
-	// 失败调用 token 记 0：只消耗成功那次。
-	if _, tokK, _ := q.Snapshot(5); tokK != 300 {
-		t.Fatalf("failed call leaked tokens: tokK=%d", tokK)
+	// 失败调用占一轮但 token 记 0；重试成功再占一轮。
+	if rounds, tokK, _ := q.Snapshot(5); rounds != 18 || tokK != 300 {
+		t.Fatalf("failed-call accounting: rounds=%d tokK=%d", rounds, tokK)
 	}
 }
 
@@ -186,14 +190,15 @@ func TestAgentManualCorpusInjected(t *testing.T) {
 	mock := &MockProvider{}
 	a := NewAgent(q, mock, nil)
 	a.SetManual([]string{"## 手册", "正文语料"})
+	a.SetPerception(`{"tick":120,"robots":[]}`)
 	if _, err := a.HandlePrompt(context.Background(), 2, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if sys := mock.LastSystemPrompt(); !contains(sys, "正文语料") || !contains(sys, "只输出完整新版脚本代码") {
+	if sys := mock.LastSystemPrompt(); !contains(sys, "正文语料") || !contains(sys, "只输出完整新版 JavaScript") {
 		t.Fatalf("manual/instruction missing from system prompt:\n%s", sys)
 	}
-	if calls := mock.Calls(); calls[0].Manual[0] != "## 手册" {
-		t.Fatalf("manual = %v", calls[0].Manual)
+	if calls := mock.Calls(); calls[0].Manual[0] != "## 手册" || calls[0].Perception != `{"tick":120,"robots":[]}` {
+		t.Fatalf("context = %+v", calls[0])
 	}
 }
 

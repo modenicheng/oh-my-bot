@@ -1,0 +1,12 @@
+# Copy to config.yaml beside the omb executable (or in the process cwd).
+# Secrets do not belong here; put DEEPSEEK_API_KEY in .env.
+ai:
+  enabled: false
+  model: deepseek-flash
+  endpoint: https://api.deepseek.com/chat/completions
+  timeout_seconds: 30
+quota:
+  rounds: 20
+  player_tokens: 300000
+  global_tokens: 2000000
+  max_concurrency: 20

@@ -5,7 +5,26 @@ import (
 
 	"github.com/dop251/goja"
 
+	"github.com/modenicheng/oh-my-bot/server/internal/nav"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
+)
+
+// commandSink 是 tick 上下文的命令出口：玩家阶段用 *commandCollector，
+// snippet 阶段用 *snippetCollector（玩家轴丢弃 + N 归因）。
+type commandSink interface {
+	setMove(vx, vy float64)
+	setAim(angle float64)
+	setFire()
+	setDash()
+	setShield(on bool)
+	setInteract()
+	setSay(text string)
+	setPulseScan()
+}
+
+var (
+	_ commandSink = (*commandCollector)(nil)
+	_ commandSink = (*snippetCollector)(nil)
 )
 
 // buildTickContext 组装 JS 侧 BotContext（runtime.ts 契约）：
@@ -14,7 +33,7 @@ import (
 //
 // 新脚本直接使用 flat bot.move()/bot.scan()；api 保留为 deprecated
 // 兼容引用。全部 metadata 为每 tick 独立快照，方法闭包只记录命令。
-func buildTickContext(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *goja.Object {
+func buildTickContext(vm *goja.Runtime, frame sim.ScriptFrame, cmd commandSink) *goja.Object {
 	self := frame.Self
 	obs := &frame.Obs
 
@@ -58,7 +77,7 @@ func readonlyVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {
 
 // buildAPI 绑定 L0 原语 + L1 便利层（index.ts 契约）。所有方法只记录意图，
 // 物理结算归 sim。
-func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *goja.Object {
+func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd commandSink) *goja.Object {
 	api := vm.NewObject()
 	self := frame.Self
 	obs := &frame.Obs
@@ -113,7 +132,7 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 
 	// ---------- L1 便利层 ----------
 
-	// moveTo(pos: Vec2)：内部转为单位向量 move 输出。
+	// moveTo(pos: Vec2)：保持历史直线语义，仅转为单位向量 move 输出。
 	_ = api.Set("moveTo", func(call goja.FunctionCall) goja.Value {
 		pos, ok := argToVec2(call.Argument(0))
 		if !ok {
@@ -123,6 +142,17 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 		if L := d.Len(); L > 1e-9 {
 			cmd.setMove(d.X/L, d.Y/L)
 		}
+		return goja.Undefined()
+	})
+
+	// navigateTo(pos: Vec2)：服务器确定性静态寻路；仅记录本 tick 的移动方向。
+	_ = api.Set("navigateTo", func(call goja.FunctionCall) goja.Value {
+		pos, ok := argToVec2(call.Argument(0))
+		if !ok {
+			throwValue(vm, "navigateTo: expected { x, y }")
+		}
+		d := nav.Direction(obs.Frame.Map, obs.Frame.Phase, self.Pos, pos)
+		cmd.setMove(d.X, d.Y)
 		return goja.Undefined()
 	})
 
@@ -193,7 +223,7 @@ func buildAPI(vm *goja.Runtime, frame sim.ScriptFrame, cmd *commandCollector) *g
 }
 
 // aimAtEntity L1 重载实现：按可见实体位置计算角度。不可见实体抛 JS TypeError。
-func aimAtEntity(vm *goja.Runtime, obs *sim.Observation, self sim.RobotView, arg goja.Value, cmd *commandCollector) {
+func aimAtEntity(vm *goja.Runtime, obs *sim.Observation, self sim.RobotView, arg goja.Value, cmd commandSink) {
 	id, ok := argEntityID(arg)
 	if !ok {
 		throwValue(vm, "aimAt: expected RobotRef { id }")

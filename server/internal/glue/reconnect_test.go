@@ -49,7 +49,7 @@ func TestNewMatchWaitsForPublication(t *testing.T) {
 	var mu sync.Mutex
 	count := 0
 	s := joinTestSession(t, h, rc, "host", func(*ombv1.ServerMsg) { mu.Lock(); count++; mu.Unlock() })
-	m, err := NewMatch(rc, 42, 1, map[uint64]SessionInfo{s.playerID: {PlayerID: s.playerID, Nick: "host"}}, true)
+	m, err := NewMatch(rc, 42, 1, map[uint64]SessionInfo{s.playerID: {PlayerID: s.playerID, Nick: "host"}}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
