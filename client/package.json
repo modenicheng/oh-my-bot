@@ -16,6 +16,7 @@
     "test:spectator": "tsx scripts/spectator-check.mjs",
     "test:manual": "tsx scripts/manual-check.mjs",
     "test:manual-live": "tsx scripts/manual-live-check.mjs",
+    "capture:manual": "tsx scripts/capture-manual-assets.mjs",
     "test:live-spectator": "tsx scripts/live-spectator-check.mjs"
   },
   "dependencies": {

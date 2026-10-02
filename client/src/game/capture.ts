@@ -4,6 +4,7 @@ import { artReady, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, dr
 import { Camera } from './camera'
 import { drawIcon } from '../icons'
 import type { MapDefParsed } from './mapdef'
+import type { IconName } from '../icons'
 
 // 与真实地图一致的极简 fixture：外环 80m、若干墙体，让 drawArena/drawCover 画真实结构。
 function fixtureMap(): MapDefParsed {
@@ -13,8 +14,8 @@ function fixtureMap(): MapDefParsed {
     seed: 20260206,
     mapHash: 'capture01',
     walls: [
-      { id: 1, rect: { min: { x: -2.5, y: -1 }, max: { x: -1.5, y: 1 } } },
-      { id: 2, rect: { min: { x: 1.5, y: -1 }, max: { x: 2.5, y: 1 } } },
+      { id: 1, min: { x: -2.5, y: -1 }, max: { x: -1.5, y: 1 } },
+      { id: 2, min: { x: 1.5, y: -1 }, max: { x: 2.5, y: 1 } },
     ],
     sectors: [],
     uplinks: [{ id: 1, pos: { x: 0, y: 6 }, activePhase: 1 }],
@@ -174,7 +175,7 @@ async function main() {
   {
     const sheet = $('sheet-icons')
     row(sheet)
-    const names = ['play', 'pause', 'book', 'code', 'spectator', 'replay', 'heart', 'energy', 'dash', 'shield', 'uplink', 'target', 'trophy', 'skull', 'fire', 'sound'] as const
+    const names = ['play', 'pause', 'book', 'code', 'spectator', 'replay', 'heart', 'energy', 'dash', 'shield', 'uplink', 'target', 'trophy', 'skull', 'fire', 'sound'] as const satisfies readonly IconName[]
     const { canvas } = cell(sheet, 'HUD / 控件图标（16 网格放大 2x）', names.length * 40 + 16, 56)
     const ctx = canvas.getContext('2d')!
     ctx.fillStyle = ink.floor

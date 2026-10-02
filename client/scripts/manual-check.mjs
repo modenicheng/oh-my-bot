@@ -17,10 +17,12 @@ import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, EvRoomStateSchema,
 const shots = resolve(import.meta.dirname, '../../.artifacts/manual')
 mkdirSync(shots, { recursive: true })
 const docsRoot = resolve(import.meta.dirname, '../../docs/manual')
+const port = Number(process.env.OMB_MANUAL_PORT || 18431)
+const apiPort = port + 1
 
 // 与 server/cmd/omb/manual_index.go 相同的排序规则（浏览器检查只断言可见顺序，
 // 排序本身由 Go 测试锁定；这里仅构造预期树）。
-const server = await preview({ configFile: false, root: resolve(import.meta.dirname, '..'), logLevel: 'silent', preview: { host: '127.0.0.1', port: 18431, strictPort: true } })
+const server = await preview({ configFile: false, root: resolve(import.meta.dirname, '..'), logLevel: 'silent', preview: { host: '127.0.0.1', port, strictPort: true } })
 
 // 手册 API 桩：从磁盘读真实 docs/manual，按目录树（与服务器一致的排序）返回。
 const api = createServer((req, res) => {
@@ -48,7 +50,7 @@ const api = createServer((req, res) => {
   }
   res.writeHead(404); res.end()
 })
-await new Promise(done => api.listen(18432, '127.0.0.1', done))
+await new Promise(done => api.listen(apiPort, '127.0.0.1', done))
 
 // 目录树构造（与 manual_index.go 相同的 frontmatter 语义，足够构造期望顺序）。
 function frontmatter(raw) {
@@ -185,6 +187,14 @@ async function open(url, options = {}) {
       await route.fulfill({ json: manualTreeJSON() })
     } else {
       const rel = decodeURIComponent(path.slice('/api/manual/'.length))
+      if (rel.endsWith('.png') || rel.endsWith('.webp')) {
+        // 图片与 markdown 同前缀：从磁盘读白名单图片（与服务端 serveManualImage 同语义）。
+        if (rel.includes('..')) { await route.fulfill({ status: 400 }); return }
+        try {
+          await route.fulfill({ contentType: rel.endsWith('.webp') ? 'image/webp' : 'image/png', body: readFileSync(join(docsRoot, rel)) })
+        } catch { await route.fulfill({ status: 404, body: 'not found' }) }
+        return
+      }
       if (!rel.endsWith('.md') || rel.includes('..')) { await route.fulfill({ status: 400 }); return }
       try {
         await route.fulfill({ contentType: 'text/markdown; charset=utf-8', body: readFileSync(join(docsRoot, rel), 'utf-8') })
@@ -198,7 +208,7 @@ async function open(url, options = {}) {
   return page
 }
 
-const base = 'http://127.0.0.1:18431'
+const base = `http://127.0.0.1:${port}`
 try {
   // ---- 1) 全屏手册：中文目录顺序与章节点击 ----
   const page = await open(`${base}/?view=manual`)
@@ -241,6 +251,27 @@ try {
   assert.match(await page.locator('#manual-content h1').first().textContent(), /进房前准备/)
   const doc = new URL(page.url()).searchParams.get('doc')
   assert.equal(doc, 'start/prepare.md', `route doc = ${doc}`)
+
+  // 图鉴页：双 reader 图片断言（全屏侧）——目录含图鉴章节，正文图片改写为 /api/manual/ 前缀且真实加载成功。
+  const visual = await open(`${base}/?view=manual&doc=reference/visual.md`)
+  await visual.locator('#manual-content .manual-body').waitFor({ timeout: 10000 })
+  const visualH1 = await visual.locator('#manual-content h1').first().textContent()
+  assert.match(visualH1, /图鉴/, `visual page h1 = ${visualH1}`)
+  const imgs = visual.locator('#manual-content .manual-body img')
+  const imgCount = await imgs.count()
+  assert.equal(imgCount, 10, `visual page image count = ${imgCount}, want 10`)
+  for (let i = 0; i < imgCount; i++) {
+    const src = await imgs.nth(i).getAttribute('src')
+    assert.match(src, /^\/api\/manual\/reference\/images\/(?:sheet|ui)-[a-z-]+\.png$/, `img src = ${src}`)
+  }
+  await visual.waitForFunction(() => {
+    const nodes = [...document.querySelectorAll('#manual-content .manual-body img')]
+    return nodes.length === 10 && nodes.every(img => img.complete && img.naturalWidth > 0)
+  }, undefined, { timeout: 10000 })
+  const natural = await imgs.evaluateAll(nodes => nodes.map(n => ({ w: n.naturalWidth, h: n.naturalHeight, ok: n.complete && n.naturalWidth > 0 })))
+  assert.ok(natural.every(n => n.ok), `visual images not loaded: ${JSON.stringify(natural)}`)
+  await visual.screenshot({ path: resolve(shots, 'fullscreen-visual.png') })
+  await visual.close()
 
   // 旧无扩展名 path（曾用格式）仍可导航（重新加载页面走启动门）。
   const oldPath = await open(`${base}/?view=manual&doc=reference/actions`)
@@ -285,6 +316,23 @@ try {
   const wbChips = await game.locator('#workbench-doc-content .manual-tag').allTextContents()
   assert.ok(wbChips.includes('脚本'), `workbench tag chips = ${JSON.stringify(wbChips)}`)
   await game.screenshot({ path: resolve(shots, 'workbench-manual.png') })
+
+  // 双 reader 图片断言（局内 workbench 侧）：同一图鉴页在局内阅读器同样加载真实图片。
+  await game.locator('#workbench-toc-toggle').click()
+  await game.locator('#workbench-toc .toc-section', { hasText: 'API 总览' }).locator('> a').first().click()
+  await game.locator('#workbench-toc-toggle').click()
+  await game.locator('#workbench-toc .toc-children a', { hasText: '图鉴' }).first().click()
+  await game.locator('#workbench-doc-content h1').first().waitFor({ timeout: 10000 })
+  const wbImgs = game.locator('#workbench-doc-content .manual-body img')
+  const wbImgCount = await wbImgs.count()
+  assert.equal(wbImgCount, 10, `workbench visual image count = ${wbImgCount}, want 10`)
+  await game.waitForFunction(() => {
+    const nodes = [...document.querySelectorAll('#workbench-doc-content .manual-body img')]
+    return nodes.length === 10 && nodes.every(img => img.complete && img.naturalWidth > 0)
+  }, undefined, { timeout: 10000 })
+  const wbNatural = await wbImgs.evaluateAll(nodes => nodes.map(n => ({ ok: n.complete && n.naturalWidth > 0 })))
+  assert.ok(wbNatural.every(n => n.ok), `workbench visual images not loaded: ${JSON.stringify(wbNatural)}`)
+  await game.screenshot({ path: resolve(shots, 'workbench-visual.png') })
   await game.close()
 
   assert.deepEqual(errors, [], `page errors: ${errors}`)

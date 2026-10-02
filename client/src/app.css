@@ -294,6 +294,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .manual-body th { font-family: var(--mono); font-size: 11px; letter-spacing: .15em;
                   color: var(--fg-dim); background: var(--panel); }
 .manual-body hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.manual-body img { display: block; box-sizing: border-box; max-width: 100%; height: auto; margin: 14px auto 20px;
+                   border: 1px solid var(--line); background: var(--bg); image-rendering: auto; }
 /* 代码块：radius 0、等宽、右上角语言标签（v1 不做语法高亮） */
 .codeblock { position: relative; margin: 14px 0; border: 1px solid var(--line);
              background: var(--panel); }
