@@ -365,9 +365,9 @@ function leaveRoom(logout: boolean): void {
   connectionNotice.hidden = true
   btnReconnect.hidden = true
   lobby.setJoining(false)
-  if (logout) lobby.clearIdentity()
   setStatus('off', logout ? '本地身份已清除' : '已离开房间')
   showView('join')
+  if (logout) lobby.clearIdentity()
 }
 
 // ---- 心跳 RTT 状态行（沿用探针逻辑） ----------------------------------

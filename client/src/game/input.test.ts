@@ -60,6 +60,21 @@ describe('human input continuity', () => {
     expect(release.axisMask & AXIS_ABILITY).toBe(AXIS_ABILITY)
   })
 
+  it('does not rebuild released controls from browser key repeat after reattach', () => {
+    send(win, 'keydown', { code: 'ShiftLeft', repeat: false })
+    expect(input.sample(10, 10).msg.dash).toBe(true)
+    input.detach()
+    input.attach(canvas as unknown as HTMLCanvasElement, cam)
+    send(win, 'keydown', { code: 'ShiftLeft', repeat: true })
+    send(win, 'keydown', { code: 'KeyW', repeat: true })
+    const repeated = input.sample(10, 10)
+    expect(repeated.msg.dash).toBe(false)
+    expect(repeated.msg.moveY).toBe(0)
+    expect(repeated.active).toBe(false)
+    send(win, 'keydown', { code: 'ShiftLeft', repeat: false })
+    expect(input.sample(10, 10).msg.dash).toBe(true)
+  })
+
   it('reprojects a stationary pointer with camera movement and CSS resize', () => {
     send(canvas, 'mousemove', { clientX: 640, clientY: 320 })
     const expected = () => Math.atan2(cam.toWorldY((320 - canvas.rect.top) * cam.ch / canvas.rect.height) - 10,

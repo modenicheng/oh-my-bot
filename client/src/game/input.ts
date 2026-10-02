@@ -57,20 +57,16 @@ export class InputSampler {
       // 只在真实按下时置位，mask 反映真实操作）。
       const edge = !e.repeat
       if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD') {
-        this.keys.add(k)
-        if (edge) this.stickyAxes |= AXIS_MOVE
+        if (edge) { this.keys.add(k); this.stickyAxes |= AXIS_MOVE }
         e.preventDefault()
       } else if (k === 'KeyE' || k === 'KeyF') {
-        this.keys.add(k)
-        if (edge) this.stickyAxes |= AXIS_ABILITY
+        if (edge) { this.keys.add(k); this.stickyAxes |= AXIS_ABILITY }
         e.preventDefault()
       } else if (k === 'ShiftLeft' || k === 'ShiftRight') {
-        this.keys.add(k)
-        if (edge) this.stickyAxes |= AXIS_ABILITY
+        if (edge) { this.keys.add(k); this.stickyAxes |= AXIS_ABILITY }
         e.preventDefault()
       } else if (k === 'KeyQ') {
-        this.keys.add(k)
-        if (edge) this.stickyAxes |= AXIS_ABILITY
+        if (edge) { this.keys.add(k); this.stickyAxes |= AXIS_ABILITY }
         e.preventDefault()
       }
     }
