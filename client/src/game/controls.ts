@@ -264,6 +264,15 @@ export class GameController {
     if (enabled && this.active && this.map) this.input.attach(this.canvas, this.cam)
   }
 
+  /** 选项层等本地覆盖层打开时释放全部 held 输入，不暂停服务端模拟。 */
+  releaseInput(): void {
+    if (!this.map || !this.active || !this.inputEnabled) return
+    this.input.release()
+    this.sampleAndSend()
+    this.input.detach()
+    this.inputEnabled = false
+  }
+
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return

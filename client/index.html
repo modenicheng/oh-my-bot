@@ -146,6 +146,30 @@
       </div>
       </div>
       <aside id="workbench" aria-label="文档与脚本工作栏" hidden></aside>
+      <section id="game-options" class="game-options" role="dialog" aria-modal="true" aria-labelledby="options-title" hidden>
+        <div class="game-options-panel">
+          <header class="game-options-heading">
+            <span class="game-options-signal" aria-hidden="true"></span>
+            <h2 id="options-title">选项</h2>
+            <span class="game-options-key">ESC</span>
+          </header>
+          <p class="game-options-note">仅释放你的操作输入，对局仍在服务器继续。</p>
+          <button type="button" id="options-continue" class="game-options-action primary">继续</button>
+          <fieldset class="game-options-audio">
+            <legend>共享音频</legend>
+            <div>
+              <button type="button" id="options-audio-mute" aria-pressed="false">静音</button>
+              <label for="options-audio-volume">音量</label>
+              <input type="range" id="options-audio-volume" min="0" max="100" value="45">
+              <output id="options-volume-value" for="options-audio-volume">45%</output>
+            </div>
+          </fieldset>
+          <div class="game-options-session">
+            <button type="button" id="options-leave" class="game-options-action">离开房间</button>
+            <button type="button" id="options-logout" class="game-options-action danger">注销本地身份</button>
+          </div>
+        </div>
+      </section>
     </section>
     <section id="view-live" hidden aria-label="实时只读观战">
       <header class="live-heading">

@@ -345,6 +345,13 @@ export class Workbench {
     })
   }
 
+  clearIdentity(): void {
+    if (this.draftKey) this.saveLanguagePref()
+    this.draftKey = ''
+    this.prefKey = ''
+    this.resetMatch()
+  }
+
   setIdentity(roomCode: string, nick: string): void {
     const prefKey = languagePrefKey(roomCode, nick)
     if (this.draftKey) this.saveLanguagePref()

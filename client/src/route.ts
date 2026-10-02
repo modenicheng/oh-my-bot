@@ -21,6 +21,10 @@ export function saveProfile(profile: JoinProfile): void {
   try { sessionStorage.setItem(profileKey, JSON.stringify(profile)) } catch { /* storage can be disabled */ }
 }
 
+export function clearProfile(): void {
+  try { sessionStorage.removeItem(profileKey) } catch { /* storage can be disabled */ }
+}
+
 export function loadProfile(roomCode: string): JoinProfile | null {
   try {
     const p = JSON.parse(sessionStorage.getItem(profileKey) ?? 'null') as JoinProfile | null

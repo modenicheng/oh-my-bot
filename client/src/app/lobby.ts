@@ -83,6 +83,13 @@ export class Lobby {
     this.renderColor()
   }
 
+  clearIdentity(): void {
+    this.nickInput.value = ''
+    this.showError('')
+    this.setJoining(false)
+    this.nickInput.focus({ preventScroll: true })
+  }
+
   private renderColor(): void {
     for (const element of this.swatches.children) {
       element.classList.toggle('sel', (element as HTMLElement).style.getPropertyValue('--sw') === this.color)

@@ -1,15 +1,16 @@
 // 应用协调入口：玩家会话、路由、对局与工作台；页面呈现由 app/ 模块负责。
 // 连接层见 net.ts，游戏视图见 game/，页面样式与职责约定见 client/STYLE.md。
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, RoomActionSchema,
+import { ClientMsgSchema, RoomActionSchema, LeaveRoomSchema,
          RoomAction_Kind, EvRoomState_State,
          type ServerMsg } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
+import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
-import { readRoute, saveProfile, loadProfile, writeRoute, type View, type RouteExtra } from './route'
+import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
 import { artReady } from './game/art'
@@ -199,9 +200,17 @@ const workbench = new Workbench({
   toggleAssist: () => game?.toggleAssist(),
 })
 
+const gameOptions = new GameOptions({
+  canOpen: () => isInGame(),
+  onOpen: () => game?.releaseInput(),
+  onClose: syncGameInput,
+  onLeave: () => leaveRoom(false),
+  onLogout: () => leaveRoom(true),
+})
+
 /** 面板可以并排打开，只有战场获得焦点时才接收手操。 */
 function syncGameInput(): void {
-  game?.setInputEnabled(!viewGame.hidden && !document.hidden && document.hasFocus() && document.activeElement === gameCanvas)
+  game?.setInputEnabled(!gameOptions.isOpen && !viewGame.hidden && !document.hidden && document.hasFocus() && document.activeElement === gameCanvas)
 }
 
 gameCanvas.addEventListener('pointerdown', () => gameCanvas.focus({ preventScroll: true }))
@@ -230,6 +239,7 @@ function enterGame(): void {
 }
 
 function exitGame(): void {
+  gameOptions.close(false, false)
   game?.exit()
   game = null
   workbench.resetMatch()
@@ -334,6 +344,32 @@ btnReconnect.addEventListener('click', () => {
   void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
 })
 
+function leaveRoom(logout: boolean): void {
+  const current = session
+  if (current?.state === 'online') {
+    current.send(encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'leave', value: create(LeaveRoomSchema, {}) },
+    })))
+  }
+  session = null
+  current?.close()
+  stopRttLoop()
+  gameOptions.close(false, false)
+  game?.exit()
+  game = null
+  awaitingFull = false
+  lastJoin = null
+  clearProfile()
+  workbench.clearIdentity()
+  workbench.setAvailability(false, false)
+  connectionNotice.hidden = true
+  btnReconnect.hidden = true
+  lobby.setJoining(false)
+  if (logout) lobby.clearIdentity()
+  setStatus('off', logout ? '本地身份已清除' : '已离开房间')
+  showView('join')
+}
+
 // ---- 心跳 RTT 状态行（沿用探针逻辑） ----------------------------------
 
 let rttTimer: ReturnType<typeof setInterval> | undefined
@@ -355,6 +391,7 @@ function stopRttLoop(): void {
 // M / C 切换侧栏；编辑、输入法和浏览器组合键保留原行为。
 window.addEventListener('keydown', (e) => {
   if (!viewLive.hidden) return
+  if (gameOptions.handleGlobalKey(e)) return
   if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return

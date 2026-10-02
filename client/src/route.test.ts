@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { readRoute, writeRoute } from './route'
+import { clearProfile, loadProfile, readRoute, saveProfile, writeRoute } from './route'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -17,5 +17,19 @@ describe('spectator routes', () => {
     writeRoute('live', 'WATCH1')
     const url = new URL(written)
     expect(Object.fromEntries(url.searchParams)).toEqual({ room: 'WATCH1', view: 'live' })
+  })
+
+  it('clears the stored join profile so refresh cannot auto-rejoin', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    })
+    const profile = { roomCode: 'LEAVE1', nick: 'pilot', color: '#22d3ee' }
+    saveProfile(profile)
+    expect(loadProfile('LEAVE1')).toEqual(profile)
+    clearProfile()
+    expect(loadProfile('LEAVE1')).toBeNull()
   })
 })
