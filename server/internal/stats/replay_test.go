@@ -432,7 +432,9 @@ func TestReplaySameTickIdenticalHitsCountsBoth(t *testing.T) {
 	if err := log.Close(); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	replayed, err := ReadReplay(path, ReadReplayOptions{})
 	if err != nil {
