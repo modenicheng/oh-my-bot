@@ -3,6 +3,7 @@
 // UI 截图（startup/lobby/HUD/结算等）走 mock-WS fixture，复用 pickup-visual-check 模式。
 // 用法：pnpm --dir client capture:manual  （或 node client/scripts/capture-manual-assets.mjs）
 import { chromium } from 'playwright'
+import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve } from 'node:path'
@@ -11,7 +12,7 @@ import { WebSocketServer } from 'ws'
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
-  EvRoomStateSchema, EvMapBootstrapSchema, EvScoreboardSchema, EvMatchEndSchema,
+  EvRoomStateSchema, EvMapBootstrapSchema, EvScoreboardSchema, EvMatchEndSchema, EvScriptLogSchema,
 } from '../../packages/protocol/src/index.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -21,6 +22,7 @@ const repoRoot = resolve(clientRoot, '..')
 // ---------- 配置 ----------
 const PORT = Number(process.env.OMB_CAPTURE_PORT || 18458)
 const DOC_IMAGES = resolve(repoRoot, 'docs/manual/reference/images')
+const ARTIFACTS = resolve(repoRoot, '.artifacts/manual')
 
 const CATEGORIES = ['arena', 'robots', 'pickups', 'projectiles', 'icons']
 
@@ -131,6 +133,19 @@ async function captureUI(browser) {
         // 记分板
         ws.send(frame({ case: 'event', value: create(ServerEventSchema, { tick: 600, kind: { case: 'scoreboard',
           value: create(EvScoreboardSchema, { tick: 600, rows: [{ robot: 202, score: 12 }, { robot: SELF_ID, score: 35 }] }) } }) }))
+        const logEvent = (tick, text, level = 'log') => frame({ case: 'event', value: create(ServerEventSchema, { tick, kind: { case: 'scriptLog',
+          value: create(EvScriptLogSchema, { robotId: SELF_ID, scriptRev: 4, tick, level, text }) } }) })
+        ws.send(logEvent(601, 'scan complete'))
+        ws.send(logEvent(602, 'scan complete'))
+        ws.send(logEvent(603, 'scan complete'))
+        const structured = '\x1eomb-console:v1:' + JSON.stringify({ a: [
+          { k: 's', v: 'state' },
+          { k: 'o', p: [
+            ['self', { k: 'o', p: [['hp', { k: 'n', v: '75' }], ['armed', { k: 'b', v: 'true' }]], m: 0 }],
+            ['targets', { k: 'a', p: [['0', { k: 's', v: 'alpha' }], ['1', { k: 's', v: 'beta' }]], m: 0 }],
+          ], m: 0 },
+        ], m: 0 })
+        ws.send(logEvent(604, structured, 'debug'))
       }
     })
   })
@@ -186,8 +201,75 @@ async function captureUI(browser) {
   await page.click('#btn-game-manual')
   await page.waitForSelector('#workbench-doc-content h1', { timeout: 10000 })
   await page.waitForTimeout(400)
+
+  // Console 回归：操作集中于标题栏，抽屉可关闭/恢复并支持键盘与鼠标调高。
+  const heading = page.locator('.workbench-editor-heading')
+  for (const selector of ['#workbench-lang-switch', '#workbench-submit', '#workbench-assist', '#workbench-console-toggle']) {
+    assert.equal(await heading.locator(selector).count(), 1, `${selector} must live in editor heading`)
+  }
+  const headingOverflow = await heading.evaluate(el => el.scrollWidth - el.clientWidth)
+  assert.ok(headingOverflow <= 1, `editor heading overflow = ${headingOverflow}`)
+  assert.equal((await page.locator('#workbench-console-toggle').innerText()).replace(/\s+/g, ' ').trim(), 'Console 4')
+  const consoleRoot = page.locator('#workbench-console')
+  const toggle = page.locator('#workbench-console-toggle')
+  const resize = page.locator('.script-console-resize')
+  const logLines = consoleRoot.locator('.script-console-line')
+  await page.waitForFunction(() => document.querySelectorAll('#workbench-console .script-console-line').length === 2)
+  assert.equal(await logLines.count(), 2)
+  const repeatedLine = logLines.filter({ hasText: 'scan complete' })
+  assert.equal(await repeatedLine.locator('.script-console-repeat').textContent(), '3')
+  assert.equal(await toggle.locator('[data-console-trigger-count]').textContent(), '4')
+  const structuredLine = logLines.filter({ hasText: 'state' })
+  const topObject = structuredLine.locator('details.script-console-object').first()
+  await topObject.locator('summary').first().click()
+  assert.equal(await topObject.getAttribute('open'), '')
+  const selfObject = topObject.locator('.script-console-property').filter({ hasText: 'self:' }).locator('details.script-console-object').first()
+  await selfObject.locator('summary').first().click()
+  assert.equal(await selfObject.getAttribute('open'), '')
+  assert.equal(await selfObject.locator('.script-console-property').filter({ hasText: 'hp:' }).count(), 1)
+  await page.locator('.script-console-close').click()
+  await consoleRoot.waitFor({ state: 'hidden' })
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
+  await toggle.click()
+  await consoleRoot.waitFor({ state: 'visible' })
+  await resize.focus()
+  await page.keyboard.press('Home')
+  const minHeight = await consoleRoot.evaluate(el => el.getBoundingClientRect().height)
+  await page.keyboard.press('ArrowUp')
+  const keyboardHeight = await consoleRoot.evaluate(el => el.getBoundingClientRect().height)
+  assert.ok(keyboardHeight > minHeight, `keyboard resize ${minHeight} -> ${keyboardHeight}`)
+  const grip = await resize.boundingBox()
+  assert.ok(grip, 'console resize grip missing')
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2, grip.y - 38, { steps: 4 })
+  await page.mouse.up()
+  const pointerHeight = await consoleRoot.evaluate(el => el.getBoundingClientRect().height)
+  assert.ok(pointerHeight > keyboardHeight, `pointer resize ${keyboardHeight} -> ${pointerHeight}`)
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('omb.workbench.layout') || '{}'))
+  assert.equal(saved.consoleOpen, true)
+  assert.ok(saved.consoleHeight >= pointerHeight - 1, `saved console height = ${saved.consoleHeight}`)
+  await page.locator('.script-console-close').click()
+  await toggle.click()
+  const restoredHeight = await consoleRoot.evaluate(el => el.getBoundingClientRect().height)
+  assert.ok(Math.abs(restoredHeight - pointerHeight) <= 1, `restored console height ${restoredHeight}, want ${pointerHeight}`)
+
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-workbench.png') })
   console.log('[capture] docs/manual/reference/images/ui-workbench.png')
+
+  // 窄屏：标题栏控制换行但仍全部可见，抽屉不制造横向滚动。
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.waitForTimeout(150)
+  for (const selector of ['#workbench-submit', '#workbench-assist', '#workbench-console-toggle']) {
+    assert.equal(await page.locator(selector).isVisible(), true, `${selector} visible on mobile`)
+  }
+  const overflow = await page.evaluate(() => ({
+    page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    workbench: document.getElementById('workbench').scrollWidth - document.getElementById('workbench').clientWidth,
+  }))
+  assert.ok(overflow.page <= 1 && overflow.workbench <= 1, `mobile overflow ${JSON.stringify(overflow)}`)
+  await page.screenshot({ path: join(ARTIFACTS, 'console-mobile.png') })
+  await page.setViewportSize({ width: 1280, height: 800 })
 
   // 结算 overlay
   await page.goto(base + '/')
@@ -212,6 +294,7 @@ async function captureUI(browser) {
 
 async function main() {
   await mkdir(DOC_IMAGES, { recursive: true })
+  await mkdir(ARTIFACTS, { recursive: true })
   const browser = await chromium.launch()
   try {
     await captureSheets(browser)

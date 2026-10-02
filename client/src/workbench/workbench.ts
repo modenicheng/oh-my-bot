@@ -4,7 +4,7 @@ import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
-import { ScriptConsoleView } from './script-console'
+import { DEFAULT_CONSOLE_HEIGHT, ScriptConsoleView } from './script-console'
 import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from './ts-submit'
 import './workbench.css'
 
@@ -63,10 +63,11 @@ export class Workbench {
   private readonly splitHandle: HTMLElement
   private width = Math.min(600, Math.max(400, window.innerWidth * .36))
   private ratio = 50
+  private consoleOpen = true
+  private consoleHeight = DEFAULT_CONSOLE_HEIGHT
   private stopResizing?: () => void
   private readonly submitButton: HTMLButtonElement
   private readonly assistButton: HTMLButtonElement
-  private readonly result: HTMLElement
   private readonly draftStatus: HTMLElement
   private readonly languageButtons: HTMLButtonElement[]
   private readonly scriptConsole: ScriptConsoleView
@@ -78,6 +79,8 @@ export class Workbench {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null')
       if (typeof saved?.width === 'number' && Number.isFinite(saved.width)) this.width = saved.width
       if (typeof saved?.ratio === 'number' && Number.isFinite(saved.ratio)) this.ratio = saved.ratio
+      if (typeof saved?.consoleOpen === 'boolean') this.consoleOpen = saved.consoleOpen
+      if (typeof saved?.consoleHeight === 'number' && Number.isFinite(saved.consoleHeight)) this.consoleHeight = saved.consoleHeight
     } catch { /* 存储不可用时仍可调整布局。 */ }
     deps.root.tabIndex = -1
     deps.root.innerHTML = `
@@ -100,13 +103,18 @@ export class Workbench {
       </section>
       <div id="workbench-split" class="workbench-resize" role="separator" tabindex="0" aria-label="文档与编辑器高度" aria-orientation="horizontal" aria-controls="workbench-docs workbench-editor"></div>
       <section id="workbench-editor" class="workbench-pane" tabindex="-1" aria-label="脚本编辑器">
-        <header class="workbench-heading">
+        <header class="workbench-heading workbench-editor-heading">
           <h2>bot.<span id="workbench-lang-ext">js</span> <span id="workbench-lang-name">JavaScript</span></h2>
-          <span id="workbench-lang-switch" class="workbench-lang-switch" role="group" aria-label="脚本语言">
-            <button type="button" data-lang="js" aria-pressed="true" title="编辑 JavaScript，按原样提交">JS</button>
-            <button type="button" data-lang="ts" aria-pressed="false" title="编辑 TypeScript，提交前在浏览器内编译为 JavaScript">TS</button>
-          </span>
           <span id="workbench-draft" role="status">本地草稿</span>
+          <div class="workbench-editor-controls">
+            <span id="workbench-lang-switch" class="workbench-lang-switch" role="group" aria-label="脚本语言">
+              <button type="button" data-lang="js" aria-pressed="true" title="编辑 JavaScript，按原样提交">JS</button>
+              <button type="button" data-lang="ts" aria-pressed="false" title="编辑 TypeScript，提交前在浏览器内编译为 JavaScript">TS</button>
+            </span>
+            <button type="button" id="workbench-submit" class="primary" disabled title="提交当前草稿（Ctrl / ⌘ + Enter）"><span data-icon="play"></span>提交</button>
+            <button type="button" id="workbench-assist" aria-pressed="false" disabled>辅助 OFF</button>
+            <button type="button" id="workbench-console-toggle" aria-expanded="true" aria-controls="workbench-console">Console <span data-console-trigger-count>0</span></button>
+          </div>
           <button type="button" data-panel="editor" aria-label="收起编辑器"><span data-icon="collapse"></span></button>
         </header>
         <div class="workbench-editor-area">
@@ -114,11 +122,6 @@ export class Workbench {
           <div id="workbench-editor-loading" role="status">正在加载编辑器…</div>
         </div>
         <div class="workbench-editor-meta"><span id="workbench-diagnostics" role="status">JavaScript · Bot API 补全</span><span>Ctrl / ⌘ + Enter 提交</span></div>
-        <div class="workbench-actions">
-          <button type="button" id="workbench-submit" class="primary" disabled><span data-icon="play"></span>提交到机器人</button>
-          <button type="button" id="workbench-assist" aria-pressed="false" disabled>辅助 OFF</button>
-        </div>
-        <div id="workbench-result" class="workbench-status" role="status" aria-live="polite">提交后开启辅助，让脚本驾驶机器人。</div>
         <section id="workbench-console" class="script-console" aria-label="脚本 Console"></section>
       </section>`
     mountIcons(deps.root)
@@ -128,10 +131,21 @@ export class Workbench {
     this.splitHandle = this.el('workbench-split')
     this.submitButton = this.el('workbench-submit')
     this.assistButton = this.el('workbench-assist')
-    this.result = this.el('workbench-result')
     this.draftStatus = this.el('workbench-draft')
     this.languageButtons = Array.from(this.deps.root.querySelectorAll<HTMLButtonElement>('#workbench-lang-switch [data-lang]'))
-    this.scriptConsole = new ScriptConsoleView(this.el('workbench-console'))
+    this.scriptConsole = new ScriptConsoleView(this.el('workbench-console'), {
+      trigger: this.el('workbench-console-toggle'),
+      open: this.consoleOpen,
+      height: this.consoleHeight,
+      onOpenChange: open => {
+        this.consoleOpen = open
+        this.saveLayout()
+      },
+      onHeightChange: height => {
+        this.consoleHeight = height
+        this.saveLayout()
+      },
+    })
     for (const button of this.languageButtons) {
       button.addEventListener('click', () => this.setLanguage((button.dataset.lang as BotLanguage) === 'ts' ? 'ts' : 'js'))
     }
@@ -176,6 +190,7 @@ export class Workbench {
     window.addEventListener('resize', () => {
       this.stopResizing?.()
       this.renderSizes()
+      this.scriptConsole.refreshLayout()
     })
     window.addEventListener('blur', () => this.stopResizing?.())
     // 初始化仅设置布局；宿主完成构造后再打开异步视图。
@@ -267,6 +282,7 @@ export class Workbench {
     this.deps.gameView.style.setProperty('--workbench-width', `${effectiveWidth}px`)
     this.docsPane.style.flexGrow = String(this.ratio)
     this.editorPane.style.flexGrow = String(100 - this.ratio)
+    this.scriptConsole.refreshLayout()
     this.resizeHandle.setAttribute('aria-valuemin', String(MIN_WIDTH))
     this.resizeHandle.setAttribute('aria-valuemax', String(maxWidth))
     this.resizeHandle.setAttribute('aria-valuenow', String(effectiveWidth))
@@ -281,8 +297,14 @@ export class Workbench {
   }
 
   private saveLayout(): void {
-    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ width: this.width, ratio: this.ratio })) }
-    catch { /* 调整仍在当前页面生效。 */ }
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify({
+        width: this.width,
+        ratio: this.ratio,
+        consoleOpen: this.consoleOpen,
+        consoleHeight: this.consoleHeight,
+      }))
+    } catch { /* 调整仍在当前页面生效。 */ }
   }
 
   private bindResize(handle: HTMLElement, axis: 'width' | 'split'): void {
@@ -443,9 +465,6 @@ export class Workbench {
             if (this.draftKey) localStorage.setItem(this.draftKey, source)
             this.draftStatus.textContent = '草稿已保存'
           } catch { this.draftStatus.textContent = '草稿无法保存，请复制备份' }
-          if (this.loaded && this.result.dataset.kind === 'ok') {
-            this.setResult(`服务器已加载 r${this.loaded.revision}。${source === this.loaded.source ? '草稿与已加载版本一致。' : '草稿已有新修改，尚未提交。'}`, 'ok')
-          }
           this.renderButtons()
         },
         onSubmit: () => this.submit(),
@@ -463,9 +482,10 @@ export class Workbench {
 
   setAvailability(online: boolean, inMatch: boolean): void {
     if (this.online && !online) {
-      if (this.pending) this.setResult('连接中断，提交结果未知；重连后可重新提交。', 'error')
+      const hadPending = !!this.pending
       this.clearPending()
       this.scriptConsole.clear()
+      if (hadPending) this.scriptConsole.appendClient('warn', '连接中断，提交结果未知；重连后可重新提交。')
     }
     this.online = online
     this.inMatch = inMatch
@@ -479,7 +499,7 @@ export class Workbench {
     this.assistOn = false
     this.inMatch = false
     this.scriptConsole.clear()
-    this.setResult(wasPending ? '对局已切换，请重新提交草稿。' : '草稿已保留。提交后开启辅助，让脚本驾驶机器人。')
+    if (wasPending) this.scriptConsole.appendClient('warn', '对局已切换，提交已取消；草稿仍保留。')
     this.renderButtons()
   }
 
@@ -498,30 +518,25 @@ export class Workbench {
     this.editorPane.dataset.dirty = String(!this.loaded || this.loaded.source !== this.source)
   }
 
-  private setResult(text: string, kind: 'info' | 'ok' | 'error' = 'info'): void {
-    this.result.textContent = text
-    this.result.dataset.kind = kind
-  }
-
   submit(): void {
     if (!this.editor || !this.online || !this.inMatch || this.pending || this.compiling) return
     const id = this.nextScriptId = (this.nextScriptId + 1) >>> 0
     if (this.language === 'ts') {
       this.compiling = true
       this.renderButtons()
-      this.setResult('正在编译 TypeScript…')
+      this.scriptConsole.appendClient('info', '正在编译 TypeScript…')
       void this.editor.compile().then(outcome => {
         this.compiling = false
         if (!outcome.ok) {
           // 编译失败：不发送任何内容，旧脚本继续运行，错误按 TS 原始行列展示。
-          this.setResult(`TypeScript 编译失败，未提交：\n${outcome.errors.join('\n')}`, 'error')
+          this.scriptConsole.appendClient('error', `TypeScript 编译失败，未提交：\n${outcome.errors.join('\n')}`)
           this.renderButtons()
           return
         }
         this.sendScript(id, outcome.js)
       }).catch(error => {
         this.compiling = false
-        this.setResult(`TypeScript 编译失败，未提交：${error instanceof Error ? error.message : String(error)}`, 'error')
+        this.scriptConsole.appendClient('error', `TypeScript 编译失败，未提交：${error instanceof Error ? error.message : String(error)}`)
         this.renderButtons()
       })
       return
@@ -533,16 +548,16 @@ export class Workbench {
   private sendScript(id: number, source: string): void {
     const frame = encodeClient(create(ClientMsgSchema, { payload: { case: 'scriptSubmit', value: { clientScriptId: id, source } } }))
     if (frame.byteLength > 32768) {
-      this.setResult('脚本过大：提交消息不能超过 32 KiB，请精简后重试。', 'error')
+      this.scriptConsole.appendClient('error', '脚本过大：提交消息不能超过 32 KiB，请精简后重试。')
       this.renderButtons()
       return
     }
     this.pending = { id, source, timer: setTimeout(() => {
       this.clearPending()
-      this.setResult('未收到服务器回执，结果未知；检查连接后可重新提交。', 'error')
+      this.scriptConsole.appendClient('warn', '未收到服务器回执，结果未知；检查连接后可重新提交。')
       this.renderButtons()
     }, 10000) }
-    this.setResult('正在提交，等待服务器回执…')
+    this.scriptConsole.appendClient('info', '正在提交，等待服务器回执…')
     this.renderButtons()
     this.deps.send(frame)
   }
@@ -564,9 +579,9 @@ export class Workbench {
     this.clearPending()
     if (result.ok) {
       this.loaded = { source, revision: result.scriptRev }
-      this.setResult(`服务器已加载 r${result.scriptRev}。${source !== this.source ? '草稿已有新修改，尚未提交。' : '开启辅助后由脚本接管；手操仍可逐轴接管。'}`, 'ok')
+      this.scriptConsole.appendClient('info', `服务器已加载脚本 r${result.scriptRev}。${source !== this.source ? '当前草稿已有新修改。' : '开启辅助后运行；手操仍可逐轴接管。'}`)
     } else {
-      this.setResult(`加载失败：${result.error || '服务器拒绝了脚本'}。原脚本保持不变。`, 'error')
+      this.scriptConsole.appendClient('error', `加载失败：${result.error || '服务器拒绝了脚本'}。原脚本保持不变。`)
     }
     this.renderButtons()
   }

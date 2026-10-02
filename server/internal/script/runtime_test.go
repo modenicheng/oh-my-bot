@@ -439,9 +439,10 @@ func TestConsoleCapturesLoadAndTickSafely(t *testing.T) {
 console.info("loaded", 7);
 function tick(bot) {
   const cycle = {}; cycle.self = cycle;
-  const hostile = {}; Object.defineProperty(hostile, "boom", { get(){ throw new Error("getter ran") } });
+  const hostile = {}; Object.defineProperty(hostile, "boom", { enumerable: true, get(){ throw new Error("getter ran") } });
   hostile.toString = function(){ throw new Error("toString ran") };
-  console.log("tick", cycle, hostile);
+  const proxy = new Proxy({ hidden: true }, { ownKeys(){ throw new Error("proxy trap ran") } });
+  console.log("tick", cycle, hostile, [1, { ok: true }], proxy);
   console.error("x".repeat(5000));
   bot.say("alive");
 }`
@@ -460,8 +461,13 @@ function tick(bot) {
 	if len(logs) != 2 {
 		t.Fatalf("want 2 tick logs, got %+v", logs)
 	}
-	if logs[0].Text != "tick [object] [object]" || logs[0].Tick != testFrame().Obs.Frame.Tick {
-		t.Fatalf("unsafe object formatting: %+v", logs[0])
+	if logs[0].Tick != testFrame().Obs.Frame.Tick || !strings.HasPrefix(logs[0].Text, structuredConsolePrefix) {
+		t.Fatalf("structured object formatting missing: %+v", logs[0])
+	}
+	for _, marker := range []string{`"Circular"`, `"Getter"`, `"Function"`, `"k":"a"`, `"Proxy"`, `"ok"`} {
+		if !strings.Contains(logs[0].Text, marker) {
+			t.Fatalf("structured log missing %s: %s", marker, logs[0].Text)
+		}
 	}
 	if !logs[1].Truncated || len(logs[1].Text) > maxConsoleMessageBytes {
 		t.Fatalf("long message not bounded: len=%d log=%+v", len(logs[1].Text), logs[1])
