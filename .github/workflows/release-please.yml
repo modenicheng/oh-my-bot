@@ -69,23 +69,24 @@ jobs:
           set -euo pipefail
           # 使用固定 semver 实现做严格格式和单调递增校验；现有 v0.1.0 是基线，
           # 后续手动版本必须更大，禁止把 RC 或正式版附着到历史 tag。
-          npx --yes --package semver@7.7.3 node - <<'NODE'
-          const child = require('node:child_process')
-          const semver = require('semver')
-          const requested = process.env.RELEASE_AS
-          const parsed = semver.valid(requested)
-          if (!parsed || requested !== `v${parsed}`) {
-            console.error(`release_as must be strict v-prefixed SemVer, got: ${requested}`)
-            process.exit(1)
+          parsed="$(npx --yes semver@7.7.3 "${RELEASE_AS}")" || {
+            echo "release_as must be strict v-prefixed SemVer, got: ${RELEASE_AS}" >&2
+            exit 1
           }
-          const tags = child.execFileSync('git', ['tag', '--list', 'v*'], { encoding: 'utf8' })
-            .trim().split(/\s+/).filter(Boolean).map(tag => semver.valid(tag)).filter(Boolean)
-          const latest = tags.sort(semver.rcompare)[0]
-          if (latest && !semver.gt(parsed, latest)) {
-            console.error(`release_as ${requested} must be newer than latest tag v${latest}`)
-            process.exit(1)
-          }
-          NODE
+          if [ "${RELEASE_AS}" != "v${parsed}" ]; then
+            echo "release_as must be strict v-prefixed SemVer, got: ${RELEASE_AS}" >&2
+            exit 1
+          fi
+          mapfile -t tags < <(git tag --list 'v*')
+          latest="0.0.0"
+          if [ "${#tags[@]}" -gt 0 ]; then
+            latest="$(npx --yes semver@7.7.3 "${tags[@]}" | tail -n1)"
+          fi
+          highest="$(npx --yes semver@7.7.3 "${latest}" "${parsed}" | tail -n1)"
+          if [ "${parsed}" = "${latest}" ] || [ "${highest}" != "${parsed}" ]; then
+            echo "release_as ${RELEASE_AS} must be newer than latest tag v${latest}" >&2
+            exit 1
+          fi
           # CLI 只认显式 --token（不读 GITHUB_TOKEN env，见文件头注释）
           npx --yes release-please@17.11.2 release-pr \
             --release-as "${RELEASE_AS#v}" \

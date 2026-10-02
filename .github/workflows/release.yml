@@ -48,16 +48,15 @@ jobs:
           else
             tag="${INPUT_TAG}"
           fi
-          # 用固定 semver 实现做严格格式校验，拒绝 leading zero 等非 SemVer 形态。
-          TAG_TO_VALIDATE="${tag}" npx --yes --package semver@7.7.3 node - <<'NODE'
-          const semver = require('semver')
-          const tag = process.env.TAG_TO_VALIDATE
-          const parsed = semver.valid(tag)
-          if (!parsed || tag !== `v${parsed}`) {
-            console.error(`tag must be strict v-prefixed SemVer, got: ${tag}`)
-            process.exit(1)
+          # 用固定 semver CLI 做严格格式校验，拒绝缺少 v、leading zero 等非 SemVer 形态。
+          parsed="$(npx --yes semver@7.7.3 "${tag}")" || {
+            echo "tag must be strict v-prefixed SemVer, got: ${tag}" >&2
+            exit 1
           }
-          NODE
+          if [ "${tag}" != "v${parsed}" ]; then
+            echo "tag must be strict v-prefixed SemVer, got: ${tag}" >&2
+            exit 1
+          fi
           # 显式抓取目标 tag 后取 commit；不存在或无法解析时立即失败。
           git fetch --no-tags --force origin "refs/tags/${tag}:refs/tags/${tag}"
           commit="$(git rev-list -n1 "refs/tags/${tag}")"
