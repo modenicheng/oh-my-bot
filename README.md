@@ -13,7 +13,7 @@ cd server
 ./omb.exe              # 启动（默认监听 127.0.0.1:27182）；浏览器打开 http://127.0.0.1:27182/ 即玩
 ```
 
-详细说明（本地调试、开发循环、常见问题）：[docs/runbook.md](docs/runbook.md)。内网部署与常驻运行：[docs/deploy.md](docs/deploy.md)。
+详细说明（本地调试、开发循环、常见问题）：[docs/runbook.md](docs/runbook.md)。内网部署与常驻运行：[docs/deploy.md](docs/deploy.md)。发版与预编译下载见 [GitHub Releases](https://github.com/modenicheng/oh-my-bot/releases)（流程见 [docs/deploy.md](docs/deploy.md) CI/CD 章节）。
 
 ## 玩家文档
 

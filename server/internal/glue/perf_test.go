@@ -42,7 +42,7 @@ function tick(ctx) {
 	frame := sim.ScriptFrame{Self: self, Obs: sim.Observation{Robots: []sim.RobotView{{ID: 2}}}}
 	deadline := time.Now().Add(12 * time.Millisecond)
 	for i := 1; i <= N; i++ {
-		pool.Submit(uint32(i), frame, deadline)
+		_ = pool.Submit(uint32(i), frame, deadline) // 测试仅关心 Collect 结果
 	}
 	results := pool.Collect(deadline)
 	el := time.Since(deadline.Add(-12 * time.Millisecond))

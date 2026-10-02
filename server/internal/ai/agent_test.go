@@ -95,7 +95,7 @@ func TestAgentQuotaRejectionPropagates(t *testing.T) {
 	// token 也耗尽（第一次提交用掉 1000/1000）。
 	q2 := NewQuotaService(QuotaConfig{PlayerRounds: 5, PlayerTokens: 1000, GlobalTokens: 10_000})
 	a2 := NewAgent(q2, mock, nil)
-	a2.HandlePrompt(context.Background(), 1, "x")
+	_, _ = a2.HandlePrompt(context.Background(), 1, "x") // 消耗剩余 tokens（意图：后续期望 ErrTokensExhausted）
 	if _, err := a2.HandlePrompt(context.Background(), 1, "x"); err != ErrTokensExhausted {
 		t.Fatalf("err = %v", err)
 	}
@@ -133,7 +133,7 @@ func TestAgentStaleRevDiscarded(t *testing.T) {
 	}
 	a := NewAgent(q, mock, scripts)
 
-	scripts.SubmitSource(1, 0, "export default { manual() {} }") // rev 0→1
+	_, _, _ = scripts.SubmitSource(1, 0, "export default { manual() {} }") // rev 0→1
 	var wg sync.WaitGroup
 	var out atomic.Value
 	wg.Add(1)
@@ -169,7 +169,7 @@ func TestAgentBusyDuringInFlight(t *testing.T) {
 	a := NewAgent(q, mock, nil)
 
 	done := make(chan struct{})
-	go func() { a.HandlePrompt(context.Background(), 3, "slow"); close(done) }()
+	go func() { _, _ = a.HandlePrompt(context.Background(), 3, "slow"); close(done) }()
 	time.Sleep(10 * time.Millisecond)
 	if _, err := a.HandlePrompt(context.Background(), 3, "again"); err != ErrBusy {
 		t.Fatalf("err = %v, want ErrBusy", err)
@@ -233,7 +233,7 @@ func TestAgentStress64Players(t *testing.T) {
 						t.Error("accepted=false without rev race in stress")
 					}
 					ok.Add(1)
-				case err == ErrBusy || err == ErrRoundsExhausted || err == ErrTokensExhausted || err == ErrConcurrency:
+				case errors.Is(err, ErrBusy), errors.Is(err, ErrRoundsExhausted), errors.Is(err, ErrTokensExhausted), errors.Is(err, ErrConcurrency):
 					rejected.Add(1)
 				default:
 					t.Errorf("worker %d: %v", id, err)

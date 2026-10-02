@@ -1,11 +1,12 @@
 package sim
 
 import (
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"math"
 	"sort"
 	"strings"
 	"unicode"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 func (s *Sim) prepareCombat() {

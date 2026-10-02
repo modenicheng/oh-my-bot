@@ -11,9 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 func startEvent(tick uint32) *ombv1.ServerEvent {

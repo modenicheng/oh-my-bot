@@ -5,8 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 type recordingSink struct {

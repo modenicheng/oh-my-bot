@@ -1,0 +1,96 @@
+name: Release Please
+
+# push main：自动维护常规 release PR（chore: release）。
+# workflow_dispatch：仅允许从 main 运行；release_as 非空时走 CLI
+# `release-pr --release-as` 产指定 release PR（如 v0.2.0-rc.1），为空时
+# 与 push 等价，跑常规 action（非 no-op）。
+# 说明：action 虽暴露 release-as，但 manifest 模式存在已知忽略问题（官方 issue #1220）；
+# 手动指定版本固定走 CLI。CLI 认证按官方源码只认显式
+# `--token`，不读 GITHUB_TOKEN env，必须传参数。
+# TOKEN：默认 GITHUB_TOKEN merge 出的 tag 不会触发其他 workflow（GitHub 官方
+# 限制）。要全自动 tag→release.yml，需配 fine-grained PAT 为 secret
+# RELEASE_PLEASE_TOKEN（contents / pull requests / issues 均为 read/write）；
+# 否则 merge 后手动 workflow_dispatch
+# release.yml 补产物（见 docs/deploy.md）。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_as:
+        description: 'Release as a version newer than the latest tag (e.g. v0.2.0-rc.1); empty = normal release PR'
+        required: false
+        type: string
+
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: require main for manual runs
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Release Please manual runs must be launched from main, got ${{ github.ref }}" >&2
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: normal release PR (push to main / empty release_as)
+        if: ${{ github.event_name == 'push' || inputs.release_as == '' }}
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: rc release PR (manual, --release-as)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_as != '' }}
+        env:
+          RELEASE_AS: ${{ inputs.release_as }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          # 使用固定 semver 实现做严格格式和单调递增校验；现有 v0.1.0 是基线，
+          # 后续手动版本必须更大，禁止把 RC 或正式版附着到历史 tag。
+          npx --yes --package semver@7.7.3 node - <<'NODE'
+          const child = require('node:child_process')
+          const semver = require('semver')
+          const requested = process.env.RELEASE_AS
+          const parsed = semver.valid(requested)
+          if (!parsed || requested !== `v${parsed}`) {
+            console.error(`release_as must be strict v-prefixed SemVer, got: ${requested}`)
+            process.exit(1)
+          }
+          const tags = child.execFileSync('git', ['tag', '--list', 'v*'], { encoding: 'utf8' })
+            .trim().split(/\s+/).filter(Boolean).map(tag => semver.valid(tag)).filter(Boolean)
+          const latest = tags.sort(semver.rcompare)[0]
+          if (latest && !semver.gt(parsed, latest)) {
+            console.error(`release_as ${requested} must be newer than latest tag v${latest}`)
+            process.exit(1)
+          }
+          NODE
+          # CLI 只认显式 --token（不读 GITHUB_TOKEN env，见文件头注释）
+          npx --yes release-please@17.11.2 release-pr \
+            --release-as "${RELEASE_AS#v}" \
+            --token "${GH_TOKEN}" \
+            --config-file release-please-config.json \
+            --manifest-file .release-please-manifest.json \
+            --repo-url "${{ github.repository }}" \
+            --target-branch main

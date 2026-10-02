@@ -39,10 +39,10 @@ func TestManualImagePath(t *testing.T) {
 
 func TestServeManualImage(t *testing.T) {
 	mapFS := fstest.MapFS{
-		"manual/reference/images/robots.png":     &fstest.MapFile{Data: []byte("PNGDATA")},
-		"manual/reference/images/hud.webp":       &fstest.MapFile{Data: []byte("WEBPDATA")},
-		"manual/reference/images/.gitkeep":       &fstest.MapFile{Data: []byte("")},
-		"manual/reference/index.md":              &fstest.MapFile{Data: []byte("---\ntitle: x\n---\n")},
+		"manual/reference/images/robots.png": &fstest.MapFile{Data: []byte("PNGDATA")},
+		"manual/reference/images/hud.webp":   &fstest.MapFile{Data: []byte("WEBPDATA")},
+		"manual/reference/images/.gitkeep":   &fstest.MapFile{Data: []byte("")},
+		"manual/reference/index.md":          &fstest.MapFile{Data: []byte("---\ntitle: x\n---\n")},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveManualImage(w, r, mapFS, "manual")

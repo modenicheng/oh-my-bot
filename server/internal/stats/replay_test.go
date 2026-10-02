@@ -136,7 +136,7 @@ func writeGoldenLog(t *testing.T, events []goldenEvent, checkpoints []sim.Checkp
 	if err != nil {
 		t.Fatalf("create golden log: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	log, err := sim.NewMatchEventLogWriter(f)
 	if err != nil {
 		t.Fatalf("new log writer: %v", err)

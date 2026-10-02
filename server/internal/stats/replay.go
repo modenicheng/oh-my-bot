@@ -29,7 +29,7 @@ func ReadReplay(path string, opts ReadReplayOptions) (*ProjectorImpl, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stats: open replay: %w", err)
 	}
-	defer f.Close() // read-only handle; close error is irrelevant
+	defer func() { _ = f.Close() }() // read-only handle; close error is irrelevant
 	return ReadReplayFrom(f, opts)
 }
 

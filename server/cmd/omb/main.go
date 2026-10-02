@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -27,6 +28,9 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
+
+// version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
+var version = "dev"
 
 //go:embed all:web
 var webFS embed.FS
@@ -78,7 +82,14 @@ const frontendMissingHTML = `<!doctype html>
 
 func main() {
 	addr := flag.String("addr", envAddr(), "listen address: host:port, :port (all interfaces), unix:/path/to.sock, or unix:@name (Linux abstract socket)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	// 版本旗标：打印后立即退出，不初始化 hub、不监听端口。
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	hub := glue.NewHub()
 
@@ -86,6 +97,8 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// 只读版本接口：release 构建经 -ldflags '-X main.version=<tag>' 注入，二进制是唯一版本源。
+	registerVersionRoute(mux)
 
 	// 回放 API：对局列表 + 单局事件流（JSONL 原样透传，客户端逐行解析）
 	mux.HandleFunc("/api/matches", func(w http.ResponseWriter, _ *http.Request) {
@@ -143,7 +156,7 @@ func main() {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		info, err := f.Stat()
 		if err != nil {
 			http.Error(w, "unavailable", http.StatusInternalServerError)
@@ -185,7 +198,7 @@ func main() {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 
-	log.Printf("oh-my-bot server listening on %s (%s)", ln.Addr(), ln.Addr().Network())
+	log.Printf("oh-my-bot %s listening on %s (%s)", version, ln.Addr(), ln.Addr().Network())
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -209,6 +222,20 @@ func envAddr() string {
 		return v
 	}
 	return listen.Default
+}
+
+// registerVersionRoute 挂载只读 GET /api/version，返回 {"version":...}。
+func registerVersionRoute(mux *http.ServeMux) {
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": version})
+	})
 }
 
 // copyCompleteRecords exposes only newline-terminated records. A partial tail

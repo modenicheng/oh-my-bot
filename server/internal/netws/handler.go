@@ -60,7 +60,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		if err != nil {
 			return
 		}
-		defer c.CloseNow()
+		defer func() { _ = c.CloseNow() }() // 强制关闭属正常路径，close 错误无信息量
 
 		ctx := r.Context()
 

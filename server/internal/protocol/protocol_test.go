@@ -4,8 +4,9 @@ import (
 	"encoding/hex"
 	"testing"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 // 跨语言契约黄金字节：与 packages/protocol/test/golden.test.ts 断言同一 hex。

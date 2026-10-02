@@ -6,8 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 func restoreGameplay(t *testing.T, cp Checkpoint, sink EventSink) *Sim {

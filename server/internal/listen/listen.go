@@ -45,7 +45,7 @@ func Resolve(spec string) (network, address string, err error) {
 	if rest, ok := strings.CutPrefix(spec, "unix:"); ok {
 		path := strings.TrimSpace(rest)
 		if path == "" {
-			return "", "", fmt.Errorf("listen %q: missing socket path after unix:", spec)
+			return "", "", fmt.Errorf("listen %q: unix: requires a non-empty socket path", spec)
 		}
 		if strings.HasPrefix(path, "@") && runtime.GOOS != "linux" {
 			return "", "", fmt.Errorf("listen %q: abstract sockets require Linux", spec)
@@ -75,7 +75,7 @@ func listenUnix(path string) (net.Listener, error) {
 		return nil, err
 	}
 	if err := os.Chmod(path, 0o666); err != nil {
-		ln.Close()
+		_ = ln.Close() // chmod 失败时 close 错误无信息量，返回 chmod 错误
 		return nil, err
 	}
 	return ln, nil
@@ -94,7 +94,7 @@ func removeStaleSocket(path string) error {
 	}
 	conn, err := net.DialTimeout("unix", path, time.Second)
 	if err == nil {
-		conn.Close()
+		_ = conn.Close() // 探活连接，close 错误无信息量
 		return fmt.Errorf("unix socket %s already in use (is another instance running?)", path)
 	}
 	// A timeout or permission failure does not prove the listener is gone.

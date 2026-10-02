@@ -203,6 +203,7 @@ func TestDeprecatedBestPartnerNeverAwards(t *testing.T) {
 	p.OnEvent(10, kill(10, 1, 3, 2))
 	p.OnEvent(30, matchEnd(30))
 	for id, row := range feedFinal(p) {
+		//nolint:staticcheck // Title_BEST_PARTNER 已弃用：断言不再产出该称号
 		if titlesOf(t, row)[ombv1.Title_BEST_PARTNER] {
 			t.Errorf("robot %d awarded deprecated BEST_PARTNER", id)
 		}

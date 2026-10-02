@@ -144,7 +144,7 @@ func (p *DeepSeekProvider) Complete(ctx context.Context, pc PromptContext) (Resu
 			err:       err,
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {

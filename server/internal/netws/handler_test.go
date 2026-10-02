@@ -21,7 +21,7 @@ func dialAndKick(t *testing.T, ctx context.Context, s *testserverT) *websocket.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.CloseNow() })
+	t.Cleanup(func() { _ = c.CloseNow() })
 	if err := c.Write(ctx, websocket.MessageBinary, []byte{frameUp}); err != nil {
 		t.Fatal(err)
 	}

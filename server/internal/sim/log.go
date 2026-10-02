@@ -12,8 +12,9 @@ import (
 	"sort"
 	"strings"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 const (
@@ -87,10 +88,15 @@ func NewMatchEventLog(matchID string) (*MatchEventLog, error) {
 	return NewMatchEventLogIn(filepath.Join("data", "matches"), matchID)
 }
 
+// isValidMatchIDRune 报告 r 是否为合法 match ID 字符（字母数字下划线连字符）。
+func isValidMatchIDRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_'
+}
+
 // NewMatchEventLogIn accepts a log directory for deployment and isolated tests.
 func NewMatchEventLogIn(dir, matchID string) (*MatchEventLog, error) {
 	if len(matchID) == 0 || len(matchID) > 128 || strings.IndexFunc(matchID, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+		return !isValidMatchIDRune(r)
 	}) >= 0 {
 		return nil, fmt.Errorf("sim: invalid match ID %q", matchID)
 	}

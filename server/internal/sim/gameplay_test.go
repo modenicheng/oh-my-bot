@@ -473,6 +473,7 @@ func TestDamageShareAttributionAndThreeSecondRespawn(t *testing.T) {
 				s.damage(hit.from, victim, hit.amount)
 			}
 			kill := s.events[len(s.events)-1].GetKill()
+			//nolint:staticcheck // 旧字段 Assist：断言新事件不再产出（legacy replay 兼容）
 			if kill == nil || kill.Killer != tc.wantKiller || kill.Victim != 4 || !reflect.DeepEqual(append([]uint32{}, kill.Assists...), append([]uint32{}, tc.wantAssist...)) || kill.KillSteal != tc.wantSteal || kill.Assist != 0 {
 				t.Fatalf("bad attribution %+v", kill)
 			}

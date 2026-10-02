@@ -13,8 +13,9 @@ import (
 // interface is not, so each helper builds the ServerEvent directly.
 
 func kill(tick, killer, victim, assist uint32) *ombv1.ServerEvent {
-	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{
-		Killer: killer, Victim: victim, Assist: assist}}}
+	kill := &ombv1.EvKill{Killer: killer, Victim: victim}
+	kill.Assist = assist //nolint:staticcheck // 旧 replay 单助字段 Assist，测 legacy 兼容
+	return &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_Kill{Kill: kill}}
 }
 
 func attributedKill(tick, killer, victim uint32, assists []uint32, steal bool) *ombv1.ServerEvent {
@@ -72,10 +73,10 @@ func noOpEvents(tick uint32) []*ombv1.ServerEvent {
 	return []*ombv1.ServerEvent{
 		phaseChange(tick),
 		say(tick, 1, "glhf"),
-		&ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_RoomState{RoomState: &ombv1.EvRoomState{State: ombv1.EvRoomState_R_RUNNING, RobotsOnline: 3}}},
-		&ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_AiQuota{AiQuota: &ombv1.EvAiQuota{RoundsLeft: 19}}},
-		&ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: 1, Ok: true, ScriptRev: 1}}},
-		&ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapHash: "h", GeneratorVersion: 1}}},
+		{Tick: tick, Kind: &ombv1.ServerEvent_RoomState{RoomState: &ombv1.EvRoomState{State: ombv1.EvRoomState_R_RUNNING, RobotsOnline: 3}}},
+		{Tick: tick, Kind: &ombv1.ServerEvent_AiQuota{AiQuota: &ombv1.EvAiQuota{RoundsLeft: 19}}},
+		{Tick: tick, Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: 1, Ok: true, ScriptRev: 1}}},
+		{Tick: tick, Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapHash: "h", GeneratorVersion: 1}}},
 	}
 }
 

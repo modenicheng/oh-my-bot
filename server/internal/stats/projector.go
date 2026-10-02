@@ -299,6 +299,7 @@ func (p *ProjectorImpl) onKill(tick uint32, e *ombv1.EvKill) {
 		killer.killsAt = tick
 		killer.score += ScoreKill
 		assists := e.Assists
+		//nolint:staticcheck // 旧字段 Assist：兼容旧 replay 归档（proto 已弃用）
 		if len(assists) == 0 && e.Assist != 0 {
 			assists = []uint32{e.Assist} // legacy replay compatibility
 		}
@@ -457,7 +458,7 @@ func eventKey(tick uint32, ev *ombv1.ServerEvent) string {
 	switch k := ev.Kind.(type) {
 	case *ombv1.ServerEvent_Kill:
 		if e := k.Kill; e != nil {
-			return fmt.Sprintf("%d|k|%d|%d|%d|%v|%t", tick, e.Killer, e.Victim, e.Assist, e.Assists, e.KillSteal)
+			return fmt.Sprintf("%d|k|%d|%d|%d|%v|%t", tick, e.Killer, e.Victim, e.Assist, e.Assists, e.KillSteal) //nolint:staticcheck // 旧字段 Assist 参与 fingerprint，兼容旧 replay
 		}
 	case *ombv1.ServerEvent_CorePickup:
 		if e := k.CorePickup; e != nil {

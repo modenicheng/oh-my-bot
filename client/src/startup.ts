@@ -1,4 +1,5 @@
 import { asciiField, asciiTitle } from './startup-art'
+import { initAppVersion } from './version'
 
 const root = document.getElementById('startup')!
 const status = document.getElementById('startup-status')!
@@ -113,3 +114,5 @@ window.addEventListener('pageshow', syncAnimation)
 motion.addEventListener('change', syncAnimation)
 syncAnimation()
 void prepare()
+// 版本页脚：fire-and-forget，不阻塞手势/音频解锁路径。
+void initAppVersion()

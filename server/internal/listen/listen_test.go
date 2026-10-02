@@ -53,7 +53,7 @@ func TestListenTCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	if _, port, err := net.SplitHostPort(ln.Addr().String()); err != nil || port == "0" {
 		t.Fatalf("Listen addr = %v (err %v), want bound ephemeral port", ln.Addr(), err)
 	}
@@ -67,7 +67,7 @@ func requireUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Skipf("unix sockets unavailable on %s: %v", runtime.GOOS, err)
 	}
-	ln.Close()
+	_ = ln.Close()
 }
 
 func TestListenUnixLifecycle(t *testing.T) {
@@ -92,7 +92,7 @@ func TestListenUnixLifecycle(t *testing.T) {
 	if err != nil {
 		t.Errorf("dial after listen: %v", err)
 	} else {
-		conn.Close()
+		_ = conn.Close()
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestListenUnixRemovesStaleSocketFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen over stale socket: %v, want it removed and bound", err)
 	}
-	ln.Close()
+	_ = ln.Close()
 }
 
 func TestListenUnixPreservesOtherFiles(t *testing.T) {
@@ -149,7 +149,7 @@ func TestListenUnixPreservesOtherFiles(t *testing.T) {
 			}
 			ln, err := Listen("unix:" + path)
 			if err == nil {
-				ln.Close()
+				_ = ln.Close()
 				t.Fatal("Listen should refuse a non-socket path")
 			}
 			after, err := os.Lstat(path)
@@ -180,13 +180,13 @@ func TestClosedListenerDoesNotRemoveReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer replacement.Close()
+	defer func() { _ = replacement.Close() }()
 	_ = old.Close()
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		t.Fatalf("old listener removed replacement: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 func TestListenUnixRefusesLiveSocket(t *testing.T) {
@@ -197,7 +197,7 @@ func TestListenUnixRefusesLiveSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	_, err = Listen("unix:" + path)
 	if err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatalf("second Listen on live socket err = %v, want already-in-use", err)
@@ -213,7 +213,7 @@ func TestListenAbstractSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	if got := ln.Addr().String(); got != "@omb-listen-test" {
 		t.Fatalf("addr = %q, want @omb-listen-test", got)
 	}

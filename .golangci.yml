@@ -1,0 +1,25 @@
+# golangci-lint v2 配置（https://golangci-lint.run/usage/configuration/）
+# CI 使用 golangci/golangci-lint-action，版本见 .github/workflows/ci.yml。
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - misspell
+  exclusions:
+    # server/tmp is gitignored runtime/build output and does not exist in clean CI checkouts.
+    paths:
+      - ^server/tmp/
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/modenicheng/oh-my-bot
+  exclusions:
+    paths:
+      - ^server/tmp/

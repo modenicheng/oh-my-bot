@@ -128,7 +128,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	}
 
 	// 事件管线：sim → 日志落盘（正式局）+ 投影 + 可靠广播
-	var sinkAll sim.EventSink = m.newSink()
+	sinkAll := m.newSink()
 	if !warmup {
 		matchID := fmt.Sprintf("%s-%d", rc.Code, matchSeq)
 		ml, err := sim.NewMatchEventLogIn("data/matches", matchID)

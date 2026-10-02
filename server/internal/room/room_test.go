@@ -83,7 +83,8 @@ func TestGenerateCodeFormat(t *testing.T) {
 			case '0', 'O', '1', 'I':
 				t.Fatalf("code %q contains confusable %q", c, ch)
 			}
-			if !(ch >= 'A' && ch <= 'Z' || ch >= '2' && ch <= '9') {
+			isValid := (ch >= 'A' && ch <= 'Z') || (ch >= '2' && ch <= '9')
+			if !isValid {
 				t.Fatalf("code %q contains invalid char %q", c, ch)
 			}
 		}

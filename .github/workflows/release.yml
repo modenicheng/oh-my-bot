@@ -1,0 +1,271 @@
+name: Release
+
+# push v* tag 或 workflow_dispatch（tag 输入：用于 release-please 用 GITHUB_TOKEN
+# 打 tag 后不触发本工作流时手动补产物）。产物：五平台二进制 + SHA256SUMS。
+# resolve job 统一选择/校验 tag（严格 SemVer，绝不以 main 分支头当版本），
+# 并要求 tag commit 的 VERSION 与 tag 一致；各 build job 精确 checkout 该 commit，
+# 全链 -ldflags version 一致。历史 v0.1.0 tag 不含版本链路，因此不会被回填。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing v-prefixed semver tag to build and publish (e.g. v0.2.0-rc.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      commit: ${{ steps.pick.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: pick tag (push = event ref, dispatch = input)
+        id: pick
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${EVENT_REF#refs/tags/}"
+          else
+            tag="${INPUT_TAG}"
+          fi
+          # 用固定 semver 实现做严格格式校验，拒绝 leading zero 等非 SemVer 形态。
+          TAG_TO_VALIDATE="${tag}" npx --yes --package semver@7.7.3 node - <<'NODE'
+          const semver = require('semver')
+          const tag = process.env.TAG_TO_VALIDATE
+          const parsed = semver.valid(tag)
+          if (!parsed || tag !== `v${parsed}`) {
+            console.error(`tag must be strict v-prefixed SemVer, got: ${tag}`)
+            process.exit(1)
+          }
+          NODE
+          # 显式抓取目标 tag 后取 commit；不存在或无法解析时立即失败。
+          git fetch --no-tags --force origin "refs/tags/${tag}:refs/tags/${tag}"
+          commit="$(git rev-list -n1 "refs/tags/${tag}")"
+          version="$(git show "${commit}:VERSION" 2>/dev/null || true)"
+          expected="${tag#v}"
+          if [ "${version}" != "${expected}" ]; then
+            echo "tag ${tag} cannot be released: VERSION at ${commit} is '${version:-missing}', want '${expected}'" >&2
+            echo "Historical v0.1.0 predates the version pipeline; create a newer release tag from a release PR." >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+  build-web:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 与 build.sh 相同的产物链：workspace typecheck，再构建 client/dist。
+      - name: build web (client/dist)
+        run: pnpm build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: client/dist/
+          retention-days: 3
+
+  build-binaries:
+    needs: [resolve, build-web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: windows, arch: amd64 }
+          - { os: darwin, arch: amd64 }
+          - { os: darwin, arch: arm64 }
+    env:
+      GOOS: ${{ matrix.os }}
+      GOARCH: ${{ matrix.arch }}
+      VERSION: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: client/dist
+
+      # 与 build.sh 语义一致：embed 目录暂存（gitignore 的产物目录 + 保留 .gitkeep），
+      # manual 直接复制整目录（含 legalassets）。
+      - name: stage embed dirs (web + manual)
+        shell: bash
+        run: |
+          mkdir -p server/cmd/omb/web server/cmd/omb/manual
+          cp -r client/dist/. server/cmd/omb/web/
+          cp -r docs/manual/. server/cmd/omb/manual/
+          touch server/cmd/omb/web/.gitkeep server/cmd/omb/manual/.gitkeep
+
+      - name: go build (CGO off, trimpath, version=tag)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          BIN="dist/omb"
+          [ "${GOOS}" = "windows" ] && BIN="dist/omb.exe"
+          CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${BIN}" ./server/cmd/omb
+
+      # smoke：仅 linux/amd64 可直接运行。-version 严格等于 tag；起服探 /healthz 后清理。
+      - name: smoke (-version strict + /healthz)
+        if: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          got="$(./dist/omb -version)"
+          echo "-version output: ${got}"
+          [ "${got}" = "${VERSION}" ] || { echo "version mismatch: want ${VERSION}"; exit 1; }
+          ./dist/omb -addr 127.0.0.1:18099 &
+          pid=$!
+          trap 'kill "${pid}" 2>/dev/null || true' EXIT
+          code=""
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18099/healthz || true)"
+            [ "${code}" = "200" ] && break
+            sleep 0.5
+          done
+          [ "${code}" = "200" ] || { echo "healthz did not return 200"; exit 1; }
+          echo "healthz OK"
+
+      - name: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          NAME="omb-${VER}-${GOOS}-${GOARCH}"
+          mkdir -p "out/${GOOS}-${GOARCH}"
+          if [ "${GOOS}" = "windows" ]; then
+            cp dist/omb.exe "out/${GOOS}-${GOARCH}/omb.exe"
+            (cd "out/${GOOS}-${GOARCH}" && zip -q "${GITHUB_WORKSPACE}/${NAME}.zip" omb.exe)
+          else
+            cp dist/omb "out/${GOOS}-${GOARCH}/omb"
+            tar -C "out/${GOOS}-${GOARCH}" -czf "${NAME}.tar.gz" omb
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: omb-${{ matrix.os }}-${{ matrix.arch }}
+          path: omb-*
+          retention-days: 3
+          if-no-files-found: error
+
+  gather:
+    needs: [resolve, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          pattern: 'omb-*'
+          merge-multiple: true
+
+      # 不发半套：5 个平台产物缺一即失败。
+      - name: verify all platform archives present
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          for f in \
+            "omb-${VER}-linux-amd64.tar.gz" \
+            "omb-${VER}-linux-arm64.tar.gz" \
+            "omb-${VER}-windows-amd64.zip" \
+            "omb-${VER}-darwin-amd64.tar.gz" \
+            "omb-${VER}-darwin-arm64.tar.gz"; do
+            [ -f "assets/${f}" ] || { echo "missing asset: ${f}"; exit 1; }
+          done
+          echo "all 5 archives present"
+
+      - name: sha256sums (filenames relative to assets dir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum omb-*.tar.gz omb-*.zip > SHA256SUMS
+          cd ..
+          mkdir -p release-assets
+          mv assets/* release-assets/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: release-assets/
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    needs: [resolve, gather]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      # 幂等上传：release-please（GITHUB_TOKEN 模式）merge 后已创建 release 时
+      # 直接 upload --clobber 覆盖同名资产；否则 create --generate-notes。
+      - name: upload to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" --clobber release-assets/*
+          else
+            prerelease_flag=""
+            version="${TAG#v}"
+            major="${version%%.*}"
+            if [ "${major}" = "0" ] || [[ "${TAG}" == *-* ]]; then prerelease_flag="--prerelease"; fi
+            gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+              --generate-notes ${prerelease_flag} release-assets/*
+          fi

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # 根目录唯一 go.mod（module github.com/modenicheng/oh-my-bot）
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+
+  # pnpm workspace：根 package.json + pnpm-lock.yaml
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly

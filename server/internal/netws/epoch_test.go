@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
@@ -26,7 +27,7 @@ func TestBootstrapDiscardsQueuedPreviousMatchScriptLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 	if readServerMsg(t, c, ctx).GetEvent().GetMapBootstrap() == nil {
 		t.Fatal("bootstrap must precede new-epoch script logs")
 	}
@@ -59,7 +60,7 @@ func TestBootstrapDiscardsQueuedPreviousMatchDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 	if readServerMsg(t, c, ctx).GetEvent().GetMapBootstrap() == nil {
 		t.Fatal("bootstrap must precede the new snapshots")
 	}

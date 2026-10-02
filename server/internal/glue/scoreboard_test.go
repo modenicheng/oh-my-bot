@@ -59,8 +59,8 @@ func TestScoreboardEventOfConvertsLiveRows(t *testing.T) {
 // TestScoreboardFingerprintDetectsChange 指纹应能区分榜位与分数变化，忽略昵称等不影响排序的因素。
 func TestScoreboardFingerprintDetectsChange(t *testing.T) {
 	base := []stats.ScoreRow{{RobotID: 1, Score: 30}, {RobotID: 2, Score: 10}}
-	if scoreboardFingerprint(base) != scoreboardFingerprint(base) {
-		t.Fatal("fingerprint not deterministic")
+	if scoreboardFingerprint(base) != scoreboardFingerprint([]stats.ScoreRow{{RobotID: 1, Score: 30}, {RobotID: 2, Score: 10}}) {
+		t.Fatal("fingerprint not deterministic for equal content")
 	}
 	if scoreboardFingerprint(base) == scoreboardFingerprint([]stats.ScoreRow{{RobotID: 2, Score: 10}, {RobotID: 1, Score: 30}}) {
 		t.Fatal("fingerprint ignores order change")

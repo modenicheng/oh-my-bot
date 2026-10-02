@@ -1,8 +1,9 @@
 package script
 
 import (
-	"github.com/dop251/goja"
 	"strconv"
+
+	"github.com/dop251/goja"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )

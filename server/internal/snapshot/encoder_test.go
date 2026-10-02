@@ -51,6 +51,7 @@ func TestFirstFrameFull(t *testing.T) {
 	}
 	// full 携带元数据。
 	r2 := robotByID(d1, 2)
+	//nolint:staticcheck // IsPartner 已弃用：断言编码器不再置位（legacy replay 兼容）
 	if r2 == nil || r2.Nick != "r" || r2.Color != "#fff" || r2.IsPartner {
 		t.Fatalf("full 应含元数据与 partner 标记：%+v", r2)
 	}
@@ -177,10 +178,8 @@ func TestTombstoneLifecycle(t *testing.T) {
 	enc := NewEncoder()
 	walls := []sim.Wall{mkWall(1, 4, -10, 5, 10)}
 
-	// tick1：1 与 2 同视野（full）。
-	w := mkWorld(walls, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
-	// 2 在墙后不可见 → 用无墙世界保证同视野。
-	w = mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
+	// tick1：1 与 2 同视野（full）。墙对同侧无遮挡，直接用无墙世界。
+	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 10, 0)})
 	enc.Encode(1, 0, sim.PhaseOuterRing, 480, obsOf(w, 1, 0, nil), selfIn(1))
 
 	// tick2：2 移出视野（35m）→ tombstone。

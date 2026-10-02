@@ -1,8 +1,9 @@
 package mapgen
 
 import (
-	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 	"math"
+
+	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
 // dirCount 为方向表分辨率：48 步 × 7.5° = 360°。扇区轴（k*45° = 6k 步）
@@ -53,24 +54,6 @@ func rot90(p sim.Vec2) sim.Vec2 { return sim.Vec2{X: -p.Y, Y: p.X} }
 // IEEE754 乘加后完全可复现；用于掩体中心的八分对称标记。
 func rot45(p sim.Vec2) sim.Vec2 {
 	return sim.Vec2{X: (p.X - p.Y) * r2, Y: (p.X + p.Y) * r2}
-}
-
-// rotateK 返回 p 绕原点旋转 k·45° 后的位置：偶数 k 走精确整格旋转
-// （90° 的倍数），奇数 k 先做一次 45° 旋转再做整格旋转。
-func rotateK(p sim.Vec2, k int) sim.Vec2 {
-	q := p
-	if k%2 != 0 {
-		q = rot45(q)
-	}
-	switch ((k % 4) + 4) % 4 {
-	case 1, -3:
-		q = rot90(q)
-	case 2, -2:
-		q = rot90(rot90(q))
-	case 3, -1:
-		q = rot90(rot90(rot90(q)))
-	}
-	return q
 }
 
 // rect 为 mapgen 内部轴对齐矩形（与 sim.Rect/Min-Max 语义同构）。

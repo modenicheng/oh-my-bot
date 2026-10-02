@@ -480,3 +480,6 @@ button .pixel-icon + span { margin-left: 7px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* --- 版本页脚（#view-join 底部，低调小字） --- */
+#app-version { margin: 4px 0 0; font: 11px var(--mono); letter-spacing: 0.08em; color: var(--fg-dim); opacity: 0.7; user-select: text; }

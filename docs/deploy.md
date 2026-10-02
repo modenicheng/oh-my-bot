@@ -156,6 +156,55 @@ docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发�
 
 容器里的 unix socket 也能用：`-addr unix:/run/omb/omb.sock` 并把 `/run/omb` 挂成共享卷，宿主机 nginx 或 sidecar 反代容器直接连卷里的 socket。
 
+## CI/CD 与版本发布
+
+工作流位于 `.github/workflows/`；运行状态与历史记录以仓库 Actions 页面为准。
+
+### 工作流一览
+
+| 工作流 | 触发 | 作用 |
+|---|---|---|
+| CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ `go test -race`；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e） |
+| Release Please (`.github/workflows/release-please.yml`) | push main、手动 | 自动维护 `chore: release` PR（由 conventional commits 汇总）；手动可填高于最新 tag 的 `release_as`（如 `v0.2.0-rc.1`）产指定 release PR；merge 后打 tag + 建 GitHub release |
+| Release (`.github/workflows/release.yml`) | push `v*` tag、手动（tag 必填，须为已存在的 `vX.Y.Z[-pre]` tag） | resolve 校验 tag 并输出 tag+commit，五平台构建（linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64）精确 checkout 该 commit + linux/amd64 smoke（`-version` 严格等于 tag、`/healthz` 200）+ SHA256SUMS + 幂等上传到 GitHub release；五平台产物缺一不发 |
+| Dependabot (`.github/dependabot.yml`) | 每周 | github-actions / gomod（根 go.mod）/ npm（根 pnpm workspace）更新 PR |
+
+### 正式发版
+
+1. push 到 main 后 Release Please 自动开/更新 `chore: release` PR（版本号由 conventional commits 推导：`feat:` 进 minor、`fix:`/`perf:` 进 patch、`feat!:`/`BREAKING CHANGE:` 进 major）。
+2. 人工核对 CHANGELOG 后 merge 该 PR → 自动打 `vX.Y.Z` tag 并创建 GitHub release，触发 Release 工作流出五平台产物。
+
+### rc（预发布）发版
+
+Release Please action 本身无 prerelease 输入；rc 走手动 `release_as`：
+
+1. 在 Actions 页从 `main` 运行 Release Please，`release_as` 显式填一个**高于最新 tag** 的版本，例如当前从已有 `v0.1.0` 基线开始使用 `v0.2.0-rc.1`；后续可填 `v0.2.0-rc.2`。工作流用严格 SemVer 校验并拒绝不递增版本。
+2. merge 产出的 release PR → 对应 tag + 预发布 GitHub release（config `prerelease: true`：0.x 或带预发布后缀的 release 标为 prerelease，1.x 及之后无后缀的版本转正）。自动构建产物需要下文的 PAT 配置；否则手动运行 Release。
+3. 从 RC 发布无后缀版本时，用 `release_as` 显式指定目标版本，例如 `v0.2.0`。当前采用默认版本策略；`prerelease-type: rc` 不是自动递增策略。
+
+### 下载与校验
+
+Releases 页下载对应平台 `omb-<版本>-<os>-<arch>.tar.gz`（Windows 为 `.zip`，内含 `omb.exe`）与 `SHA256SUMS`：
+
+```bash
+sha256sum -c SHA256SUMS          # 在产物所在目录
+tar xzf omb-0.2.0-linux-amd64.tar.gz && ./omb -version   # 应输出 v0.2.0
+```
+
+### 版本查询
+
+二进制是唯一版本源（release 构建经 `-ldflags '-X main.version=<tag>'` 注入）：
+
+- `./omb -version` — 打印版本立即退出，不监听端口
+- `curl http://127.0.0.1:27182/api/version` — 例如 `{"version":"v0.2.0"}`（只读 GET，非 GET 405）
+- 首页加入页底部页脚 — 启动时异步读取 `/api/version`，读取失败静默显示 `dev`
+
+### 已知限制
+
+- **GITHUB_TOKEN 限制（GitHub 官方）**：Release Please 用默认 `github.token` merge 出的 tag **不会**再触发 Release 工作流。两条路径：① 配 fine-grained PAT 为 secret `RELEASE_PLEASE_TOKEN`，需同时勾选 **Contents: Read and write**、**Pull requests: Read and write** 与 **Issues: Read and write**，实现全自动；② 不配 PAT 时 merge 后在 Actions 手动 Run Release 工作流（tag 输入必填，须为已存在的 `vX.Y.Z[-pre]` tag）补产物——release 本体与 tag 已由 Release Please 创建，产物上传幂等（`--clobber`）。
+- 仓库已有历史 `v0.1.0` tag，但它早于版本注入与 Release workflow，仅作为源码基线，不支持用新流水线回填二进制；首个自动 release 从其后的提交生成。
+- 本地已验证五平台交叉编译、归档、SHA256SUMS 和版本/healthz smoke；Actions 真实运行、release PR 自动晋级与 GitHub Release 上传由推送后的远端演练确认。
+
 ## AI Agent 接入状态
 
 当前房间链路仍返回 `not configured` 占位提示，网页也没有 AI 对话入口；仅设置 `DEEPSEEK_API_KEY` 不会启用改码。仓库的 DeepSeek Provider 和配额组件已有实现，尚需完成房间及客户端接入。默认配额与限制见 [AI Agent 接入状态](manual/start/ai-agent.md)。
