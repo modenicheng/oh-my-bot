@@ -37,7 +37,7 @@
 ## 3. CI 工作流（.github/workflows/ci.yml）
 
 - 触发：push main、全部 PR、workflow_dispatch；`concurrency` 按 ref 取消旧运行。
-- `go` job（ubuntu-latest）：checkout → setup-go（`go-version-file: go.mod`）→ golangci-lint-action v9 → `go test -race -timeout 10m ./...`。
+- `go` job（ubuntu-latest）：checkout → setup-go（`go-version-file: go.mod`）→ golangci-lint-action v9 → 完整 `go test -timeout 10m ./...` → `go test -race -short -timeout 10m ./...`。严格 5/12ms 性能门和依赖生产脚本墙钟配额的集成测试仅在非 race 全量步骤运行；64 runtime 并发 race harness 使用放宽测试配额，继续覆盖数据竞争。
 - `web` job：pnpm/action-setup（读 `packageManager`）→ setup-node 22（cache pnpm）→ `pnpm install --frozen-lockfile` → 根 `pnpm typecheck`（显式过滤 packages + client，避免根脚本递归）→ `pnpm test`（vitest run，不含 Playwright e2e）。
 - `package.json` 补 `"test": "vitest run"`（vitest 已是 root devDependency，锁文件不动）。
 - 权限最小：顶层 `permissions: contents: read`。

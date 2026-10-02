@@ -30,7 +30,10 @@ jobs:
           version: v2.14.0
 
       - name: go test
-        run: go test -race -timeout 10m ./...
+        run: go test -timeout 10m ./...
+
+      - name: go test (race, short)
+        run: go test -race -short -timeout 10m ./...
 
   web:
     runs-on: ubuntu-latest

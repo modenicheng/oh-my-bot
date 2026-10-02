@@ -134,7 +134,8 @@ func TestPoolDeferredIsIdleNotCrash(t *testing.T) {
 // ---- 64 并行 -race ----
 
 func TestPool64ParallelRace(t *testing.T) {
-	p := NewRunPool(Config{PoolSize: NumWorkers()})
+	cfg := Config{PoolSize: NumWorkers(), TickTimeout: time.Second}
+	p := NewRunPool(cfg)
 	defer p.Close()
 
 	const N = 64
@@ -147,7 +148,7 @@ function tick(ctx){
 	ctx.api.moveTo(ctx.api.nearestCore());
 }`
 	for i := 1; i <= N; i++ {
-		rt := NewGojaRuntime(Config{})
+		rt := NewGojaRuntime(cfg)
 		if err := rt.Load(src); err != nil {
 			t.Fatalf("load %d: %v", i, err)
 		}

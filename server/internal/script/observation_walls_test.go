@@ -122,6 +122,9 @@ func TestScanWallsNilMap(t *testing.T) {
 }
 
 func TestScanWalls64WithinRuntimeBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("strict runtime budget is not meaningful under race instrumentation")
+	}
 	frame := testFrame()
 	frame.Obs.Frame.Map.Walls = make([]sim.Wall, 64)
 	for i := range frame.Obs.Frame.Map.Walls {

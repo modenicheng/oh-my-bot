@@ -113,6 +113,9 @@ func TestSoloBotScriptIntents(t *testing.T) {
 }
 
 func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
+	if testing.Short() {
+		t.Skip("wall-clock script quotas are not meaningful under race instrumentation")
+	}
 	t.Chdir(t.TempDir())
 	h := NewHub()
 	rc := h.EnsureRoom("BOTLOG")
