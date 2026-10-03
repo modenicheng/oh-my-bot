@@ -29,7 +29,7 @@
   "devDependencies": {
     "playwright": "^1.63.0",
     "tsx": "^4.23.15",
-    "typescript": "^5.8.0",
+    "typescript": "^7.0.2",
     "vite": "^6.2.0",
     "ws": "^8.22.0"
   }
