@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-alpha.1](https://github.com/modenicheng/oh-my-bot/compare/v0.2.0...v1.0.0-alpha.1) (2026-10-03)
+
+
+### Features
+
+* add snippets AI assistance and deterministic navigation ([4987f14](https://github.com/modenicheng/oh-my-bot/commit/4987f142e3dbde5d082d7c54cad55cf02206d27c))
+* **client:** vision fog and defeat camera shake ([2303f0b](https://github.com/modenicheng/oh-my-bot/commit/2303f0bb3d01e30d3512ea68b2b0a7a4e19c6b8a))
+* deterministic visual replay export and interpolated playback ([a17429a](https://github.com/modenicheng/oh-my-bot/commit/a17429a638f8d0cd35f83c87fdbbbb4cf726ae34))
+* keep room-scoped bot script and assist across matches ([c9ba157](https://github.com/modenicheng/oh-my-bot/commit/c9ba15773c026afc21b01b5c656b512aa802e8f4))
+* **server:** honor OMB_CONFIG_DIR for runtime config lookup ([4a64d4f](https://github.com/modenicheng/oh-my-bot/commit/4a64d4f76a4f87f9bc02bd25f152a740aed84242))
+* stream AI responses into the workbench panel ([9e4a103](https://github.com/modenicheng/oh-my-bot/commit/9e4a10336e8e1da04f329154a7742f9838683edf))
+
 ## [0.2.0](https://github.com/modenicheng/oh-my-bot/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
