@@ -13,6 +13,9 @@ export interface SnippetPanelDeps {
   root: HTMLElement
   send: (settings: ReturnType<typeof snippetSettingsFor>) => boolean
   availability: () => { online: boolean; inMatch: boolean }
+  /** 应用配置后激活驾驶辅助（幂等）：Snippet 不开辅助不生效，这是最常见的
+   * 玩家困惑（应用了却“没反应”）。返回是否已处于辅助开启状态。 */
+  activateAssist?: () => boolean
 }
 
 export type SnippetApplyStatus =
@@ -313,6 +316,8 @@ export class SnippetPanelView {
       this.applied = result.applied.map(setting => ({ ...setting }))
       this.appliedRev = result.scriptRev
       this.status = { phase: 'ok', rev: result.scriptRev }
+      // 应用成功即激活辅助：snippet 挂在辅助仲裁层下，不开辅助等于没应用。
+      if (result.applied.some(setting => setting.enabled)) this.deps.activateAssist?.()
     } else {
       this.status = { phase: 'error', message: result.error || '服务器拒绝了配置' }
     }
@@ -393,6 +398,7 @@ export class SnippetPanelView {
     this.applyButton.disabled = !online || !inMatch || this.status.phase === 'pending'
     this.applyButton.textContent = this.status.phase === 'pending' ? '应用中…' : '应用配置'
     const dirty = this.applied ? !snippetDraftMatchesApplied(this.draft, this.applied) : this.hasAnyEnabled()
+    this.applyButton.dataset.dirty = String(dirty)
     let text: string
     switch (this.status.phase) {
       case 'pending': text = '正在应用，等待服务器回执…'; break
@@ -411,6 +417,11 @@ export class SnippetPanelView {
 
   private hasAnyEnabled(): boolean {
     return SNIPPET_ROWS.some(row => this.draft[row.key].enabled)
+  }
+
+  /** 已应用配置里含自瞄模块（服务器已回执生效）。用于瞄准 guard。 */
+  aimsTurret(): boolean {
+    return !!this.applied?.some(setting => setting.kind === 1)
   }
 
   focus(): void {

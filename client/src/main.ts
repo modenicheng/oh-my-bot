@@ -241,6 +241,8 @@ function enterGame(): void {
     send: (data) => session?.state === 'online' && session.send(data),
     onExitToRoom: exitGame,
   })
+  // 瞄准能力信号桥：脚本装载/Snippet 应用即重算 guard（早于服务器回显）。
+  workbench.setAssistAimListener(capable => game?.setAssistAimCapable(capable))
   showView('game')
   workbench.activate()
 }

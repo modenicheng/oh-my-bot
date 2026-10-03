@@ -60,6 +60,13 @@ interface WorkbenchDeps {
   activateAssist: () => boolean
 }
 
+/** 辅助脚本是否具备瞄准能力：已装载玩家脚本（含 aimAt 调用）或已应用
+ * 自瞄 Snippet。用于瞄准 guard：这类脚本在辅助模式下应拥有炮塔轴，
+ * 鼠标移动不再抢占（R 显式夺取）。 */
+export interface WorkbenchAssistAimSignal {
+  assistAimScript(): boolean
+}
+
 /** 文档与编辑器共享一列；提交状态只接受当前连接、当前对局的匹配回执。 */
 export class Workbench {
   private readonly panels = new Set<WorkbenchPanel>()
@@ -81,6 +88,10 @@ export class Workbench {
   private compiling = false
   private pending?: { id: number; source: string; timer: ReturnType<typeof setTimeout> }
   private loaded?: { source: string; revision: number }
+  /** 辅助脚本具备瞄准能力（玩家脚本含 aimAt / 已应用自瞄 Snippet）；变更
+   * 时回调通知 GameController 重算瞄准 guard。 */
+  private assistAimCapable = false
+  private onAssistAimChange?: (capable: boolean) => void
   private readonly docsPane: HTMLElement
   private readonly editorPane: HTMLElement
   private readonly resizeHandle: HTMLElement
@@ -186,6 +197,7 @@ export class Workbench {
       root: this.snippetPane,
       send: settings => this.sendSnippetConfig(settings),
       availability: () => ({ online: this.online, inMatch: this.inMatch }),
+      activateAssist: () => this.deps.activateAssist(),
     })
     this.aiPanel = new AiPanelView({
       root: this.aiPane,
@@ -476,6 +488,7 @@ export class Workbench {
     this.loaded = undefined
     this.assistOn = false
     this.resetMatch()
+    this.updateAssistAim()
   }
 
   setIdentity(roomCode: string, nick: string): void {
@@ -485,6 +498,7 @@ export class Workbench {
       this.aiPanel.resetSession('identity')
       this.loaded = undefined
       this.assistOn = false
+      this.updateAssistAim()
     }
     const prefKey = languagePrefKey(roomCode, nick)
     if (this.draftKey) this.saveLanguagePref()
@@ -711,7 +725,28 @@ export class Workbench {
     } else {
       this.scriptConsole.appendClient('error', `加载失败：${result.error || '服务器拒绝了脚本'}。原脚本保持不变。`)
     }
+    this.updateAssistAim()
     this.renderButtons()
+  }
+
+  /** 瞄准能力信号：玩家脚本含 aimAt 调用或已应用自瞄 Snippet。
+   * 结果缓存的粗糙检测足够：guard 只需知道「脚本可能操作炮塔」。 */
+  private computeAssistAim(): boolean {
+    if (this.loaded && /\baimAt\s*\(/.test(this.loaded.source)) return true
+    return this.snippetPanel.aimsTurret()
+  }
+
+  private updateAssistAim(): void {
+    const capable = this.computeAssistAim()
+    if (capable === this.assistAimCapable) return
+    this.assistAimCapable = capable
+    this.onAssistAimChange?.(capable)
+  }
+
+  /** 注册瞄准能力变更回调（GameController 的 guard 重算入口）。 */
+  setAssistAimListener(fn: (capable: boolean) => void): void {
+    this.onAssistAimChange = fn
+    fn(this.assistAimCapable)
   }
 
   /** SnippetConfig 上行（仅在线对局中；帧超限防护与脚本提交一致）。 */
@@ -734,6 +769,7 @@ export class Workbench {
 
   acceptSnippetResult(result: EvSnippetResult): void {
     this.snippetPanel.acceptResult(result)
+    this.updateAssistAim()
   }
 
   acceptAiQuota(quota: EvAiQuota): void {

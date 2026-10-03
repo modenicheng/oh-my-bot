@@ -28,6 +28,7 @@ import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema, EvShotSchema, EvProjectileImpactSchema,
   EvUplinkHackSchema, EvCorePickupSchema, EvHealSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
+  EvScriptResultSchema,
 } from '../../packages/protocol/src/index.ts'
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -155,7 +156,13 @@ class Fixture {
       this.pushDelta()
     }
     else if (c.case === 'resyncRequest') { this.sendFull() }
-    // roomAction / scriptSubmit / aiPrompt: ignored by fixture
+    else if (c.case === 'scriptSubmit') {
+      // 最小回执：ok + 递增 rev，驱动 workbench 的 loaded/瞄准能力信号。
+      this.scriptRev = (this.scriptRev ?? 0) + 1
+      const id = c.value.clientScriptId
+      this.send(conn, this.event('scriptResult', EvScriptResultSchema, { clientScriptId: id, ok: true, scriptRev: this.scriptRev }))
+    }
+    // roomAction / aiPrompt / snippetConfig: ignored by fixture
   }
 
   send(conn, msg) { if (conn.ws.readyState === 1) conn.ws.send(Buffer.concat([Buffer.from([0x03]), toBinary(ServerMsgSchema, msg)])) }
@@ -401,7 +408,7 @@ async function skillHudText(page) {
 
 // ---------------------------------------------------------------- scenario
 async function fullPass(browser, fix) {
-  const ctx = await browser.newContext({ viewport: { width: 2048, height: 1152 }, deviceScaleFactor: 1.25 })
+  const ctx = await browser.newContext({ viewport: { width: 2048, height: 1152 }, deviceScaleFactor: 1.25, permissions: ['clipboard-read', 'clipboard-write'] })
   await ctx.addInitScript(AUDIO_INIT)
   const page = await ctx.newPage()
   page.setDefaultTimeout(9000)
@@ -508,13 +515,29 @@ async function fullPass(browser, fix) {
     }
 
     // --- aim guard: script-driven turret eats mouse aim until R seizes it back
-    // 场景：开自瞄但手动开火的玩家。辅助开（分支1），fixture 权威回显
-    // turret_src=CS_SCRIPT；此后鼠标大幅移动不产生 aim mask 帧，HUD 提示按 R；
-    // 按 R 后帧流恢复 aim mask（服务端炮塔轴归人）；Space 交回后 guard 重新生效。
+    // 场景：开自瞄但手动开火的玩家。真实编辑器提交含 aimAt 的脚本（fixture
+    // 回 scriptResult ok）→ workbench 上报瞄准能力 → guard 生效：鼠标大幅移动
+    // 不产生 aim mask 帧，HUD 提示按 R；按 R 后帧流恢复 aim mask；Space 交回后
+    // guard 重新生效。guard 现在由本地「脚本具备瞄准能力」信号驱动（敌人出现
+    // 前即生效），不再依赖服务器 turret_src 回显。
     await page.keyboard.press(' ')
     await until(() => fix.assistToggles >= 6, 'sixth assistToggle upstream')
     await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'assist ON before aim guard')
-    await fix.step(st => { st.self.turretSrc = CS_SCRIPT })
+    // 通过真实编辑器提交 aimAt 脚本（fixture scriptResult 驱动 loaded 信号）。
+    await page.keyboard.press('c')
+    await page.locator('#workbench-editor').waitFor({ state: 'visible' })
+    const guardEditor = page.getByRole('textbox', { name: '机器人脚本编辑器', exact: true })
+    await guardEditor.focus()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.evaluate(src => navigator.clipboard.writeText(src), 'function tick(bot) { const e = bot.nearestEnemy(); if (e) bot.aimAt(e) }')
+    await page.keyboard.press('ControlOrMeta+v')
+    await sleep(400)
+    await page.keyboard.press('ControlOrMeta+Enter')
+    await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本')), 'guard script loaded', 10000)
+    await page.keyboard.press('Escape')
+    // 收起编辑器并回到战场画布：点击画布聚焦，确保后续鼠标事件直达。
+    await page.locator('.workbench-tools [data-panel="editor"]').click()
+    await page.locator('#game-canvas').click({ position: { x: 1000, y: 560 } })
     const guardMark = lastSeq(fix)
     await page.mouse.move(1400, 300)
     await sleep(200)
@@ -522,7 +545,11 @@ async function fullPass(browser, fix) {
     await sleep(200)
     const guardedFrames = framesSince(fix, guardMark).filter(f => (f.axisMask & 0b10) !== 0)
     assert.equal(guardedFrames.length, 0, `guarded mouse moves must not send aim takeover frames (got ${guardedFrames.length})`)
-    await until(async () => /按 R 手动瞄准/.test(await hudMsgText(page)), 'aim guard hint must surface in HUD')
+    // guard 生效的直接证据：再动一次鼠标，HUD 应出现提示（若 guard 未生效，
+    // 这些移动会发送 aim 帧而非提示）。
+    await page.mouse.move(300, 200, { steps: 3 })
+    await sleep(150)
+    await until(async () => /按 R 手动瞄准/.test(await hudMsgText(page)), `aim guard hint must surface in HUD (hud=${JSON.stringify(await hudMsgText(page))})`)
     // 左键开火不受 guard 影响（fire 轴照常抢占，点击微动不泄漏 aim）
     const clickMark = lastSeq(fix)
     await page.mouse.down(); await sleep(150); await page.mouse.up()
@@ -549,7 +576,6 @@ async function fullPass(browser, fix) {
     await page.keyboard.press(' ')
     await until(() => fix.assistToggles >= 8, 'eighth assistToggle upstream')
     await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'assist OFF after aim-guard scenario')
-    await fix.step(st => { st.self.turretSrc = CS_HUMAN })
 
     // --- dash edge: Shift press produces an edge, not a held level
     // 阈值上限随宿主采样吞吐放宽（60Hz 下 180ms ≈ 1-2 帧；本机 headless ~20Hz

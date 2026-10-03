@@ -212,6 +212,10 @@ html[data-console-resize] * { cursor: ns-resize !important; user-select: none !i
 .snippet-status[data-phase="pending"] { color: var(--amber); }
 .snippet-status[data-phase="error"] { color: var(--danger); }
 .snippet-apply { flex: none; min-width: 96px; }
+/* 草稿脏（有未应用修改）时高亮：琥珀描边 + 呼吸脉冲，提醒必须显式应用。 */
+.snippet-apply[data-dirty="true"] { border-color: var(--amber); color: var(--amber); background: transparent; animation: snippet-apply-pulse 1.6s ease-in-out infinite; }
+.snippet-apply[data-dirty="true"]:hover:not(:disabled) { background: rgba(255, 191, 87, .12); }
+@keyframes snippet-apply-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 191, 87, 0); } 50% { box-shadow: 0 0 0 3px rgba(255, 191, 87, .25); } }
 
 @media (pointer: coarse) {
   .snippet-range-shell, .snippet-range-input { height: 28px; }

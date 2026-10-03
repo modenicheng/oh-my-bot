@@ -11,7 +11,6 @@ import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldStat
 import { Camera } from './camera'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
 import { InputSampler, AXIS_AIM } from './input'
-import { ControlSource } from '@omb/protocol'
 import { Hud } from './hud'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback } from './feedback'
@@ -291,7 +290,7 @@ export class GameController {
     return this.input.assistOn
   }
 
-  /** R：显式夺取炮塔轴（辅助脚本正在瞄准时鼠标不抢轴，R 是唯一入口）。 */
+  /** 瞄准 guard：脚本控制炮塔时鼠标移动不抢炮塔轴，R 显式夺取。 */
   seizeAim(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return
     if (!this.input.seizeAim()) return
@@ -299,14 +298,25 @@ export class GameController {
     this.hud.flashMsg('手动瞄准 · Space 交回辅助')
   }
 
-  /** 每帧按权威 SelfState 更新瞄准 guard：辅助开启 + 炮塔轴归脚本/官方
-   * Snippet + 人未持有炮塔轴（本地粘滞位）时，鼠标移动不抢炮塔轴，改由 R
-   * 显式夺取（开自瞄但手动开火的玩家不被点击微动打断辅助瞄准）。
+  /** 瞄准能力信号（Workbench 上报）：已装载玩家脚本含 aimAt 调用，或
+   * 已应用自瞄 Snippet。信号在脚本装载/卸载/Snippet 应用时更新，早于
+   * 服务器 turret_src 回显——敌人出现前 guard 就应生效，否则先手鼠标
+   * 粘滞会永远阻止脚本拿走炮塔轴。 */
+  private assistAimCapable = false
+
+  setAssistAimCapable(capable: boolean): void {
+    if (this.assistAimCapable === capable) return
+    this.assistAimCapable = capable
+    this.syncAimGuard()
+  }
+
+  /** 每帧按本地信号更新瞄准 guard：辅助开启 + 瞄准能力脚本在场 + 人未
+   * 持有炮塔轴（本地粘滞位）时，鼠标移动不抢炮塔轴，R 显式夺取。
    * 字段缺失（旧服务器）不启用 guard，保持逐帧鼠标抢占。 */
   private syncAimGuard(): void {
     const self = this.world.self
     this.input.aimUnderScript = !!self?.assistOn
-      && (self.turretSrc === ControlSource.CS_SCRIPT || self.turretSrc === ControlSource.CS_SNIPPET)
+      && this.assistAimCapable
       && !this.input.holdsAim()
   }
 
