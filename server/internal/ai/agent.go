@@ -96,6 +96,13 @@ func (a *Agent) HandlePromptStream(ctx context.Context, playerID uint64, instruc
 		return HandleOutcome{}, err
 	}
 
+	// 串行位内重读脚本快照：TryAcquire 可能阻塞等全局并发位，等待期间同玩家
+	// 上一轮请求可能已落地新版本；沿用等待前的旧 rev 提交会被误判为迟到结果
+	// 丢弃（accepted=false）。持有串行位后重读，保证该 rev 不会再被同玩家超越。
+	if a.scripts != nil {
+		pc.CurrentScript, pc.ScriptRev = a.scripts.CurrentScript(playerID)
+	}
+
 	var result Result
 	var usage Usage
 	var perr error
