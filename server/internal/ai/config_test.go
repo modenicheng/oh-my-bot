@@ -100,6 +100,22 @@ func TestLoadServerConfigEnvFileAndPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigExplicitEnvDir(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, map[string]string{
+		".env": "AI_ENABLED=true\nDEEPSEEK_API_KEY=sk-explicit-dir\n",
+	})
+	t.Setenv("OMB_CONFIG_DIR", dir)
+	t.Setenv(EnvKey, "")
+	cfg, err := LoadServerConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AI.Enabled || cfg.APIKey != "sk-explicit-dir" {
+		t.Fatalf("explicit dir config = %+v key=%q", cfg.AI, cfg.APIKey)
+	}
+}
+
 func TestLoadServerConfigFlatKeysAndComments(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, map[string]string{

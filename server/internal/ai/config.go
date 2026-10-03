@@ -35,7 +35,11 @@ const EnvKey = DeepSeekKeyEnv
 // 不静默降级。key 缺失不是错误：返回零值 key，由调用方决定禁用。
 func LoadServerConfig(dir string) (ServerConfig, error) {
 	if dir == "" {
-		dir = resolveConfigDir()
+		if configured := strings.TrimSpace(os.Getenv("OMB_CONFIG_DIR")); configured != "" {
+			dir = configured
+		} else {
+			dir = resolveConfigDir()
+		}
 	}
 	cfg := ServerConfig{
 		AI: AIConfig{
