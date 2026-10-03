@@ -43,7 +43,7 @@ tags: [脚本, API]
 
 ## 示例库
 
-仓库 `docs/manual/examples/` 下有六个完整可跑的示例，每个不超过 60 行，带教学点注释：
+仓库 `docs/manual/examples/` 下有七个完整可跑的示例，每个不超过 80 行，带教学点注释：
 
 | 示例 | 教学点 |
 |---|---|
@@ -52,6 +52,7 @@ tags: [脚本, API]
 | `core-farmer.ts` | 捡 Core 得分 + 路过交火 |
 | `uplink-rusher.ts` | 站桩引导与等待估算 |
 | `shield-brawler.ts` | 近战：护盾、位移、能量管理 |
+| `predictive-shield.ts` | 弹道预测：只在即将命中时开盾，heading + 位移双重校验 |
 | `flank-strike.ts` | 侧翼走位与发现敌人时报点 |
 
 游戏内阅读器只显示 Markdown，示例源码请到仓库里看。各示例的关键片段也内嵌在[模块语义与陷阱](modules.md)对应小节。

@@ -127,6 +127,8 @@ if (bot.self.hp < 30 && bot.self.energy >= 20) {
 }
 ```
 
+被动换主动：`predictive-shield.ts` 演示按弹道预测开盾——拿 `scan().projectiles` 的 `heading`（含散布后的瞬时方向）外推最近距离，再用上一帧位置差分复核方向，只在「2~8 tick 内命中」时才 `shield(true)`，平时关盾把能量留给 Dash。注意管线延迟：脚本看到的快照比结算旧 2 tick，窗口要提前。
+
 陷阱：
 
 - Dash 取本 tick 仲裁后的 move 向量。脚本省略移动时该向量中立，人类 held 移动不受影响，最终向量为零才取炮口方向。

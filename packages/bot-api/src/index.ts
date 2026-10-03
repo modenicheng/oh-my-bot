@@ -19,12 +19,15 @@ export interface HealthPackRef {
 }
 
 /** scan() 返回的感知快照：动态实体按视野+墙体遮挡裁剪；地图对象为静态公开全量。 */
+/** 弹丸感知项：owner 为射手 robotID（自己发射的也会出现在列表中）；heading 为当前飞行方向（弧度，含散布后的瞬时值），弹速 30 m/s。 */
+export interface ProjectileRef { readonly id: number; readonly owner: number; readonly x: number; readonly y: number; readonly heading: number }
+
 export interface Observation {
   readonly tick: number
   readonly robots: readonly RobotRef[]
   readonly cores: readonly (Vec2 & { readonly id: number })[]
   readonly uplinks: readonly (Vec2 & { readonly id: number; readonly ready: boolean; readonly holder?: number })[]
-  readonly projectiles: readonly (Vec2 & { readonly id: number })[]
+  readonly projectiles: readonly ProjectileRef[]
   /** 四个公开健康包点（可能为空数组，不会为 undefined）。触碰可用点自动回血。 */
   readonly healthPacks: readonly HealthPackRef[]
   /** 静态墙列表（可能为空数组，不会为 undefined）。修改返回值不影响地图。 */

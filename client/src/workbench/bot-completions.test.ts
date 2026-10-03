@@ -35,6 +35,15 @@ describe('seedsForContext', () => {
     expect(seeds.find(s => s.label === 'healthPacks')?.detail).toContain('id/x/y/available/respawnInS')
   })
 
+  it('scan().projectiles. 给出 id/owner/x/y/heading 弹体字段', () => {
+    const seeds = seedsForContext(completionContext('bot.scan().projectiles.'))
+    const labels = seeds.map(s => s.label)
+    expect(labels).toContain('id')
+    expect(labels).toContain('owner')
+    expect(labels).toContain('heading')
+    expect(seeds).toHaveLength(5)
+  })
+
   it('词前缀只推荐 canonical bot 入口', () => {
     expect(seedsForContext(completionContext('b')).map(s => s.label)).toEqual(['bot', 'botmod'])
     expect(seedsForContext(completionContext('tick'))).toHaveLength(1)

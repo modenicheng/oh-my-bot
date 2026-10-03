@@ -47,12 +47,14 @@ interface RobotRef { id: number; position: Vec2; velocity: Vec2; hp: number }
 interface Self { hp: number; energy: number; position: Vec2; velocity: Vec2 }
 interface GameInfo { time: number; timeLeft: number; phase: 'OUTER_RING' | 'CORE_OPEN'; mapSeed: number }
 
+interface ProjectileRef { id: number; owner: number; x: number; y: number; heading: number }
+
 interface Observation {
   tick: number
   robots: RobotRef[]
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
-  projectiles: (Vec2 & { id: number })[]
+  projectiles: ProjectileRef[]
   healthPacks: (Vec2 & { id: number; available: boolean; respawnInS: number })[]
   walls: { id: number; min: Vec2; max: Vec2 }[]
 }

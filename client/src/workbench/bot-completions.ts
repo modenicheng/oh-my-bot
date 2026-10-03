@@ -58,7 +58,7 @@ const OBSERVATION_MEMBERS: CompletionSeed[] = [
   { label: 'robots', insert: 'robots', kind: 'property', detail: 'robots: readonly RobotRef[] — 可见机器人' },
   { label: 'cores', insert: 'cores', kind: 'property', detail: 'cores: readonly Vec2[] — 可见核心' },
   { label: 'uplinks', insert: 'uplinks', kind: 'property', detail: 'uplinks — 可见上行桩（ready/holder）' },
-  { label: 'projectiles', insert: 'projectiles', kind: 'property', detail: 'projectiles: readonly Vec2[] — 可见弹体' },
+  { label: 'projectiles', insert: 'projectiles', kind: 'property', detail: 'projectiles: readonly ProjectileRef[] — 可见弹体（id/owner/x/y/heading，弹速 30 m/s）' },
   { label: 'healthPacks', insert: 'healthPacks', kind: 'property', detail: 'healthPacks: readonly HealthPackRef[] — 公开健康包（id/x/y/available/respawnInS，触碰自动回血）' },
   { label: 'walls', insert: 'walls', kind: 'property', detail: 'walls: readonly WallRef[] — 静态墙 AABB（公开全量）' },
 ]
@@ -69,12 +69,22 @@ const WORD_SEEDS: CompletionSeed[] = [
   { label: 'botmod', insert: 'const bot = {\n\ttick(bot) {\n\t\t$0\n\t},\n}\n\nexport default bot', kind: 'snippet', detail: 'bot 对象模块骨架（import type / export default 行由服务器剥离）' },
 ]
 
+const PROJECTILE_MEMBERS: CompletionSeed[] = [
+  { label: 'id', insert: 'id', kind: 'property', detail: 'id: number — 弹体 id（跨 tick 稳定，可差分测速）' },
+  { label: 'owner', insert: 'owner', kind: 'property', detail: 'owner: number — 射手机器人 id' },
+  { label: 'x', insert: 'x', kind: 'property', detail: 'x: number — 当前位置 x（米）' },
+  { label: 'y', insert: 'y', kind: 'property', detail: 'y: number — 当前位置 y（米）' },
+  { label: 'heading', insert: 'heading', kind: 'property', detail: 'heading: number — 当前飞行方向（弧度，含散布）' },
+]
+
 const MEMBER_TABLE: Record<string, CompletionSeed[]> = {
   bot: BOT_MEMBERS,
   'bot.self': SELF_MEMBERS,
   'bot.game': GAME_MEMBERS,
   'bot.scan': OBSERVATION_MEMBERS,
   'bot.pulseScan': OBSERVATION_MEMBERS,
+  'bot.scan.projectiles': PROJECTILE_MEMBERS,
+  'bot.pulseScan.projectiles': PROJECTILE_MEMBERS,
 }
 
 function receiverChain(expr: string): string[] {

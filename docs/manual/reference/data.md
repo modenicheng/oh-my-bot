@@ -76,7 +76,7 @@ interface Observation {
   robots: RobotRef[]
   cores: (Vec2 & { id: number })[]
   uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
-  projectiles: (Vec2 & { id: number })[]
+  projectiles: ProjectileRef[]
   healthPacks: HealthPackRef[]
   walls: { id: number; min: Vec2; max: Vec2 }[]
 }
@@ -88,6 +88,14 @@ interface HealthPackRef {
   available: boolean
   respawnInS: number
 }
+
+interface ProjectileRef {
+  id: number
+  owner: number    // 射手机器人 id（自己的弹也在列表里）
+  x: number
+  y: number
+  heading: number  // 当前飞行方向（弧度，含散布后的瞬时值）；弹速 30 m/s
+}
 ```
 
 哪个列表裁剪、哪个列表全量：
@@ -97,7 +105,7 @@ interface HealthPackRef {
 | `robots` | 其他机器人：中心距 ≤ 20m 且视线不被墙挡。不含自己，已死的不在里面 |
 | `cores` | 全图存活资源，不按距离裁剪，只返回活着的 Core。被拾取或尚未激活的不会出现 |
 | `uplinks` | 恒全量，全图所有 Uplink。`ready` 指桩激活且无人正在引导；`holder` 是当前引导者的机器人 id，有人引导才有值 |
-| `projectiles` | 与 `robots` 同规则：20m 内且不穿墙 |
+| `projectiles` | 与 `robots` 同规则：20m 内且不穿墙。`owner` 是射手 id，`heading` 是含散布后的瞬时飞行方向 |
 | `healthPacks` | 公开全量，固定血包点的位置和状态。`available=false` 时 `respawnInS` 是预计恢复秒数 |
 | `walls` | 静态公开全量，不随视野半径和遮挡裁剪。与碰撞几何一致的只读 AABB，改写返回值动不了地图 |
 

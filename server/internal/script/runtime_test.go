@@ -32,7 +32,7 @@ func testFrame() sim.ScriptFrame {
 			{ID: 21, Pos: sim.Vec2{X: -15, Y: 15}, Active: false, HackingID: 3},
 		},
 		Projectiles: []sim.ProjView{
-			{ID: 30, Pos: sim.Vec2{X: 5, Y: 5}},
+			{ID: 30, Owner: 2, Pos: sim.Vec2{X: 5, Y: 5}, Heading: 0.5},
 		},
 	}
 	return sim.ScriptFrame{Self: obs.Robots[0], Obs: obs}
@@ -132,6 +132,8 @@ func TestScanObservation(t *testing.T) {
 		parts.push("ready0=" + o.uplinks[0].ready);
 		parts.push("holder1=" + o.uplinks[1].holder);
 		parts.push("proj=" + o.projectiles.length);
+		parts.push("projOwner=" + o.projectiles[0].owner);
+		parts.push("projHeading=" + o.projectiles[0].heading.toFixed(3));
 		ctx.api.say(parts.join(","));
 	}`
 	cmds, err := loadAndTick(t, src, testFrame())
@@ -140,7 +142,8 @@ func TestScanObservation(t *testing.T) {
 	}
 	got := *cmds.Say
 	// robots: 3 total - self(1) = 2；cores: 2 alive；uplinks: 2（全部可见，含未激活）。
-	want := "robots=2,hp2=5.5,cores=2,uplinks=2,ready0=true,holder1=3,proj=1"
+	// fixture 弹丸：Owner 2，Heading 0.5 —— 验证 owner/heading 透传。
+	want := "robots=2,hp2=5.5,cores=2,uplinks=2,ready0=true,holder1=3,proj=1,projOwner=2,projHeading=0.500"
 	if got != want {
 		t.Fatalf("scan shape: got %q want %q", got, want)
 	}
