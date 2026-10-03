@@ -1,7 +1,9 @@
 // 手册资产截取 harness：起 vite dev server（多页入口 capture.html），
-// 用真实 draw* 渲染的 sprite sheet 截图为 PNG，写入 docs/manual/reference/images/。
+// 用真实 draw* 渲染的 sprite sheet、内联 SVG 示意图与逐枚图标截图为 PNG，
+// 写入 docs/manual/reference/images/。
 // UI 截图（startup/lobby/HUD/结算等）走 mock-WS fixture，复用 pickup-visual-check 模式。
 // 用法：pnpm --dir client capture:manual  （或 node client/scripts/capture-manual-assets.mjs）
+// 可用 OMB_CAPTURE_ONLY=sheets,diagrams,icons,ui 只跑其中几组（逗号分隔，默认全跑）。
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -25,8 +27,11 @@ const DOC_IMAGES = resolve(repoRoot, 'docs/manual/reference/images')
 const ARTIFACTS = resolve(repoRoot, '.artifacts/manual')
 
 const CATEGORIES = ['arena', 'robots', 'pickups', 'projectiles', 'icons']
+const ONLY = new Set((process.env.OMB_CAPTURE_ONLY || '').split(',').map((s) => s.trim()).filter(Boolean))
+const want = (group) => ONLY.size === 0 || ONLY.has(group)
+const relDoc = (p) => `docs/manual/reference/images/${p}`
 
-// ---------- sprite sheet 截图（vite dev + capture.html）----------
+// ---------- sprite sheet / 示意图 / 图标（vite dev + capture.html）----------
 async function captureSheets(browser) {
   // vite dev server（多页应用：/capture.html）
   const viteMod = await import('vite')
@@ -39,19 +44,60 @@ async function captureSheets(browser) {
   await vite.listen()
   const origin = `http://127.0.0.1:${PORT}`
 
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
-  page.on('pageerror', (e) => { throw e })
-  await page.goto(`${origin}/capture.html`)
-  await page.waitForSelector('html[data-capture-ready="1"]', { timeout: 20000 })
-  await page.evaluate(() => document.fonts.ready)
-
-  for (const cat of CATEGORIES) {
-    const el = page.locator(`#sheet-${cat}`)
-    await el.scrollIntoViewIfNeeded()
-    await el.screenshot({ path: join(DOC_IMAGES, `sheet-${cat}.png`) })
-    console.log(`[capture] docs/manual/reference/images/sheet-${cat}.png`)
+  const needsPage = want('sheets') || want('icons')
+  const page = needsPage
+    ? await browser.newPage({ viewport: { width: 1400, height: 900 } })
+    : null
+  if (page) {
+    page.on('pageerror', (e) => { throw e })
+    await page.goto(`${origin}/capture.html`)
+    await page.waitForSelector('html[data-capture-ready="1"]', { timeout: 20000 })
+    await page.evaluate(() => document.fonts.ready)
   }
-  await page.close()
+
+  if (want('sheets')) {
+    for (const cat of CATEGORIES) {
+      const el = page.locator(`#sheet-${cat}`)
+      await el.scrollIntoViewIfNeeded()
+      await el.screenshot({ path: join(DOC_IMAGES, `sheet-${cat}.png`) })
+      console.log(`[capture] ${relDoc(`sheet-${cat}.png`)}`)
+    }
+  }
+
+  // 示意图：内联 SVG 区块，2x 导出保证阅读器内清晰。
+  if (want('diagrams')) {
+    await mkdir(join(DOC_IMAGES, 'diagrams'), { recursive: true })
+    const ctx2x = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 2 })
+    const page2x = await ctx2x.newPage()
+    page2x.on('pageerror', (e) => { throw e })
+    await page2x.goto(`${origin}/capture.html`)
+    await page2x.waitForSelector('html[data-capture-ready="1"]', { timeout: 20000 })
+    await page2x.evaluate(() => document.fonts.ready)
+    const slugs = await page2x.$$eval('[id^="diagram-"]', (els) => els.map((el) => el.id.slice('diagram-'.length)))
+    for (const slug of slugs) {
+      const el = page2x.locator(`#diagram-${slug}`)
+      await el.scrollIntoViewIfNeeded()
+      await el.screenshot({ path: join(DOC_IMAGES, 'diagrams', `${slug}.png`) })
+      console.log(`[capture] ${relDoc(`diagrams/${slug}.png`)}`)
+    }
+    await ctx2x.close()
+  }
+
+  // 逐枚图标：capture 页把 64×64 透明底 PNG 以 dataURL 挂在 window.__ombManualIcons。
+  if (want('icons')) {
+    await mkdir(join(DOC_IMAGES, 'icons'), { recursive: true })
+    const icons = await page.evaluate(() => window.__ombManualIcons || {})
+    const names = Object.keys(icons)
+    if (!names.length) throw new Error('window.__ombManualIcons 为空 — capture.ts 未导出图标')
+    for (const name of names.sort()) {
+      const dataUrl = icons[name]
+      const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      await writeFile(join(DOC_IMAGES, 'icons', `${name}.png`), Buffer.from(b64, 'base64'))
+      console.log(`[capture] ${relDoc(`icons/${name}.png`)}`)
+    }
+  }
+
+  if (page) await page.close()
   await vite.close()
 }
 
@@ -174,7 +220,7 @@ async function captureUI(browser) {
   await page.keyboard.press('Enter')
   await page.waitForSelector('#startup', { state: 'hidden', timeout: 10000 })
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-lobby.png') })
-  console.log('[capture] docs/manual/reference/images/ui-lobby.png')
+  console.log(`[capture] ${relDoc('ui-lobby.png')}`)
 
   // 进入对局 HUD
   await page.fill('#in-room', 'SHOT')
@@ -183,14 +229,14 @@ async function captureUI(browser) {
   await page.waitForSelector('#view-game', { state: 'visible', timeout: 10000 })
   await page.waitForTimeout(600) // 等 HUD 渲染 + 血包 sprite
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-hud.png') })
-  console.log('[capture] docs/manual/reference/images/ui-hud.png')
+  console.log(`[capture] ${relDoc('ui-hud.png')}`)
 
   // Esc 选项层：真实主界面 DOM、输入释放与共享音频控件。
   await page.locator('#game-canvas').focus()
   await page.keyboard.press('Escape')
   await page.waitForSelector('#game-options', { state: 'visible', timeout: 5000 })
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-options.png') })
-  console.log('[capture] docs/manual/reference/images/ui-options.png')
+  console.log(`[capture] ${relDoc('ui-options.png')}`)
   await page.keyboard.press('Escape')
   await page.waitForSelector('#game-options', { state: 'hidden', timeout: 5000 })
 
@@ -231,7 +277,7 @@ async function captureUI(browser) {
   await consoleRoot.waitFor({ state: 'hidden' })
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
   await toggle.click()
-  await consoleRoot.waitFor({ state: 'visible' })
+  consoleRoot.waitFor({ state: 'visible' })
   await resize.focus()
   await page.keyboard.press('Home')
   const minHeight = await consoleRoot.evaluate(el => el.getBoundingClientRect().height)
@@ -255,7 +301,7 @@ async function captureUI(browser) {
   assert.ok(Math.abs(restoredHeight - pointerHeight) <= 1, `restored console height ${restoredHeight}, want ${pointerHeight}`)
 
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-workbench.png') })
-  console.log('[capture] docs/manual/reference/images/ui-workbench.png')
+  console.log(`[capture] ${relDoc('ui-workbench.png')}`)
 
   // 窄屏：标题栏控制换行但仍全部可见，抽屉不制造横向滚动。
   await page.setViewportSize({ width: 390, height: 844 })
@@ -285,7 +331,7 @@ async function captureUI(browser) {
     value: create(EvMatchEndSchema, { scores: [{ robot: SELF_ID, score: 42, titles: [6] }, { robot: 202, score: 12 }] }) } }) })))
   await page.waitForSelector('.end-overlay', { timeout: 5000 })
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-match-end.png') })
-  console.log('[capture] docs/manual/reference/images/ui-match-end.png')
+  console.log(`[capture] ${relDoc('ui-match-end.png')}`)
 
   await page.close()
   server.close()
@@ -297,8 +343,8 @@ async function main() {
   await mkdir(ARTIFACTS, { recursive: true })
   const browser = await chromium.launch()
   try {
-    await captureSheets(browser)
-    await captureUI(browser)
+    if (want('sheets') || want('diagrams') || want('icons')) await captureSheets(browser)
+    if (want('ui')) await captureUI(browser)
     console.log(`[capture] manual assets → ${DOC_IMAGES}`)
   } finally {
     await browser.close()

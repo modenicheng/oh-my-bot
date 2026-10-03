@@ -205,6 +205,22 @@ func TestManualNodeJSONOmitsEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadAIManualCorpusFSOnlyBoth(t *testing.T) {
+	fsys := fstest.MapFS{
+		"a.md": {Data: []byte("---\naudience: both\ntitle: A\n---\nA 内容")},
+		"b.md": {Data: []byte("---\naudience: human\ntitle: B\n---\nB 内容")},
+		"c.md": {Data: []byte("# 无 audience")},
+		"z.md": {Data: []byte("---\naudience: both\ntitle: Z\n---\nZ 内容")},
+	}
+	corpus := loadAIManualCorpusFS(fsys, ".")
+	if len(corpus) != 2 || !strings.Contains(corpus[0], "A 内容") || !strings.Contains(corpus[1], "Z 内容") {
+		t.Fatalf("corpus = %#v", corpus)
+	}
+	if strings.Contains(strings.Join(corpus, "\n"), "B 内容") {
+		t.Fatal("human-only manual leaked into AI corpus")
+	}
+}
+
 func pathsOf(nodes []manualNode) []string {
 	out := make([]string, len(nodes))
 	for i, n := range nodes {

@@ -5,6 +5,11 @@
 <title>omb 手册资产截取</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+  @font-face {
+    font-family: 'Fusion Pixel';
+    src: url('/src/assets/fonts/fusion-pixel-12.woff2') format('woff2');
+    font-display: block;
+  }
   html, body { margin: 0; padding: 0; background: #070d14; color: #d8e6f2; font-family: "Fusion Pixel", ui-monospace, monospace; }
   /* 每个 section 是一张 sprite sheet：白色卡片 + 1px 描边，保持像素风 */
   .sheet { margin: 16px auto; padding: 20px 24px; width: fit-content; background: #101b25; border: 1px solid #1f2733; }
@@ -13,6 +18,17 @@
   .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .cell span { font-size: 12px; color: #5f7889; }
   canvas { background: #070d14; border: 1px solid #1f2733; }
+
+  /* 示意图：暗底 + 直角 + 克制荧光，宽度固定 760（map-rings 720） */
+  #diagrams { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px 0; }
+  .diagram { margin: 0 auto; padding: 18px 20px; background: #0a0e14; border: 1px solid #1f2733; width: fit-content; }
+  .diagram svg { display: block; }
+  .d-title { font: 15px 'Fusion Pixel', ui-monospace, monospace; fill: #d8dee9; }
+  .d-strong { font: 13px 'Fusion Pixel', ui-monospace, monospace; fill: #d8dee9; }
+  .d-sub { font: 12px 'Fusion Pixel', ui-monospace, monospace; fill: #8b98a9; }
+  .d-mono { font: 11px ui-monospace, 'JetBrains Mono', monospace; fill: #8b98a9; }
+  .d-num { font: 12px ui-monospace, 'JetBrains Mono', monospace; fill: #22d3ee; }
+  .d-warn { font: 11px ui-monospace, 'JetBrains Mono', monospace; fill: #fbbf24; }
 </style>
 </head>
 <body>
@@ -21,6 +37,7 @@
 <div class="sheet" id="sheet-pickups"><h2>拾取物 · PICKUPS</h2></div>
 <div class="sheet" id="sheet-projectiles"><h2>子弹 · PROJECTILES</h2></div>
 <div class="sheet" id="sheet-icons"><h2>常用图标 · ICONS</h2></div>
+<div id="diagrams"></div>
 <script type="module" src="/src/game/capture.ts"></script>
 </body>
 </html>

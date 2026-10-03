@@ -1,21 +1,22 @@
-// 教学点：cores 恒全量可见 → nearestCore 选目标 → navigateTo 做静态导航；路过敌人顺手还击。
-// - 拾取无需 API：机器人圆形边缘接触 Core 即自动得分（普通 +10 / Mega +25）
-// - navigateTo 避开墙、竞技场边界和未解锁中央区；不躲动态机器人、不评估威胁、不预测弹道
-// - 敌人在视野内时每 tick 调 fire()，离开视野即停火
-// - 本 tick 的 fire 意图会阻止黑入；本例不尝试抢 Uplink
+// 捡分为主，路过顺手打两枪。
+// - Core 全图可见：nearestCore 挑最近的，navigateTo 走服务器算好的静态路线
+// - 拾取不用调 API：机器人边缘碰到 Core 就自动捡（普通 +10，Mega +25）
+// - navigateTo 不躲移动中的机器人，不评估威胁，也不预判弹道
+// - 有敌人就每帧 fire()，敌人出视野就停火
+// - 这个例子的 fire 意图会挡住黑入，所以它不去抢桩
 import type { BotContext } from '@omb/bot-api'
 
 function tick(bot: BotContext) {
-  const core = bot.nearestCore() // 全图最近存活 Core（不是视野内），无则 null
+  const core = bot.nearestCore() // 全图最近的存活 Core，没有就 null
   if (core) {
-    bot.navigateTo(core) // 服务器确定性静态 A*；接触 Core 后自动拾取
+    bot.navigateTo(core) // 服务器确定性 A*；碰到 Core 自动拾取
   } else {
-    bot.move(0, 0) // 暂无 Core：原地待刷
+    bot.move(0, 0) // 暂时没 Core：原地等刷新
   }
 
   const enemy = bot.nearestEnemy()
   if (enemy) {
-    bot.aimAt(enemy) // 有效射程 16m，超过后散布增大，远距命中靠运气
+    bot.aimAt(enemy) // 有效射程 16m，超出后散布变大，远距离靠运气
     bot.fire()
   }
 }

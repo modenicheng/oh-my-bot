@@ -296,6 +296,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .manual-body hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .manual-body img { display: block; box-sizing: border-box; max-width: 100%; height: auto; margin: 14px auto 20px;
                    border: 1px solid var(--line); background: var(--bg); image-rendering: auto; }
+/* 行内图标：按正文行高对齐，不要边框与大间距 */
+.manual-body img.inline-icon { display: inline-block; width: 1em; height: 1em; vertical-align: -0.14em;
+                              margin: 0 0.35em 0 0; border: 0; background: none; image-rendering: pixelated; }
 /* 代码块：radius 0、等宽、右上角语言标签（v1 不做语法高亮） */
 .codeblock { position: relative; margin: 14px 0; border: 1px solid var(--line);
              background: var(--panel); }

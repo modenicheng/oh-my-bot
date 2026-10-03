@@ -1,6 +1,6 @@
 # oh-my-bot
 
-**64 人实时机器人大乱斗**：每个人操控一台机器人在圆形竞技场里抢资源、互射、黑入得分设备，一局 8 分钟。当前网页支持手操对局、回放，以及可独立开关的文档与 JavaScript 编辑器侧栏；编辑器提供语法与类型检查、Bot API 补全，可提交脚本由服务器运行和热更新，辅助需单独开启。Snippet 和游戏内 AI 改码入口尚未接入。定位是小组织内部破冰活动：私有部署，无公开服务。
+**64 人实时机器人大乱斗**：每人一台机器人，在圆形竞技场抢资源、互射、黑入得分设备，一局 8 分钟。手操就能玩；不想手操，可以挂官方 Snippet 驾驶辅助，可以用中文让游戏内 AI 改码，也可以自己写 JS/TS 脚本，服务器负责运行和局内热更。定位是小组织内部破冰活动：私有部署，无公开服务。
 
 ## 三分钟跑起来
 
@@ -19,10 +19,11 @@ cd server
 
 游戏内置手册（按 `M` 或点手册按钮）来自 [`docs/manual/`](docs/manual/index.md)：
 
-- [玩家手册首页](docs/manual/index.md) — 5 分钟上手法、核心概念速查
+- [玩家手册首页](docs/manual/index.md) — 上手四步、四种玩法、核心概念速查
+- [你的第一局](docs/manual/start/first-match.md) — 手操走位、抢 Core、抢桩
 - [游戏规则](docs/manual/rules/game-rules.md) / [操作与仲裁](docs/manual/rules/controls.md)
-- [写第一个 Bot](docs/manual/code/bot-scripting.md) — 零基础编程入门
-- [API 总览](docs/manual/reference/index.md) — 14 个动作 + 数据结构 + 语义陷阱，示例带 TS/Python/Java 标签页
+- [写第一个 Bot](docs/manual/code/bot-scripting.md) — 从 tick 模型到提交契约，零基础也能读
+- [API 总览](docs/manual/reference/index.md) — 13 个动作 + 数据结构 + 语义陷阱，示例统一 JS/TS
 
 ## 仓库布局
 
