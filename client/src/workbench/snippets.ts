@@ -1,21 +1,23 @@
-// Snippet 驾驶辅助面板的纯逻辑（v0.3 §9-2）：八条官方模块的行模型、
+// Snippet 驾驶辅助面板的纯逻辑（v0.3 §9-2）：六条官方模块的行模型、
 // 参数范围（与服务端 catalog 对齐的客户端预检）、上行 payload 组装、
 // 每身份（room+nick）本地草稿与服务器 applied 确认态。
 // 不依赖 DOM 与协议实现，便于单元测试；范围校验以服务端回执为权威。
+// 已移除行：autoFire（自动开火）/ autoPickup（有限半径自动拾取，被
+// globalCore 全局拾取取代）—— kind 2/3 编号永不复用；autoAim 现为
+// 无参数纯直瞄（提前量预判是玩家/Bot Script 的乐趣，官方模块不做）。
 
 import { create } from '@bufbuild/protobuf'
 import { SnippetSettingSchema, type SnippetKind, type SnippetSetting } from '@omb/protocol'
 
-/** 参数控件形态：无参数 / bool 开关 / 数值范围 / 文本（路径点）。 */
+/** 参数控件形态：无参数 / 数值范围 / 文本（路径点）。 */
 export type SnippetParam =
   | { type: 'none' }
-  | { type: 'lead' }
   | { type: 'number'; min: number; max: number; step: number; unit: string }
   | { type: 'waypoints' }
 
 export interface SnippetRowDef {
   kind: SnippetKind
-  key: 'autoAim' | 'autoFire' | 'autoPickup' | 'shield' | 'avoid' | 'patrol' | 'globalCore' | 'lowHpHealthPack'
+  key: 'autoAim' | 'shield' | 'avoid' | 'patrol' | 'globalCore' | 'lowHpHealthPack'
   title: string
   hint: string
   param: SnippetParam
@@ -27,16 +29,8 @@ export interface SnippetRowDef {
 /** 与 server/internal/snippet/catalog.go 常量对齐（漂移由服务端回执兜底）。 */
 export const SNIPPET_ROWS: readonly SnippetRowDef[] = [
   {
-    kind: 1, key: 'autoAim', title: '自动瞄准', hint: '炮塔持续锁定最近敌人',
-    param: { type: 'lead' }, defaultEnabled: false, defaultP1: 1, defaultS1: '',
-  },
-  {
-    kind: 2, key: 'autoFire', title: '自动开火', hint: '目标进入射程且已对准时开火',
-    param: { type: 'number', min: 2, max: 20, step: 0.5, unit: 'm' }, defaultEnabled: false, defaultP1: 16, defaultS1: '',
-  },
-  {
-    kind: 3, key: 'autoPickup', title: '自动拾取', hint: '半径内朝最近 Core/健康包移动',
-    param: { type: 'number', min: 0.5, max: 20, step: 0.5, unit: 'm' }, defaultEnabled: false, defaultP1: 6, defaultS1: '',
+    kind: 1, key: 'autoAim', title: '自动瞄准', hint: '炮塔持续直瞄最近敌人（不做提前量预判）',
+    param: { type: 'none' }, defaultEnabled: false, defaultP1: 0, defaultS1: '',
   },
   {
     kind: 4, key: 'shield', title: '紧急护盾', hint: 'HP 低于阈值自动开盾（恢复后关闭）',
@@ -63,7 +57,7 @@ export const SNIPPET_ROWS: readonly SnippetRowDef[] = [
 /** 行状态：仅启用行参与上行（全量替换语义，disabled 可省略）。 */
 export interface SnippetRowState {
   enabled: boolean
-  /** lead 行 0/1；number 行数值；none/waypoints 行忽略。 */
+  /** number 行数值；none/waypoints 行忽略。 */
   p1: number
   /** patrol 行路径点文本。 */
   s1: string
@@ -113,14 +107,13 @@ export function validateWaypoints(text: string): string | undefined {
   return undefined
 }
 
-/** 草稿 → 上行条目（仅启用行；lead 规范化 0/1）。 */
+/** 草稿 → 上行条目（仅启用行；数值经夹取，无参数行 p1 清零）。 */
 export function snippetSettingsFor(draft: SnippetDraft): SnippetSetting[] {
   const out: SnippetSetting[] = []
   for (const row of SNIPPET_ROWS) {
     const state = draft[row.key]
     if (!state.enabled) continue
-    const lead = row.param.type === 'lead' ? (state.p1 !== 0 ? 1 : 0) : 0
-    const p1 = row.param.type === 'lead' ? lead : row.param.type === 'number' ? clampSnippetNumber(row, state.p1) : 0
+    const p1 = row.param.type === 'number' ? clampSnippetNumber(row, state.p1) : 0
     out.push(create(SnippetSettingSchema, {
       kind: row.kind,
       enabled: true,

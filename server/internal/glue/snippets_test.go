@@ -67,7 +67,7 @@ func TestConfigureSnippetsBeforeMatchPublishesStillAcks(t *testing.T) {
 	h := NewHub()
 	rc := h.EnsureRoom("SNIP-PENDING")
 	p, log := bindLogged(t, h, rc, "pilot")
-	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_FIRE, true, 12, "")))
+	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, true, 40, "")))
 	r := lastSnippetResult(t, log.take())
 	if !r.Ok || r.ScriptRev != 0 || len(r.Sources) != len(snippet.Catalog()) {
 		t.Fatalf("pending-match ack = %+v", r)
@@ -75,7 +75,7 @@ func TestConfigureSnippetsBeforeMatchPublishesStillAcks(t *testing.T) {
 	rc.mu.Lock()
 	saved := append([]snippet.Setting{}, rc.snippets[p.playerID]...)
 	rc.mu.Unlock()
-	if len(saved) != 1 || saved[0].Kind != snippet.AutoFire || saved[0].P1 != 12 {
+	if len(saved) != 1 || saved[0].Kind != snippet.EmergencyShield || saved[0].P1 != 40 {
 		t.Fatalf("saved pending-match config = %+v", saved)
 	}
 }
@@ -86,14 +86,14 @@ func TestConfigureSnippetsAppliesAndAcks(t *testing.T) {
 	_, rc, p, log, m := snippetMatch(t)
 
 	p.ConfigureSnippets(snipCfgUp(
-		snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 1, ""),
-		snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_FIRE, true, 16.0, ""),
+		snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, ""),
+		snipEntry(ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, true, 40, ""),
 	))
 	r := lastSnippetResult(t, log.take())
 	if !r.Ok || r.Error != "" {
 		t.Fatalf("valid config rejected: %v", r.Error)
 	}
-	if kinds := appliedKinds(r); len(kinds) != 2 || kinds[0] != ombv1.SnippetKind_SNIPPET_AUTO_AIM || kinds[1] != ombv1.SnippetKind_SNIPPET_AUTO_FIRE {
+	if kinds := appliedKinds(r); len(kinds) != 2 || kinds[0] != ombv1.SnippetKind_SNIPPET_AUTO_AIM || kinds[1] != ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD {
 		t.Fatalf("applied kinds = %v", kinds)
 	}
 	if r.ScriptRev == 0 {
@@ -129,7 +129,7 @@ func TestConfigureSnippetsAppliesAndAcks(t *testing.T) {
 func TestConfigureSnippetsBadConfigKeepsOld(t *testing.T) {
 	_, _, p, log, m := snippetMatch(t)
 
-	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 1, "")))
+	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, "")))
 	if r := lastSnippetResult(t, log.take()); !r.Ok {
 		t.Fatal("seed config failed")
 	}
@@ -145,17 +145,19 @@ func TestConfigureSnippetsBadConfigKeepsOld(t *testing.T) {
 		{"unknown kind", snipCfgUp(snipEntry(ombv1.SnippetKind(99), true, 1, ""))},
 		{"unspecified kind", snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_UNSPECIFIED, true, 1, ""))},
 		{"duplicate kind", snipCfgUp(
-			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 1, ""),
+			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, ""),
 			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, ""))},
-		{"out of range param", snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_FIRE, true, 999, ""))},
+		{"removed kind 2 (auto_fire)", snipCfgUp(snipEntry(ombv1.SnippetKind(2), true, 10, ""))},
+		{"removed kind 3 (auto_pickup)", snipCfgUp(snipEntry(ombv1.SnippetKind(3), true, 5, ""))},
+		{"out of range param", snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, true, 999, ""))},
 		{"bad waypoints", snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_PATROL, true, 0, "500,500"))},
 		{"too many entries", snipCfgUp(
-			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 1, ""),
-			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_FIRE, true, 10, ""),
-			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_PICKUP, true, 5, ""),
+			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, ""),
 			snipEntry(ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, true, 40, ""),
 			snipEntry(ombv1.SnippetKind_SNIPPET_DANGER_AVOID, true, 8, ""),
 			snipEntry(ombv1.SnippetKind_SNIPPET_PATROL, true, 0, "1,1"),
+			snipEntry(ombv1.SnippetKind_SNIPPET_GLOBAL_CORE, true, 0, ""),
+			snipEntry(ombv1.SnippetKind_SNIPPET_LOW_HP_HEALTH_PACK, true, 40, ""),
 			snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, false, 0, ""))},
 	}
 	for _, tc := range cases {
@@ -306,7 +308,7 @@ func TestSpectatorCannotConfigureSnippets(t *testing.T) {
 	}
 
 	spec, slog := bindSpectator(t, h, rc)
-	spec.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_FIRE, true, 10, "")))
+	spec.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, true, 50, "")))
 	for _, msg := range slog.take() {
 		if r := msg.msg.GetEvent().GetSnippetResult(); r != nil {
 			t.Fatalf("spectator received snippet ack: %+v", r)
@@ -325,7 +327,7 @@ func TestSpectatorCannotConfigureSnippets(t *testing.T) {
 func TestSnippetOnlyRuntimeProducesAttributedCommands(t *testing.T) {
 	_, _, p, log, m := snippetMatch(t)
 
-	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 1, "")))
+	p.ConfigureSnippets(snipCfgUp(snipEntry(ombv1.SnippetKind_SNIPPET_AUTO_AIM, true, 0, "")))
 	if r := lastSnippetResult(t, log.take()); !r.Ok {
 		t.Fatal("snippet-only config rejected")
 	}

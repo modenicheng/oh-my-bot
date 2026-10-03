@@ -127,10 +127,10 @@ func (ControlSource) EnumDescriptor() ([]byte, []int) {
 type SnippetKind int32
 
 const (
-	SnippetKind_SNIPPET_UNSPECIFIED        SnippetKind = 0
-	SnippetKind_SNIPPET_AUTO_AIM           SnippetKind = 1 // 自动瞄准（提前量开关）
-	SnippetKind_SNIPPET_AUTO_FIRE          SnippetKind = 2 // 自动开火（射程阈值 m）
-	SnippetKind_SNIPPET_AUTO_PICKUP        SnippetKind = 3 // 自动拾取（拾取半径 m）
+	SnippetKind_SNIPPET_UNSPECIFIED SnippetKind = 0
+	SnippetKind_SNIPPET_AUTO_AIM    SnippetKind = 1 // 自动瞄准（无参数，纯直瞄不预判）
+	// 2/3 已移除：自动开火并入玩家/Bot Script 职责，有限半径自动拾取
+	// 被全局 Core 拾取取代（SNIPPET_GLOBAL_CORE）；编号不复用。
 	SnippetKind_SNIPPET_EMERGENCY_SHIELD   SnippetKind = 4 // 紧急护盾（HP 阈值 0..100）
 	SnippetKind_SNIPPET_DANGER_AVOID       SnippetKind = 5 // 危险规避（威胁半径 m）
 	SnippetKind_SNIPPET_PATROL             SnippetKind = 6 // 简单巡逻（路径点 "x,y;x,y"）
@@ -143,8 +143,6 @@ var (
 	SnippetKind_name = map[int32]string{
 		0: "SNIPPET_UNSPECIFIED",
 		1: "SNIPPET_AUTO_AIM",
-		2: "SNIPPET_AUTO_FIRE",
-		3: "SNIPPET_AUTO_PICKUP",
 		4: "SNIPPET_EMERGENCY_SHIELD",
 		5: "SNIPPET_DANGER_AVOID",
 		6: "SNIPPET_PATROL",
@@ -154,8 +152,6 @@ var (
 	SnippetKind_value = map[string]int32{
 		"SNIPPET_UNSPECIFIED":        0,
 		"SNIPPET_AUTO_AIM":           1,
-		"SNIPPET_AUTO_FIRE":          2,
-		"SNIPPET_AUTO_PICKUP":        3,
 		"SNIPPET_EMERGENCY_SHIELD":   4,
 		"SNIPPET_DANGER_AVOID":       5,
 		"SNIPPET_PATROL":             6,
@@ -4591,12 +4587,10 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\bCS_HUMAN\x10\x01\x12\r\n" +
 	"\tCS_SCRIPT\x10\x02\x12\x0e\n" +
 	"\n" +
-	"CS_SNIPPET\x10\x03*\xf1\x01\n" +
+	"CS_SNIPPET\x10\x03*\xc1\x01\n" +
 	"\vSnippetKind\x12\x17\n" +
 	"\x13SNIPPET_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10SNIPPET_AUTO_AIM\x10\x01\x12\x15\n" +
-	"\x11SNIPPET_AUTO_FIRE\x10\x02\x12\x17\n" +
-	"\x13SNIPPET_AUTO_PICKUP\x10\x03\x12\x1c\n" +
+	"\x10SNIPPET_AUTO_AIM\x10\x01\x12\x1c\n" +
 	"\x18SNIPPET_EMERGENCY_SHIELD\x10\x04\x12\x18\n" +
 	"\x14SNIPPET_DANGER_AVOID\x10\x05\x12\x12\n" +
 	"\x0eSNIPPET_PATROL\x10\x06\x12\x17\n" +

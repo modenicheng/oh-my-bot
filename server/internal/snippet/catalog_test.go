@@ -10,25 +10,30 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
-// ---- 八模块 catalog 结构验证（v0.3 §9-2）----
+// ---- 六模块 catalog 结构验证（v0.3 §9-2；2/3 已移除且编号不复用）----
 
-func TestCatalogEightModulesKindOrder(t *testing.T) {
+func TestCatalogSixModulesKindOrder(t *testing.T) {
 	mods := Catalog()
-	if len(mods) != 8 {
-		t.Fatalf("catalog must expose exactly 8 modules, got %d", len(mods))
+	if len(mods) != 6 {
+		t.Fatalf("catalog must expose exactly 6 modules, got %d", len(mods))
 	}
+	wantKinds := []Kind{AutoAim, EmergencyShield, DangerAvoid, Patrol, GlobalCore, LowHpHealthPack}
 	for i, mod := range mods {
-		if mod.Kind != Kind(i+1) {
-			t.Fatalf("module %d has kind %d; catalog order must be kinds 1..8", i, mod.Kind)
+		if mod.Kind != wantKinds[i] {
+			t.Fatalf("module %d has kind %d; want %d (2/3 removed, never reused)", i, mod.Kind, wantKinds[i])
 		}
 		if mod.Title == "" || mod.Validate == nil || mod.Source == nil {
 			t.Fatalf("module kind %d incomplete (title/validate/source)", mod.Kind)
 		}
 	}
-	for k := AutoAim; k <= LowHpHealthPack; k++ {
+	for _, k := range wantKinds {
 		if ModuleOf(k) == nil || ModuleOf(k).Kind != k {
 			t.Fatalf("ModuleOf(%d) broken", k)
 		}
+	}
+	// 2/3：已移除的 kind 必须无法解析，编号不复用。
+	if ModuleOf(Kind(2)) != nil || ModuleOf(Kind(3)) != nil {
+		t.Fatal("removed kinds 2/3 must resolve to nil module (never reused)")
 	}
 	if ModuleOf(Kind(0)) != nil || ModuleOf(Kind(9)) != nil || ModuleOf(Kind(-1)) != nil {
 		t.Fatal("unknown kinds must resolve to nil module")
@@ -42,8 +47,6 @@ func TestSnippetKindProtoEnumValuesStable(t *testing.T) {
 		want  int
 	}{
 		{AutoAim, ombv1.SnippetKind_SNIPPET_AUTO_AIM, 1},
-		{AutoFire, ombv1.SnippetKind_SNIPPET_AUTO_FIRE, 2},
-		{AutoPickup, ombv1.SnippetKind_SNIPPET_AUTO_PICKUP, 3},
 		{EmergencyShield, ombv1.SnippetKind_SNIPPET_EMERGENCY_SHIELD, 4},
 		{DangerAvoid, ombv1.SnippetKind_SNIPPET_DANGER_AVOID, 5},
 		{Patrol, ombv1.SnippetKind_SNIPPET_PATROL, 6},
@@ -78,10 +81,6 @@ func TestCatalogValidateRejectsOutOfRange(t *testing.T) {
 		name string
 		set  Setting
 	}{
-		{"auto_fire below min", Setting{Kind: AutoFire, P1: 0.5}},
-		{"auto_fire above max", Setting{Kind: AutoFire, P1: 25}},
-		{"auto_fire NaN", Setting{Kind: AutoFire, P1: math.NaN()}},
-		{"auto_pickup negative", Setting{Kind: AutoPickup, P1: -1}},
 		{"emergency_shield above 100", Setting{Kind: EmergencyShield, P1: 101}},
 		{"danger_avoid Inf", Setting{Kind: DangerAvoid, P1: math.Inf(1)}},
 		{"patrol bad pair", Setting{Kind: Patrol, S1: "30;0"}},
@@ -100,15 +99,10 @@ func TestCatalogValidateRejectsOutOfRange(t *testing.T) {
 }
 
 func TestCatalogValidateNormalizes(t *testing.T) {
-	// auto_aim 任意非零 → 1；P2/S1 清零。
-	s, err := ModuleOf(AutoAim).Validate(Setting{P1: 7})
-	if err != nil || s.P1 != 1 || s.P2 != 0 || s.S1 != "" {
+	// auto_aim 无参数：任意参数位输入都被清空（纯直瞄不预判）。
+	s, err := ModuleOf(AutoAim).Validate(Setting{P1: 7, P2: 3, S1: "x"})
+	if err != nil || s != (Setting{Kind: AutoAim}) {
 		t.Fatalf("auto_aim normalization: %+v err=%v", s, err)
-	}
-	// auto_fire 保留一位小数。
-	s, err = ModuleOf(AutoFire).Validate(Setting{P1: 16.263})
-	if err != nil || s.P1 != 16.3 {
-		t.Fatalf("auto_fire rounding: %+v err=%v", s, err)
 	}
 	// 无参数模块清空全部参数位；低血量阈值保留合法整数并清空其余参数。
 	s, err = ModuleOf(GlobalCore).Validate(Setting{P1: 7, P2: 8, S1: "ignored"})
@@ -274,8 +268,8 @@ func TestOfficialSourcesCompileAndRunInGoja(t *testing.T) {
 // （场景：hp 20、敌在 5m、core 在 3m、弹丸在 1.4m）。
 func TestOfficialModulesProduceExpectedAxisIntents(t *testing.T) {
 	vm, fns, _ := compileCombined(t, "", defaults())
-	if len(fns) != 8 {
-		t.Fatalf("combined registry must hold 8 modules, got %d", len(fns))
+	if len(fns) != 6 {
+		t.Fatalf("combined registry must hold 6 modules, got %d", len(fns))
 	}
 	fb := &fakeBot{}
 	bot := fb.botObj(vm)
@@ -288,13 +282,14 @@ func TestOfficialModulesProduceExpectedAxisIntents(t *testing.T) {
 			t.Fatalf("snippet tick threw: %v", err)
 		}
 	}
-	if len(fb.aims) != 2 { // auto_aim + auto_fire both aim
+	// auto_aim 直瞄敌人在 (5,0)：atan2(0,5)=0，不预判（velocity (1,0) 被忽略）。
+	if len(fb.aims) != 1 || fb.aims[0] != 0 {
 		t.Fatalf("aim intents: %v", fb.aims)
 	}
-	if fb.fires != 1 {
-		t.Fatalf("auto_fire must fire once at 5m (< 16m), got %d", fb.fires)
+	if fb.fires != 0 {
+		t.Fatalf("no module may fire (auto_fire removed), got %d", fb.fires)
 	}
-	if len(fb.moves) != 3 { // auto_pickup / danger_avoid / patrol
+	if len(fb.moves) != 2 { // danger_avoid / patrol
 		t.Fatalf("move intents: %v", fb.moves)
 	}
 	if len(fb.navigations) != 2 { // global_core / low_hp_health_pack
@@ -302,6 +297,24 @@ func TestOfficialModulesProduceExpectedAxisIntents(t *testing.T) {
 	}
 	if len(fb.shields) != 1 || !fb.shields[0] {
 		t.Fatalf("emergency shield must engage at hp 20 <= 30: %v", fb.shields)
+	}
+}
+
+// 自动瞄准必须直瞄目标当前位置，不做速度预判（提前量是玩家的乐趣）。
+func TestAutoAimAimsCurrentPositionNoLead(t *testing.T) {
+	vm, fns, _ := compileCombined(t, "", defaults()[:1])
+	if len(fns) != 1 {
+		t.Fatal("registry must hold auto_aim only")
+	}
+	// 敌人在 (5,0)，velocity (1,0)：直瞄 0 rad；若做提前量会得到非零角。
+	fb := &fakeBot{}
+	callable, _ := goja.AssertFunction(fns[0])
+	if _, err := callable(goja.Undefined(), fb.botObj(vm)); err != nil {
+		t.Fatal(err)
+	}
+	// 直瞄用目标速度叠加后的位置会得到 atan2(0, 5+t)≈0.16 rad；断言严格 0。
+	if len(fb.aims) != 1 || fb.aims[0] != 0 {
+		t.Fatalf("auto_aim must aim current position (no lead): %v", fb.aims)
 	}
 }
 

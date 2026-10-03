@@ -403,17 +403,17 @@ try {
   assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), legacySource, 'switching back restores the latest JS draft')
   await until(() => page.locator('#workbench-diagnostics').textContent().then(t => t.includes('检查通过')), 'JS diagnostics after switching back', 20000)
 
-  // Snippet tool pane: bootstrap publishes all eight official sources; custom
+  // Snippet tool pane: bootstrap publishes all six official sources; custom
   // switches/range controls apply over the real websocket and never stay pending.
   await page.locator('.workbench-tools [data-panel="snippets"]').click()
   await page.locator('#workbench-snippets').waitFor({ state: 'visible' })
-  await until(() => page.locator('.snippet-source-count').textContent().then(t => t?.includes('8 / 8')), 'official snippet sources', 20000)
-  assert.equal(await page.locator('.snippet-row').count(), 8, 'eight official snippet cards render')
-  assert.equal(await page.locator('.snippet-switch').count(), 8, 'all cards use custom switches')
-  assert.ok(await page.locator('.snippet-range-shell').count() >= 4, 'numeric modules use custom sliders')
+  await until(() => page.locator('.snippet-source-count').textContent().then(t => t?.includes('6 / 6')), 'official snippet sources', 20000)
+  assert.equal(await page.locator('.snippet-row').count(), 6, 'six official snippet cards render')
+  assert.equal(await page.locator('.snippet-switch').count(), 6, 'all cards use custom switches')
+  assert.ok(await page.locator('.snippet-range-shell').count() >= 3, 'numeric modules use custom sliders')
   await page.locator('.snippet-row[data-kind="autoAim"] .snippet-toggle').click()
-  await page.locator('.snippet-row[data-kind="autoFire"] .snippet-toggle').click()
-  await page.locator('.snippet-row[data-kind="autoFire"] .snippet-range-input').fill('12')
+  await page.locator('.snippet-row[data-kind="avoid"] .snippet-toggle').click()
+  await page.locator('.snippet-row[data-kind="avoid"] .snippet-range-input').fill('12')
   await page.locator('.snippet-apply').click()
   await until(() => page.locator('.snippet-status').textContent().then(t => /已生效|配置已保存/.test(t || '')), 'snippet config ack', 12000)
   assert.notEqual(await page.locator('.snippet-status').getAttribute('data-phase'), 'pending', 'snippet apply leaves pending state')

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// 八条官方 Snippet 模块源码定稿（v0.3 §9-2）。
+// 六条官方 Snippet 模块源码定稿（v0.3 §9-2；自动开火与有限半径自动拾取已下线）。
 //
 // 契约：每条模块是一段独立 JS，定义 `function snippetTick(bot)`；
 // 只使用公开 bot API（bot.scan()/bot.self/bot.game/bot.move()/bot.aimAt()/
@@ -16,67 +16,19 @@ import (
 // 执行 snippet；玩家本 tick 已操作的轴会在 snippet 收集器中被丢弃，
 // 未操作轴继续由 Snippet 生效（ADR-0009 分轴并存语义）。
 
-// autoAimSource 自动瞄准：瞄准最近可见敌人；lead=1 时按弹速 30 m/s 做提前量。
-func autoAimSource(cfg Setting) string {
-	return fmt.Sprintf(`// 官方 Snippet：自动瞄准（lead=%v）
-// 教材要点：scan() 免费读取；atan2 定角；提前量 = 目标速度 × 飞行时间。
-var aimTarget = 0;
+// autoAimSource 自动瞄准（无参数）：炮塔直瞄最近可见敌人的当前位置，
+// 不做速度预判——提前量外推是玩家/Bot Script 的乐趣，官方模块不越俎。
+func autoAimSource(_ Setting) string {
+	return `// 官方 Snippet：自动瞄准（直瞄，不预判）
+// 教材要点：scan() 免费读取；atan2 定角。提前量要自己拿 velocity 外推，
+// 官方模块只负责把炮口指向目标当前位置。
 function snippetTick(bot) {
   var target = bot.nearestEnemy();
   if (!target) return;
   var self = bot.self, p = target.position;
-  var lead = %v;
-  if (lead && target.velocity) {
-    var d = Math.hypot(p.x - self.position.x, p.y - self.position.y);
-    var t = d / 30; // 弹速 30 m/s（设计基线 28–32 取中）
-    p = { x: p.x + target.velocity.x * t, y: p.y + target.velocity.y * t };
-  }
   bot.aimAt(Math.atan2(p.y - self.position.y, p.x - self.position.x));
 }
-`, cfg.P1 != 0, cfg.P1 != 0)
-}
-
-// autoFireSource 自动开火：目标在射程阈值内且炮口已对准（±0.1 rad）才开火。
-func autoFireSource(cfg Setting) string {
-	return fmt.Sprintf(`// 官方 Snippet：自动开火（range=%.1fm）
-// 教材要点：射程硬顶 20m；先瞄准再开火，避免浪费弹药与能量。
-var aimAngle = null;
-function snippetTick(bot) {
-  var target = bot.nearestEnemy();
-  if (!target) return;
-  var self = bot.self;
-  var d = Math.hypot(target.position.x - self.position.x, target.position.y - self.position.y);
-  if (d > %.1f) return;
-  var want = Math.atan2(target.position.y - self.position.y, target.position.x - self.position.x);
-  aimAngle = want;
-  bot.aimAt(want);
-  bot.fire();
-}
-`, cfg.P1, cfg.P1)
-}
-
-// autoPickupSource 自动拾取：半径内朝最近 Core/健康包移动。
-func autoPickupSource(cfg Setting) string {
-	return fmt.Sprintf(`// 官方 Snippet：自动拾取（radius=%.1fm）
-// 教材要点：Core/Uplink 恒全量公开；moveTo 是 move 的单位向量便利层。
-function snippetTick(bot) {
-  var self = bot.self, r = %.1f;
-  var best = null, bestD = r;
-  var scan = bot.scan();
-  for (var i = 0; i < scan.cores.length; i++) {
-    var c = scan.cores[i];
-    var d = Math.hypot(c.x - self.position.x, c.y - self.position.y);
-    if (d < bestD) { best = c; bestD = d; }
-  }
-  for (var j = 0; j < scan.healthPacks.length; j++) {
-    var h = scan.healthPacks[j];
-    if (!h.available) continue;
-    var dh = Math.hypot(h.x - self.position.x, h.y - self.position.y);
-    if (dh < bestD) { best = h; bestD = dh; }
-  }
-  if (best) bot.moveTo({ x: best.x, y: best.y });
-}
-`, cfg.P1, cfg.P1)
+`
 }
 
 // emergencyShieldSource 紧急护盾：HP ≤ 阈值开盾，恢复到阈值+10 以上关盾。

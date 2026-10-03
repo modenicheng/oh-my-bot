@@ -23,8 +23,6 @@ export type SnippetApplyStatus =
 
 const SNIPPET_ICONS: Record<SnippetRowDef['key'], IconName> = {
   autoAim: 'target',
-  autoFire: 'fire',
-  autoPickup: 'energy',
   shield: 'shield',
   avoid: 'dash',
   patrol: 'replay',
@@ -45,6 +43,8 @@ export class SnippetPanelView {
   private identity = { roomCode: '', nick: '' }
   private status: SnippetApplyStatus = { phase: 'idle' }
   private pendingTimer?: ReturnType<typeof setTimeout>
+  /** 草稿落盘防抖：滑块拖动每 input 同步 JSON+localStorage 会阻塞输入路径。 */
+  private persistTimer?: number
   private statusEl!: HTMLElement
   private enabledCountEl!: HTMLElement
   private sourceCountEl!: HTMLElement
@@ -57,7 +57,6 @@ export class SnippetPanelView {
     valueEl?: HTMLInputElement
     valueReadout?: HTMLOutputElement
     rangeFill?: HTMLElement
-    leadEl?: HTMLButtonElement
     textEl?: HTMLInputElement
     sourceBox: HTMLElement
     sourceToggle: HTMLButtonElement
@@ -67,6 +66,8 @@ export class SnippetPanelView {
 
   constructor(private readonly deps: SnippetPanelDeps) {
     this.build()
+    // 防抖落盘的兜底：页面隐藏/关闭时不丢最后 400ms 的滑块调整。
+    window.addEventListener('pagehide', () => this.persistNow())
   }
 
   private build(): void {
@@ -145,34 +146,16 @@ export class SnippetPanelView {
     let valueEl: HTMLInputElement | undefined
     let valueReadout: HTMLOutputElement | undefined
     let rangeFill: HTMLElement | undefined
-    let leadEl: HTMLButtonElement | undefined
     let textEl: HTMLInputElement | undefined
 
-    if (def.param.type === 'lead') {
-      const control = document.createElement('div')
-      control.className = 'snippet-control snippet-control-bool'
-      const caption = document.createElement('span')
-      caption.className = 'snippet-control-label'
-      caption.textContent = '目标提前量'
-      leadEl = document.createElement('button')
-      leadEl.type = 'button'
-      leadEl.className = 'snippet-binary'
-      leadEl.setAttribute('aria-label', '切换目标提前量')
-      const led = document.createElement('span')
-      led.className = 'snippet-binary-led'
-      const text = document.createElement('span')
-      text.className = 'snippet-binary-text'
-      leadEl.append(led, text)
-      control.append(caption, leadEl)
-      body.append(control)
-    } else if (def.param.type === 'number') {
+    if (def.param.type === 'number') {
       const control = document.createElement('label')
       control.className = 'snippet-control snippet-control-range'
       const meta = document.createElement('span')
       meta.className = 'snippet-control-meta'
       const caption = document.createElement('span')
       caption.className = 'snippet-control-label'
-      caption.textContent = def.param.unit === '%' ? 'HP 阈值' : def.key === 'autoFire' ? '开火射程' : def.key === 'avoid' ? '威胁半径' : '搜索半径'
+      caption.textContent = def.param.unit === '%' ? 'HP 阈值' : def.key === 'avoid' ? '威胁半径' : '搜索半径'
       valueReadout = document.createElement('output')
       valueReadout.className = 'snippet-range-value'
       const rangeId = `snippet-range-${def.key}`
@@ -271,13 +254,12 @@ export class SnippetPanelView {
       this.render()
     }
     toggle.addEventListener('change', bind(state => { state.enabled = toggle.checked }))
-    leadEl?.addEventListener('click', bind(state => { state.p1 = state.p1 === 0 ? 1 : 0 }))
     valueEl?.addEventListener('input', bind(state => { state.p1 = clampSnippetNumber(def, Number(valueEl!.value)) }))
     textEl?.addEventListener('input', bind(state => { state.s1 = textEl!.value }))
     textEl?.addEventListener('change', bind(state => { state.s1 = textEl!.value.trim() }))
 
     row.append(head, body, sourceBox)
-    this.rows.set(def.key, { def, row, toggle, body, valueEl, valueReadout, rangeFill, leadEl, textEl, sourceBox, sourceToggle, sourcePre, sourceNote })
+    this.rows.set(def.key, { def, row, toggle, body, valueEl, valueReadout, rangeFill, textEl, sourceBox, sourceToggle, sourcePre, sourceNote })
     return row
   }
 
@@ -314,6 +296,7 @@ export class SnippetPanelView {
 
   setIdentity(roomCode: string, nick: string): void {
     if (this.identity.roomCode === roomCode && this.identity.nick === nick) return
+    this.persistNow() // 身份切换前把旧草稿落盘
     this.identity = { roomCode, nick }
     this.draft = roomCode ? loadSnippetDraft(roomCode, nick) : defaultSnippetDraft()
     this.applied = undefined
@@ -356,6 +339,15 @@ export class SnippetPanelView {
   }
 
   private persist(): void {
+    if (this.persistTimer !== undefined) return
+    this.persistTimer = window.setTimeout(() => { this.persistTimer = undefined; this.persistNow() }, 400)
+  }
+
+  private persistNow(): void {
+    if (this.persistTimer !== undefined) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = undefined
+    }
     const { roomCode, nick } = this.identity
     if (!roomCode) return
     saveSnippetDraft(roomCode, nick, this.draft)
@@ -381,12 +373,6 @@ export class SnippetPanelView {
       entry.row.classList.toggle('enabled', state.enabled)
       entry.row.dataset.source = this.sources.has(entry.def.kind) ? 'ready' : 'waiting'
       entry.body.setAttribute('aria-disabled', String(!state.enabled))
-      if (entry.leadEl) {
-        const on = state.p1 !== 0
-        entry.leadEl.disabled = !state.enabled
-        entry.leadEl.setAttribute('aria-pressed', String(on))
-        entry.leadEl.querySelector<HTMLElement>('.snippet-binary-text')!.textContent = on ? 'LEAD ON' : 'DIRECT'
-      }
       if (entry.valueEl && entry.def.param.type === 'number') {
         entry.valueEl.disabled = !state.enabled
         entry.valueEl.value = String(state.p1)

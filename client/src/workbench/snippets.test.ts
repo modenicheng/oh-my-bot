@@ -8,7 +8,7 @@ import {
   snippetDraftMatchesApplied, snippetSettingsFor, validateWaypoints, type SnippetDraft,
 } from './snippets'
 
-function draftWith(key: 'autoAim' | 'autoFire' | 'autoPickup' | 'shield' | 'avoid' | 'patrol' | 'globalCore' | 'lowHpHealthPack', patch: Partial<{ enabled: boolean; p1: number; s1: string }>): SnippetDraft {
+function draftWith(key: 'autoAim' | 'shield' | 'avoid' | 'patrol' | 'globalCore' | 'lowHpHealthPack', patch: Partial<{ enabled: boolean; p1: number; s1: string }>): SnippetDraft {
   const draft = defaultSnippetDraft()
   draft[key] = { ...draft[key], ...patch }
   return draft
@@ -27,14 +27,15 @@ describe('snippetDraftKey', () => {
 })
 
 describe('snippet row model', () => {
-  it('旧编号 1..6 不重排，新模块固定追加为 7/8', () => {
+  it('六行固定：autoAim=1、shield=4、avoid=5、patrol=6、globalCore=7、lowHpHealthPack=8（2/3 移除不复用）', () => {
     expect(SNIPPET_ROWS.map(row => [row.key, row.kind])).toEqual([
-      ['autoAim', 1], ['autoFire', 2], ['autoPickup', 3], ['shield', 4],
-      ['avoid', 5], ['patrol', 6], ['globalCore', 7], ['lowHpHealthPack', 8],
+      ['autoAim', 1], ['shield', 4], ['avoid', 5], ['patrol', 6], ['globalCore', 7], ['lowHpHealthPack', 8],
     ])
   })
 
-  it('全局 Core 无参数；低血量血包为 1..100 整数百分比且默认 45', () => {
+  it('autoAim 无参数纯直瞄；全局 Core 无参数；低血量血包为 1..100 整数百分比且默认 45', () => {
+    const autoAim = SNIPPET_ROWS.find(row => row.key === 'autoAim')!
+    expect(autoAim).toMatchObject({ kind: 1, param: { type: 'none' }, defaultP1: 0 })
     const globalCore = SNIPPET_ROWS.find(row => row.key === 'globalCore')!
     expect(globalCore).toMatchObject({ kind: 7, param: { type: 'none' }, defaultP1: 0 })
     const healthPack = SNIPPET_ROWS.find(row => row.key === 'lowHpHealthPack')!
@@ -51,13 +52,11 @@ describe('snippetSettingsFor', () => {
     expect(settings[0]).toMatchObject({ kind: 4, enabled: true, p1: 40, s1: '' })
   })
 
-  it('lead 行 p1 规范化为 0/1，非 lead 行数值经夹取', () => {
+  it('无参数行 p1 清零，数值行经夹取', () => {
     const aim = snippetSettingsFor(draftWith('autoAim', { enabled: true, p1: 7 }))
-    expect(aim[0]).toMatchObject({ kind: 1, p1: 1 })
-    const aimOff = snippetSettingsFor(draftWith('autoAim', { enabled: true, p1: 0 }))
-    expect(aimOff[0]).toMatchObject({ p1: 0 })
-    const fire = snippetSettingsFor(draftWith('autoFire', { enabled: true, p1: 999 }))
-    expect(fire[0]).toMatchObject({ kind: 2, p1: 20 })
+    expect(aim[0]).toMatchObject({ kind: 1, p1: 0, p2: 0, s1: '' })
+    const avoid = snippetSettingsFor(draftWith('avoid', { enabled: true, p1: 999 }))
+    expect(avoid[0]).toMatchObject({ kind: 5, p1: 20 })
   })
 
   it('无参数行固定清空 p1/p2/s1，低血量血包保留整数阈值', () => {
@@ -80,11 +79,11 @@ describe('snippetSettingsFor', () => {
 
 describe('clampSnippetNumber', () => {
   it('夹取到 [min, max] 并按步进取整，消除浮点尾差', () => {
-    const autoFire = SNIPPET_ROWS.find(row => row.key === 'autoFire')!
-    expect(clampSnippetNumber(autoFire, 999)).toBe(20)
-    expect(clampSnippetNumber(autoFire, 0)).toBe(2)
-    expect(clampSnippetNumber(autoFire, 7.3)).toBe(7.5)
-    expect(clampSnippetNumber(autoFire, 15.5000000000002)).toBe(15.5)
+    const avoid = SNIPPET_ROWS.find(row => row.key === 'avoid')!
+    expect(clampSnippetNumber(avoid, 999)).toBe(20)
+    expect(clampSnippetNumber(avoid, 0)).toBe(2)
+    expect(clampSnippetNumber(avoid, 7.3)).toBe(7)
+    expect(clampSnippetNumber(avoid, 8.0000000001)).toBe(8)
   })
 
   it('低血量阈值夹取到 1..100 并按整数步进', () => {

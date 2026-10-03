@@ -21,9 +21,8 @@ import (
 type Kind int
 
 const (
-	AutoAim         Kind = 1 // 自动瞄准（提前量开关）
-	AutoFire        Kind = 2 // 自动开火（射程阈值 m）
-	AutoPickup      Kind = 3 // 自动拾取（拾取半径 m）
+	AutoAim         Kind = 1 // 自动瞄准（无参数，纯直瞄）
+	// 2/3 已移除：AutoFire 自动开火、AutoPickup 有限半径自动拾取。
 	EmergencyShield Kind = 4 // 紧急护盾（HP 阈值 0..100）
 	DangerAvoid     Kind = 5 // 危险规避（威胁半径 m）
 	Patrol          Kind = 6 // 简单巡逻（路径点）
@@ -31,15 +30,11 @@ const (
 	LowHpHealthPack Kind = 8 // 低血量自动拾取血包（HP 阈值 1..100）
 )
 
-// 参数范围（设计文档 §9：每条 1–2 参数；范围校验 + 稳定默认值）。
+// 参数范围（设计文档 §9：每条 0–2 参数；范围校验 + 稳定默认值）。
+// 已移除模块：AutoFire（自动开火，职责并入玩家/Bot Script）与
+// AutoPickup（有限半径自动拾取，被 GlobalCore 全局拾取取代）；
+// kind 编号 2/3 永不复用（协议 additive 原则）。
 const (
-	autoAimLeadDefault     = true
-	autoFireRangeMin       = 2.0
-	autoFireRangeMax       = 20.0 // 最大飞行硬顶 = 视野
-	autoFireRangeDefault   = 16.0 // 有效射程
-	autoPickupRadiusMin    = 0.5
-	autoPickupRadiusMax    = 20.0
-	autoPickupRadiusDflt   = 6.0
 	emergencyShieldMin     = 0.0
 	emergencyShieldMax     = 100.0
 	emergencyShieldDefault = 30.0
@@ -78,50 +73,16 @@ type Module struct {
 // catalog 是唯一事实源；顺序即组合执行顺序（确定性）。
 var catalog = []Module{
 	{
-		Kind:    AutoAim,
-		Title:   "自动瞄准",
-		Default: Setting{Kind: AutoAim, P1: boolToF(autoAimLeadDefault)},
+		Kind:  AutoAim,
+		Title: "自动瞄准",
+		Default: Setting{Kind: AutoAim},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = AutoAim
-			// p1 为 bool 语义（0/1）；任意非零视为 true，规范化为 0/1。
-			if math.IsNaN(s.P1) || math.IsInf(s.P1, 0) {
-				return s, fmt.Errorf("auto_aim: p1 must be 0 or 1")
-			}
-			s.P1 = boolToF(s.P1 != 0)
-			s.P2, s.S1 = 0, ""
+			// 无参数模块：清空全部参数位，保持单一规范表示。
+			s.P1, s.P2, s.S1 = 0, 0, ""
 			return s, nil
 		},
 		Source: autoAimSource,
-	},
-	{
-		Kind:    AutoFire,
-		Title:   "自动开火",
-		Default: Setting{Kind: AutoFire, P1: autoFireRangeDefault},
-		Validate: func(s Setting) (Setting, error) {
-			s.Kind = AutoFire
-			if !inRange(s.P1, autoFireRangeMin, autoFireRangeMax) {
-				return s, fmt.Errorf("auto_fire: range must be %.0f..%.0f m", autoFireRangeMin, autoFireRangeMax)
-			}
-			s.P1 = math.Round(s.P1*10) / 10
-			s.P2, s.S1 = 0, ""
-			return s, nil
-		},
-		Source: autoFireSource,
-	},
-	{
-		Kind:    AutoPickup,
-		Title:   "自动拾取",
-		Default: Setting{Kind: AutoPickup, P1: autoPickupRadiusDflt},
-		Validate: func(s Setting) (Setting, error) {
-			s.Kind = AutoPickup
-			if !inRange(s.P1, autoPickupRadiusMin, autoPickupRadiusMax) {
-				return s, fmt.Errorf("auto_pickup: radius must be %.1f..%.0f m", autoPickupRadiusMin, autoPickupRadiusMax)
-			}
-			s.P1 = math.Round(s.P1*10) / 10
-			s.P2, s.S1 = 0, ""
-			return s, nil
-		},
-		Source: autoPickupSource,
 	},
 	{
 		Kind:    EmergencyShield,
@@ -200,13 +161,6 @@ var catalog = []Module{
 		},
 		Source: lowHpHealthPackSource,
 	},
-}
-
-func boolToF(b bool) float64 {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 func inRange(v, min, max float64) bool {

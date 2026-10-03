@@ -11,7 +11,7 @@ func TestSnippetOnlyAndPlayerAxisPriority(t *testing.T) {
 	rt := NewGojaRuntime(Config{})
 	defer rt.Close()
 
-	aim := snippet.Setting{Kind: snippet.AutoAim, P1: 0}
+	aim := snippet.Setting{Kind: snippet.AutoAim}
 	if err := rt.LoadSnippets([]snippet.Setting{aim}); err != nil {
 		t.Fatalf("load snippet-only: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSnippetReloadPreservesPlayerSourceAndOldVersionOnFailure(t *testing.T) 
 	if err := rt.Load(source); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.LoadSnippets([]snippet.Setting{{Kind: snippet.AutoAim, P1: 1}}); err != nil {
+	if err := rt.LoadSnippets([]snippet.Setting{{Kind: snippet.AutoAim}}); err != nil {
 		t.Fatal(err)
 	}
 	beforeRev := rt.Rev()

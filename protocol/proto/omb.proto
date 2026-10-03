@@ -52,9 +52,9 @@ message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
 
 enum SnippetKind {
   SNIPPET_UNSPECIFIED = 0;
-  SNIPPET_AUTO_AIM = 1;         // 自动瞄准（提前量开关）
-  SNIPPET_AUTO_FIRE = 2;        // 自动开火（射程阈值 m）
-  SNIPPET_AUTO_PICKUP = 3;      // 自动拾取（拾取半径 m）
+  SNIPPET_AUTO_AIM = 1;         // 自动瞄准（无参数，纯直瞄不预判）
+  // 2/3 已移除：自动开火并入玩家/Bot Script 职责，有限半径自动拾取
+  // 被全局 Core 拾取取代（SNIPPET_GLOBAL_CORE）；编号不复用。
   SNIPPET_EMERGENCY_SHIELD = 4; // 紧急护盾（HP 阈值 0..100）
   SNIPPET_DANGER_AVOID = 5;     // 危险规避（威胁半径 m）
   SNIPPET_PATROL = 6;           // 简单巡逻（路径点 "x,y;x,y"）
