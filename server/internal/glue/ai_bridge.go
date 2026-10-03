@@ -327,6 +327,7 @@ func (ms *matchScripts) SubmitSource(playerID uint64, rev uint32, source string)
 	}
 	newRev, accepted, err := rt.LoadIfRev(rev, source)
 	if accepted {
+		ms.m.rc.scriptSource[playerID] = source
 		ms.m.sendScriptLogsLocked(rid, rt)
 	}
 	return newRev, accepted, err

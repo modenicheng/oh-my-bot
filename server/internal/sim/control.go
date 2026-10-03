@@ -90,6 +90,20 @@ func (s *Sim) ClearScriptAxes(id uint32) bool {
 	return true
 }
 
+// SetAssist sets the initial room preference during Match assembly. Runtime
+// gameplay should use AssistToggle so replay records the user action.
+func (s *Sim) SetAssist(id uint32, on bool) bool {
+	i, ok := s.index[id]
+	if !ok || s.ended {
+		return false
+	}
+	s.robots[i].Control.Assist = on
+	if !on {
+		s.robots[i].Control.Script, s.robots[i].Control.ScriptAxes = ArbitratedInput{}, 0
+	}
+	return true
+}
+
 // AssistToggle queues an event, not a desired boolean. Switching ON explicitly
 // gives all axes back; subsequent human operations still take priority.
 func (s *Sim) AssistToggle(id uint32) bool {

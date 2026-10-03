@@ -96,13 +96,13 @@ type RoomConn struct {
 	sessions   map[uint64]*Session
 	spectators map[uint64]*Session
 	identities map[string]SessionInfo
-	// snippets 按玩家保存的 Snippet 驾驶辅助配置（已验证、已排序）。
-	// 生命周期绑定身份而非连接：warmup→running、Restart、断线重连都保留；
-	// 显式离开（LeaveRoom 释放身份）时清理。
-	snippets map[uint64][]snippet.Setting
-	match    *Match
-	launcher room.SimLauncher
-	launch   atomic.Pointer[asyncHandle]
+	// Bot 配置按玩家身份保存：同房间换局保留，显式离开才清理。
+	snippets     map[uint64][]snippet.Setting
+	scriptSource map[uint64]string
+	assist       map[uint64]bool
+	match        *Match
+	launcher     room.SimLauncher
+	launch       atomic.Pointer[asyncHandle]
 
 	// ai is shared by warmup and its following scored match, so both consume
 	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
@@ -110,7 +110,11 @@ type RoomConn struct {
 }
 
 func newRoomConn(code string) *RoomConn {
-	return &RoomConn{Code: code, Room: room.NewRoom(code, 0), sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{}, snippets: map[uint64][]snippet.Setting{}}
+	return &RoomConn{
+		Code: code, Room: room.NewRoom(code, 0),
+		sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{},
+		snippets: map[uint64][]snippet.Setting{}, scriptSource: map[uint64]string{}, assist: map[uint64]bool{},
+	}
 }
 
 type Session struct {
@@ -247,6 +251,11 @@ func (s *Session) ToggleAssist() {
 		if m := rc.match; m != nil && m.activeLocked() {
 			if rid, ok := m.robotOf[s.playerID]; ok {
 				m.sim.AssistToggle(rid)
+				// Persist the preference immediately as well as after the next
+				// authoritative tick, so an instant restart cannot lose it.
+				if robot, exists := m.sim.Robot(rid); exists {
+					rc.assist[s.playerID] = !robot.Control.Assist || robot.Control.HumanAxes != 0
+				}
 			}
 		}
 	})
@@ -325,7 +334,9 @@ func (s *Session) LeaveRoom() {
 		}
 		delete(rc.sessions, s.playerID)
 		delete(rc.identities, s.nick)
-		delete(rc.snippets, s.playerID) // 身份释放：驾驶辅助配置随之丢弃
+		delete(rc.snippets, s.playerID)
+		delete(rc.scriptSource, s.playerID)
+		delete(rc.assist, s.playerID) // 身份释放：同房间 Bot 状态随之清理
 		_ = rc.Room.Leave(s.playerID)
 		if s.hub != nil {
 			s.hub.mu.Lock()
@@ -397,6 +408,8 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 		for _, id := range ids {
 			if id == info.PlayerID {
 				info.Snippets = append([]snippet.Setting{}, rc.snippets[id]...)
+				info.ScriptSource = rc.scriptSource[id]
+				info.Assist = rc.assist[id]
 				players[id] = info
 				break
 			}

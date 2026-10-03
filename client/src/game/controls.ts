@@ -54,6 +54,7 @@ export class GameController {
   private inputEnabled = true
   private resyncAt = -Infinity
   private startCuePending = false
+  private assistPreference = false
   private chat = document.getElementById('game-chat') as HTMLFormElement
   private chatInput = document.getElementById('game-chat-input') as HTMLInputElement
   private chatCount = document.getElementById('game-chat-count')!
@@ -132,7 +133,7 @@ export class GameController {
     this.bubbles = []
     this.sayTicks.clear()
     this.feedback.reset()
-    this.input.assistOn = false
+    this.input.assistOn = this.assistPreference
     this.world = emptyWorld()
     this.hud.update(this.world, this.map, this.scores)
     this.hud.setAssist(false)
@@ -189,7 +190,10 @@ export class GameController {
       } else if (result === 'applied') {
         this.scores.observe(this.world.robots)
         this.input.acknowledge(snap.ackSeq)
-        if (snap.self?.assistOn !== undefined) this.input.assistOn = snap.self.assistOn
+        if (snap.self?.assistOn !== undefined) {
+          this.assistPreference = snap.self.assistOn
+          this.input.assistOn = snap.self.assistOn
+        }
         // 普通 full 只是状态重同步，不代表服务端释放了 HumanAxes；保留本地
         // held/mask，避免服务端继续旧值而客户端静默停止发送对应轴。
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)

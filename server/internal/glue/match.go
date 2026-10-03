@@ -89,6 +89,10 @@ type SessionInfo struct {
 	// Snippets is an immutable deep-copied launch snapshot. NewMatch assembles
 	// outside rc.mu and must never read the live RoomConn.snippets map.
 	Snippets []snippet.Setting
+	// ScriptSource and Assist are room-scoped Bot configuration. They survive
+	// Match replacement but are cleared when the player explicitly leaves.
+	ScriptSource string
+	Assist       bool
 }
 
 // NewMatch only assembles. Publication sends bootstrap before start runs the clock.
@@ -198,9 +202,13 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		m.runtimes[rid] = rt
 		m.sim.AssistToggle(rid)
 	}
+	// 玩家脚本和 assist 是房间身份状态：新局重新装配运行时，但不丢失
+	// 上一局已经热更成功的源码或驾驶辅助开关。
+	m.applySavedPlayerScripts(players)
 	// 房间保存的 Snippet 配置应用到新局 runtime（warmup→running、Restart
 	// 保留；snippet-only 玩家由此获得 runtime）。
 	m.applySavedSnippets(players)
+	m.restoreSavedAssist(players)
 
 	return m, nil
 }
@@ -337,6 +345,7 @@ func (m *Match) submitScriptLocked(pid uint64, src string) (ok bool, errMsg stri
 	if err := rt.Load(src); err != nil {
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
+	m.rc.scriptSource[pid] = src
 	m.sendScriptLogsLocked(rid, rt)
 	return true, "", rt.Rev()
 }
@@ -402,6 +411,41 @@ func (m *Match) bootstrapLocked(s *Session) {
 	m.forceResyncLocked(s.playerID)
 	m.sendSnippetStateLocked(s)
 }
+
+// applySavedPlayerScripts restores room-scoped player code before snippets are
+// combined. Match-local position, combat and world state are intentionally new.
+func (m *Match) applySavedPlayerScripts(players map[uint64]SessionInfo) {
+	for pid, info := range players {
+		if info.Bot || info.ScriptSource == "" {
+			continue
+		}
+		rid, ok := m.robotOf[pid]
+		if !ok {
+			continue
+		}
+		rt := script.NewGojaRuntime(script.Config{})
+		if err := rt.Load(info.ScriptSource); err != nil {
+			rt.Close()
+			continue
+		}
+		m.scriptPool.Register(rid, rt)
+		m.runtimes[rid] = rt
+	}
+}
+
+// restoreSavedAssist queues the room-scoped assist preference after snippets
+// have created any snippet-only runtimes. World position/combat state remains new.
+func (m *Match) restoreSavedAssist(players map[uint64]SessionInfo) {
+	for pid, info := range players {
+		if info.Bot || !info.Assist {
+			continue
+		}
+		if rid, ok := m.robotOf[pid]; ok {
+			m.sim.SetAssist(rid, true)
+		}
+	}
+}
+
 func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(m.mapDef)
 	h := fnv.New128a()
@@ -515,6 +559,7 @@ func (m *Match) step() {
 	}
 	m.tick++
 	m.sim.Tick()
+	m.persistAssistStateLocked()
 
 	wv := m.sim.WorldView()
 	m.runScripts(wv)
@@ -620,6 +665,19 @@ func (m *Match) step() {
 	}
 
 	m.maybeBroadcastScoreboard(wv)
+}
+
+// persistAssistStateLocked snapshots post-toggle authority into the room identity
+// so a replacement Match starts with the same assist preference.
+func (m *Match) persistAssistStateLocked() {
+	for pid, rid := range m.robotOf {
+		if m.botRobots[rid] {
+			continue
+		}
+		if robot, ok := m.sim.Robot(rid); ok {
+			m.rc.assist[pid] = robot.Control.Assist
+		}
+	}
 }
 
 // scoreboardEveryTicks 实时积分榜最小广播间隔（2s）：榜是低频信息，无需 60Hz；

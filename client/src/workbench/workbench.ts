@@ -451,6 +451,8 @@ export class Workbench {
     this.identity = { roomCode: '', nick: '' }
     this.snippetPanel.setIdentity('', '')
     this.aiPanel.resetSession('identity')
+    this.loaded = undefined
+    this.assistOn = false
     this.resetMatch()
   }
 
@@ -459,6 +461,8 @@ export class Workbench {
     if (this.identity.roomCode !== roomCode || this.identity.nick !== nick) {
       this.identity = { roomCode, nick }
       this.aiPanel.resetSession('identity')
+      this.loaded = undefined
+      this.assistOn = false
     }
     const prefKey = languagePrefKey(roomCode, nick)
     if (this.draftKey) this.saveLanguagePref()
@@ -583,8 +587,8 @@ export class Workbench {
   resetMatch(): void {
     const wasPending = !!this.pending
     this.clearPending()
-    this.loaded = undefined
-    this.assistOn = false
+    // Match-local logs and pending requests reset here. The loaded script and
+    // assist preference belong to the room identity and survive the next match.
     this.inMatch = false
     this.scriptConsole.clear()
     if (wasPending) this.scriptConsole.appendClient('warn', '对局已切换，提交已取消；草稿仍保留。')
