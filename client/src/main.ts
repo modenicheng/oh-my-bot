@@ -199,6 +199,12 @@ const workbench = new Workbench({
   onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
   send: frame => session?.state === 'online' ? session.send(frame) : false,
   toggleAssist: () => game?.toggleAssist(),
+  activateAssist: () => {
+    if (!game || viewGame.hidden) {
+      showView('game')
+    }
+    return game?.activateAssist() ?? false
+  },
 })
 
 const gameOptions = new GameOptions({
@@ -256,6 +262,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
     if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
     if (ev.kind.case === 'aiQuota') { workbench.acceptAiQuota(ev.kind.value); return }
+    if (ev.kind.case === 'aiStream') { workbench.acceptAiStream(ev.kind.value); return }
     if (ev.kind.case === 'aiUsage') workbench.acceptAiUsage(ev.kind.value)
     if (ev.kind.case === 'scriptLog') { workbench.acceptScriptLog(ev.kind.value); return }
     if (ev.kind.case === 'matchEnd') workbench.resetMatch()

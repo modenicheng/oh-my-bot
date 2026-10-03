@@ -277,6 +277,17 @@ message EvAiQuota {
   uint32 global_tokens_left_k = 3; // 全局护栏余量（2M token/局，触顶全员禁 AI）
 }
 
+// AI provider 的实时增量：服务端解析上游 SSE 后立即定向推入玩家 WS。
+// 单玩家请求严格串行，因此无需 request_id；kind 区分思考过程与最终回答。
+message EvAiStream {
+  enum Kind {
+    ANSWER = 0;
+    REASONING = 1;
+  }
+  string delta = 1;
+  Kind kind = 2;
+}
+
 message ServerEvent {
   uint32 tick = 1;
   google.protobuf.Timestamp wall = 2; // 落 Match Event Log 用的墙钟
@@ -304,6 +315,7 @@ message ServerEvent {
     EvHeal heal = 30;
     EvSnippetUsage snippet_usage = 31; // OLD_SCHOOL 埋点：某轴最终采用 CS_SNIPPET（0.5s 节流/robot）
     EvSnippetResult snippet_result = 32; // SnippetConfig 定向回执（不落事件日志，仅 owner 下发）
+    EvAiStream ai_stream = 33; // AI 上游 SSE 文本增量（仅 owner，下发即展示，不落事件日志）
   }
 }
 

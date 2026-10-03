@@ -3,9 +3,23 @@
 // pending 状态机的完整 DOM 行为属浏览器验收范围，此处不引入真实 DOM 环境。
 import { describe, expect, it } from 'vitest'
 import {
-  AI_MAX_PROMPT_CHARS, AI_SCRIPT_RESULT_ID, aiHotSwapNotice, aiQuotaText,
-  checkAiPrompt, isAiDirectedSay,
+  AI_SCRIPT_RESULT_ID, aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
 } from './ai-assist'
+
+describe('appendAiStreamText', () => {
+  it('按增量顺序完整合并且空增量不改变内容', () => {
+    const first = appendAiStreamText('', '```js\n')
+    const second = appendAiStreamText(first, 'function tick() {}')
+    expect(second).toBe('```js\nfunction tick() {}')
+    expect(appendAiStreamText(second, '')).toBe(second)
+  })
+
+  it('长响应完整保留，不截断头部', () => {
+    const prefix = '前'.repeat(20_000)
+    const result = appendAiStreamText(prefix, '🤖尾')
+    expect(result).toBe(`${prefix}🤖尾`)
+  })
+})
 
 describe('checkAiPrompt', () => {
   it('空文本与纯空白拒绝', () => {
@@ -13,9 +27,8 @@ describe('checkAiPrompt', () => {
     expect(checkAiPrompt('   \n\t ', false)).toEqual({ ok: false, reason: '请输入要 AI 修改的内容' })
   })
 
-  it(`超过 ${AI_MAX_PROMPT_CHARS} 字（按码点）拒绝，上限内通过`, () => {
-    expect(checkAiPrompt('血'.repeat(AI_MAX_PROMPT_CHARS + 1), false).ok).toBe(false)
-    expect(checkAiPrompt('血'.repeat(AI_MAX_PROMPT_CHARS), false)).toEqual({ ok: true })
+  it('长指令不做人为长度限制', () => {
+    expect(checkAiPrompt('血'.repeat(20_000), false)).toEqual({ ok: true })
   })
 
   it('pending 期间一律拒绝（单玩家串行）', () => {

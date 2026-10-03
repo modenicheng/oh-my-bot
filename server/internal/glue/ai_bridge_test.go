@@ -6,8 +6,50 @@ import (
 	"testing"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
+
+func TestAIStreamTargetsCurrentOwnerSession(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("AI-STREAM")
+	owner, ownerLog := bindLogged(t, h, rc, "owner")
+	_, peerLog := bindLogged(t, h, rc, "peer")
+	quota := ai.NewQuotaService(ai.DefaultQuotaConfig())
+	svc := &AIService{quota: quota}
+	m, err := NewMatch(rc, 42, 1, map[uint64]SessionInfo{
+		owner.playerID: {PlayerID: owner.playerID, Nick: owner.nick},
+	}, true, svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopTestMatch(t, m) })
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+	ownerLog.take()
+	peerLog.take()
+
+	m.sendAIStream(owner.playerID, svc, quota.CurrentMatchSeq(), ai.StreamDelta{Kind: ai.StreamReasoning, Text: "first"})
+	ownerMsgs := ownerLog.take()
+	if len(ownerMsgs) != 1 || ownerMsgs[0].msg.GetEvent().GetAiStream().GetDelta() != "first" || ownerMsgs[0].msg.GetEvent().GetAiStream().GetKind() != ombv1.EvAiStream_REASONING || !ownerMsgs[0].reliable {
+		t.Fatalf("owner stream messages = %+v", ownerMsgs)
+	}
+	if got := peerLog.take(); len(got) != 0 {
+		t.Fatalf("peer received private AI stream: %+v", got)
+	}
+
+	replacement, replacementLog := bindLogged(t, h, rc, "owner")
+	replacementLog.take() // takeover bootstrap
+	m.sendAIStream(replacement.playerID, svc, quota.CurrentMatchSeq(), ai.StreamDelta{Kind: ai.StreamAnswer, Text: "second"})
+	if got := ownerLog.take(); len(got) != 0 {
+		t.Fatalf("superseded session received AI stream: %+v", got)
+	}
+	replacementMsgs := replacementLog.take()
+	if len(replacementMsgs) != 1 || replacementMsgs[0].msg.GetEvent().GetAiStream().GetDelta() != "second" || replacementMsgs[0].msg.GetEvent().GetAiStream().GetKind() != ombv1.EvAiStream_ANSWER {
+		t.Fatalf("replacement stream messages = %+v", replacementMsgs)
+	}
+}
 
 func TestNormalizeAIPrompt(t *testing.T) {
 	if got, ok := normalizeAIPrompt("  改成巡逻  "); !ok || got != "改成巡逻" {
@@ -16,8 +58,9 @@ func TestNormalizeAIPrompt(t *testing.T) {
 	if _, ok := normalizeAIPrompt(" \n\t "); ok {
 		t.Fatal("blank prompt accepted")
 	}
-	if _, ok := normalizeAIPrompt(strings.Repeat("血", aiMaxPromptRunes+1)); ok {
-		t.Fatal("oversize prompt accepted")
+	long := strings.Repeat("血", 20_000)
+	if got, ok := normalizeAIPrompt(long); !ok || got != long {
+		t.Fatal("long prompt should be accepted unchanged")
 	}
 }
 

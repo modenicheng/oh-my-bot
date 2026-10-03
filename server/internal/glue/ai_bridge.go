@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -59,8 +59,6 @@ type aiScriptSnapshot struct {
 	perception string
 }
 
-const aiMaxPromptRunes = 500
-
 // aiClientScriptID AI 改码 ScriptResult 的保留 client_script_id：
 // 客户端编辑器区分「自己提交的回执」与「AI 改码回执」（0 = 服务器保留）。
 const aiClientScriptID = 0
@@ -85,7 +83,7 @@ func (m *Match) handleAiPromptLocked(pid uint64, text string) {
 	var valid bool
 	text, valid = normalizeAIPrompt(text)
 	if !valid {
-		sess.SendReliable(say("AI 请求失败：指令不能为空且最多 500 字"))
+		sess.SendReliable(say("AI 请求失败：指令不能为空"))
 		return
 	}
 	svc := m.ai
@@ -100,7 +98,7 @@ func (m *Match) handleAiPromptLocked(pid uint64, text string) {
 
 func normalizeAIPrompt(text string) (string, bool) {
 	text = strings.TrimSpace(text)
-	return text, text != "" && utf8.RuneCountInString(text) <= aiMaxPromptRunes
+	return text, text != ""
 }
 
 // aiScriptSnapshot 读取玩家当前源码与同 tick 的合法感知（调用方持 rc.mu）。
@@ -234,7 +232,9 @@ func (m *Match) runAiPrompt(_ *Session, pid uint64, text string, svc *AIService,
 	agent := ai.NewAgent(svc.quota, svc.provider, snapshotScripts{snap: snap})
 	agent.SetManual(svc.manual)
 	agent.SetPerception(snap.perception)
-	outcome, err := agent.HandlePrompt(context.Background(), pid, text)
+	outcome, err := agent.HandlePromptStream(context.Background(), pid, text, func(delta ai.StreamDelta) {
+		m.sendAIStream(pid, svc, matchSeq, delta)
+	})
 
 	m.rc.mu.Lock()
 	defer m.rc.mu.Unlock()
@@ -247,6 +247,28 @@ func (m *Match) runAiPrompt(_ *Session, pid uint64, text string, svc *AIService,
 	m.handleAgentResult(sess, pid, outcome, err, svc, snap, matchSeq)
 }
 
+// sendAIStream 将上游文本增量可靠地定向到该玩家当前绑定的会话。
+// 重连/接管发生时后续增量自动转向新连接；其他玩家和观战者不可见。
+func (m *Match) sendAIStream(pid uint64, svc *AIService, matchSeq int, delta ai.StreamDelta) {
+	if delta.Text == "" {
+		return
+	}
+	m.rc.mu.Lock()
+	defer m.rc.mu.Unlock()
+	if !m.activeLocked() || svc.quota.CurrentMatchSeq() != matchSeq {
+		return
+	}
+	if current := m.rc.sessions[pid]; current != nil {
+		kind := ombv1.EvAiStream_ANSWER
+		if delta.Kind == ai.StreamReasoning {
+			kind = ombv1.EvAiStream_REASONING
+		}
+		current.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_AiStream{AiStream: &ombv1.EvAiStream{Delta: delta.Text, Kind: kind}},
+		}}})
+	}
+}
+
 // handleAgentResult 持 rc.mu 落地：脚本写入（乐观并发）+ 定向回执 +
 // EvAiUsage 进事件管线（正式局落 Match Event Log + 投影；不广播——
 // 配额事实属个人，走定向 AiQuota）。
@@ -255,6 +277,7 @@ func (m *Match) runAiPrompt(_ *Session, pid uint64, text string, svc *AIService,
 func (m *Match) handleAgentResult(sess *Session, pid uint64, outcome ai.HandleOutcome, err error, svc *AIService, snap aiScriptSnapshot, matchSeq int) {
 	stillSameMatch := m.activeLocked() && svc.quota.CurrentMatchSeq() == matchSeq
 	if err != nil {
+		logAIRequestError(pid, err)
 		sess.SendReliable(say("AI 请求失败：" + aiRejectText(err)))
 		m.sendAIUsageLocked(sess, pid, svc, outcome.Usage, stillSameMatch)
 		return
@@ -341,6 +364,23 @@ func (m *Match) emitNonSimEvent(ev *ombv1.ServerEvent) {
 		m.log.OnEvent(m.tick, ev)
 	}
 	glueSink{m: m}.OnEvent(m.tick, ev)
+}
+
+// logAIRequestError 仅记录定位所需的错误元数据，不记录 prompt、脚本或密钥。
+func logAIRequestError(pid uint64, err error) {
+	var perr *ai.ProviderError
+	if errors.As(err, &perr) {
+		log.Printf("AI provider request failed: player=%d category=%s status=%d retryable=%t",
+			pid, perr.Category, perr.Status, perr.Retryable)
+		return
+	}
+	switch {
+	case errors.Is(err, ai.ErrRoundsExhausted), errors.Is(err, ai.ErrTokensExhausted),
+		errors.Is(err, ai.ErrGlobalGuardrail), errors.Is(err, ai.ErrBusy), errors.Is(err, ai.ErrConcurrency):
+		return
+	default:
+		log.Printf("AI request failed: player=%d err=%v", pid, err)
+	}
 }
 
 // aiRejectText 拒因/错误转玩家可读文案（不含 prompt 原文、key、上游响应体）。

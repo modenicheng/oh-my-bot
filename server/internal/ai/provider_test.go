@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,6 +184,159 @@ func TestDeepSeekRequestShape(t *testing.T) {
 	}
 	if !strings.Contains(gotBody.Messages[1].Content, "旧脚本") || !strings.Contains(gotBody.Messages[1].Content, "指令") || !strings.Contains(gotBody.Messages[1].Content, `"tick":1`) {
 		t.Error("user prompt missing script/perception/instruction")
+	}
+}
+
+func TestDeepSeekCompleteStream(t *testing.T) {
+	var gotBody chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"先检查当前脚本\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"说明\\n```js\\n\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"function tick(bot) {}\\n```\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	var deltas []StreamDelta
+	res, usage, err := p.CompleteStream(context.Background(), PromptContext{Instruction: "x"}, func(delta StreamDelta) {
+		deltas = append(deltas, delta)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotBody.Stream || gotBody.StreamOptions == nil || !gotBody.StreamOptions.IncludeUsage || gotBody.Thinking == nil || gotBody.Thinking.Type != "enabled" || gotBody.ReasoningEffort != "high" {
+		t.Fatalf("stream request = %+v", gotBody)
+	}
+	if len(deltas) != 3 || deltas[0] != (StreamDelta{Kind: StreamReasoning, Text: "先检查当前脚本"}) || deltas[1].Kind != StreamAnswer || deltas[2].Kind != StreamAnswer || deltas[1].Text+deltas[2].Text != "说明\n```js\nfunction tick(bot) {}\n```" {
+		t.Fatalf("deltas = %#v", deltas)
+	}
+	if res.NewScript != "function tick(bot) {}" || res.Explain != "说明" || usage.TokensDelta != 15 {
+		t.Fatalf("res=%+v usage=%+v", res, usage)
+	}
+}
+
+func TestDeepSeekCompleteStreamMissingUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"function tick(bot) {}\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	_, _, err := p.CompleteStream(context.Background(), PromptContext{}, nil)
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Category != CatProvider {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeepSeekCompleteStreamAllowsLongActiveResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		chunks := []string{
+			"说明\n```js\n",
+			"function tick(bot) {\n",
+			"  bot.move(0)\n",
+			"}\n```",
+		}
+		for _, chunk := range chunks {
+			encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": chunk}}}})
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
+			flusher.Flush()
+			time.Sleep(45 * time.Millisecond)
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	p.HTTPClient = &http.Client{Timeout: 80 * time.Millisecond}
+	started := time.Now()
+	res, usage, err := p.CompleteStream(context.Background(), PromptContext{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) <= p.HTTPClient.Timeout {
+		t.Fatal("test response did not exceed the configured timeout")
+	}
+	if res.NewScript != "function tick(bot) {\n  bot.move(0)\n}" || usage.TokensDelta != 15 {
+		t.Fatalf("res=%+v usage=%+v", res, usage)
+	}
+}
+
+func TestDeepSeekCompleteStreamDoesNotCapTotalContent(t *testing.T) {
+	const contentBytes = (4 << 20) + 1024
+	largeScript := "function tick(bot) { /*" + strings.Repeat("x", contentBytes) + "*/ }"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": largeScript}}}})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	var streamed strings.Builder
+	res, _, err := p.CompleteStream(context.Background(), PromptContext{}, func(delta StreamDelta) {
+		if delta.Kind == StreamAnswer {
+			streamed.WriteString(delta.Text)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if streamed.String() != largeScript || res.NewScript != largeScript {
+		t.Fatalf("large stream truncated: callback=%d result=%d want=%d", streamed.Len(), len(res.NewScript), len(largeScript))
+	}
+}
+
+func TestDeepSeekCompleteStreamIdleTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"```js\\n\"}}]}\n\n")
+		w.(http.Flusher).Flush()
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	p.HTTPClient = &http.Client{Timeout: 60 * time.Millisecond}
+	started := time.Now()
+	_, _, err := p.CompleteStream(context.Background(), PromptContext{}, nil)
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Category != CatNetwork || !pe.Retryable {
+		t.Fatalf("err = %v, want retryable network ProviderError", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 250*time.Millisecond {
+		t.Fatalf("idle stream cancelled too late: %v", elapsed)
+	}
+}
+
+func TestDeepSeekCompleteStreamResponseHeaderTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+	}))
+	defer srv.Close()
+	p := NewDeepSeekProvider("test-key")
+	p.Endpoint = srv.URL
+	p.HTTPClient = &http.Client{Timeout: 60 * time.Millisecond}
+	_, _, err := p.CompleteStream(context.Background(), PromptContext{}, nil)
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Category != CatNetwork || !pe.Retryable {
+		t.Fatalf("err = %v, want retryable network ProviderError", err)
 	}
 }
 

@@ -59,6 +59,25 @@ type Provider interface {
 	Complete(ctx context.Context, promptCtx PromptContext) (Result, Usage, error)
 }
 
+type StreamKind uint8
+
+const (
+	StreamAnswer StreamKind = iota
+	StreamReasoning
+)
+
+type StreamDelta struct {
+	Kind StreamKind
+	Text string
+}
+
+// StreamingProvider 可选实现：将上游 SSE 的思考与最终回答分轨回调给 glue，
+// glue 立即定向推入玩家 WebSocket；最终结果与 usage 仍由返回值结算。
+type StreamingProvider interface {
+	Provider
+	CompleteStream(ctx context.Context, promptCtx PromptContext, onDelta func(StreamDelta)) (Result, Usage, error)
+}
+
 type PromptContext struct {
 	PlayerID      uint64
 	Instruction   string   // 玩家自然语言指令

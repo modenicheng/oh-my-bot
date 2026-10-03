@@ -1,6 +1,6 @@
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, encodeClient,
-         type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type SnippetSetting } from '@omb/protocol'
+         EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type SnippetSetting } from '@omb/protocol'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
@@ -57,6 +57,7 @@ interface WorkbenchDeps {
   onLayout: () => void
   send: (frame: Uint8Array) => boolean
   toggleAssist: () => void
+  activateAssist: () => boolean
 }
 
 /** 文档与编辑器共享一列；提交状态只接受当前连接、当前对局的匹配回执。 */
@@ -187,6 +188,7 @@ export class Workbench {
       send: text => this.sendAiPrompt(text),
       availability: () => ({ online: this.online, inMatch: this.inMatch }),
       editorDirty: () => !this.loaded || this.loaded.source !== this.source,
+      activateAssist: () => this.deps.activateAssist(),
     })
     for (const button of this.languageButtons) {
       button.addEventListener('click', () => this.setLanguage((button.dataset.lang as BotLanguage) === 'ts' ? 'ts' : 'js'))
@@ -716,6 +718,10 @@ export class Workbench {
 
   acceptAiUsage(usage: EvAiUsage): void {
     this.aiPanel.acceptUsage(usage)
+  }
+
+  acceptAiStream(stream: EvAiStream): void {
+    this.aiPanel.acceptStream(stream.kind === EvAiStream_Kind.REASONING ? 'reasoning' : 'answer', stream.delta)
   }
 
   /** 快照 SelfState 的配额初值（重连/进入对局时的权威基线）。 */

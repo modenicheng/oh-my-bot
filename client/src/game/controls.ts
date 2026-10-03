@@ -277,6 +277,13 @@ export class GameController {
     this.inputEnabled = false
   }
 
+  /** AI 面板使用的幂等激活：辅助已开启时不反向关闭。 */
+  activateAssist(): boolean {
+    if (!this.active || !this.map || this.ended || !this.world.initialized) return false
+    if (!this.input.assistOn) this.toggleAssist()
+    return this.input.assistOn
+  }
+
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return

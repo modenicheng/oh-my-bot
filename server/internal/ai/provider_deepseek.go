@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -112,14 +113,7 @@ func (p *DeepSeekProvider) Complete(ctx context.Context, pc PromptContext) (Resu
 		}
 	}
 
-	body, err := json.Marshal(chatRequest{
-		Model: p.model(),
-		Messages: []chatMessage{
-			{Role: "system", Content: buildSystemPrompt(pc.Manual)},
-			{Role: "user", Content: buildUserPrompt(pc)},
-		},
-		Stream: false,
-	})
+	body, err := p.requestBody(pc, false)
 	if err != nil {
 		return Result{}, Usage{}, &ProviderError{Category: CatClient, Detail: "encode request: " + err.Error(), err: err}
 	}
@@ -191,6 +185,144 @@ func (p *DeepSeekProvider) Complete(ctx context.Context, pc PromptContext) (Resu
 
 	usage := Usage{TokensDelta: uint32(cr.Usage.PromptTokens + cr.Usage.CompletionTokens)}
 	return Result{NewScript: script, Explain: explain}, usage, nil
+}
+
+// CompleteStream 使用 DeepSeek/OpenAI 兼容 SSE：每个 choices[].delta.content
+// 到达即回调；最后一个 include_usage chunk 提供精确 token 计量。
+func (p *DeepSeekProvider) CompleteStream(ctx context.Context, pc PromptContext, onDelta func(StreamDelta)) (Result, Usage, error) {
+	key := p.apiKey()
+	if key == "" {
+		return Result{}, Usage{}, &ProviderError{Category: CatClient, Detail: "missing API key (set DEEPSEEK_API_KEY)"}
+	}
+	body, err := p.requestBody(pc, true)
+	if err != nil {
+		return Result{}, Usage{}, &ProviderError{Category: CatClient, Detail: "encode request: " + err.Error(), err: err}
+	}
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return Result{}, Usage{}, &ProviderError{Category: CatClient, Detail: "build request: " + err.Error(), err: err}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+key)
+	client, idleTimeout := p.streamHTTPClient()
+	var headerTimer *time.Timer
+	if idleTimeout > 0 {
+		headerTimer = time.AfterFunc(idleTimeout, cancelStream)
+	}
+	resp, err := client.Do(req)
+	if headerTimer != nil {
+		headerTimer.Stop()
+	}
+	if err != nil {
+		return Result{}, Usage{}, &ProviderError{Category: CatNetwork, Detail: truncate(err.Error(), 200), Retryable: true, err: err}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+		cat, retryable := CatClient, false
+		if resp.StatusCode == http.StatusTooManyRequests {
+			cat, retryable = CatRateLimited, true
+		} else if resp.StatusCode >= 500 {
+			cat, retryable = CatNetwork, true
+		}
+		return Result{}, Usage{}, &ProviderError{Category: cat, Status: resp.StatusCode, Detail: truncate(string(raw), 200), Retryable: retryable}
+	}
+
+	var content strings.Builder
+	var promptTokens, completionTokens int
+	var idleTimer *time.Timer
+	if idleTimeout > 0 {
+		idleTimer = time.AfterFunc(idleTimeout, cancelStream)
+		defer idleTimer.Stop()
+	}
+	refreshIdleDeadline := func() {
+		if idleTimer != nil {
+			idleTimer.Reset(idleTimeout)
+		}
+	}
+	reader := bufio.NewReader(resp.Body)
+	streamDone := false
+	for !streamDone {
+		line, readErr := reader.ReadString('\n')
+		if len(line) > 0 {
+			refreshIdleDeadline()
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, ":") && strings.HasPrefix(line, "data:") {
+				data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if data == "[DONE]" {
+					streamDone = true
+				} else {
+					var chunk chatStreamChunk
+					if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+						return Result{}, Usage{}, &ProviderError{Category: CatNetwork, Detail: "decode stream chunk: " + err.Error(), Retryable: true, err: err}
+					}
+					for _, choice := range chunk.Choices {
+						if choice.Delta.ReasoningContent != "" && onDelta != nil {
+							onDelta(StreamDelta{Kind: StreamReasoning, Text: choice.Delta.ReasoningContent})
+						}
+						if choice.Delta.Content != "" {
+							content.WriteString(choice.Delta.Content)
+							if onDelta != nil {
+								onDelta(StreamDelta{Kind: StreamAnswer, Text: choice.Delta.Content})
+							}
+						}
+					}
+					if chunk.Usage != nil {
+						promptTokens = chunk.Usage.PromptTokens
+						completionTokens = chunk.Usage.CompletionTokens
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return Result{}, Usage{}, &ProviderError{Category: CatNetwork, Detail: "read stream: " + readErr.Error(), Retryable: true, err: readErr}
+		}
+	}
+	if promptTokens <= 0 && completionTokens <= 0 {
+		return Result{}, Usage{}, &ProviderError{Category: CatProvider, Detail: "stream missing usage fields"}
+	}
+	script, explain, ok := extractScript(content.String())
+	if !ok {
+		return Result{}, Usage{}, &ProviderError{Category: CatProvider, Detail: "stream contains no script code block"}
+	}
+	return Result{NewScript: script, Explain: explain}, Usage{TokensDelta: uint32(promptTokens + completionTokens)}, nil
+}
+
+// streamHTTPClient 去掉 http.Client.Timeout 对整个 SSE 响应的总时长限制。
+// 配置的 timeout 由 CompleteStream 改作“等待响应头”和“相邻流数据之间”
+// 的空闲超时：只要上游持续输出，长生成不会被误报成网络异常。
+func (p *DeepSeekProvider) streamHTTPClient() (*http.Client, time.Duration) {
+	base := p.HTTPClient
+	if base == nil {
+		base = &http.Client{Timeout: DeepSeekDefaultTimeout}
+	}
+	clone := *base
+	timeout := clone.Timeout
+	clone.Timeout = 0
+	return &clone, timeout
+}
+
+func (p *DeepSeekProvider) requestBody(pc PromptContext, stream bool) ([]byte, error) {
+	request := chatRequest{
+		Model: p.model(),
+		Messages: []chatMessage{
+			{Role: "system", Content: buildSystemPrompt(pc.Manual)},
+			{Role: "user", Content: buildUserPrompt(pc)},
+		},
+		Stream: stream,
+	}
+	if stream {
+		request.StreamOptions = &chatStreamOptions{IncludeUsage: true}
+		request.Thinking = &chatThinking{Type: "enabled"}
+		request.ReasoningEffort = "high"
+	}
+	return json.Marshal(request)
 }
 
 const maxResponseBytes = 4 << 20 // 4 MiB：防异常超大响应占内存
@@ -279,9 +411,33 @@ type chatMessage struct {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model           string             `json:"model"`
+	Messages        []chatMessage      `json:"messages"`
+	Stream          bool               `json:"stream"`
+	StreamOptions   *chatStreamOptions `json:"stream_options,omitempty"`
+	Thinking        *chatThinking      `json:"thinking,omitempty"`
+	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
+}
+
+type chatThinking struct {
+	Type string `json:"type"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+type chatStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 type chatResponse struct {

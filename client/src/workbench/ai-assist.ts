@@ -10,7 +10,10 @@ export interface AiQuotaState {
   globalTokensLeftK?: number
 }
 
-export const AI_MAX_PROMPT_CHARS = 500
+/** 合并实时模型增量，完整保留本次响应内容。 */
+export function appendAiStreamText(current: string, delta: string): string {
+  return delta ? current + delta : current
+}
 
 /** AI 面板消息流条目（说明/错误/成功提示；不含 prompt 原文全文回显）。 */
 export interface AiFeedItem {
@@ -21,12 +24,11 @@ export interface AiFeedItem {
 
 export type AiPromptCheck = { ok: true } | { ok: false; reason: string }
 
-/** 发送前的本地预检：空文本/超长/未进对局由调用方禁用按钮，这里兜底。 */
+/** 发送前的本地预检：空文本与串行 pending 兜底；不限制指令长度。 */
 export function checkAiPrompt(text: string, pending: boolean): AiPromptCheck {
   if (pending) return { ok: false, reason: '上一个 AI 请求仍在处理中' }
   const trimmed = text.trim()
   if (!trimmed) return { ok: false, reason: '请输入要 AI 修改的内容' }
-  if ([...trimmed].length > AI_MAX_PROMPT_CHARS) return { ok: false, reason: `指令过长（最多 ${AI_MAX_PROMPT_CHARS} 字）` }
   return { ok: true }
 }
 

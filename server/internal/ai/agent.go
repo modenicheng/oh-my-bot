@@ -67,6 +67,12 @@ func (a *Agent) SetPerception(snapshot string) { a.perception = snapshot }
 // 返回的 Outcome.Usage.RoundsDelta 恒为 1（一次提示一轮）；TokensDelta 为
 // Provider 实测；GlobalLeftK 由 Commit 后 Snapshot 回填。
 func (a *Agent) HandlePrompt(ctx context.Context, playerID uint64, instruction string) (HandleOutcome, error) {
+	return a.HandlePromptStream(ctx, playerID, instruction, nil)
+}
+
+// HandlePromptStream 与 HandlePrompt 相同，但当 provider 支持 SSE 时将文本增量
+// 立即回调；非流式 provider（含测试 mock）自动回退到 Complete。
+func (a *Agent) HandlePromptStream(ctx context.Context, playerID uint64, instruction string, onDelta func(StreamDelta)) (HandleOutcome, error) {
 	if a.quota == nil || a.provider == nil {
 		return HandleOutcome{}, fmt.Errorf("agent: quota/provider not wired")
 	}
@@ -90,7 +96,14 @@ func (a *Agent) HandlePrompt(ctx context.Context, playerID uint64, instruction s
 		return HandleOutcome{}, err
 	}
 
-	result, usage, perr := a.provider.Complete(ctx, pc)
+	var result Result
+	var usage Usage
+	var perr error
+	if streaming, ok := a.provider.(StreamingProvider); ok {
+		result, usage, perr = streaming.CompleteStream(ctx, pc, onDelta)
+	} else {
+		result, usage, perr = a.provider.Complete(ctx, pc)
+	}
 	if perr != nil {
 		// 失败也必须 Commit：释放串行位与并发位。轮次在 TryAcquire 时已
 		// 预留，所以 Commit 成功时仍返回一轮 usage 事实（token 为 0）。
