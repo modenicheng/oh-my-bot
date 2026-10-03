@@ -111,6 +111,53 @@ describe('confirmed feedback transitions', () => {
     expect(cueCount('death')).toBe(3)
   })
 
+  it('shakes only for an authoritative self kill, decays by tick, and ignores duplicates', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } }, nick: '阿乙' }), seenAt: 0 })
+    const remote = create(ServerEventSchema, { tick: 11, kind: { case: 'kill', value: { killer: 1, victim: 2, at: { x: 42, y: 0 } } } })
+    f.feedback.event(remote, f.world, map, true)
+    expect(f.feedback.cameraShake(11)).toEqual({ x: 0, y: 0 })
+
+    const own = create(ServerEventSchema, { tick: 12, kind: { case: 'kill', value: { killer: 2, victim: 1, at: { x: 40, y: 0 } } } })
+    f.feedback.event(own, f.world, map, true)
+    const first = f.feedback.cameraShake(12)
+    const middle = f.feedback.cameraShake(20)
+    expect(Math.hypot(first.x, first.y)).toBeGreaterThan(Math.hypot(middle.x, middle.y))
+    expect(middle).not.toEqual({ x: 0, y: 0 })
+    expect(f.feedback.cameraShake(28)).toEqual({ x: 0, y: 0 })
+
+    f.feedback.event(own, f.world, map, true)
+    expect(f.feedback.cameraShake(28)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('suppresses camera shake while inactive, hidden, resyncing, paused, or reduced', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } } }), seenAt: 0 })
+    const own = (tick: number) => create(ServerEventSchema, { tick, kind: { case: 'kill', value: { killer: 2, victim: 1, at: { x: 40, y: 0 } } } })
+
+    f.feedback.event(own(11), f.world, map, false)
+    expect(f.feedback.cameraShake(11)).toEqual({ x: 0, y: 0 })
+
+    vi.stubGlobal('document', { hidden: true })
+    f.feedback.event(own(12), f.world, map, true)
+    expect(f.feedback.cameraShake(12)).toEqual({ x: 0, y: 0 })
+
+    vi.stubGlobal('document', { hidden: false })
+    f.feedback.reset(); f.consume(snap(20, 0, true))
+    f.feedback.event(own(20), f.world, map, true)
+    expect(f.feedback.cameraShake(20)).toEqual({ x: 0, y: 0 })
+
+    f.feedback.event(own(21), f.world, map, true)
+    expect(f.feedback.cameraShake(21)).not.toEqual({ x: 0, y: 0 })
+    f.feedback.pause()
+    expect(f.feedback.cameraShake(21)).toEqual({ x: 0, y: 0 })
+
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    const reduced = new GameFeedback(vi.fn())
+    reduced.event(own(22), f.world, map, true)
+    expect(reduced.cameraShake(22)).toEqual({ x: 0, y: 0 })
+  })
+
   it('keeps successful hacking silent of cancellation when its delta arrives before the event', () => {
     const f = fixture(); f.consume(snap(10, 0, true))
     f.consume(snap(11, 10, false, 1))

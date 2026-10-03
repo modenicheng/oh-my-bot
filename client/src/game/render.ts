@@ -6,6 +6,8 @@ import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
 import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
 const ROBOT_R = 0.6
+const DEFAULT_VISION_RADIUS = 20
+const VISION_FEATHER = 3.5
 
 export function phaseName(p: number): string {
   switch (p) {
@@ -39,6 +41,8 @@ export class Renderer {
     ctx.fillStyle = ink.bg; ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
     const dpr = this.canvas.width / Math.max(1, cam.cw)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    const shake = extras.feedback?.cameraShake(world.tick)
+    if (shake && (shake.x || shake.y)) ctx.translate(shake.x, shake.y)
     drawArena(ctx, map, cam, world.phase)
     for (const def of map.uplinks) {
       const st = world.uplinks.get(def.id)
@@ -77,8 +81,130 @@ export class Renderer {
         r.shieldOn, r.dashing, (r.invulnUntil ?? 0) > performance.now(), world.tick)
       drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn)
     }
+    // Dim the rendered world itself; HUD feedback and speech stay above the fog.
+    this.drawVisionMask(world, map, cam)
     extras.feedback?.draw(ctx, cam)
     this.drawBubbles(world, cam, extras)
+  }
+
+  /** 20m 圆形视野 + 墙体投射的视线阴影，全部在当前 Canvas 内合成。 */
+  private drawVisionMask(world: WorldState, map: MapDefParsed, cam: Camera): void {
+    const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
+    if (!self || cam.scale <= 0) return
+
+    const ctx = this.ctx
+    const x = cam.toPxX(self.x)
+    const y = cam.toPxY(self.y)
+    const radius = DEFAULT_VISION_RADIUS * cam.scale
+    const feather = Math.min(VISION_FEATHER * cam.scale, radius * 0.28)
+    const clearRadius = Math.max(0, radius - feather)
+
+    ctx.save()
+    // Fill only outside the 20m circle. Do not use destination-out here:
+    // erasing the canvas would reveal the page background, not the world below.
+    ctx.fillStyle = 'rgba(5, 9, 14, 0.78)'
+    ctx.beginPath()
+    ctx.rect(0, 0, cam.cw, cam.ch)
+    ctx.arc(x, y, radius, 0, Math.PI * 2, true)
+    ctx.fill('evenodd')
+
+    // Put back only the parts of the radius hidden behind walls. Sampling rays
+    // avoids fragile corner-angle ordering for thin and wraparound AABBs.
+    const rays = 512
+    const step = Math.PI * 2 / rays
+    const hits: Array<number | null> = []
+    for (let i = 0; i < rays; i++) {
+      const angle = (i + 0.5) * step
+      const distance = this.nearestWallHit(self.x, self.y, angle, radius / cam.scale, map.walls)
+      hits.push(distance === null ? null : Math.max(0, (distance - 0.03) * cam.scale))
+    }
+
+    // Feather just behind each wall, then continue the shadow to the view edge.
+    // The narrow alpha bands remove the hard wall cut without polygon aliasing.
+    const wallFeather = Math.max(8, Math.min(24, 1.2 * cam.scale))
+    const featherBands = 8
+    for (let band = 0; band < featherBands; band++) {
+      const t0 = band / featherBands
+      const t1 = (band + 1) / featherBands
+      ctx.fillStyle = `rgba(5, 9, 14, ${0.78 * t1 * 0.65})`
+      ctx.beginPath()
+      for (let i = 0; i < rays; i++) {
+        const near = hits[i]
+        if (near == null || near >= radius) continue
+        const start = near + wallFeather * t0
+        const end = Math.min(radius, near + wallFeather * t1)
+        const angle = (i + 0.5) * step
+        const a0 = angle - step / 2
+        const a1 = angle + step / 2
+        ctx.moveTo(x + Math.cos(a0) * start, y + Math.sin(a0) * start)
+        ctx.lineTo(x + Math.cos(a1) * start, y + Math.sin(a1) * start)
+        ctx.lineTo(x + Math.cos(a1) * end, y + Math.sin(a1) * end)
+        ctx.lineTo(x + Math.cos(a0) * end, y + Math.sin(a0) * end)
+        ctx.closePath()
+      }
+      ctx.fill()
+    }
+
+    const shadowBands = 24
+    for (let band = 0; band < shadowBands; band++) {
+      const t0 = band / shadowBands
+      const t1 = (band + 1) / shadowBands
+      ctx.fillStyle = `rgba(5, 9, 14, ${0.78 * (t1 - t0) * 9})`
+      ctx.beginPath()
+      for (let i = 0; i < rays; i++) {
+        const near = hits[i]
+        if (near == null || near + wallFeather >= radius) continue
+        const start = near + wallFeather + (radius - near - wallFeather) * t0
+        const end = near + wallFeather + (radius - near - wallFeather) * t1
+        const angle = (i + 0.5) * step
+        const a0 = angle - step / 2
+        const a1 = angle + step / 2
+        ctx.moveTo(x + Math.cos(a0) * start, y + Math.sin(a0) * start)
+        ctx.lineTo(x + Math.cos(a1) * start, y + Math.sin(a1) * start)
+        ctx.lineTo(x + Math.cos(a1) * end, y + Math.sin(a1) * end)
+        ctx.lineTo(x + Math.cos(a0) * end, y + Math.sin(a0) * end)
+        ctx.closePath()
+      }
+      ctx.fill()
+    }
+
+    // Keep the circular feather visible where there is no wall shadow.
+    const edgeGradient = ctx.createRadialGradient(x, y, clearRadius, x, y, radius)
+    edgeGradient.addColorStop(0, 'rgba(5, 9, 14, 0)')
+    edgeGradient.addColorStop(0.72, 'rgba(5, 9, 14, 0.08)')
+    edgeGradient.addColorStop(1, 'rgba(5, 9, 14, 0.78)')
+    ctx.fillStyle = edgeGradient
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+
+  private nearestWallHit(x: number, y: number, angle: number, radius: number, walls: MapDefParsed['walls']): number | null {
+    const dx = Math.cos(angle)
+    const dy = Math.sin(angle)
+    let nearest = radius
+    let hit = false
+    for (const wall of walls) {
+      let enter = 0
+      let exit = radius
+      for (const [origin, delta, min, max] of [[x, dx, wall.min.x, wall.max.x], [y, dy, wall.min.y, wall.max.y]] as const) {
+        if (Math.abs(delta) < 1e-8) {
+          if (origin < min || origin > max) { enter = radius + 1; break }
+          continue
+        }
+        const t0 = (min - origin) / delta
+        const t1 = (max - origin) / delta
+        enter = Math.max(enter, Math.min(t0, t1))
+        exit = Math.min(exit, Math.max(t0, t1))
+      }
+      if (enter <= exit && exit >= 0 && enter <= radius) {
+        // Keep the wall face visible; the occluded region starts after its far edge.
+        nearest = Math.min(nearest, Math.max(0, exit))
+        hit = true
+      }
+    }
+    return hit ? nearest : null
   }
 
   /** say 气泡：随机器人移动的像素框，长消息换行，4s 后消失。 */

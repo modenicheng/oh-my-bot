@@ -5,6 +5,8 @@ import type { MapDefParsed, MapVec2 } from './mapdef'
 import type { WorldState } from './world'
 
 const tau = Math.PI * 2
+const CAMERA_SHAKE_TICKS = 16
+const CAMERA_SHAKE_DIRECTIONS = [[1, 1], [-1, 1], [-1, -1], [1, -1]] as const
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
 export type FeedbackKind = 'status' | 'kill' | 'uplink'
 type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'dash' | 'death'
@@ -28,6 +30,7 @@ export class GameFeedback {
   private countdownTicks = new Set<number>()
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
+  private shake: { tick: number; seed: number } | undefined
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
   constructor(
@@ -41,11 +44,11 @@ export class GameFeedback {
     this.hackers.clear(); this.completed.clear(); this.near = 0; this.baseline = false; this.lastDenied = -Infinity
     this.quietThroughTick = -1; this.phase = undefined; this.innerOpened = false
     this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
-    this.held = { fire: false, shield: false, interact: false }
+    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined
     audio.stopGame()
   }
 
-  pause(): void { this.effects = []; this.near = 0; this.baseline = false; audio.stopGame() }
+  pause(): void { this.effects = []; this.near = 0; this.baseline = false; this.shake = undefined; audio.stopGame() }
 
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
     const transitions = this.baseline && !snap.full && active && !document.hidden
@@ -173,10 +176,11 @@ export class GameFeedback {
       }
       case 'kill':
         if (k.value.at) { this.add('death', k.value.at, red, k.value.victim, 650); this.sound('death', k.value.at, world, 1, k.value.victim === selfId) }
+        if (k.value.victim === selfId) this.shake = { tick: ev.tick, seed: ev.tick + k.value.killer * 3 + k.value.victim * 7 }
         this.message(`${this.nickOf(k.value.killer, world)} 击毁 ${this.nickOf(k.value.victim, world)}`, 'kill')
         break
       case 'respawn':
-        if (k.value.robot === selfId) { audio.play('respawn'); this.message('机体已重生') }
+        if (k.value.robot === selfId) { this.shake = undefined; audio.play('respawn'); this.message('机体已重生') }
         break
       case 'matchStart': audio.play('matchStart'); break
       case 'matchEnd': audio.stopGame(); audio.play('matchEnd'); break
@@ -214,6 +218,16 @@ export class GameFeedback {
     if (reason && performance.now() - this.lastDenied > 700) {
       this.lastDenied = performance.now(); this.message(reason); audio.play('deny')
     }
+  }
+
+  cameraShake(tick: number): { x: number; y: number } {
+    const shake = this.shake
+    if (!shake || this.reduced.matches) return { x: 0, y: 0 }
+    const age = Math.max(0, tick - shake.tick)
+    if (age >= CAMERA_SHAKE_TICKS) { this.shake = undefined; return { x: 0, y: 0 } }
+    const decay = 1 - age / CAMERA_SHAKE_TICKS
+    const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(shake.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
+    return { x: Math.round(direction[0] * 8 * decay), y: Math.round(direction[1] * 6 * decay) }
   }
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {

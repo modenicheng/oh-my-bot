@@ -726,7 +726,25 @@ async function bannerPass(browser, fix, reduced = false) {
   await ctx.addInitScript(AUDIO_INIT)
   await ctx.addInitScript(() => {
     const drawText = CanvasRenderingContext2D.prototype.fillText
+    const setTransform = CanvasRenderingContext2D.prototype.setTransform
+    const translate = CanvasRenderingContext2D.prototype.translate
+    const save = CanvasRenderingContext2D.prototype.save
+    const frameTransforms = new WeakMap()
     window.__sayPaint = null
+    window.__cameraShakes = []
+    CanvasRenderingContext2D.prototype.setTransform = function(...args) {
+      if (this.canvas?.id === 'game-canvas') frameTransforms.set(this, (frameTransforms.get(this) || 0) + 1)
+      return setTransform.apply(this, args)
+    }
+    CanvasRenderingContext2D.prototype.translate = function(x, y) {
+      if (this.canvas?.id === 'game-canvas' && frameTransforms.get(this) === 2 && (x || y)) window.__cameraShakes.push({ x, y, at: performance.now() })
+      frameTransforms.set(this, 0)
+      return translate.call(this, x, y)
+    }
+    CanvasRenderingContext2D.prototype.save = function() {
+      if (this.canvas?.id === 'game-canvas' && frameTransforms.get(this) === 2) frameTransforms.set(this, 0)
+      return save.call(this)
+    }
     CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) {
       if (text === 'PIXEL SAY 气泡') window.__sayPaint = { x, y, at: performance.now(), font: this.font }
       return drawText.call(this, text, x, y, ...args)
@@ -793,6 +811,7 @@ async function bannerPass(browser, fix, reduced = false) {
     fix.bcast(kill)
     await until(async () => /击毁/.test(await hudMsgText(page)), 'kill banner')
     assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'kill')
+    assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'remote defeat never shakes the local camera')
     await sleep(230) // measure the final frame after the stepped banner entrance
     const banner = await page.locator('#hud-msg').boundingBox(), hp = await page.locator('#hud-left').boundingBox()
     assert.ok(banner.y + banner.height <= hp.y - 8 && Math.abs(banner.x - hp.x) < 2, 'kill banner anchored above HP/EN')
@@ -800,6 +819,28 @@ async function bannerPass(browser, fix, reduced = false) {
     sound = await audioStarted(page)
     fix.bcast(kill); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate kill is silent')
+
+    await page.evaluate(() => { window.__cameraShakes = [] })
+    const defeated = fix.event('kill', EvKillSchema, { killer: ENEMY_ID, victim: SELF_ID, at: { x: 20, y: 0 } })
+    fix.bcast(defeated)
+    if (reduced) {
+      await sleep(80)
+      assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'reduced motion suppresses defeat camera shake')
+    } else {
+      await until(async () => await page.evaluate(() => window.__cameraShakes.length > 0), 'self defeat camera shake')
+      const firstShake = await page.evaluate(() => window.__cameraShakes[0])
+      assert.ok(Math.hypot(firstShake.x, firstShake.y) >= 8, `self defeat starts with a strong camera shake (${firstShake.x}, ${firstShake.y})`)
+      for (let i = 0; i < 7; i++) await fix.step(() => {})
+      await until(async () => await page.evaluate(() => window.__cameraShakes.length > 4), 'camera shake decay samples')
+      const shakes = await page.evaluate(() => window.__cameraShakes)
+      const lastShake = shakes[shakes.length - 1]
+      assert.ok(Math.hypot(lastShake.x, lastShake.y) < Math.hypot(firstShake.x, firstShake.y), 'camera shake decays across authoritative ticks')
+      await fix.step(() => {})
+      await sleep(80)
+      const count = await page.evaluate(() => window.__cameraShakes.length)
+      fix.bcast(defeated); await sleep(80)
+      assert.equal(await page.evaluate(() => window.__cameraShakes.length), count, 'duplicate self defeat does not restart camera shake')
+    }
     const hack = fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 })
     fix.bcast(hack)
     await until(async () => /黑入完成/.test(await hudMsgText(page)), 'uplink banner')
