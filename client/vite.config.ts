@@ -14,7 +14,17 @@ const proxyTarget: ProxyOptions['target'] = upstream.startsWith('unix:')
   ? { protocol: 'http:', host: '127.0.0.1', port: 80, socketPath: upstream.slice('unix:'.length) }
   : upstream
 
+// monaco 必须排除出依赖预打包：它是懒加载的（编辑器展开才 import './editor'），
+// 而 vite 在会话中重跑 optimizer（如 lockfile 变更、运行中发现新依赖）会重写
+// node_modules/.vite/deps 下的 chunk 文件与 ?v= 版本参数。同一页面先后拿到两代
+// 预打包产物时，monaco 的 platform.js Registry 单例会被求值两次，第二次
+// Registry.add('editor.modesRegistry') 触发 "There is already an extension with
+// this id" 断言，编辑器加载失败。exclude 后 dev 直接按稳定 URL 原样供给 esm 文件
+// （1511 个文件中编辑器路径约 744 个，首开略慢但无状态分叉）；生产构建不受影响。
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ['monaco-editor'],
+  },
   server: {
     host: '127.0.0.1',
     proxy: {
