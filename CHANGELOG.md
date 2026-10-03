@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-alpha.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **ai:** reread script rev inside the serial section before submit ([4e7e311](https://github.com/modenicheng/oh-my-bot/commit/4e7e311661fd9fb8438f9af4d795f125b44bb206))
+* **client:** keep monaco out of vite dep optimizer to prevent double registry load ([#8](https://github.com/modenicheng/oh-my-bot/issues/8)) ([5a5f9f3](https://github.com/modenicheng/oh-my-bot/commit/5a5f9f345b4dcf90b882cb33fdd77c52ded6200c))
+
 ## [1.0.0-alpha.1](https://github.com/modenicheng/oh-my-bot/compare/v0.2.0...v1.0.0-alpha.1) (2026-10-03)
 
 
