@@ -4,6 +4,9 @@
 // （未置位轴不抢占脚本控制 —— 见 docs/manual/rules/controls.md 仲裁语义）。
 // 接管为边沿触发：仅非 repeat 的 keydown / 真实指针事件才置位；重复系统 keyrepeat
 // 帧、恢复 Space 后仍按住的键不得重新抢占（ADR-0009）。
+// 瞄准 guard：辅助开启且炮塔轴归脚本/官方 Snippet 时，鼠标移动不抢炮塔轴
+// （开自瞄但手点左键的玩家不该被点击微动打断辅助瞄准）；R 显式夺取。
+// guard 是纯客户端采样策略：置位与否只影响本帧 axis_mask，服务端仲裁语义不变。
 import { create } from '@bufbuild/protobuf'
 import { ClientInputSchema, type ClientInput } from '@omb/protocol'
 import type { Camera } from './camera'
@@ -41,6 +44,11 @@ export class InputSampler {
   private disposers: (() => void)[] = []
   /** assist 开关状态（本地镜像，快照权威回写） */
   assistOn = false
+  /** 瞄准 guard：true 期间鼠标移动/点击微动不置位 AXIS_AIM，由 R 显式夺取。
+   * 由 GameController 每帧按 SelfState（assist_on + turret_src）回写。 */
+  aimUnderScript = false
+  /** guard 生效期间检测到被吞掉的鼠标移动时回调（HUD 提示；节流归 HUD）。 */
+  onAimGuarded: (() => void) | null = null
 
   attach(canvas: HTMLCanvasElement, cam: Camera): void {
     this.detach()
@@ -77,7 +85,10 @@ export class InputSampler {
     const onMouseMove = (e: MouseEvent) => {
       // 指针微抖也会持续置位：只在真实移动（坐标变化）时抢占 aim 轴。
       if (e.clientX !== this.pointer.x || e.clientY !== this.pointer.y) {
-        this.stickyAxes |= AXIS_AIM
+        // guard：脚本正控制炮塔且人未持有该轴时，鼠标移动只更新指针，
+        // 不发 aim mask（否则开自瞄手点左键时点击微动就永远打断辅助瞄准）。
+        if (!this.aimUnderScript || this.stickyAxes & AXIS_AIM) this.stickyAxes |= AXIS_AIM
+        else this.onAimGuarded?.()
       }
       this.pointer.x = e.clientX
       this.pointer.y = e.clientY
@@ -156,6 +167,7 @@ export class InputSampler {
     this.releaseAxes = 0
     this.canvas = null
     this.cam = null
+    this.aimUnderScript = false
   }
 
   /** Every draw and input sample uses the same current camera and CSS pointer position. */
@@ -175,6 +187,20 @@ export class InputSampler {
     this.assistOn = !this.assistOn
     this.resetTakeover()
     return true
+  }
+
+  /** R：显式夺取炮塔轴（guard 生效时唯一入口）。置位 AXIS_AIM 粘滞后
+   * 帧流持续携带 aim mask，服务端炮塔轴归人；guard 随之失效（人已持有）。
+   * 已持有时幂等返回 false，不重复提示。 */
+  seizeAim(): boolean {
+    if (!this.canvas || this.stickyAxes & AXIS_AIM) return false
+    this.stickyAxes |= AXIS_AIM
+    return true
+  }
+
+  /** 人是否已持有炮塔轴（粘滞位；guard 计算用，不含单帧释放帧）。 */
+  holdsAim(): boolean {
+    return (this.stickyAxes & AXIS_AIM) !== 0
   }
 
   /**

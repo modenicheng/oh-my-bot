@@ -418,6 +418,7 @@ window.addEventListener('keydown', (e) => {
     const action = battleKeyAction(e.code)
     if (action === 'assist') { e.preventDefault(); game.toggleAssist() }
     else if (action === 'chat') { e.preventDefault(); game.openChat() }
+    else if (action === 'aim') { e.preventDefault(); game.seizeAim() }
   }
 })
 

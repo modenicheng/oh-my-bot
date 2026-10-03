@@ -111,3 +111,89 @@ describe('fine-grained manual takeover', () => {
     expect(next.active).toBe(false)
   })
 })
+
+/** 瞄准 guard：脚本控制炮塔时鼠标移动不抢炮塔轴，R 显式夺取。 */
+describe('aim guard under script turret control', () => {
+  let input: InputSampler, win: Target, canvas: Target, cam: Camera
+  beforeEach(() => {
+    win = new Target(); canvas = new Target(); cam = new Camera()
+    vi.stubGlobal('window', win)
+    vi.stubGlobal('document', new Target())
+    cam.resize(800, 500, 80); cam.follow(10, 10)
+    input = new InputSampler(); input.attach(canvas as unknown as HTMLCanvasElement, cam)
+  })
+  afterEach(() => { input.detach(); vi.unstubAllGlobals() })
+
+  it('mouse moves do not take the aim axis while the guard is on, but still report pointer', () => {
+    input.aimUnderScript = true
+    send(canvas, 'mousemove', { clientX: 300, clientY: 200 })
+    send(canvas, 'mousemove', { clientX: 400, clientY: 260 })
+    expect(input.sample(10, 10).msg.axisMask & AXIS_AIM).toBe(0)
+    // guard 只挡抢占，不挡指针更新：R 夺取后 aim 用的是最新坐标而非初始 (0,0)
+    input.seizeAim()
+    const aim = input.aimAt(10, 10)
+    expect(aim).not.toBeUndefined()
+    const expectAim = Math.atan2(
+      cam.toWorldY((260 - 20) * 500 / 500) - 10,
+      cam.toWorldX((400 - 40) * 800 / 800) - 10)
+    expect(aim).toBeCloseTo(expectAim, 6)
+  })
+
+  it('guarded mouse move fires the onAimGuarded callback exactly once per move event', () => {
+    let calls = 0
+    input.aimUnderScript = true
+    input.onAimGuarded = () => { calls++ }
+    send(canvas, 'mousemove', { clientX: 300, clientY: 200 })
+    send(canvas, 'mousemove', { clientX: 310, clientY: 210 })
+    expect(calls).toBe(2)
+    // 坐标未变化的重复事件既不抢占也不提示
+    send(canvas, 'mousemove', { clientX: 310, clientY: 210 })
+    expect(calls).toBe(2)
+  })
+
+  it('left-click still takes the fire axis under the guard; the click micro-move does not leak aim', () => {
+    input.aimUnderScript = true
+    // 点击必伴随微动：mousedown 里先回放 onMouseMove，再置 fire
+    send(canvas, 'mousedown', { button: 0, clientX: 300, clientY: 200 })
+    const { msg } = input.sample(10, 10)
+    expect(msg.axisMask & AXIS_FIRE).toBe(AXIS_FIRE)
+    expect(msg.axisMask & AXIS_AIM).toBe(0)
+    expect(msg.fire).toBe(true)
+  })
+
+  it('R seizes the aim axis explicitly; guard no longer applies once held', () => {
+    input.aimUnderScript = true
+    expect(input.seizeAim()).toBe(true)
+    send(canvas, 'mousemove', { clientX: 300, clientY: 200 })
+    const { msg } = input.sample(10, 10)
+    expect(msg.axisMask & AXIS_AIM).toBe(AXIS_AIM)
+    // 幂等：已持有时再按 R 不重复提示
+    expect(input.seizeAim()).toBe(false)
+  })
+
+  it('Space restore clears the held aim axis; the guard re-arms after script turret returns', () => {
+    input.aimUnderScript = true
+    input.seizeAim()
+    expect(input.sample(10, 10).msg.axisMask & AXIS_AIM).toBe(AXIS_AIM)
+    // Space 交回辅助（服务端分支 2：把人工轴交回脚本）
+    input.toggleAssist()
+    input.aimUnderScript = true // 控制器下一帧回写 guard（脚本重新接管炮塔）
+    send(canvas, 'mousemove', { clientX: 400, clientY: 260 })
+    expect(input.sample(10, 10).msg.axisMask & AXIS_AIM).toBe(0)
+    // R 可再次夺取
+    expect(input.seizeAim()).toBe(true)
+    expect(input.sample(10, 10).msg.axisMask & AXIS_AIM).toBe(AXIS_AIM)
+  })
+
+  it('guard off (assist closed or human turret) keeps classic per-frame mouse takeover', () => {
+    input.aimUnderScript = false
+    send(canvas, 'mousemove', { clientX: 300, clientY: 200 })
+    expect(input.sample(10, 10).msg.axisMask & AXIS_AIM).toBe(AXIS_AIM)
+  })
+
+  it('detach resets the guard so a fresh attach never starts guarded', () => {
+    input.aimUnderScript = true
+    input.detach()
+    expect(input.aimUnderScript).toBe(false)
+  })
+})
