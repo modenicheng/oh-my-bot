@@ -184,9 +184,29 @@ go test ./server/internal/glue/ -run TestFrameBudget -v
 
 # 感知裁剪基准（多观察者 AOI）
 go test ./server/internal/snapshot/ -bench . -benchtime 100x
+
+# 64 脚本满载并行（重载脚本；看 ns/op、deferred_pct、allocs/op）
+go test ./server/internal/script/ -bench BenchmarkRunPool64Heavy -benchtime 30x -run XXX
+
+# 单 tick 分量拆解（空底座 / scan / navigateTo / 重载脚本）
+go test ./server/internal/script/ -bench 'BenchmarkTick(EmptyJS|ScanOnly|NavWalls|HeavyReal)' -benchtime 3s -run XXX
 ```
 
 已知热点：64 观察者可见性约 260μs/人（T3 优化项，见 `docs/plans/round-2.md` §5）。
+
+**脚本/GC 调优（ADR-0015）**：64 脚本满载时每帧产生 ~9MB 短命 goja 对象，
+默认 GOGC=100 会让 GC assist 耗掉 ~40% 帧预算。生产环境设置
+`OMB_GC_PERCENT=400`（或 config.yaml `gc: percent: 400`）；验收方法：
+
+```bash
+GOGC=400 go test ./server/internal/script/ -bench BenchmarkRunPool64Heavy -benchtime 30x -run XXX
+# 对比无 GOGC 的同基准：帧时应降 ~30-45%，deferred_pct 应为 0
+```
+
+注意：`-test.memprofilerate=1` 只用于分配归因（会把帧预算拖爆，
+deferred 会到 99%），不能当计时基线。perf 归因时先看 GC 系符号
+（scanobject/mallocgc）占比，再看 goja 符号；`perf_event_paranoid`
+受限时用 Go pprof 代替（符号更准）。
 
 ## 常见问题
 

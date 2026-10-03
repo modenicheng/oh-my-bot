@@ -34,10 +34,15 @@ type resultSink struct {
 	mu      sync.Mutex
 	pending map[uint32]struct{}
 	out     []TickResult
+	notify  chan struct{}
 }
 
 func newResultSink(ids []uint32) *resultSink {
-	s := &resultSink{pending: make(map[uint32]struct{}, len(ids))}
+	s := &resultSink{
+		pending: make(map[uint32]struct{}, len(ids)),
+		out:     make([]TickResult, 0, MaxPoolWorkers),
+		notify:  make(chan struct{}, 1),
+	}
 	for _, id := range ids {
 		s.pending[id] = struct{}{}
 	}
@@ -53,12 +58,17 @@ func (s *resultSink) addPending(id uint32) {
 
 func (s *resultSink) deliver(res TickResult) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, ok := s.pending[res.ID]; !ok {
+		s.mu.Unlock()
 		return // 未知/重复投递，丢弃
 	}
 	delete(s.pending, res.ID)
 	s.out = append(s.out, res)
+	s.mu.Unlock()
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
 }
 
 // finish freezes completed and pending IDs in one critical section. Ownership
@@ -95,11 +105,12 @@ type RunPool struct {
 }
 
 type poolJob struct {
-	id    uint32
-	frame sim.ScriptFrame
-	rev   uint32
-	sink  *resultSink
-	quota time.Duration
+	id       uint32
+	frame    sim.ScriptFrame
+	rev      uint32
+	runtime  *GojaRuntime
+	sink     *resultSink
+	deadline time.Time
 }
 
 // NewRunPool 创建执行池。cfg.PoolSize <= 0 时取 NumWorkers()
@@ -174,16 +185,13 @@ func (p *RunPool) Submit(id uint32, frame sim.ScriptFrame, deadline time.Time) e
 	sink.addPending(id) // 注册本帧待收 id（deliver 只接受注册过的 id）
 	p.mu.Unlock()
 
-	quota := time.Until(deadline)
-	if quota > rt.cfg.TickTimeout {
-		quota = rt.cfg.TickTimeout
-	}
-	if quota <= 0 {
-		sink.deliver(TickResult{ID: id, Rev: rt.Rev(), Deferred: true})
+	rev := rt.Rev()
+	if !time.Now().Before(deadline) {
+		sink.deliver(TickResult{ID: id, Rev: rev, Deferred: true})
 		return &DeferredError{ID: id}
 	}
 
-	job := poolJob{id: id, frame: frame, rev: rt.Rev(), sink: sink, quota: quota}
+	job := poolJob{id: id, frame: frame, rev: rev, runtime: rt, sink: sink, deadline: deadline}
 	select {
 	case p.jobs <- job:
 		return nil
@@ -212,14 +220,11 @@ func (p *RunPool) worker() {
 }
 
 func (p *RunPool) runJob(job poolJob) TickResult {
-	p.mu.Lock()
-	rt := p.runtimes[job.id]
-	p.mu.Unlock()
-	if rt == nil {
-		return TickResult{ID: job.id, Rev: job.rev, Err: ErrNoSuchScript}
+	if !time.Now().Before(job.deadline) {
+		return TickResult{ID: job.id, Rev: job.rev, Deferred: true}
 	}
-	cmds, err := rt.tickWithQuota(job.frame, job.quota)
-	return TickResult{ID: job.id, Rev: rt.Rev(), Commands: cmds, Err: err}
+	cmds, deferred, err := job.runtime.tickBeforeDeadline(job.frame, job.deadline)
+	return TickResult{ID: job.id, Rev: job.runtime.Rev(), Commands: cmds, Deferred: deferred, Err: err}
 }
 
 // Collect 收齐当前帧全部结果：阻塞至全部完成或 deadline。
@@ -234,13 +239,19 @@ func (p *RunPool) Collect(deadline time.Time) []TickResult {
 		return nil
 	}
 
-	wait := time.NewTicker(50 * time.Microsecond)
-	defer wait.Stop()
-	for time.Now().Before(deadline) {
-		if sink.isEmpty() {
+	for !sink.isEmpty() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			break
 		}
-		<-wait.C
+		timer := time.NewTimer(remaining)
+		select {
+		case <-sink.notify:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
+		}
 	}
 
 	results, pending := sink.finish()

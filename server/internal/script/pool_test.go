@@ -131,6 +131,50 @@ func TestPoolDeferredIsIdleNotCrash(t *testing.T) {
 	}
 }
 
+func TestPoolQueuedJobPastDeadlineDoesNotExecute(t *testing.T) {
+	p := NewRunPool(Config{PoolSize: 1, TickTimeout: 20 * time.Millisecond})
+	defer p.Close()
+
+	blocker := NewGojaRuntime(Config{TickTimeout: 20 * time.Millisecond})
+	if err := blocker.Load(`function tick(ctx){ for (;;) {} }`); err != nil {
+		t.Fatal(err)
+	}
+	stateful := NewGojaRuntime(Config{TickTimeout: 20 * time.Millisecond})
+	if err := stateful.Load(`var n = 0; function tick(ctx){ n++; ctx.api.say("n=" + n); }`); err != nil {
+		t.Fatal(err)
+	}
+	p.Register(1, blocker)
+	p.Register(2, stateful)
+
+	frame := testFrame()
+	deadline := time.Now().Add(3 * time.Millisecond)
+	if err := p.Submit(1, frame, deadline); err != nil {
+		t.Fatalf("submit blocker: %v", err)
+	}
+	if err := p.Submit(2, frame, deadline); err != nil {
+		t.Fatalf("submit queued: %v", err)
+	}
+	results := p.Collect(deadline)
+	if len(results) != 2 {
+		t.Fatalf("frame 1 results: %+v", results)
+	}
+
+	// Give the worker enough time to drain the old queue. A job that Collect
+	// already marked deferred must not execute later and mutate module state.
+	time.Sleep(15 * time.Millisecond)
+	next := time.Now().Add(50 * time.Millisecond)
+	if err := p.Submit(2, frame, next); err != nil {
+		t.Fatalf("submit next frame: %v", err)
+	}
+	results = p.Collect(next)
+	if len(results) != 1 || results[0].Err != nil || results[0].Deferred || results[0].Commands.Say == nil {
+		t.Fatalf("frame 2 result: %+v", results)
+	}
+	if got := *results[0].Commands.Say; got != "n=1" {
+		t.Fatalf("queued deferred tick executed after deadline: got %q, want n=1", got)
+	}
+}
+
 // ---- 64 并行 -race ----
 
 func TestPool64ParallelRace(t *testing.T) {

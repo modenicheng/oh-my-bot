@@ -38,6 +38,7 @@ type GojaRuntime struct {
 
 	interruptVal any // 配额中断哨兵载荷（闭包类型，脚本无法伪造）
 	console      *consoleState
+	bindings     *vmBindings // 装载期原生方法缓存（随候选 VM 重建）
 	closed       bool
 }
 
@@ -206,6 +207,7 @@ func (r *GojaRuntime) loadLocked(baseSource string, snips []snippet.Setting) err
 	}
 
 	r.vm = vm
+	r.bindings = newVMBindings(vm)
 	r.tickFn = tickFn
 	r.snipFns = snipFns
 	r.rev = nextRevision
@@ -332,10 +334,30 @@ func (r *GojaRuntime) tickWithQuota(frame sim.ScriptFrame, quota time.Duration) 
 	return r.tickLocked(frame, quota)
 }
 
+// tickBeforeDeadline 串行取得 runtime 后重新计算剩余帧预算。排队或等待
+// Hot Swap 导致截止已过时，任务必须直接 deferred，不能再推进模块状态。
+func (r *GojaRuntime) tickBeforeDeadline(frame sim.ScriptFrame, deadline time.Time) (sim.ScriptCommands, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	quota := time.Until(deadline)
+	if quota <= 0 {
+		return sim.ScriptCommands{}, true, nil
+	}
+	if quota > r.cfg.TickTimeout {
+		quota = r.cfg.TickTimeout
+	}
+	cmds, err := r.tickLockedHeld(frame, quota)
+	return cmds, false, err
+}
+
 // tickLocked 互斥下执行（与 Load/Close 串行，保证 Hot Swap 原子性）。
 func (r *GojaRuntime) tickLocked(frame sim.ScriptFrame, quota time.Duration) (sim.ScriptCommands, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.tickLockedHeld(frame, quota)
+}
+
+func (r *GojaRuntime) tickLockedHeld(frame sim.ScriptFrame, quota time.Duration) (sim.ScriptCommands, error) {
 	if r.closed || r.vm == nil || (r.tickFn == nil && len(r.snipFns) == 0) {
 		return sim.ScriptCommands{}, ErrNoModule
 	}
@@ -350,10 +372,14 @@ func (r *GojaRuntime) tickLocked(frame sim.ScriptFrame, quota time.Duration) (si
 		vm.ClearInterrupt()
 	}()
 
+	// tick 结束（含异常路径）清空 hooks 的帧引用，避免 64 个 runtime
+	// 各自持有最后一帧的 Observation 副本延迟回收（每次 tick 都会重设）。
+	defer r.bindings.hooks.release()
+
 	// —— 阶段1：玩家源码（完整权限；归因 = 玩家 Script）——
 	playerCmd := newCommandCollector()
 	if r.tickFn != nil {
-		ctxObj := buildTickContext(vm, frame, playerCmd)
+		ctxObj := r.bindings.buildTickContext(frame, playerCmd)
 		if _, err := r.tickFn(goja.Undefined(), ctxObj); err != nil {
 			return sim.ScriptCommands{}, classifyErr(err, r.interruptVal)
 		}
@@ -363,7 +389,7 @@ func (r *GojaRuntime) tickLocked(frame sim.ScriptFrame, quota time.Duration) (si
 	// —— 阶段2：官方 snippet（受限视图；玩家已操作轴丢弃；归因 = N）——
 	snipCmd := newSnippetCollector(playerAxes)
 	if len(r.snipFns) > 0 {
-		ctxObj := buildTickContext(vm, frame, snipCmd)
+		ctxObj := r.bindings.buildTickContext(frame, snipCmd)
 		for _, fn := range r.snipFns {
 			if _, err := fn(goja.Undefined(), ctxObj); err != nil {
 				// 官方模块异常不应拖垮玩家源码：丢弃本 tick snippet 产出，

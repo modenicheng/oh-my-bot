@@ -74,6 +74,10 @@ WorkingDirectory=/opt/omb
 # 对外服务必须显式 -addr（默认 127.0.0.1 只有本机可达）
 ExecStart=/opt/omb/omb -addr :27182
 Restart=on-failure
+# GC 调优（ADR-0015：64 脚本满载时默认 GOGC=100 会耗掉 ~40% 帧预算）
+# 也可写进 /opt/omb/config.yaml 的 gc: 段，二选一
+Environment=OMB_GC_PERCENT=400
+# Environment=OMB_GC_MEMORY_LIMIT=1GiB   # 软上限兑底，内存紧张时再加
 
 [Install]
 WantedBy=multi-user.target

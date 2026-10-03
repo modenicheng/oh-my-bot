@@ -18,7 +18,9 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -82,6 +84,79 @@ const frontendMissingHTML = `<!doctype html>
 </html>
 `
 
+// applyGCSettings 应用 gc.* 运行时调优（config.yaml / 环境变量，见
+// ai.GCConfig 文档）。必须在第一个房间创建（即第一台 goja VM 分配）之前
+// 调用；放在 main 早期保证这一点。解析失败记日志并保留原值——GC 调优
+// 失效不应阻止服务器启动。
+func applyGCSettings(cfg ai.ServerConfig) {
+	if cfg.GC.Percent > 0 {
+		p := cfg.GC.Percent
+		if p > ai.GCPercentMax {
+			p = ai.GCPercentMax
+		}
+		debug.SetGCPercent(p)
+		log.Printf("gc: GOGC=%d (from config)", p)
+	}
+	if cfg.GC.MemoryLimit != "" {
+		if limit, err := parseByteSize(cfg.GC.MemoryLimit); err == nil {
+			old := debug.SetMemoryLimit(limit)
+			if limit > 0 {
+				log.Printf("gc: GOMEMLIMIT=%s (previous soft limit %s)", cfg.GC.MemoryLimit, byteSizeHuman(old))
+			}
+		} else {
+			log.Printf("gc: invalid gc.memory_limit %q: %v (kept default)", cfg.GC.MemoryLimit, err)
+		}
+	}
+}
+
+// parseByteSize 解析 "512MiB"/"1GiB"/"768KB"/"1073741824" 字节量。
+// 单位不区分大小写；裸数字按字节。
+func parseByteSize(v string) (int64, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, fmt.Errorf("empty value")
+	}
+	i := 0
+	for i < len(v) && (v[i] >= '0' && v[i] <= '9') {
+		i++
+	}
+	num, err := strconv.ParseInt(v[:i], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	unit := strings.TrimSpace(strings.ToLower(v[i:]))
+	switch unit {
+	case "", "b":
+		return num, nil
+	case "k", "kb":
+		return num * 1024, nil
+	case "kib":
+		return num * 1024, nil
+	case "m", "mb", "mib":
+		return num * 1024 * 1024, nil
+	case "g", "gb", "gib":
+		return num * 1024 * 1024 * 1024, nil
+	default:
+		return 0, fmt.Errorf("unknown unit %q", unit)
+	}
+}
+
+// byteSizeHuman 人类可读字节数（日志用）。
+func byteSizeHuman(v int64) string {
+	switch {
+	case v >= 1<<30:
+		return fmt.Sprintf("%.1fGiB", float64(v)/(1<<30))
+	case v >= 1<<20:
+		return fmt.Sprintf("%.1fMiB", float64(v)/(1<<20))
+	case v >= 1<<10:
+		return fmt.Sprintf("%.1fKiB", float64(v)/(1<<10))
+	case v >= 0:
+		return fmt.Sprintf("%dB", v)
+	default:
+		return "off"
+	}
+}
+
 func main() {
 	addr := flag.String("addr", envAddr(), "listen address: host:port, :port (all interfaces), unix:/path/to.sock, or unix:@name (Linux abstract socket)")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -97,7 +172,9 @@ func main() {
 	serverCfg, cfgErr := ai.LoadServerConfig("")
 	if cfgErr != nil {
 		log.Printf("AI disabled: configuration error: %v", cfgErr)
-	} else if serverCfg.AI.Enabled && serverCfg.APIKey != "" {
+	}
+	applyGCSettings(serverCfg)
+	if cfgErr == nil && serverCfg.AI.Enabled && serverCfg.APIKey != "" {
 		manualCorpus := loadAIManualCorpusFS(manualSource, manualRoot)
 		hub.SetAIService(func() *glue.AIService {
 			return glue.NewAIService(serverCfg, manualCorpus)

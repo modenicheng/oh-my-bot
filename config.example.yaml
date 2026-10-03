@@ -10,3 +10,12 @@ quota:
   player_tokens: 300000
   global_tokens: 2000000
   max_concurrency: 20
+
+# Go runtime GC tuning (see server/internal/ai/config.go GCConfig for rationale:
+# 64-script 60Hz matches produce ~9MB/tick short-lived goja objects; default
+# GOGC=100 burns ~40% of frame budget on GC assist. Measured on the 8-core
+# target host: gc.percent=400 -> frame time -34%, script deferrals 1.4% -> 0%).
+# Env overrides: OMB_GC_PERCENT / OMB_GC_MEMORY_LIMIT.
+gc:
+  percent: 400
+  # memory_limit: 1GiB   # soft limit backstop (GOMEMLIMIT); optional

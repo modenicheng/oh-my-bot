@@ -16,8 +16,32 @@ import (
 type ServerConfig struct {
 	AI     AIConfig
 	Quota  QuotaConfig
+	GC     GCConfig
 	APIKey string // DeepSeek key（.env/环境变量 DEEPSEEK_API_KEY；不写日志）
 }
+
+// GCConfig Go 运行时垃圾回收参数（config.yaml gc.* 段）。
+//
+// 背景（2026-10 bit-333 perf 剖析）：64 脚本 60Hz 对局每帧产生 ~9MB
+// 短命 goja 对象，默认 GOGC=100 下 GC 协助吞掉 ~40% 帧预算（8 worker
+// 只剩 4.3x 有效并行）。GOGC=400 实测帧时 -34%（7.5ms→4.96ms）、
+// script deferred 1.4%→0%。这些对象是 tick 级垃圾，加大触发间隔
+// 只影响峰值堆（几百 MB 量级），不影响稳态内存。
+type GCConfig struct {
+	// Percent 等价 GOGC：触发下次 GC 的堆增长百分比。0 = 不调整
+	//（沿用进程默认 100 或外部 GOGC 环境变量）。
+	Percent int
+	// MemoryLimit 等价 GOMEMLIMIT（如 "512MiB"）。空 = 不设置。
+	// 与 Percent 配合使用可在拿到 GC 收益的同时给内存兜底。
+	MemoryLimit string
+}
+
+const (
+	// GCPercentDefault 生产推荐值（见 GCConfig 文档）。
+	GCPercentDefault = 400
+	// GCPercentMax 防御上限：>2000 后收益趋平、风险（堆溢出 OOM）上升。
+	GCPercentMax = 2000
+)
 
 // AIConfig AI 通道参数（config.yaml ai.* 段）。
 type AIConfig struct {
@@ -113,6 +137,12 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 	if n, ok := envUint("QUOTA_MAX_CONCURRENCY"); ok {
 		cfg.Quota.MaxConcurrency = int(n)
 	}
+	if n, ok := envUint("OMB_GC_PERCENT"); ok {
+		cfg.GC.Percent = int(n)
+	}
+	if v := os.Getenv("OMB_GC_MEMORY_LIMIT"); v != "" {
+		cfg.GC.MemoryLimit = v
+	}
 
 	if cfg.AI.Model == "" {
 		cfg.AI.Model = DeepSeekDefaultModel
@@ -151,6 +181,12 @@ func (c *ServerConfig) applyYAML(kv map[string]string) {
 	}
 	if n, ok := yamlUint(kv, "QUOTA_MAX_CONCURRENCY", "QUOTA.MAX_CONCURRENCY"); ok {
 		c.Quota.MaxConcurrency = int(n)
+	}
+	if n, ok := yamlUint(kv, "GC_PERCENT", "GC.PERCENT"); ok {
+		c.GC.Percent = int(n)
+	}
+	if v := firstNonEmpty(kv["GC_MEMORY_LIMIT"], kv["GC.MEMORY_LIMIT"]); v != "" {
+		c.GC.MemoryLimit = v
 	}
 }
 
