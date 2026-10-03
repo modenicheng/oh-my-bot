@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 

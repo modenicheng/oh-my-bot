@@ -421,29 +421,6 @@ func zoneLocked(m *sim.MapDef, phase sim.Phase) bool {
 	return m != nil && m.CoreZone.Radius > 0 && phase < m.CoreZone.UnlockPhase
 }
 
-func gridPointFree(m *sim.MapDef, locked bool, p sim.Vec2) bool {
-	// Treat each grid node as its full square footprint. This makes 4-neighbor
-	// adjacency conservative without doing expensive segment checks per edge.
-	clearance := sim.RobotRadius + cellSize*math.Sqrt2/2
-	if !finiteVec(p) {
-		return false
-	}
-	if m != nil && m.GeneratorVer >= 2 && p.Len() > arenaRadius-cellSize*math.Sqrt2/2-1e-9 {
-		return false
-	}
-	if locked && p.Len() < m.CoreZone.Radius+clearance+1e-9 {
-		return false
-	}
-	if m != nil {
-		for _, wall := range m.Walls {
-			if pointRectDistanceSquared(p, wall.Min, wall.Max) <= clearance*clearance+1e-12 {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func pointFree(m *sim.MapDef, locked bool, p sim.Vec2) bool {
 	if !finiteVec(p) {
 		return false
