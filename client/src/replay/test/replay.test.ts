@@ -24,6 +24,23 @@ describe('parseReplayNDJSON', () => {
     expect(data.initCheckpoint.mapJson).toBeTruthy()
   })
 
+  it('权威视觉采样在样本间连续插值机器人位置', () => {
+    const data = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, phase: 1, robots: [{ id: 1, nick: 'MOVE', color: '#fff', hp: 100, energy: 100, state: 'alive', position: { X: 0, Y: 0 } }] } }),
+      JSON.stringify({ type: 'visual', tick: 0, phase: 1, robots: [[1, 0, 0, 0, 100, 100, 1, 0]], projectiles: [] }),
+      JSON.stringify({ type: 'visual', tick: 6, phase: 1, robots: [[1, 6, 3, Math.PI / 2, 90, 80, 1, 1]], projectiles: [] }),
+    ].join('\n'))
+    const replay = new ReplayIndex(data)
+    expect(data.visualFrames).toHaveLength(2)
+    const middle = replay.frameAt(3).robots[0]!
+    expect(middle.pos.x).toBeCloseTo(3)
+    expect(middle.pos.y).toBeCloseTo(1.5)
+    expect(middle.heading).toBeCloseTo(Math.PI / 4)
+    expect(middle.hp).toBeCloseTo(95)
+    expect(middle.energy).toBeCloseTo(90)
+    expect(replay.frameAt(6).robots[0]?.invulnerable).toBe(true)
+  })
+
   it('仅有输入的短局保留时间轴长度', () => {
     const data = parseReplayNDJSON([
       JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),

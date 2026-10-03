@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -181,8 +182,23 @@ func main() {
 		w.Header().Set("Cache-Control", "no-store")
 		// Fix the read boundary while the active match continues appending.
 		// The buffered log writer may have flushed only part of its last record.
-		if err := copyCompleteRecords(w, io.NewSectionReader(f, 0, info.Size())); err != nil {
-			log.Printf("replay %s: %v", id, err)
+		source := io.NewSectionReader(f, 0, info.Size())
+		var exportErr error
+		if r.URL.Query().Get("visual") == "1" {
+			var visual bytes.Buffer
+			exportErr = writeVisualReplay(&visual, source)
+			if exportErr == nil {
+				_, exportErr = w.Write(visual.Bytes())
+			} else {
+				// Legacy or still-being-written logs may not have enough state for
+				// authoritative replay. Preserve the original approximate viewer.
+				exportErr = copyCompleteRecords(w, source)
+			}
+		} else {
+			exportErr = copyCompleteRecords(w, source)
+		}
+		if exportErr != nil {
+			log.Printf("replay %s: %v", id, exportErr)
 		}
 	})
 	mux.Handle("/ws", sessionHandler(hub))

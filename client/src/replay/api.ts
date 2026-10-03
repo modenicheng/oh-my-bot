@@ -45,7 +45,7 @@ export async function fetchMatches(): Promise<MatchEntry[]> {
 export async function fetchReplayText(id: string): Promise<string> {
   let resp: Response
   try {
-    resp = await fetch(`/api/replay/${encodeURIComponent(id)}`)
+    resp = await fetch(`/api/replay/${encodeURIComponent(id)}?visual=1`)
   } catch (e) {
     throw new ReplayApiError(`网络错误: ${(e as Error).message}`)
   }

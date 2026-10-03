@@ -10,6 +10,42 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+func TestReplayVisualFramesAdvanceBetweenCheckpoints(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := NewMatchEventLogWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSim(7, []uint32{1}, log)
+	if err := s.SetMap(gameMap()); err != nil {
+		t.Fatal(err)
+	}
+	for tick := uint32(1); tick <= 120; tick++ {
+		if tick == 1 || tick == 120 {
+			s.ApplyInput(1, &ombv1.ClientInput{Seq: tick, AxisMask: uint32(AxisMove), MoveX: 1000})
+		}
+		s.Tick()
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	frames, err := ReplayVisualFrames(bytes.NewReader(buf.Bytes()), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 41 || frames[0].Tick != 0 || frames[len(frames)-1].Tick != 120 {
+		t.Fatalf("unexpected visual samples: len=%d first=%d last=%d", len(frames), frames[0].Tick, frames[len(frames)-1].Tick)
+	}
+	if frames[1].Robots[0].Pos == frames[20].Robots[0].Pos || frames[20].Robots[0].Pos == frames[len(frames)-1].Robots[0].Pos {
+		t.Fatal("visual replay did not advance robot position between checkpoints")
+	}
+	want := s.WorldView()
+	got := frames[len(frames)-1]
+	if got.Robots[0].Pos != want.Robots[0].Pos || got.Robots[0].Heading != want.Robots[0].Turret {
+		t.Fatalf("final visual sample differs: got=%+v want=%+v", got.Robots[0], want.Robots[0])
+	}
+}
+
 func TestReplayToUsesProductionCheckpointsAndControls(t *testing.T) {
 	var buf bytes.Buffer
 	log, err := NewMatchEventLogWriter(&buf)

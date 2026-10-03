@@ -61,6 +61,30 @@ export interface ReplayRecord {
   state?: ReplayCheckpoint
 }
 
+export interface ReplayVisualRobot {
+  id: number
+  pos: { x: number; y: number }
+  heading: number
+  hp: number
+  energy: number
+  alive: boolean
+  invulnerable: boolean
+}
+
+export interface ReplayVisualProjectile {
+  id: number
+  owner: number
+  pos: { x: number; y: number }
+  heading: number
+}
+
+export interface ReplayVisualFrame {
+  tick: number
+  phase: number
+  robots: ReplayVisualRobot[]
+  projectiles: ReplayVisualProjectile[]
+}
+
 /** HUD 展示用机器人摘要。 */
 export interface RobotBrief {
   id: number
@@ -77,6 +101,8 @@ export interface ReplayData {
   endTick: number
   /** 机器人 id → 昵称/颜色（初始 robots）。 */
   robots: Map<number, RobotBrief>
+  /** 服务端确定性重放生成的紧凑视觉采样；旧接口可为空。 */
+  visualFrames: ReplayVisualFrame[]
 }
 
 export class ReplayParseError extends Error {}
@@ -84,6 +110,7 @@ export class ReplayParseError extends Error {}
 /** 解析完整 NDJSON 文本。头行（schema_version）跳过；空行容错。 */
 export function parseReplayNDJSON(text: string): ReplayData {
   const records: ReplayRecord[] = []
+  const visualFrames: ReplayVisualFrame[] = []
   let initCheckpoint: ReplayCheckpoint | null = null
   let endTick = 0
   const lines = text.split('\n')
@@ -116,8 +143,11 @@ export function parseReplayNDJSON(text: string): ReplayData {
         records.push({ type: 'event', tick: ev.tick, event: ev })
         break
       }
+      case 'visual':
+        visualFrames.push(normalizeVisualFrame(obj))
+        break
       default:
-        break // input 与未知类型向前兼容，忽略
+        break // input/control 与未知类型向前兼容，忽略
     }
   }
   if (!initCheckpoint) {
@@ -132,8 +162,10 @@ export function parseReplayNDJSON(text: string): ReplayData {
   }
   // 记录按 tick 稳定排序（文件内同 tick 保持出现顺序）
   const sorted = records.slice().sort((a, b) => a.tick - b.tick)
+  visualFrames.sort((a, b) => a.tick - b.tick)
   for (const r of sorted) endTick = Math.max(endTick, r.tick)
-  return { records: sorted, initCheckpoint, endTick, robots }
+  for (const frame of visualFrames) endTick = Math.max(endTick, frame.tick)
+  return { records: sorted, initCheckpoint, endTick, robots, visualFrames }
 }
 
 function normalizeCheckpoint(st: any): ReplayCheckpoint {
@@ -188,6 +220,35 @@ function normalizeRobot(r: any): ReplayRobotState {
     sector: num(r.sector, 0),
     respawnPending: !!r.respawn_pending,
     invulnerable: !!r.invulnerable,
+  }
+}
+
+function normalizeVisualFrame(obj: any): ReplayVisualFrame {
+  const robots = Array.isArray(obj.robots) ? obj.robots : []
+  const projectiles = Array.isArray(obj.projectiles) ? obj.projectiles : []
+  return {
+    tick: num(obj.tick, 0),
+    phase: num(obj.phase, 1),
+    robots: robots.map((row: unknown) => {
+      const values = Array.isArray(row) ? row : []
+      return {
+        id: num(values[0], 0),
+        pos: { x: num(values[1], 0), y: num(values[2], 0) },
+        heading: num(values[3], 0),
+        hp: num(values[4], 0),
+        energy: num(values[5], 0),
+        alive: num(values[6], 0) !== 0,
+        invulnerable: num(values[7], 0) !== 0,
+      }
+    }),
+    projectiles: projectiles.map((row: unknown) => {
+      const values = Array.isArray(row) ? row : []
+      return {
+        id: num(values[0], 0), owner: num(values[1], 0),
+        pos: { x: num(values[2], 0), y: num(values[3], 0) },
+        heading: num(values[4], 0),
+      }
+    }),
   }
 }
 

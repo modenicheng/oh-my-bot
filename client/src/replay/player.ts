@@ -39,6 +39,7 @@ export class ReplayPlayer {
 
   // 播放状态
   private playing = false
+  private resumeAfterScrub = false
   private speed = 1
   private tick = 0
   /** 播放累计（浮点 tick，避免 0.5× 时整数截断） */
@@ -145,7 +146,18 @@ export class ReplayPlayer {
     listen(tl, 'input', () => {
       this.seekTo(numOr(tl?.value, 0))
     })
-    listen(tl, 'pointerdown', () => this.pause())
+    listen(tl, 'pointerdown', () => {
+      this.resumeAfterScrub = this.playing
+      this.pause()
+    })
+    const finishScrub = () => {
+      if (!this.resumeAfterScrub) return
+      this.resumeAfterScrub = false
+      this.play()
+    }
+    listen(tl, 'pointerup', finishScrub)
+    listen(tl, 'pointercancel', finishScrub)
+    listen(tl, 'change', finishScrub)
 
     // 时间轴标记 hover 详情
     const marks = this.el['rp-marks']
@@ -266,6 +278,7 @@ export class ReplayPlayer {
   }
 
   private togglePlay(): void {
+    this.resumeAfterScrub = false
     this.playing ? this.pause() : this.play()
   }
 

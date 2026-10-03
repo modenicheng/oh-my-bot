@@ -16,6 +16,7 @@ import {
   ReplayEvent,
   ReplayRecord,
   ReplayCheckpoint,
+  ReplayVisualFrame,
   RobotBrief,
 } from './model'
 
@@ -98,11 +99,15 @@ export class ReplayIndex {
   readonly marks: TimelineMark[]
   private readonly keyframes = new Map<number, FrameState>()
   private readonly keyTicks: number[] = []
+  private readonly visualFrames: ReplayVisualFrame[]
+  private readonly visualTicks: number[]
 
   constructor(data: ReplayData) {
     this.endTick = Math.max(data.endTick, 1)
     this.robots = data.robots
     this.marks = []
+    this.visualFrames = data.visualFrames
+    this.visualTicks = data.visualFrames.map(frame => frame.tick)
     this.buildIndex(data.records)
   }
 
@@ -239,17 +244,69 @@ export class ReplayIndex {
       }
     }
     const kf = this.keyframes.get(best)!
+    const visual = this.visualAt(q)
     return {
       tick: q,
-      phase: kf.phase,
-      robots: [...kf.robots.values()],
+      phase: visual?.phase ?? kf.phase,
+      robots: visual?.robots ?? [...kf.robots.values()],
       scores: cloneScores(kf.scores),
       finalScores: kf.finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: kf.bubbles.filter((b) => q - b.tick <= BUBBLE_TTL),
       cores: kf.cores.map((c) => ({ ...c, pos: { ...c.pos } })),
       healthPacks: kf.healthPacks.map((pack) => ({ ...pack, pos: { ...pack.pos } })),
-      projectiles: kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
+      projectiles: visual?.projectiles ?? kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     }
+  }
+
+  private visualAt(tick: number): { phase: number; robots: RobotTickState[]; projectiles: ReplayFrame['projectiles'] } | null {
+    if (this.visualFrames.length === 0) return null
+    let lo = 0
+    let hi = this.visualTicks.length - 1
+    let before = 0
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if ((this.visualTicks[mid] ?? 0) <= tick) {
+        before = mid
+        lo = mid + 1
+      } else {
+        hi = mid - 1
+      }
+    }
+    const a = this.visualFrames[before]!
+    const b = this.visualFrames[Math.min(before + 1, this.visualFrames.length - 1)]!
+    const mix = b.tick > a.tick ? Math.max(0, Math.min(1, (tick - a.tick) / (b.tick - a.tick))) : 0
+    const nextRobots = new Map(b.robots.map(robot => [robot.id, robot]))
+    const robots = a.robots.map(robot => {
+      const next = nextRobots.get(robot.id)
+      const roster = this.robots.get(robot.id)
+      return {
+        id: robot.id, nick: roster?.nick ?? `ROBOT-${robot.id}`, color: roster?.color ?? '#22d3ee',
+        pos: next ? { x: lerp(robot.pos.x, next.pos.x, mix), y: lerp(robot.pos.y, next.pos.y, mix) } : { ...robot.pos },
+        heading: next ? lerpAngle(robot.heading, next.heading, mix) : robot.heading,
+        hp: next ? lerp(robot.hp, next.hp, mix) : robot.hp,
+        energy: next ? lerp(robot.energy, next.energy, mix) : robot.energy,
+        alive: mix < 1 ? robot.alive : (next?.alive ?? robot.alive),
+        respawnAt: null,
+        invulnerable: mix < 1 ? robot.invulnerable : (next?.invulnerable ?? robot.invulnerable),
+      }
+    })
+    const nextProjectiles = new Map(b.projectiles.map(projectile => [projectile.id, projectile]))
+    const projectiles = a.projectiles.map(projectile => {
+      const next = nextProjectiles.get(projectile.id)
+      return {
+        id: projectile.id, owner: projectile.owner,
+        pos: next ? { x: lerp(projectile.pos.x, next.pos.x, mix), y: lerp(projectile.pos.y, next.pos.y, mix) } : { ...projectile.pos },
+        heading: next ? lerpAngle(projectile.heading, next.heading, mix) : projectile.heading,
+      }
+    })
+    if (mix >= 1) {
+      for (const robot of b.robots) if (!robots.some(current => current.id === robot.id)) {
+        const roster = this.robots.get(robot.id)
+        robots.push({ id: robot.id, nick: roster?.nick ?? `ROBOT-${robot.id}`, color: roster?.color ?? '#22d3ee', pos: { ...robot.pos }, heading: robot.heading, hp: robot.hp, energy: robot.energy, alive: robot.alive, respawnAt: null, invulnerable: robot.invulnerable })
+      }
+      for (const projectile of b.projectiles) if (!projectiles.some(current => current.id === projectile.id)) projectiles.push({ ...projectile, pos: { ...projectile.pos } })
+    }
+    return { phase: mix < 1 ? a.phase : b.phase, robots, projectiles }
   }
 }
 
@@ -291,6 +348,13 @@ function cloneScores(m: Map<number, ScoreAcc>): Map<number, ScoreAcc> {
   const out = new Map()
   for (const [k, v] of m) out.set(k, { ...v })
   return out
+}
+
+function lerp(a: number, b: number, t: number): number { return a + (b - a) * t }
+
+function lerpAngle(a: number, b: number, t: number): number {
+  const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a))
+  return a + delta * t
 }
 
 function vec(v: any): { x: number; y: number } {
