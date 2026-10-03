@@ -31,3 +31,8 @@ server/tmp/
 /.env
 /server/config.yaml
 /server/.env
+
+# 本地运行时文件：dev server 进程号、AI/会话工具的临时产物
+*.pid
+/.v2c/
+/.zcode/
