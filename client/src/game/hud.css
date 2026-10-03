@@ -68,6 +68,14 @@
 #hud-time.urgent { color: #ff5c5c; text-shadow: none; }
 #hud-time.countdown-pulse { animation: hud-countdown 480ms steps(4, end); }
 
+/* 脚本接管标记（ADR-0009）：正在由脚本/Snippet 输出的轴，对应技能卡用
+   amber 令牌描边+图标+微光（STYLE.md 警告色；荧光纪律允许的状态高亮）。 */
+.skill[data-takeover='script'] { border-top-color: #fbbf24; }
+.skill[data-takeover='script'] .skill-icon { color: #fbbf24; }
+.skill[data-takeover='script'] .skill-cd { color: #fbbf24; }
+.skill[data-state='takeover'] .skill-icon { color: #fbbf24; box-shadow: 0 0 8px #fbbf2440; }
+.skill[data-state='takeover'] .skill-cd { color: #fbbf24; }
+
 @keyframes hud-event-in {
   from { transform: translateY(6px); opacity: 0; }
   to { transform: none; opacity: 1; }

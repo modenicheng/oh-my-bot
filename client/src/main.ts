@@ -45,6 +45,32 @@ const viewLive = $<HTMLElement>('view-live')
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
 viewJoin.appendChild(audioSettings)
 
+// ---- 对局帮助面板：默认折叠，? 展开/收起，Esc 关闭 ------------------------------
+
+const helpToggle = $<HTMLButtonElement>('btn-game-help')
+const helpPanel = $('hud-help')
+const closeHelp = (restoreFocus: boolean) => {
+  if (helpPanel.hidden) return
+  helpPanel.hidden = true
+  helpToggle.setAttribute('aria-expanded', 'false')
+  if (restoreFocus) helpToggle.focus({ preventScroll: true })
+}
+helpToggle.addEventListener('click', () => {
+  if (helpPanel.hidden) {
+    helpPanel.hidden = false
+    helpToggle.setAttribute('aria-expanded', 'true')
+  } else {
+    closeHelp(false)
+    helpToggle.focus({ preventScroll: true })
+  }
+})
+helpPanel.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !event.repeat) { event.preventDefault(); closeHelp(false) }
+})
+// 面板开茠离开游戏视图（回大厅/断线）时复位，避免下次进入残留展开态。
+new MutationObserver(() => { if (viewGame.hidden) closeHelp(false) })
+  .observe(viewGame, { attributes: true, attributeFilter: ['hidden'] })
+
 // ---- 页面模块 ---------------------------------------------------------------
 
 const initialRoute = readRoute()

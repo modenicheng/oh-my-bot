@@ -67,6 +67,7 @@
         <button type="button" class="act" id="btn-replay"><span data-icon="replay"></span><span>回放库</span></button>
         <a class="live-entry" id="room-live" target="_blank" rel="noopener"><span data-icon="spectator"></span><span>实时观战</span></a>
         <button type="button" class="act" id="btn-room-spectator"><span data-icon="spectator"></span><span>只读观战 · 录像</span></button>
+        <button type="button" class="act" id="btn-leave"><span data-icon="back"></span><span>返回大厅</span></button>
         <div class="room-notice" id="room-notice" hidden></div>
       </div>
       <div id="room-state">—</div>
@@ -83,18 +84,21 @@
           <button type="button" id="btn-game-manual" aria-keyshortcuts="m" aria-controls="workbench-docs" aria-expanded="false"><span data-icon="book"></span><span>文档</span> <kbd>M</kbd></button>
           <button type="button" id="btn-game-editor" aria-keyshortcuts="c" aria-controls="workbench-editor" aria-expanded="false"><span data-icon="code"></span><span>编辑器</span> <kbd>C</kbd></button>
           <button type="button" id="btn-game-replay"><span data-icon="replay"></span><span>回放</span></button>
+          <button type="button" id="btn-game-help" aria-controls="hud-help" aria-expanded="false"><span data-icon="help"></span><span>帮助</span></button>
         </nav>
         <div class="hud-top">
           <span class="hud-phase" id="hud-phase">—</span>
           <span class="hud-clock" id="hud-time">0:00</span>
         </div>
         <div class="hud-msg" id="hud-msg"></div>
+        <div class="hud-help" id="hud-help" hidden>
+          WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · R 夺回瞄准 · M 文档 · C 编辑器 · ENTER 发言
+        </div>
         <form id="game-chat" hidden aria-label="全场发言">
           <label for="game-chat-input">全场发言 <span>· 与脚本 say 共用 3s 冷却</span></label>
           <input id="game-chat-input" type="text" maxlength="320" autocomplete="off" aria-describedby="game-chat-count" placeholder="说点什么…">
           <output id="game-chat-count" for="game-chat-input">0/160 · Enter 发送 · Esc 取消</output>
         </form>
-        <div class="hud-hint">WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · R 夺回瞄准 · M 文档 · C 编辑器 · ENTER 发言</div>
         <div class="hud-left" id="hud-left">
           <div class="hud-bar-label"><span><span data-icon="heart"></span>HP · 机体</span><span class="hud-bar-num" id="hud-hp-text">100</span></div>
           <div class="hud-bar"><div class="hud-bar-fill" id="hud-hp-fill"></div></div>
@@ -112,6 +116,20 @@
           <div class="hud-roster">
             <div class="hud-right-label">实时积分榜</div>
             <div id="hud-score-rows"></div>
+          </div>
+          <div class="hud-axes" aria-label="控制来源">
+            <div class="skill" id="skill-move" data-state="ready">
+              <span class="skill-icon"><span data-icon="pan"></span></span>
+              <span class="skill-key">WASD</span>
+              <span class="skill-name">移动</span>
+              <span class="skill-cd" id="skill-move-cd">手操</span>
+            </div>
+            <div class="skill" id="skill-aim" data-state="ready">
+              <span class="skill-icon"><span data-icon="target"></span></span>
+              <span class="skill-key">鼠标</span>
+              <span class="skill-name">瞄准</span>
+              <span class="skill-cd" id="skill-aim-cd">手操</span>
+            </div>
           </div>
           <div class="hud-skills" aria-label="技能状态">
             <div class="skill" id="skill-fire" data-state="ready">
@@ -145,7 +163,6 @@
               <span class="skill-cd" id="hud-assist">辅助 OFF</span>
             </div>
           </div>
-          <div class="assist-hint" id="hud-assist-hint" hidden></div>
         </div>
       </div>
       </div>
