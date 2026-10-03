@@ -107,65 +107,108 @@ export interface ReplayData {
 
 export class ReplayParseError extends Error {}
 
-/** 解析完整 NDJSON 文本。头行（schema_version）跳过；空行容错。 */
-export function parseReplayNDJSON(text: string): ReplayData {
+export interface ReplayParser {
+  pushLine(line: string, lineNo: number): void
+  finish(): ReplayData
+}
+
+/** 行解析器：供同步解析与分片异步解析共用（错误行号 0-based 传入、1-based 展示）。 */
+export function createReplayParser(): ReplayParser {
   const records: ReplayRecord[] = []
   const visualFrames: ReplayVisualFrame[] = []
   let initCheckpoint: ReplayCheckpoint | null = null
   let endTick = 0
+  return {
+    pushLine(line: string, lineNo: number): void {
+      const trimmed = line.trim()
+      if (!trimmed) return
+      let obj: any
+      try {
+        obj = JSON.parse(trimmed)
+      } catch (e) {
+        throw new ReplayParseError(`第 ${lineNo + 1} 行不是合法 JSON: ${(e as Error).message}`)
+      }
+      if (obj && typeof obj.schema_version === 'number') return // 头行
+      if (!obj || typeof obj.type !== 'string') return
+      // Input-only stretches still occupy time, even though this visual index
+      // does not execute the authoritative server simulation.
+      if (['match_start', 'checkpoint', 'event', 'input', 'control'].includes(obj.type)) {
+        endTick = Math.max(endTick, num(obj.tick, 0))
+      }
+      switch (obj.type) {
+        case 'match_start':
+        case 'checkpoint': {
+          const st = normalizeCheckpoint(obj.state)
+          records.push({ type: obj.type, tick: st.tick, state: st })
+          if (obj.type === 'match_start' && !initCheckpoint) initCheckpoint = st
+          break
+        }
+        case 'event': {
+          const ev = normalizeEvent(obj)
+          records.push({ type: 'event', tick: ev.tick, event: ev })
+          break
+        }
+        case 'visual':
+          visualFrames.push(normalizeVisualFrame(obj))
+          break
+        default:
+          break // input/control 与未知类型向前兼容，忽略
+      }
+    },
+    finish(): ReplayData {
+      if (!initCheckpoint) {
+        const cp = records.find((r) => r.type === 'checkpoint')?.state
+        if (!cp) throw new ReplayParseError('回放缺少 match_start/checkpoint 初始状态')
+        initCheckpoint = cp
+      }
+      // 机器人花名册来自初始 robots
+      const robots = new Map<number, RobotBrief>()
+      for (const r of initCheckpoint.robots) {
+        robots.set(r.id, { id: r.id, nick: r.nick, color: r.color })
+      }
+      // 记录按 tick 稳定排序（文件内同 tick 保持出现顺序）
+      const sorted = records.slice().sort((a, b) => a.tick - b.tick)
+      visualFrames.sort((a, b) => a.tick - b.tick)
+      for (const r of sorted) endTick = Math.max(endTick, r.tick)
+      for (const frame of visualFrames) endTick = Math.max(endTick, frame.tick)
+      return { records: sorted, initCheckpoint, endTick, robots, visualFrames }
+    },
+  }
+}
+
+/** 解析完整 NDJSON 文本。头行（schema_version）跳过；空行容错。 */
+export function parseReplayNDJSON(text: string): ReplayData {
+  const parser = createReplayParser()
   const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const line = (lines[i] ?? '').trim()
-    if (!line) continue
-    let obj: any
-    try {
-      obj = JSON.parse(line)
-    } catch (e) {
-      throw new ReplayParseError(`第 ${i + 1} 行不是合法 JSON: ${(e as Error).message}`)
-    }
-    if (obj && typeof obj.schema_version === 'number') continue // 头行
-    if (!obj || typeof obj.type !== 'string') continue
-    // Input-only stretches still occupy time, even though this visual index
-    // does not execute the authoritative server simulation.
-    if (['match_start', 'checkpoint', 'event', 'input', 'control'].includes(obj.type)) {
-      endTick = Math.max(endTick, num(obj.tick, 0))
-    }
-    switch (obj.type) {
-      case 'match_start':
-      case 'checkpoint': {
-        const st = normalizeCheckpoint(obj.state)
-        records.push({ type: obj.type, tick: st.tick, state: st })
-        if (obj.type === 'match_start' && !initCheckpoint) initCheckpoint = st
-        break
+  for (let i = 0; i < lines.length; i++) parser.pushLine(lines[i] ?? '', i)
+  return parser.finish()
+}
+
+/**
+ * 分片异步解析：整段同步 parse 在长录像（数十万行）下会冻结主线程数秒。
+ * 按 ~1MB 文本切片逐片推进，片间让出事件循环；行号与同步版完全一致。
+ */
+export async function parseReplayNDJSONAsync(text: string): Promise<ReplayData> {
+  const parser = createReplayParser()
+  const CHUNK = 1 << 20
+  let start = 0
+  let lineNo = 0
+  while (start < text.length) {
+    let end = Math.min(text.length, start + CHUNK)
+    if (end < text.length) {
+      const nl = text.lastIndexOf('\n', end)
+      if (nl > start) {
+        end = nl + 1
+      } else {
+        const hard = text.indexOf('\n', start)
+        end = hard === -1 ? text.length : hard + 1
       }
-      case 'event': {
-        const ev = normalizeEvent(obj)
-        records.push({ type: 'event', tick: ev.tick, event: ev })
-        break
-      }
-      case 'visual':
-        visualFrames.push(normalizeVisualFrame(obj))
-        break
-      default:
-        break // input/control 与未知类型向前兼容，忽略
     }
+    for (const line of text.slice(start, end).split('\n')) parser.pushLine(line, lineNo++)
+    start = end
+    await new Promise<void>(resolve => setTimeout(resolve))
   }
-  if (!initCheckpoint) {
-    const cp = records.find((r) => r.type === 'checkpoint')?.state
-    if (!cp) throw new ReplayParseError('回放缺少 match_start/checkpoint 初始状态')
-    initCheckpoint = cp
-  }
-  // 机器人花名册来自初始 robots
-  const robots = new Map<number, RobotBrief>()
-  for (const r of initCheckpoint.robots) {
-    robots.set(r.id, { id: r.id, nick: r.nick, color: r.color })
-  }
-  // 记录按 tick 稳定排序（文件内同 tick 保持出现顺序）
-  const sorted = records.slice().sort((a, b) => a.tick - b.tick)
-  visualFrames.sort((a, b) => a.tick - b.tick)
-  for (const r of sorted) endTick = Math.max(endTick, r.tick)
-  for (const frame of visualFrames) endTick = Math.max(endTick, frame.tick)
-  return { records: sorted, initCheckpoint, endTick, robots, visualFrames }
+  return parser.finish()
 }
 
 function normalizeCheckpoint(st: any): ReplayCheckpoint {

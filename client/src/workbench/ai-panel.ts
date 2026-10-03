@@ -3,8 +3,21 @@ import {
   aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
   type AiFeedItem, type AiQuotaState,
 } from './ai-assist'
-import { renderAiMarkdown } from './ai-markdown'
 import './ai-panel.css'
+
+// marked + highlight.js 只服务 AI 面板：动态加载以移出首屏主 chunk（启动时并行
+// 拉取；极短的未就绪窗口内退化为转义纯文本，就绪后由构造回调触发重渲染）。
+type AiMarkdownModule = typeof import('./ai-markdown')
+let markdownModule: AiMarkdownModule | null = null
+const markdownReady: Promise<AiMarkdownModule> = import('./ai-markdown').then(module => {
+  markdownModule = module
+  return module
+})
+
+function renderAiMarkdownLazy(source: string, streaming = false): string {
+  if (markdownModule) return markdownModule.renderAiMarkdown(source, streaming)
+  return source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
 
 export type AiStreamChannel = 'reasoning' | 'answer'
 
@@ -42,6 +55,8 @@ export class AiPanelView {
   private autoFollow = true
   private suppressFollowDetection = false
   private streamRenderTimer?: number
+  /** 已渲染 turn 的签名缓存：签名涵盖渲染输出的全部输入，命中即复用 DOM。 */
+  private readonly turnCache = new Map<number, { sig: string; el: HTMLElement }>()
   private input!: HTMLTextAreaElement
   private sendButton!: HTMLButtonElement
   private quotaEl!: HTMLElement
@@ -52,6 +67,8 @@ export class AiPanelView {
 
   constructor(private readonly deps: AiPanelDeps) {
     this.build()
+    // 防御：模块在构造后极短时间内才就绪且已有内容时，用完整渲染器重画一次。
+    void markdownReady.then(() => { if (this.turns.length) this.render() })
   }
 
   private build(): void {
@@ -156,11 +173,15 @@ export class AiPanelView {
   }
 
   acceptQuota(quota: EvAiQuota | AiQuotaState): void {
-    const next: AiQuotaState = { ...this.quota, roundsLeft: quota.roundsLeft }
-    if ('tokensUsedK' in quota && quota.tokensUsedK !== undefined) next.tokensUsedK = quota.tokensUsedK
-    if ('tokensLeftK' in quota && quota.tokensLeftK !== undefined) next.tokensLeftK = quota.tokensLeftK
-    if ('globalTokensLeftK' in quota && quota.globalTokensLeftK !== undefined) next.globalTokensLeftK = quota.globalTokensLeftK
-    this.quota = next
+    // 快照 60Hz 转发配额（main.ts acceptSelfAiQuota）：值未变时早退，
+    // 避免每秒 60 次对象展开 + textContent 无效写。
+    const cur = this.quota
+    const tokensUsedK = 'tokensUsedK' in quota && quota.tokensUsedK !== undefined ? quota.tokensUsedK : cur?.tokensUsedK
+    const tokensLeftK = 'tokensLeftK' in quota && quota.tokensLeftK !== undefined ? quota.tokensLeftK : cur?.tokensLeftK
+    const globalTokensLeftK = 'globalTokensLeftK' in quota && quota.globalTokensLeftK !== undefined ? quota.globalTokensLeftK : cur?.globalTokensLeftK
+    if (cur && cur.roundsLeft === quota.roundsLeft && cur.tokensUsedK === tokensUsedK &&
+        cur.tokensLeftK === tokensLeftK && cur.globalTokensLeftK === globalTokensLeftK) return
+    this.quota = { roundsLeft: quota.roundsLeft, tokensUsedK, tokensLeftK, globalTokensLeftK }
     this.renderQuota()
   }
 
@@ -260,10 +281,12 @@ export class AiPanelView {
 
   private scheduleStreamRender(): void {
     if (this.streamRenderTimer !== undefined) return
+    // 流式渲染对累积全文重跑 markdown+高亮，代价随文本增长：150ms 合帧
+    // （50ms 时长回答打字期呈 O(n²) 主线程占用，肉眼流畅度无差）。
     this.streamRenderTimer = window.setTimeout(() => {
       this.streamRenderTimer = undefined
       this.updateLiveTurn()
-    }, 50)
+    }, 150)
   }
 
   private updateLiveTurn(): void {
@@ -277,12 +300,12 @@ export class AiPanelView {
     const reasoningBody = article.querySelector<HTMLElement>('.ai-reasoning-body')
     if (reasoningBody && turn.reasoning) {
       const scrollTop = reasoningBody.scrollTop
-      reasoningBody.innerHTML = renderAiMarkdown(turn.reasoning, !turn.answer)
+      reasoningBody.innerHTML = renderAiMarkdownLazy(turn.reasoning, !turn.answer)
       reasoningBody.scrollTop = turn.reasoningAutoFollow ? reasoningBody.scrollHeight : scrollTop
     }
     const answerBody = article.querySelector<HTMLElement>('.ai-answer-body')
     if (answerBody && turn.answer) {
-      answerBody.innerHTML = renderAiMarkdown(turn.answer, true)
+      answerBody.innerHTML = renderAiMarkdownLazy(turn.answer, true)
     }
     this.followAfterStreamUpdate(turn)
   }
@@ -308,6 +331,10 @@ export class AiPanelView {
       }
     }
     if (shouldFollow || this.turns.some(turn => turn.reasoningAutoFollow)) this.suppressFollowDetection = true
+    // 只重建签名变化的 turn：历史回合的内容不可变，避免每次 render 都对
+    // 全部历史重复 marked.parse + hljs 高亮（setAvailability/流式都会触发 render）。
+    const alive = new Set(this.turns.map(turn => turn.id))
+    for (const id of this.turnCache.keys()) if (!alive.has(id)) this.turnCache.delete(id)
     const fragment = document.createDocumentFragment()
     if (!this.turns.length) {
       const empty = document.createElement('section')
@@ -315,7 +342,17 @@ export class AiPanelView {
       empty.innerHTML = `<div class="ai-empty-scope" aria-hidden="true"><span></span><span></span><span></span></div><h3>等待脚本任务</h3><p>描述你想改变的战术。AI 会展示思考过程、生成说明与完整高亮代码，然后热更当前机器人。</p>`
       fragment.append(empty)
     }
-    for (const turn of this.turns) fragment.append(this.renderTurn(turn))
+    for (const turn of this.turns) {
+      const sig = this.turnSig(turn)
+      const cached = this.turnCache.get(turn.id)
+      if (cached && cached.sig === sig) {
+        fragment.append(cached.el)
+        continue
+      }
+      const el = this.renderTurn(turn)
+      this.turnCache.set(turn.id, { sig, el })
+      fragment.append(el)
+    }
     this.feedEl.replaceChildren(fragment)
     requestAnimationFrame(() => {
       if (shouldFollow) {
@@ -331,6 +368,19 @@ export class AiPanelView {
       }
       requestAnimationFrame(() => { this.suppressFollowDetection = false })
     })
+  }
+
+  /** 渲染输出的全部输入决定签名：状态、两段文本长度、通知数、辅助动作与 live 位。 */
+  private turnSig(turn: AiTurn): string {
+    return [
+      turn.status,
+      turn.prompt,
+      turn.reasoning.length,
+      turn.answer.length,
+      turn.notices.length,
+      turn.assistAction,
+      String(this.pending && turn.id === this.activeTurnId),
+    ].join('\u0000')
   }
 
   private renderTurn(turn: AiTurn): HTMLElement {
@@ -367,7 +417,7 @@ export class AiPanelView {
       summary.innerHTML = '<span class="ai-reasoning-signal" aria-hidden="true"></span><span>思考过程</span><i>点击收起</i>'
       const body = document.createElement('div')
       body.className = 'ai-markdown ai-reasoning-body'
-      body.innerHTML = renderAiMarkdown(turn.reasoning, this.pending && turn.id === this.activeTurnId && !turn.answer)
+      body.innerHTML = renderAiMarkdownLazy(turn.reasoning, this.pending && turn.id === this.activeTurnId && !turn.answer)
       reasoning.append(summary, body)
       assistant.append(reasoning)
     }
@@ -375,7 +425,7 @@ export class AiPanelView {
     if (turn.answer) {
       const answer = document.createElement('div')
       answer.className = 'ai-markdown ai-answer-body'
-      answer.innerHTML = renderAiMarkdown(turn.answer, this.pending && turn.id === this.activeTurnId)
+      answer.innerHTML = renderAiMarkdownLazy(turn.answer, this.pending && turn.id === this.activeTurnId)
       assistant.append(answer)
     }
 

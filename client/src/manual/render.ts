@@ -165,7 +165,9 @@ export function renderMarkdown(src: string, docPath = ''): string {
   foldTabGroups(tokens)
   // token 级改写 image.src：表格单元格、列表项、引用块里的图片与行内 <img> 同样要处理。
   walkTokens(tokens, docPath)
-  return marked.Parser.parse(tokens, { gfm: true }) as string
+  const html = marked.Parser.parse(tokens, { gfm: true }) as string
+  // 文档截图按需加载：多图页面避免一次性全量请求（代码块内 <img 已被转义，不会误伤）。
+  return html.replace(/<img\b(?![^>]*\sloading=)/gi, '<img loading="lazy" decoding="async"')
 }
 
 /** 递归遍历 token 树（block 与 inline 通用），改写所有图片与行内 <img>。 */
@@ -193,23 +195,4 @@ function rewriteSingleToken(t: Tokens.Generic, docPath: string): void {
       return dq !== undefined ? `${head}"${manualImageURL(src, docPath)}"` : `${head}'${manualImageURL(src, docPath)}'`
     })
   }
-}
-
-/** tab 点击切换（容器级事件委托，渲染容器绑定一次）。 */
-export function bindTabInteractions(root: HTMLElement): void {
-  root.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLElement>('.code-tab')
-    if (!btn) return
-    const group = btn.closest<HTMLElement>('.code-tab-group')
-    if (!group) return
-    const idx = btn.dataset.tab
-    group.querySelectorAll<HTMLElement>('.code-tab').forEach((t) => {
-      const on = t.dataset.tab === idx
-      t.classList.toggle('active', on)
-      t.setAttribute('aria-selected', String(on))
-    })
-    group.querySelectorAll<HTMLElement>('.code-panel').forEach((p) => {
-      p.classList.toggle('active', p.dataset.panel === idx)
-    })
-  })
 }

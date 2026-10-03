@@ -226,7 +226,10 @@ export class ReplayIndex {
     this.keyTicks.sort((a, b) => a - b)
   }
 
-  /** 查询 tick（含）时刻的状态。 */
+  /**
+   * 查询 tick（含）时刻的状态。每次调用返回完全隔离的克隆：调用方可能改写
+   * 返回帧（见 replay.test.ts 的防泄漏断言），不得与关键帧或其他 tick 共享。
+   */
   frameAt(queryTick: number): ReplayFrame {
     const q = Math.max(0, Math.min(queryTick, this.endTick))
     // 二分找 ≤q 的最大关键帧

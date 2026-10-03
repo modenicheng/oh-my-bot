@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>oh-my-bot</title>
+  <!-- 启动屏首视觉依赖像素字体：提前发起请求，避免 CSS 解析后才发现字体的 swap 闪烁。
+       Vite 构建会把该路径重写为带哈希的产物地址，与 app.css @font-face 指向同一资源。 -->
+  <link rel="preload" href="/src/assets/fonts/fusion-pixel-12.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/src/startup.css">
   <link rel="stylesheet" href="/src/app.css">
 </head>
@@ -73,7 +76,7 @@
     <!-- 游戏视图（mapBootstrap 后显示） -->
     <section id="view-game" hidden>
       <div id="game-stage">
-      <canvas id="game-canvas" tabindex="0" aria-label="实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，普通 Enter 发言"></canvas>
+      <canvas id="game-canvas" tabindex="0" aria-label="实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，R 夺回手动瞄准，普通 Enter 发言"></canvas>
       <div id="hud">
         <nav class="game-tools" aria-label="对局操作">
           <button type="button" id="btn-game-start" hidden><span data-icon="play"></span><span>开始正式对局</span></button>
@@ -91,7 +94,7 @@
           <input id="game-chat-input" type="text" maxlength="320" autocomplete="off" aria-describedby="game-chat-count" placeholder="说点什么…">
           <output id="game-chat-count" for="game-chat-input">0/160 · Enter 发送 · Esc 取消</output>
         </form>
-        <div class="hud-hint">WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · M 文档 · C 编辑器 · ENTER 发言</div>
+        <div class="hud-hint">WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · R 夺回瞄准 · M 文档 · C 编辑器 · ENTER 发言</div>
         <div class="hud-left" id="hud-left">
           <div class="hud-bar-label"><span><span data-icon="heart"></span>HP · 机体</span><span class="hud-bar-num" id="hud-hp-text">100</span></div>
           <div class="hud-bar"><div class="hud-bar-fill" id="hud-hp-fill"></div></div>

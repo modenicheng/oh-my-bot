@@ -68,41 +68,61 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
   world.ackSeq = snap.ackSeq
   if (snap.self) world.self = snap.self
 
+  // 60Hz 快照逐实体到达：复用已有实体对象原地更新（派生字段先于 assign 求值，
+  // 避免覆盖后语义变化），仅 full 重建/首见时新建——消除每秒数千个小对象分配。
   for (const r of snap.robots) {
-    const prev = world.robots.get(r.base?.id ?? 0)
+    const id = r.base?.id ?? 0
+    const prev = world.robots.get(id)
     // 无敌近似：仅识别 delta 帧上的 dead→alive 转变（重生后 ~4s，服务器 InvulnDuration=240tick=4s）。
     // full 重建时无 prev，不做近似（避免 resync 后全员误闪烁；代价是首帧出生闪烁缺失，可接受）。
     const invulnUntil = prev?.dead && !r.dead ? now + 4250 : prev?.invulnUntil
     // delta 帧不带 nick/color（full 才带），保留旧 meta
-    world.robots.set(r.base?.id ?? 0, {
-      ...r,
-      nick: r.nick || prev?.nick || '',
-      color: r.color || prev?.color || '',
-      seenAt: now,
-      invulnUntil,
-    })
+    const nick = r.nick || prev?.nick || ''
+    const color = r.color || prev?.color || ''
+    const ent = prev ?? ({} as RobotEnt)
+    Object.assign(ent, r)
+    ent.nick = nick
+    ent.color = color
+    ent.seenAt = now
+    ent.invulnUntil = invulnUntil
+    world.robots.set(id, ent)
   }
   for (const id of snap.robotGone) world.robots.delete(id)
 
   for (const p of snap.projectiles) {
-    const prev = world.projectiles.get(p.base?.id ?? 0)
-    world.projectiles.set(p.base?.id ?? 0, {
-      ...p, seenAt: now,
-      color: p.color || (prev?.ownerId === p.ownerId ? prev.color : '') || world.robots.get(p.ownerId)?.color || '',
-    })
+    const id = p.base?.id ?? 0
+    const prev = world.projectiles.get(id)
+    const color = p.color || (prev?.ownerId === p.ownerId ? prev.color : '') || world.robots.get(p.ownerId)?.color || ''
+    const ent = prev ?? ({} as ProjEnt)
+    Object.assign(ent, p)
+    ent.seenAt = now
+    ent.color = color
+    world.projectiles.set(id, ent)
   }
   for (const id of snap.projectileGone) world.projectiles.delete(id)
 
   for (const c of snap.cores) {
-    world.cores.set(c.base?.id ?? 0, { ...c, seenAt: now })
+    const id = c.base?.id ?? 0
+    const ent = world.cores.get(id) ?? ({} as CoreEnt)
+    Object.assign(ent, c)
+    ent.seenAt = now
+    world.cores.set(id, ent)
   }
   for (const id of snap.coreGone) world.cores.delete(id)
 
   for (const u of snap.uplinks) {
-    world.uplinks.set(u.base?.id ?? 0, { ...u, seenAt: now })
+    const id = u.base?.id ?? 0
+    const ent = world.uplinks.get(id) ?? ({} as UplinkEnt)
+    Object.assign(ent, u)
+    ent.seenAt = now
+    world.uplinks.set(id, ent)
   }
   for (const pack of snap.healthPacks) {
-    world.healthPacks.set(pack.base?.id ?? 0, { ...pack, seenAt: now })
+    const id = pack.base?.id ?? 0
+    const ent = world.healthPacks.get(id) ?? ({} as HealthPackEnt)
+    Object.assign(ent, pack)
+    ent.seenAt = now
+    world.healthPacks.set(id, ent)
   }
 
   return 'applied'

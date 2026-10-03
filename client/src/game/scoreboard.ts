@@ -16,20 +16,44 @@ export class Scoreboard {
   private tick = -1
   private final = false
   private received = false
+  /** display 缓存版本号：rows/names 变化即失效。 */
+  private version = 0
+  private displayCache: ScoreDisplay[] | null = null
+  private displayKey = ''
 
-  reset(): void { this.rows = []; this.tick = -1; this.final = false; this.received = false; this.names.clear() }
+  reset(): void { this.rows = []; this.tick = -1; this.final = false; this.received = false; this.names.clear(); this.version++; this.displayCache = null }
   observe(robots: ReadonlyMap<number, RobotEnt>): void {
-    for (const [id, robot] of robots) if (robot.nick) this.names.set(id, robot.nick)
+    let changed = false
+    for (const [id, robot] of robots) if (robot.nick && this.names.get(id) !== robot.nick) { this.names.set(id, robot.nick); changed = true }
+    if (changed) { this.version++; this.displayCache = null }
   }
   accept(rows: readonly ScoreEntry[], tick: number, final = false): void {
     if (this.final || !final && tick < this.tick) return
     this.rows = rows.map(row => ({ robot: row.robot, score: row.score, titles: [...(row.titles ?? [])] }))
     this.tick = tick; this.final = final; this.received = true
+    this.version++; this.displayCache = null
   }
   score(robot: number): number | undefined { return this.rows.find(row => row.robot === robot)?.score }
   get hasScores(): boolean { return this.received }
   get ended(): boolean { return this.final }
   display(robots: ReadonlyMap<number, RobotEnt>, self = -1): ScoreDisplay[] {
+    // HUD/观战/回放每帧调用：输出只依赖 (rows 版本, self, 各行阵亡位)。
+    // 阵亡位压进一个整数做键，命中即返回同一数组供调用方引用比对。
+    let deadBits = 0
+    const cacheable = this.rows.length <= 30
+    if (cacheable) {
+      for (let i = 0; i < this.rows.length; i++) if (robots.get(this.rows[i]!.robot)?.dead) deadBits |= 1 << i
+      const key = `${this.version}:${self}:${deadBits}`
+      if (this.displayCache && this.displayKey === key) return this.displayCache
+      const rows = rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
+        nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
+        dead: !!robots.get(row.robot)?.dead,
+      }))
+      this.displayKey = key
+      this.displayCache = rows
+      return rows
+    }
+    this.displayCache = null
     return rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
       nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
       dead: !!robots.get(row.robot)?.dead,

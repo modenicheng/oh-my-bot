@@ -52,9 +52,14 @@ describe('renderMarkdown image rewriting', () => {
 
   it('rewrites icons inside table cells and list items', () => {
     const table = renderMarkdown('| 玩法 | 说明 |\n|---|---|\n| <img class="inline-icon" src="../reference/images/icons/target.png" alt=""> 手操 | 用键盘鼠标 |', 'start/prepare.md')
-    expect(table).toContain('<td><img class="inline-icon" src="/api/manual/reference/images/icons/target.png"')
+    expect(table).toContain('<td><img loading="lazy" decoding="async" class="inline-icon" src="/api/manual/reference/images/icons/target.png"')
     const list = renderMarkdown('- <img class="inline-icon" src="images/icons/fire.png" alt=""> 开火', 'rules/controls.md')
     expect(list).toContain('src="/api/manual/rules/images/icons/fire.png"')
+  })
+
+  it('adds lazy loading to rendered images', () => {
+    const html = renderMarkdown('![截图](images/sheet-arena.png)', 'reference/visual.md')
+    expect(html).toContain('<img loading="lazy" decoding="async"')
   })
 })
 

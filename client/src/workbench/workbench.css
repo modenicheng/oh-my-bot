@@ -198,10 +198,6 @@ html[data-console-resize] * { cursor: ns-resize !important; user-select: none !i
 .snippet-range-shell:has(.snippet-range-input:focus-visible) { outline: 1px solid var(--accent); outline-offset: 2px; }
 .snippet-range-shell:has(.snippet-range-input:disabled) .snippet-range-fill { box-shadow: none; }
 .snippet-range-scale { display: flex; justify-content: space-between; color: #49616d; font: 8px var(--mono); }
-.snippet-control-bool { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-#workbench .snippet-binary { min-width: 88px; min-height: 26px; justify-content: flex-start; padding: 3px 8px; border-color: #314955; font: 10px var(--mono); }
-.snippet-binary-led { width: 6px; height: 6px; background: #314955; box-shadow: 0 0 0 1px #071016; }
-.snippet-binary[aria-pressed="true"] .snippet-binary-led { background: var(--module-color); box-shadow: 0 0 6px var(--module-color); }
 .snippet-control-format { color: #4d6875; font: 9px var(--mono); }
 .snippet-route-input { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; border: 1px solid #314955; border-radius: 0; padding: 4px 8px; color: var(--fg); background: #080d12; font: 11px var(--mono); }
 .snippet-route-input:focus { border-color: var(--module-color); outline: 1px solid color-mix(in srgb, var(--module-color) 40%, transparent); }

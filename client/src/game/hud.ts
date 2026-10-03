@@ -4,7 +4,7 @@
 import type { WorldState, RobotEnt } from './world'
 import type { MapDefParsed, MapUplink } from './mapdef'
 import { phaseName } from './render'
-import { type Scoreboard, scoreRow } from './scoreboard'
+import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
 import './hud.css'
@@ -17,7 +17,10 @@ const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
 const HACK_MAX_X10 = 80  // progress_x10 满值（8s × 10）
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
 const INNER_MS = 4200
+const AIM_HINT_MS = 4000 // 瞄准 guard 提示节流间隔
 const BANNER_ICON: Record<FeedbackKind, IconName> = { status: 'target', kill: 'skull', uplink: 'uplink' }
+/** scores 缺省时的稳定空数组：让 hud 的引用比对在无计分板时保持为 false。 */
+const NO_ROWS: ScoreDisplay[] = []
 
 interface SkillCard {
   root: HTMLDivElement
@@ -44,6 +47,8 @@ export class Hud {
   private innerBanner: HTMLDivElement
   private innerTimer: number | undefined
   private countdownTimer: number | undefined
+  /** 瞄准 guard 提示下次可触发时间（performance.now 基准）。 */
+  private aimHintUntil = 0
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
   private assistLocal = false
   private assistServer: boolean | undefined
@@ -58,7 +63,12 @@ export class Hud {
   private uplinkText: HTMLSpanElement
   private uplinkTrack: HTMLDivElement
   private uplinkFill: HTMLDivElement
-  private lastRowsSig = ''
+  private lastHp = -1
+  private lastEn = -1
+  private lastRows: ScoreDisplay[] = NO_ROWS
+  private uplinkPct = -1
+  private assistRenderedOn: boolean | undefined
+  private assistRenderedMask = -1
 
   constructor(private root: HTMLElement) {
     this.hpFill = req(root, 'hud-hp-fill')
@@ -114,12 +124,14 @@ export class Hud {
     if (self) {
       const hp = clamp01(self.hpX10 / MAX_HP)
       const en = clamp01(self.energyX10 / MAX_EN)
-      this.hpFill.style.width = `${(hp * 100).toFixed(1)}%`
-      this.enFill.style.width = `${(en * 100).toFixed(1)}%`
+      // scaleX 走合成器路径（app.css transition 同步为 transform），width 每帧触发 layout。
+      if (hp !== this.lastHp) { this.lastHp = hp; this.hpFill.style.transform = `scaleX(${hp})` }
+      if (en !== this.lastEn) { this.lastEn = en; this.enFill.style.transform = `scaleX(${en})` }
       setText(this.hpText, self.dead ? `重生 ${self.respawnInS.toFixed(1)}s` : `${Math.round(self.hpX10 / 10)}`)
       setText(this.enText, `${Math.round(self.energyX10 / 10)}`)
     } else {
-      this.hpFill.style.width = this.enFill.style.width = '0%'
+      this.lastHp = this.lastEn = 0
+      this.hpFill.style.transform = this.enFill.style.transform = 'scaleX(0)'
       setText(this.hpText, '—'); setText(this.enText, '—')
     }
 
@@ -142,10 +154,11 @@ export class Hud {
     this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
     setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
-    const rows = scores?.display(world.robots, selfId) ?? []
-    const sig = JSON.stringify([scores?.hasScores, rows])
-    if (sig !== this.lastRowsSig) {
-      this.lastRowsSig = sig
+    // scoreboard.display 内部按 (版本, self, 阵亡位) 缓存：引用相同即数据未变，
+    // 免去此前每帧 JSON.stringify 签名与整表重建。
+    const rows = scores?.display(world.robots, selfId) ?? NO_ROWS
+    if (rows !== this.lastRows) {
+      this.lastRows = rows
       this.scoreRows.replaceChildren(...rows.map(row => scoreRow(row)))
       if (!rows.length) {
         const empty = document.createElement('div')
@@ -200,6 +213,14 @@ export class Hud {
     this.timeEl.classList.add('urgent')
     this.restartAnimation(this.timeEl, 'countdown-pulse')
     this.countdownTimer = window.setTimeout(() => this.clearCountdown(), 480)
+  }
+
+  /** 瞄准 guard 生效期间的鼠标移动提示（4s 节流；不与 kill/uplink 横幅竞争）。 */
+  flashAimGuardHint(): void {
+    const now = performance.now()
+    if (this.msgTimer !== undefined && now < this.aimHintUntil) return
+    this.aimHintUntil = now + AIM_HINT_MS
+    this.flashMsg('辅助瞄准中 · 按 R 手动瞄准')
   }
 
   clearMsg(): void {
@@ -304,8 +325,12 @@ export class Hud {
     }
     if (this.uplinkPanel.hidden) this.uplinkPanel.hidden = false
     setText(this.uplinkText, text)
-    this.uplinkTrack.setAttribute('aria-valuenow', String(pct))
-    this.uplinkFill.style.width = `${pct}%`
+    // 面板可见时 update 每帧到达：等值守卫避免重复 DOM 写；进度条同走 scaleX 合成路径。
+    if (pct !== this.uplinkPct) {
+      this.uplinkPct = pct
+      this.uplinkTrack.setAttribute('aria-valuenow', String(pct))
+      this.uplinkFill.style.transform = `scaleX(${pct / 100})`
+    }
   }
 
   private setCard(card: SkillCard, state: CardState, cdText: string): void {
@@ -320,6 +345,10 @@ export class Hud {
     // （第二分支）。辅助关闭时玩家全手操属正常驾驶，不提示。缺失（旧服务器）回退
     // 分轴来源标记推导，不做其他猜测。
     const mask = this.manualAxesMask ?? srcMask(this.assistMoveSrc, this.assistTurretSrc, this.assistFireSrc, this.assistAbilitySrc)
+    // update 每帧到达而 (on, mask) 极少变化：等值守卫跳过 axesFromMask 分配与 DOM 写。
+    if (on === this.assistRenderedOn && mask === this.assistRenderedMask) return
+    this.assistRenderedOn = on
+    this.assistRenderedMask = mask
     const manual = on ? axesFromMask(mask) : []
     const manualLine = manual.length ? `手操 ${manual.join('/')} · Space 交回辅助` : ''
     setText(this.assistHint, manualLine)

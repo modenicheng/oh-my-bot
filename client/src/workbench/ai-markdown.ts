@@ -37,10 +37,16 @@ function languageName(raw: string | undefined): string {
   return (raw ?? '').trim().split(/\s+/, 1)[0]?.toLowerCase() ?? ''
 }
 
+/** 流式渲染标记：流式期间同一代码块会被反复重渲染，最贵的 highlightAuto 路径退化为纯文本。 */
+let streamingRender = false
+
 function highlightCode(code: string, language: string): string {
   if (language && hljs.getLanguage(language)) {
     return hljs.highlight(code, { language, ignoreIllegals: true }).value
   }
+  // 流式期间未标语言的代码块跳过 highlightAuto（会尝试全部已注册语言），
+  // 结束后的最终渲染补全高亮。
+  if (streamingRender) return escapeHtml(code)
   return hljs.highlightAuto(code).value
 }
 
@@ -67,5 +73,10 @@ function closeStreamingFence(source: string): string {
 export function renderAiMarkdown(source: string, streaming = false): string {
   if (!source) return ''
   const markdown = streaming ? closeStreamingFence(source) : source
-  return markdownRenderer.parse(markdown, { async: false }) as string
+  streamingRender = streaming
+  try {
+    return markdownRenderer.parse(markdown, { async: false }) as string
+  } finally {
+    streamingRender = false
+  }
 }

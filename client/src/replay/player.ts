@@ -10,7 +10,7 @@ import { artReady } from '../game/art'
 import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
 import { ReplayIndex, type ReplayFrame, phaseName, numOr } from './index'
-import { parseReplayNDJSON } from './model'
+import { parseReplayNDJSONAsync, type ReplayData } from './model'
 import { ReplayRenderer } from './render'
 import { fetchReplayText, ReplayApiError } from './api'
 
@@ -50,6 +50,7 @@ export class ReplayPlayer {
   private resizeObserver?: ResizeObserver
   private pixelRatio = 0
   private scoreMarkup = ''
+  private lastTimelineTick = -1
 
   // DOM 引用
   private el: Record<string, HTMLElement> = {}
@@ -72,7 +73,8 @@ export class ReplayPlayer {
     try {
       const [text] = await Promise.all([fetchReplayText(matchId), artReady])
       if (this.disposed) return false
-      const data = parseReplayNDJSON(text)
+      // 分片异步解析：长录像不再冻结主线程（loading 提示保持动画、可取消）。
+      const data = await parseReplayNDJSONAsync(text)
       this.index = new ReplayIndex(data)
       // 地图来自 checkpoint.map（全量快照自带 MapDef）
       const mapJson = extractMapJson(data)
@@ -84,6 +86,7 @@ export class ReplayPlayer {
       this.tick = 0
       this.tickF = 0
       this.followRobotId = null
+      this.lastTimelineTick = -1
       this.spectator?.fit()
       const select = this.el['sp-follow'] as HTMLSelectElement | undefined
       if (this.spectator && select) {
@@ -304,13 +307,13 @@ export class ReplayPlayer {
     const el = this.el['rp-follow']
     if (!el || !this.index) return
     const r = this.followRobotId === null ? undefined : this.index.robots.get(this.followRobotId)
-    el.textContent = r ? `跟随: ${r.nick}` : '视角: 全景'
-    el.hidden = false
+    setTxt(el, r ? `跟随: ${r.nick}` : '视角: 全景')
+    if (el.hidden) el.hidden = false
   }
 
   // ---- 时间轴标记 -----------------------------------------------------------
 
-  private buildTimeline(data: ReturnType<typeof parseReplayNDJSON>): void {
+  private buildTimeline(data: ReplayData): void {
     this.timelineMarks = []
     if (!this.index) return
     for (const m of this.index.marks) {
@@ -401,9 +404,9 @@ export class ReplayPlayer {
       this.spectator.update(frame.robots)
       this.followRobotId = this.spectator.followId
       const select = this.el['sp-follow'] as HTMLSelectElement | undefined
-      if (select) select.value = this.followRobotId === null ? '' : String(this.followRobotId)
-      const zoom = this.el['sp-zoom']
-      if (zoom) zoom.textContent = `${this.spectator.zoom.toFixed(1)}×`
+      const followValue = this.followRobotId === null ? '' : String(this.followRobotId)
+      if (select && select.value !== followValue) select.value = followValue
+      setTxt(this.el['sp-zoom'], `${this.spectator.zoom.toFixed(1)}×`)
     } else if (this.followRobotId !== null) {
       this.cam.scale = Math.min(this.cam.cw / 40, this.cam.ch / 25)
       const r = frame.robots.find((x) => x.id === this.followRobotId)
@@ -438,12 +441,9 @@ export class ReplayPlayer {
   // ---- HUD ---------------------------------------------------------------
 
   private updateHud(frame: ReplayFrame): void {
-    const tickEl = this.el['rp-tick']
-    if (tickEl) tickEl.textContent = String(frame.tick)
-    const timeEl = this.el['rp-time']
-    if (timeEl) timeEl.textContent = fmtClock(frame.tick / TICK_HZ)
-    const phaseEl = this.el['rp-phase']
-    if (phaseEl) phaseEl.textContent = phaseName(frame.phase as any)
+    setTxt(this.el['rp-tick'], String(frame.tick))
+    setTxt(this.el['rp-time'], fmtClock(frame.tick / TICK_HZ))
+    setTxt(this.el['rp-phase'], phaseName(frame.phase as any))
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
       const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
@@ -467,7 +467,10 @@ export class ReplayPlayer {
     // 时间轴滑块同步
     const tl = this.el['rp-timeline'] as HTMLInputElement | undefined
     if (tl && this.index) {
-      tl.value = String(frame.tick)
+      if (this.lastTimelineTick !== frame.tick) {
+        this.lastTimelineTick = frame.tick
+        tl.value = String(frame.tick)
+      }
       if (tl.max !== String(this.index.endTick)) tl.max = String(this.index.endTick)
     }
     // 跟随目标死亡时保持 UI
@@ -521,7 +524,12 @@ export class ReplayPlayer {
 // ---- 工具 ----------------------------------------------------------------
 
 /** 从解析结果中提取 checkpoint.map（MapDef JSON 字符串化）。 */
-function extractMapJson(data: ReturnType<typeof parseReplayNDJSON>): string | null {
+/** HUD 文本等值守卫：textContent 同值写入也会替换文本节点并触发无效变更。 */
+function setTxt(el: HTMLElement | undefined, text: string): void {
+  if (el && el.textContent !== text) el.textContent = text
+}
+
+function extractMapJson(data: ReplayData): string | null {
   const rec = data.records.find((r) => r.state?.mapJson)
   return rec?.state?.mapJson ?? null
 }

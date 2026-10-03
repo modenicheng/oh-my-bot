@@ -207,6 +207,12 @@ export class ScriptConsoleView {
   private preferredHeight: number
   private appliedHeight = DEFAULT_CONSOLE_HEIGHT
   private finishResize?: () => void
+  /** 与 buffer.entries 平行的已渲染行（含可选 revision 分隔线），支撑增量 append。 */
+  private readonly rows: { divider: HTMLElement | null; line: HTMLElement }[] = []
+  private renderedDropped = 0
+  private lastRevision = -1
+  private noticeEl: HTMLElement | null = null
+  private emptyEl: HTMLElement | null = null
 
   constructor(private readonly root: HTMLElement, options: ScriptConsoleViewOptions) {
     this.options = options
@@ -246,9 +252,51 @@ export class ScriptConsoleView {
   get height(): number { return this.preferredHeight }
 
   append(entry: ScriptLogEntry): void {
+    // 滚动跟随判定必须在写入前读布局（写后再读会强制同步布局）。
     const follow = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 24
+    const droppedBefore = this.buffer.dropped
+    const lengthBefore = this.buffer.entries.length
     this.buffer.push(entry)
-    this.render()
+    const entries = this.buffer.entries
+    // push 只会：合并进末行（长度不变）、追加（+1）、追加后从头部裁剪（裁 evicted 行）。
+    const evicted = this.buffer.dropped - droppedBefore
+    const added = entries.length - (lengthBefore - evicted)
+    for (let i = 0; i < evicted; i++) {
+      const row = this.rows.shift()
+      row?.divider?.remove()
+      row?.line.remove()
+    }
+    if (added === 0 && evicted === 0) {
+      // 重复合并：末行的 repeat 徽标与 tick 变化，整行重建（O(1)，不重解析其余行）。
+      const index = this.rows.length - 1
+      const fresh = this.buildRow(entries.at(-1)!)
+      const stale = this.rows[index]
+      if (stale) {
+        stale.divider?.remove()
+        if (fresh.divider) stale.line.before(fresh.divider)
+        stale.line.replaceWith(fresh.line)
+        this.rows[index] = fresh
+      }
+    }
+    for (let i = this.rows.length; i < entries.length; i++) {
+      const row = this.buildRow(entries[i]!)
+      if (row.divider) this.list.insertBefore(row.divider, this.emptyEl)
+      this.list.insertBefore(row.line, this.emptyEl)
+      this.rows.push(row)
+    }
+    this.renderedDropped = this.buffer.dropped
+    if (this.buffer.dropped > 0) {
+      const text = `客户端缓冲已丢弃最早 ${this.buffer.dropped} 行日志`
+      if (this.noticeEl) this.noticeEl.textContent = text
+      else {
+        this.noticeEl = document.createElement('div')
+        this.noticeEl.className = 'script-console-notice'
+        this.noticeEl.textContent = text
+        this.list.prepend(this.noticeEl)
+      }
+    }
+    if (this.emptyEl && this.rows.length) { this.emptyEl.remove(); this.emptyEl = null }
+    this.syncFooter()
     if (this.opened && follow) this.list.scrollTop = this.list.scrollHeight
   }
 
@@ -350,77 +398,93 @@ export class ScriptConsoleView {
     })
   }
 
+  /** 全量重建（构造与 clear 时）：append 走增量路径，不经过这里。 */
   private render(): void {
+    this.rows.length = 0
+    this.renderedDropped = this.buffer.dropped
+    this.lastRevision = -1
+    this.noticeEl = null
+    this.emptyEl = null
     const fragment = document.createDocumentFragment()
-    let revision = -1
     if (this.buffer.dropped) {
-      const notice = document.createElement('div')
-      notice.className = 'script-console-notice'
-      notice.textContent = `客户端缓冲已丢弃最早 ${this.buffer.dropped} 行日志`
-      fragment.append(notice)
+      this.noticeEl = document.createElement('div')
+      this.noticeEl.className = 'script-console-notice'
+      this.noticeEl.textContent = `客户端缓冲已丢弃最早 ${this.buffer.dropped} 行日志`
+      fragment.append(this.noticeEl)
     }
     for (const entry of this.buffer.entries) {
-      const client = entry.source === 'client'
-      if (!client && entry.scriptRev !== revision) {
-        revision = entry.scriptRev
-        const divider = document.createElement('div')
-        divider.className = 'script-console-revision'
-        divider.textContent = `script r${revision}`
-        fragment.append(divider)
-      }
-      const line = document.createElement('div')
-      const level = ['log', 'info', 'warn', 'error', 'debug'].includes(entry.level) ? entry.level : 'log'
-      line.className = `script-console-line level-${level}${client ? ' source-client' : ''}`
-      line.dataset.tick = String(entry.tick)
-      const meta = document.createElement('span')
-      meta.className = 'script-console-meta'
-      if ((entry.repeat ?? 1) > 1) {
-        const repeat = document.createElement('span')
-        repeat.className = 'script-console-repeat'
-        repeat.textContent = String(entry.repeat)
-        repeat.title = `连续重复 ${entry.repeat} 次`
-        meta.append(repeat)
-      }
-      const position = document.createElement('span')
-      position.textContent = client ? `client ${level}` : `t${entry.tick} ${level}`
-      meta.append(position)
-
-      const parsed = parseStructuredConsoleMessage(entry.text)
-      let content: HTMLElement
-      if (parsed) {
-        content = document.createElement('div')
-        content.className = 'script-console-values'
-        for (const value of parsed.args) content.append(renderSnapshot(value))
-        if (parsed.omitted) {
-          const omitted = document.createElement('span')
-          omitted.className = 'script-console-omitted'
-          omitted.textContent = `… +${parsed.omitted} args`
-          content.append(omitted)
-        }
-      } else {
-        content = document.createElement('span')
-        content.className = 'script-console-text'
-        content.textContent = entry.text
-      }
-      if (entry.truncated && !entry.text.includes('limit reached')) {
-        const truncated = document.createElement('span')
-        truncated.className = 'script-console-truncated'
-        truncated.textContent = '[截断]'
-        content.append(truncated)
-      }
-      line.append(meta, content)
-      fragment.append(line)
+      const row = this.buildRow(entry)
+      this.rows.push(row)
+      if (row.divider) fragment.append(row.divider)
+      fragment.append(row.line)
     }
-    if (!fragment.childNodes.length) {
-      const empty = document.createElement('div')
-      empty.className = 'script-console-empty'
-      empty.textContent = '等待脚本输出 · 使用 console.log(...) 调试'
-      fragment.append(empty)
+    if (!this.rows.length && !this.buffer.dropped) {
+      this.emptyEl = document.createElement('div')
+      this.emptyEl.className = 'script-console-empty'
+      this.emptyEl.textContent = '等待脚本输出 · 使用 console.log(...) 调试'
+      fragment.append(this.emptyEl)
     }
     this.list.replaceChildren(fragment)
+    this.syncFooter()
+  }
+
+  private syncFooter(): void {
     const size = String(this.buffer.messageCount)
-    this.count.textContent = size
-    this.triggerCount.textContent = size
+    if (this.count.textContent !== size) this.count.textContent = size
+    if (this.triggerCount.textContent !== size) this.triggerCount.textContent = size
     this.clearButton.disabled = this.buffer.entries.length === 0
+  }
+
+  private buildRow(entry: ScriptLogEntry): { divider: HTMLElement | null; line: HTMLElement } {
+    const client = entry.source === 'client'
+    let divider: HTMLElement | null = null
+    if (!client && entry.scriptRev !== this.lastRevision) {
+      this.lastRevision = entry.scriptRev
+      divider = document.createElement('div')
+      divider.className = 'script-console-revision'
+      divider.textContent = `script r${entry.scriptRev}`
+    }
+    const line = document.createElement('div')
+    const level = ['log', 'info', 'warn', 'error', 'debug'].includes(entry.level) ? entry.level : 'log'
+    line.className = `script-console-line level-${level}${client ? ' source-client' : ''}`
+    line.dataset.tick = String(entry.tick)
+    const meta = document.createElement('span')
+    meta.className = 'script-console-meta'
+    if ((entry.repeat ?? 1) > 1) {
+      const repeat = document.createElement('span')
+      repeat.className = 'script-console-repeat'
+      repeat.textContent = String(entry.repeat)
+      repeat.title = `连续重复 ${entry.repeat} 次`
+      meta.append(repeat)
+    }
+    const position = document.createElement('span')
+    position.textContent = client ? `client ${level}` : `t${entry.tick} ${level}`
+    meta.append(position)
+
+    const parsed = parseStructuredConsoleMessage(entry.text)
+    let content: HTMLElement
+    if (parsed) {
+      content = document.createElement('div')
+      content.className = 'script-console-values'
+      for (const value of parsed.args) content.append(renderSnapshot(value))
+      if (parsed.omitted) {
+        const omitted = document.createElement('span')
+        omitted.className = 'script-console-omitted'
+        omitted.textContent = `… +${parsed.omitted} args`
+        content.append(omitted)
+      }
+    } else {
+      content = document.createElement('span')
+      content.className = 'script-console-text'
+      content.textContent = entry.text
+    }
+    if (entry.truncated && !entry.text.includes('limit reached')) {
+      const truncated = document.createElement('span')
+      truncated.className = 'script-console-truncated'
+      truncated.textContent = '[截断]'
+      content.append(truncated)
+    }
+    line.append(meta, content)
+    return { divider, line }
   }
 }

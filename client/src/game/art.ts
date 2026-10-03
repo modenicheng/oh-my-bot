@@ -7,6 +7,9 @@ export const ink = {
   text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d',
 } as const
 export const mono = '"Fusion Pixel", ui-monospace, monospace'
+const FONT_10 = `10px ${mono}`
+const FONT_11 = `11px ${mono}`
+const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 const sources = {
@@ -81,7 +84,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
     ctx.beginPath(); ctx.moveTo(px, py + b); ctx.lineTo(px, py); ctx.lineTo(px + b, py)
     ctx.moveTo(px + w - b, py + h); ctx.lineTo(px + w, py + h); ctx.lineTo(px + w, py + h - b); ctx.stroke()
     if (s >= 8) {
-      ctx.font = `11px ${mono}`; ctx.textAlign = 'left'; ctx.fillStyle = '#9cb0bb'; ctx.textBaseline = 'top'
+      ctx.font = FONT_11; ctx.textAlign = 'left'; ctx.fillStyle = '#9cb0bb'; ctx.textBaseline = 'top'
       ctx.fillText(`出生区 ${String(sector.id + 1).padStart(2, '0')}`, px + 8, py + 8)
       ctx.strokeStyle = '#486775'; ctx.lineWidth = 1
       const cx = px + w / 2, cy = py + h / 2
@@ -92,7 +95,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   circle(ctx, x, y, map.coreZone.radius * s); ctx.fillStyle = unlocked ? '#12303a' : '#0c1620'; ctx.fill()
   ctx.lineWidth = 1.5; ctx.strokeStyle = unlocked ? ink.cyan : '#71909f'; ctx.setLineDash([8, 6]); ctx.stroke(); ctx.setLineDash([])
   if (visible(cam, x, y)) {
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `11px ${mono}`; ctx.fillStyle = unlocked ? ink.cyan : ink.dim
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = FONT_11; ctx.fillStyle = unlocked ? ink.cyan : ink.dim
     ctx.fillText(unlocked ? '核心区 · 已开放' : '核心区 · 待开放', x, y + Math.max(28, 5 * s))
   }
   ctx.restore()
@@ -109,20 +112,50 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
 }
 
 export function drawCover(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam: Camera): void {
+  // 墙体 AABB 互不重叠且样式只有 4 种：按样式分桶遍历，把每墙 4 次样式切换
+  // 降为常量次；描边合并为整批 beginPath/stroke。绘制次序(影→体→描边)不变。
+  const s = cam.scale
+  ctx.fillStyle = '#03090dbb'
   for (const wall of map.walls) {
     const x = cam.toPxX(wall.min.x), y = cam.toPxY(wall.min.y)
-    const w = (wall.max.x - wall.min.x) * cam.scale, h = (wall.max.y - wall.min.y) * cam.scale
+    const w = (wall.max.x - wall.min.x) * s, h = (wall.max.y - wall.min.y) * s
     if (!visible(cam, x, y, Math.max(w, h))) continue
-    ctx.fillStyle = '#03090dbb'; ctx.fillRect(x + 3, y + 4, w, h)
-    ctx.fillStyle = '#293e4c'; ctx.fillRect(x, y, w, h)
-    ctx.strokeStyle = '#5c798b'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h)
-    ctx.strokeStyle = '#99b4c2'; ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, y); ctx.lineTo(x + w, y); ctx.stroke()
-    if (cam.scale > 10) {
-      ctx.strokeStyle = '#131f2a'; ctx.beginPath()
+    ctx.fillRect(x + 3, y + 4, w, h)
+  }
+  ctx.fillStyle = '#293e4c'
+  for (const wall of map.walls) {
+    const x = cam.toPxX(wall.min.x), y = cam.toPxY(wall.min.y)
+    const w = (wall.max.x - wall.min.x) * s, h = (wall.max.y - wall.min.y) * s
+    if (!visible(cam, x, y, Math.max(w, h))) continue
+    ctx.fillRect(x, y, w, h)
+  }
+  ctx.strokeStyle = '#5c798b'; ctx.lineWidth = 1
+  for (const wall of map.walls) {
+    const x = cam.toPxX(wall.min.x), y = cam.toPxY(wall.min.y)
+    const w = (wall.max.x - wall.min.x) * s, h = (wall.max.y - wall.min.y) * s
+    if (!visible(cam, x, y, Math.max(w, h))) continue
+    ctx.strokeRect(x, y, w, h)
+  }
+  ctx.strokeStyle = '#99b4c2'
+  ctx.beginPath()
+  for (const wall of map.walls) {
+    const x = cam.toPxX(wall.min.x), y = cam.toPxY(wall.min.y)
+    const w = (wall.max.x - wall.min.x) * s, h = (wall.max.y - wall.min.y) * s
+    if (!visible(cam, x, y, Math.max(w, h))) continue
+    ctx.moveTo(x, y + h); ctx.lineTo(x, y); ctx.lineTo(x + w, y)
+  }
+  ctx.stroke()
+  if (s > 10) {
+    ctx.strokeStyle = '#131f2a'
+    ctx.beginPath()
+    for (const wall of map.walls) {
+      const x = cam.toPxX(wall.min.x), y = cam.toPxY(wall.min.y)
+      const w = (wall.max.x - wall.min.x) * s, h = (wall.max.y - wall.min.y) * s
+      if (!visible(cam, x, y, Math.max(w, h))) continue
       if (w > h) for (let i = 12; i < w - 8; i += 14) { ctx.moveTo(x + i, y + 3); ctx.lineTo(x + i, y + h - 3) }
       else for (let i = 12; i < h - 8; i += 14) { ctx.moveTo(x + 3, y + i); ctx.lineTo(x + w - 3, y + i) }
-      ctx.stroke()
     }
+    ctx.stroke()
   }
 }
 
@@ -188,7 +221,7 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   if (available) {
     ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
   } else if (respawnInS > 0) {
-    ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = `10px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+    ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
     ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)
   }
   ctx.restore()
@@ -206,20 +239,33 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
     const a = -tau / 4 + Math.min(1, progress) * tau
     ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
     ctx.fillStyle = '#f4fbff'; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
-    ctx.font = `16px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
+    ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
     ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
   }
   ctx.restore()
 }
+
+// 弹道渐变坐标是 translate 后的局部坐标，只依赖 (颜色, 长度)，与弹丸位置无关；
+// 长度仅随 cam.scale（一局内恒定）变化。按 ctx 分桶缓存（CanvasGradient 跨 ctx 使用
+// 无规范保证），长度按 1/4 像素分桶限容，消除每弹每帧 createLinearGradient。
+const beamGradients = new WeakMap<CanvasRenderingContext2D, Map<string, CanvasGradient>>()
 
 export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, heading: number, color: string): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy)
   if (!visible(cam, x, y)) return
   ctx.save(); ctx.translate(x, y); ctx.rotate(heading)
   const length = 1.4 * cam.scale
-  // One bounded beam, no frame-history allocations and no trail beyond the authoritative projectile.
-  const trail = ctx.createLinearGradient(-length, 0, 0, 0)
-  trail.addColorStop(0, '#22d3ee00'); trail.addColorStop(1, color)
+  let cached = beamGradients.get(ctx)
+  if (!cached) { cached = new Map(); beamGradients.set(ctx, cached) }
+  const bucket = Math.round(length * 4) / 4
+  const key = color + '|' + bucket
+  let trail = cached.get(key)
+  if (!trail) {
+    // One bounded beam, no frame-history allocations and no trail beyond the authoritative projectile.
+    trail = ctx.createLinearGradient(-bucket, 0, 0, 0)
+    trail.addColorStop(0, '#22d3ee00'); trail.addColorStop(1, color)
+    cached.set(key, trail)
+  }
   ctx.fillStyle = trail; ctx.fillRect(-length, -2, length, 4)
   ctx.fillStyle = ink.text; ctx.fillRect(-3, -1, 4, 2); ctx.restore()
 }
@@ -232,6 +278,6 @@ export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
   ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * Math.min(1, Math.max(0, hp / 100)), 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
-  ctx.font = `11px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
+  ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()
 }

@@ -8,7 +8,7 @@ import { icon } from '../icons'
 // tag/tags/order），渲染前剥离；title 覆盖文件名为页标题，audience/tag 显示为
 // 页标题旁的小标签，order 仅供服务端目录排序（客户端信服务端顺序）。
 
-import { renderMarkdown, bindTabInteractions } from './render'
+import { bindTabInteractions } from './tabs'
 import { normalizeManualTree } from './manual-order'
 
 // ---- API 契约（与主线服务器侧对齐） -----------------------------------------
@@ -259,6 +259,12 @@ export class ManualView {
   /** 目录树查找：path → 节点（含父链，用于侧栏高亮与面包屑）。 */
   private nodeIndex = new Map<string, { node: ManualNode; parent: ManualNode | null }>()
   private usingMock = false
+  /** 目录与会话内已取文档的缓存：手册内容在一次会话内不变，二次打开免网络往返。
+   * 仅缓存成功结果，失败路径保持每次重试。 */
+  private treeLoaded = false
+  private readonly docCache = new Map<string, string>()
+  /** marked 渲染模块（含 tab 组渲染）：动态加载以移出首屏主 chunk，构造期即并行拉取。 */
+  private readonly renderModule = import('./render')
 
   constructor(opts: ManualViewOpts) {
     this.opts = opts
@@ -279,6 +285,7 @@ export class ManualView {
   }
 
   private async loadTree(): Promise<void> {
+    if (this.treeLoaded) return
     this.opts.status.textContent = '加载目录…'
     try {
       const root = await fetchTree()
@@ -292,6 +299,7 @@ export class ManualView {
       this.tree = normalizeManualTree(MOCK_TREE)
       this.usingMock = true
     }
+    this.treeLoaded = true
     this.indexTree()
     this.renderSidebar()
     this.opts.status.textContent = this.usingMock ? '离线示例数据（服务器手册 API 未就绪）' : ''
@@ -323,7 +331,17 @@ export class ManualView {
     this.opts.status.textContent = '加载中…'
     let raw: string
     try {
-      raw = this.usingMock ? (MOCK_DOCS[path] ?? '') : await fetchDoc(path)
+      const cached = this.docCache.get(path)
+      if (cached !== undefined) {
+        raw = cached
+      } else {
+        raw = this.usingMock ? (MOCK_DOCS[path] ?? '') : await fetchDoc(path)
+        this.docCache.set(path, raw)
+        if (this.docCache.size > 20) {
+          const oldest = this.docCache.keys().next().value
+          if (oldest !== undefined) this.docCache.delete(oldest)
+        }
+      }
     } catch (err) {
       if (version !== this.navigationVersion) return
       this.opts.status.textContent = `文档加载失败：${err instanceof Error ? err.message : path}`
@@ -334,7 +352,7 @@ export class ManualView {
     const { body, fm } = splitFrontmatter(raw)
     const bodyEl = document.createElement('div')
     bodyEl.className = 'manual-body'
-    bodyEl.innerHTML = renderMarkdown(body, path)
+    bodyEl.innerHTML = (await this.renderModule).renderMarkdown(body, path)
     const leadingHeading = bodyEl.firstElementChild?.tagName === 'H1' ? bodyEl.firstElementChild : null
     const title = fm.title ?? leadingHeading?.textContent ?? entry?.node.title ?? path
     leadingHeading?.remove()

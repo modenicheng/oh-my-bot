@@ -9,8 +9,9 @@ import { encodeClient } from '@omb/protocol'
 import { parseMapDef, type MapDefParsed } from './mapdef'
 import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldState } from './world'
 import { Camera } from './camera'
-import { Renderer, type SayBubble } from './render'
-import { InputSampler } from './input'
+import { Renderer, type RenderExtras, type SayBubble } from './render'
+import { InputSampler, AXIS_AIM } from './input'
+import { ControlSource } from '@omb/protocol'
 import { Hud } from './hud'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback } from './feedback'
@@ -38,6 +39,8 @@ export class GameController {
   private hud: Hud
   private feedback: GameFeedback
   private bubbles: SayBubble[] = []
+  /** 渲染循环每帧复用的 extras 容器，避免每帧对象字面量分配。 */
+  private extras: RenderExtras = { bubbles: [] }
   private sayTicks = new Map<number, number>()
   private raf = 0
   private sendTimer: ReturnType<typeof setInterval> | undefined
@@ -104,6 +107,10 @@ export class GameController {
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )
+    // 瞄准 guard 生效期间鼠标移动被吞时提示按 R（节流在 HUD 内部）。
+    this.input.onAimGuarded = () => {
+      if (this.active && !this.ended && !document.hidden) this.hud.flashAimGuardHint()
+    }
     this.chat.addEventListener('submit', this.submitChat)
     this.chat.addEventListener('keydown', this.chatKey)
     this.chat.addEventListener('focusout', this.leaveChat)
@@ -284,6 +291,25 @@ export class GameController {
     return this.input.assistOn
   }
 
+  /** R：显式夺取炮塔轴（辅助脚本正在瞄准时鼠标不抢轴，R 是唯一入口）。 */
+  seizeAim(): void {
+    if (!this.active || !this.map || this.ended || !this.world.initialized) return
+    if (!this.input.seizeAim()) return
+    audio.play('assist')
+    this.hud.flashMsg('手动瞄准 · Space 交回辅助')
+  }
+
+  /** 每帧按权威 SelfState 更新瞄准 guard：辅助开启 + 炮塔轴归脚本/官方
+   * Snippet + 人未持有炮塔轴（本地粘滞位）时，鼠标移动不抢炮塔轴，改由 R
+   * 显式夺取（开自瞄但手动开火的玩家不被点击微动打断辅助瞄准）。
+   * 字段缺失（旧服务器）不启用 guard，保持逐帧鼠标抢占。 */
+  private syncAimGuard(): void {
+    const self = this.world.self
+    this.input.aimUnderScript = !!self?.assistOn
+      && (self.turretSrc === ControlSource.CS_SCRIPT || self.turretSrc === ControlSource.CS_SNIPPET)
+      && !this.input.holdsAim()
+  }
+
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return
@@ -364,6 +390,7 @@ export class GameController {
     if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
     if (this.pixelRatio !== (window.devicePixelRatio || 1)) this.resizeCanvas()
+    this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     // 死亡：人工接管归零（服务端重生时已重置控制状态），本地同步清粘滞轴，
@@ -373,10 +400,18 @@ export class GameController {
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
-    this.bubbles = this.bubbles.filter(bubble => performance.now() - bubble.at < 4000)
-    this.renderer.render(this.world, this.map, this.cam, {
-      bubbles: this.bubbles, localAim: pos ? this.input.aimAt(pos.x, pos.y) : undefined, feedback: this.feedback,
-    })
+    // 原地压缩过期气泡：rAF 每帧执行，避免 filter 的每帧数组分配。
+    const now = performance.now()
+    let kept = 0
+    for (let i = 0; i < this.bubbles.length; i++) {
+      const bubble = this.bubbles[i]!
+      if (now - bubble.at < 4000) this.bubbles[kept++] = bubble
+    }
+    this.bubbles.length = kept
+    this.extras.bubbles = this.bubbles
+    this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
+    this.extras.feedback = this.feedback
+    this.renderer.render(this.world, this.map, this.cam, this.extras)
     this.hud.update(this.world, this.map, this.scores)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
@@ -384,6 +419,7 @@ export class GameController {
 
   private sampleAndSend(): void {
     if (!this.map || !this.active || !this.inputEnabled || this.ended || !this.world.initialized) return
+    this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     const pos = self?.base?.pos

@@ -4,7 +4,7 @@ import { SpectatorCamera } from './replay/spectator'
 import { artReady } from './game/art'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
 import { Renderer, phaseName, type SayBubble } from './game/render'
-import { Scoreboard, scoreRow } from './game/scoreboard'
+import { Scoreboard, type ScoreDisplay, scoreRow } from './game/scoreboard'
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
 
@@ -12,6 +12,10 @@ export interface LiveSpectatorDeps {
   root: HTMLElement
   canvas: HTMLCanvasElement
   onExit: () => void
+}
+
+function setTxt(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text
 }
 
 /** A spectator owns only its camera and snapshot consumer, never gameplay input. */
@@ -34,28 +38,45 @@ export class LiveSpectator {
   private roomState = 0
   private bubbles: SayBubble[] = []
   private roster = ''
+  private rosterSize = -1
   private scores = new Scoreboard()
-  private scoreSignature = ''
+  private lastRows: ScoreDisplay[] | null = null
+  private lastEnded = false
+  /** 脏标记：快照/事件/相机变化才整帧重绘，空闲观战不再永动重绘。 */
+  private dirty = true
   private drag: { id: number; x: number; y: number } | null = null
   private follow: HTMLSelectElement
   private status: HTMLElement
   private retry: HTMLButtonElement
+  private zoomEl: HTMLElement
+  private phaseEl: HTMLElement
+  private timeEl: HTMLElement
+  private countEl: HTMLElement
 
   constructor(private deps: LiveSpectatorDeps) {
     this.renderer = new Renderer(deps.canvas)
     this.follow = this.el<HTMLSelectElement>('live-follow')
     this.status = this.el('live-status')
     this.retry = this.el<HTMLButtonElement>('live-retry')
+    this.zoomEl = this.el('live-zoom')
+    this.phaseEl = this.el('live-phase')
+    this.timeEl = this.el('live-time')
+    this.countEl = this.el('live-count')
     this.resetMatchDisplay()
     this.el('live-online').textContent = '真人 0'
     this.bindEvents()
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(deps.canvas)
     this.resize()
-    void artReady.then(() => { if (!this.disposed) this.draw() })
+    void artReady.then(() => { if (!this.disposed) this.requestDraw() })
     const loop = () => {
       if (this.disposed) return
-      this.draw()
+      if (this.bubbles.length) this.dirty = true // 气泡 4s 寿命，存在期间保持重绘以自然过期
+      if (!this.dirty && this.dpr !== (window.devicePixelRatio || 1)) this.dirty = true
+      if (this.dirty) {
+        this.dirty = false
+        this.draw()
+      }
       this.raf = requestAnimationFrame(loop)
     }
     this.raf = requestAnimationFrame(loop)
@@ -80,6 +101,11 @@ export class LiveSpectator {
 
   private el<T extends HTMLElement = HTMLElement>(id: string): T {
     return this.deps.root.querySelector<T>(`#${id}`)!
+  }
+
+  /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径都可安全高频调用）。 */
+  private requestDraw(): void {
+    this.dirty = true
   }
 
   private onState(state: SessionState, delay = 0): void {
@@ -110,14 +136,16 @@ export class LiveSpectator {
       this.resyncSent = false
       this.status.textContent = '已连接'
       this.deps.root.dataset.tick = String(this.world.tick)
-      this.el('live-phase').textContent = phaseName(this.world.phase)
+      setTxt(this.phaseEl, phaseName(this.world.phase))
       const seconds = Math.max(0, Math.floor(this.world.timeLeftS))
-      this.el('live-time').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-      this.el('live-count').textContent = `机器人 ${this.world.robots.size}`
-      this.updateRoster()
+      setTxt(this.timeEl, `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`)
+      setTxt(this.countEl, `机器人 ${this.world.robots.size}`)
+      // 花名册只依赖 full 快照（nick 仅 full 携带）与机器人集合规模变化，
+      // delta 帧跳过逐快照的排序/序列化。
+      if (snap.full || this.world.robots.size !== this.rosterSize) this.updateRoster()
       this.scores.observe(this.world.robots)
       this.renderScores()
-      this.draw()
+      this.requestDraw()
       return
     }
     if (msg.payload.case !== 'event') return
@@ -162,14 +190,17 @@ export class LiveSpectator {
       if (previous?.text === say.text && performance.now() - previous.at < 4000) return
       this.bubbles = this.bubbles.filter(b => b.robotId !== say.robot)
       this.bubbles.push({ robotId: say.robot, text: say.text, at: performance.now() })
+      this.requestDraw()
     }
   }
 
   private renderScores(): void {
+    // scoreboard.display 返回缓存数组：引用相同（且结算位未变）即跳过重建，
+    // 免去逐快照的 JSON.stringify 签名。
     const rows = this.scores.display(this.world.robots)
-    const signature = JSON.stringify([this.scores.ended, rows])
-    if (signature === this.scoreSignature) return
-    this.scoreSignature = signature
+    if (rows === this.lastRows && this.scores.ended === this.lastEnded) return
+    this.lastRows = rows
+    this.lastEnded = this.scores.ended
     const list = this.el('live-scores')
     list.replaceChildren(...rows.map(row => scoreRow(row, 'li', this.scores.ended)))
     list.hidden = rows.length === 0
@@ -178,7 +209,9 @@ export class LiveSpectator {
 
   private resetMatchDisplay(): void {
     this.scores.reset()
-    this.scoreSignature = ''
+    this.lastRows = null
+    this.lastEnded = false
+    this.rosterSize = -1
     this.world = emptyWorld()
     this.needsFull = true
     this.resyncSent = false
@@ -209,6 +242,7 @@ export class LiveSpectator {
   }
 
   private updateRoster(): void {
+    this.rosterSize = this.world.robots.size
     const robots = [...this.world.robots.values()].sort((a, b) => (a.base?.id ?? 0) - (b.base?.id ?? 0))
     const key = JSON.stringify(robots.map(r => [r.base?.id, r.nick]))
     if (key === this.roster) return
@@ -223,9 +257,10 @@ export class LiveSpectator {
     bgm.phase('live', this.world.phase)
     if (this.dpr !== (window.devicePixelRatio || 1)) { this.resize(); return }
     this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
-    this.follow.value = this.camera.followId === null ? '' : String(this.camera.followId)
-    this.el('live-zoom').textContent = `${this.camera.zoom.toFixed(1)}\u00d7`
-    this.bubbles = this.bubbles.filter(b => performance.now() - b.at < 4000)
+    const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
+    if (this.follow.value !== followValue) this.follow.value = followValue
+    setTxt(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
+    if (this.bubbles.length) this.bubbles = this.bubbles.filter(b => performance.now() - b.at < 4000)
     this.renderer.render(this.world, this.map, this.camera.camera, { bubbles: this.bubbles })
   }
 
@@ -250,11 +285,11 @@ export class LiveSpectator {
       this.session = new RoomSession()
       void this.connect(this.roomCode)
     }, { signal })
-    this.follow.addEventListener('change', () => { camera.follow(this.follow.value ? Number(this.follow.value) : null); this.draw() }, { signal })
-    this.el('live-free').addEventListener('click', () => { camera.follow(null); this.draw() }, { signal })
-    this.el('live-fit').addEventListener('click', () => { camera.fit(); this.draw() }, { signal })
-    this.el('live-in').addEventListener('click', () => { camera.zoomAt(1.25); this.draw() }, { signal })
-    this.el('live-out').addEventListener('click', () => { camera.zoomAt(0.8); this.draw() }, { signal })
+    this.follow.addEventListener('change', () => { camera.follow(this.follow.value ? Number(this.follow.value) : null); this.requestDraw() }, { signal })
+    this.el('live-free').addEventListener('click', () => { camera.follow(null); this.requestDraw() }, { signal })
+    this.el('live-fit').addEventListener('click', () => { camera.fit(); this.requestDraw() }, { signal })
+    this.el('live-in').addEventListener('click', () => { camera.zoomAt(1.25); this.requestDraw() }, { signal })
+    this.el('live-out').addEventListener('click', () => { camera.zoomAt(0.8); this.requestDraw() }, { signal })
     canvas.addEventListener('pointerdown', e => {
       if (e.button !== 0 || !e.isPrimary || !this.map) return
       canvas.focus({ preventScroll: true })
@@ -267,7 +302,7 @@ export class LiveSpectator {
       if (!this.drag || e.pointerId !== this.drag.id) return
       camera.pan(e.clientX - this.drag.x, e.clientY - this.drag.y)
       this.drag.x = e.clientX; this.drag.y = e.clientY
-      this.draw()
+      this.requestDraw()
     }, { signal })
     const release = (e: PointerEvent) => { if (e.pointerId === this.drag?.id) this.endDrag() }
     for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) canvas.addEventListener(event, release, { signal })
@@ -279,7 +314,7 @@ export class LiveSpectator {
       const rect = canvas.getBoundingClientRect()
       const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1
       camera.zoomAt(Math.exp(-Math.max(-400, Math.min(400, e.deltaY * units)) * 0.002), e.clientX - rect.left, e.clientY - rect.top)
-      this.draw()
+      this.requestDraw()
     }, { signal, passive: false })
     root.addEventListener('keydown', e => {
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
@@ -296,7 +331,7 @@ export class LiveSpectator {
         default: return
       }
       e.preventDefault()
-      this.draw()
+      this.requestDraw()
     }, { signal })
   }
 

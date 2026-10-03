@@ -68,6 +68,8 @@ export class Workbench {
   private loadingEditor = false
   private docPath: string
   private draftKey = ''
+  /** 草稿落盘防抖句柄：逐键同步写 localStorage 会阻塞 Monaco 输入路径。 */
+  private draftSaveTimer?: number
   private source = INITIAL_SOURCE
   private language: BotLanguage = 'js'
   private prefKey = ''
@@ -162,6 +164,8 @@ export class Workbench {
     this.submitButton = this.el('workbench-submit')
     this.assistButton = this.el('workbench-assist')
     this.draftStatus = this.el('workbench-draft')
+    // 草稿为防抖落盘：页面隐藏/关闭时兜底 flush，避免最后 400ms 输入丢失。
+    window.addEventListener('pagehide', () => this.flushDraft())
     this.languageButtons = Array.from(this.deps.root.querySelectorAll<HTMLButtonElement>('#workbench-lang-switch [data-lang]'))
     this.scriptConsole = new ScriptConsoleView(this.el('workbench-console'), {
       trigger: this.el('workbench-console-toggle'),
@@ -354,14 +358,16 @@ export class Workbench {
   }
 
   private renderSizes(): void {
+    // 先读后写：maxWidth 与 refreshLayout 的父容器高度读取都发生在本函数任何
+    // 样式写入之前，消除拖动时“写后读”的强制同步布局。
     const maxWidth = this.maxWidth()
+    this.scriptConsole.refreshLayout()
     this.width = Math.max(MIN_WIDTH, Math.round(this.width))
     const effectiveWidth = Math.min(maxWidth, this.width)
     this.ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, Math.round(this.ratio)))
     this.deps.gameView.style.setProperty('--workbench-width', `${effectiveWidth}px`)
     this.docsPane.style.flexGrow = String(this.ratio)
     this.editorPane.style.flexGrow = String(100 - this.ratio)
-    this.scriptConsole.refreshLayout()
     this.resizeHandle.setAttribute('aria-valuemin', String(MIN_WIDTH))
     this.resizeHandle.setAttribute('aria-valuemax', String(maxWidth))
     this.resizeHandle.setAttribute('aria-valuenow', String(effectiveWidth))
@@ -384,6 +390,19 @@ export class Workbench {
         consoleHeight: this.consoleHeight,
       }))
     } catch { /* 调整仍在当前页面生效。 */ }
+  }
+
+  /** 立即落盘当前草稿（防抖到期 / pagehide 兜底 / 身份或语言切换前）。 */
+  private flushDraft(): void {
+    if (this.draftSaveTimer !== undefined) {
+      window.clearTimeout(this.draftSaveTimer)
+      this.draftSaveTimer = undefined
+    }
+    if (!this.draftKey) return
+    try {
+      localStorage.setItem(this.draftKey, this.source)
+      this.draftStatus.textContent = '草稿已保存'
+    } catch { this.draftStatus.textContent = '草稿无法保存，请复制备份' }
   }
 
   private bindResize(handle: HTMLElement, axis: 'width' | 'split'): void {
@@ -447,6 +466,7 @@ export class Workbench {
   }
 
   clearIdentity(): void {
+    this.flushDraft()
     if (this.draftKey) this.saveLanguagePref()
     this.draftKey = ''
     this.prefKey = ''
@@ -475,6 +495,7 @@ export class Workbench {
     }
     const key = draftKeyFor(roomCode, nick, language)
     if (this.draftKey === key) return
+    this.flushDraft()
     this.resetMatch()
     this.draftKey = key
     // 编辑器已存在时同步切换模型，避免把 TS 源码写进 JS 模型。
@@ -509,6 +530,7 @@ export class Workbench {
     this.applyLanguage(language, true)
     const nextKey = this.languageKeyFor()
     if (this.draftKey) {
+      this.flushDraft()
       this.saveLanguagePref()
       this.draftKey = nextKey
       this.source = this.loadDraft() ?? (language === 'ts' ? INITIAL_SOURCE_TS : INITIAL_SOURCE)
@@ -552,10 +574,9 @@ export class Workbench {
       this.editor = createBotEditor(this.el('workbench-code'), this.source, {
         onChange: source => {
           this.source = source
-          try {
-            if (this.draftKey) localStorage.setItem(this.draftKey, source)
-            this.draftStatus.textContent = '草稿已保存'
-          } catch { this.draftStatus.textContent = '草稿无法保存，请复制备份' }
+          if (this.draftSaveTimer === undefined) {
+            this.draftSaveTimer = window.setTimeout(() => { this.draftSaveTimer = undefined; this.flushDraft() }, 400)
+          }
           this.renderButtons()
         },
         onSubmit: () => this.submit(),
@@ -572,6 +593,9 @@ export class Workbench {
   }
 
   setAvailability(online: boolean, inMatch: boolean): void {
+    // 每个 roomState/快照落地都会调用：值未变时直接早退，避免 renderToolPanels
+    // 连带 AI 面板整表重建（renderButtons/renderToolPanels 均为状态纯渲染，幂等）。
+    if (this.online === online && this.inMatch === inMatch) return
     if (this.online && !online) {
       const hadPending = !!this.pending
       this.clearPending()

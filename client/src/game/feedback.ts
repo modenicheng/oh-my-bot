@@ -1,7 +1,7 @@
 import type { ClientInput, ServerEvent, SnapshotDelta } from '@omb/protocol'
 import { audio, type SoundCue } from '../audio'
 import type { Camera } from './camera'
-import type { MapDefParsed, MapVec2 } from './mapdef'
+import type { MapDefParsed, MapUplink, MapVec2 } from './mapdef'
 import type { WorldState } from './world'
 
 const tau = Math.PI * 2
@@ -95,8 +95,14 @@ export class GameFeedback {
     const self = world.robots.get(world.self?.robotId ?? 0), pos = self?.base?.pos
     if (!active || document.hidden) { this.baseline = false; this.near = 0; audio.setUplink('off'); return }
     if (!pos || self?.dead) { this.near = 0; audio.setUplink('off'); return }
-    const nearest = map.uplinks.filter(u => world.phase >= u.activePhase && (!u.main || world.phase >= 2) && Math.hypot(pos.x - u.pos.x, pos.y - u.pos.y) <= u.interactR)
-      .sort((a, b) => Math.hypot(pos.x - a.pos.x, pos.y - a.pos.y) - Math.hypot(pos.x - b.pos.x, pos.y - b.pos.y))[0]
+    // 单循环取范围内最近 Uplink：rAF 与快照双路径每帧到达，避免 filter+sort 的临时数组。
+    let nearest: MapUplink | undefined
+    let bestD = Infinity
+    for (const u of map.uplinks) {
+      if (world.phase < u.activePhase || (u.main && world.phase < 2)) continue
+      const d = Math.hypot(pos.x - u.pos.x, pos.y - u.pos.y)
+      if (d <= u.interactR && d < bestD) { nearest = u; bestD = d }
+    }
     const id = nearest?.id ?? 0
     if (id && id !== this.near && transitions) {
       audio.play('uplinkEnter')
@@ -232,7 +238,13 @@ export class GameFeedback {
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
     const now = performance.now()
-    this.effects = this.effects.filter(e => now - e.at < e.duration)
+    // 原地压缩过期特效，避免每帧 filter 分配。
+    let kept = 0
+    for (let i = 0; i < this.effects.length; i++) {
+      const e = this.effects[i]!
+      if (now - e.at < e.duration) this.effects[kept++] = e
+    }
+    this.effects.length = kept
     ctx.save()
     for (const e of this.effects) {
       const x = cam.toPxX(e.pos.x), y = cam.toPxY(e.pos.y)
@@ -281,15 +293,24 @@ export class GameFeedback {
     // 截短末端：撞击墙体近表面本身不应成为遮挡。
     const end = Math.max(0, 1 - 0.03 / Math.max(distance, 0.03))
     for (const wall of map.walls) {
+      // 标量化两轴 slab 测试，语义与原数组解构版一致（平行且在外 → 不遮挡该墙）。
       let enter = 0, exit = end
-      for (const [origin, delta, min, max] of [[self.x, dx, wall.min.x, wall.max.x], [self.y, dy, wall.min.y, wall.max.y]] as const) {
-        if (Math.abs(delta) < 1e-8) { if (origin < min || origin > max) { enter = 2; break } }
-        else {
-          const a = (min - origin) / delta, b = (max - origin) / delta
+      let parallelOutside = false
+      if (dx > -1e-8 && dx < 1e-8) {
+        if (self.x < wall.min.x || self.x > wall.max.x) parallelOutside = true
+      } else {
+        const a = (wall.min.x - self.x) / dx, b = (wall.max.x - self.x) / dx
+        enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b))
+      }
+      if (!parallelOutside) {
+        if (dy > -1e-8 && dy < 1e-8) {
+          if (self.y < wall.min.y || self.y > wall.max.y) parallelOutside = true
+        } else {
+          const a = (wall.min.y - self.y) / dy, b = (wall.max.y - self.y) / dy
           enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b))
         }
+        if (enter <= exit) return false
       }
-      if (enter <= exit) return false
     }
     return true
   }
