@@ -4,7 +4,7 @@ import type { MapDefParsed } from './mapdef'
 
 export const ink = {
   bg: '#070d14', floor: '#101b25', panel: '#182735', line: '#29414f',
-  text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d',
+  text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d', white: '#f4fbff',
 } as const
 export const mono = '"Fusion Pixel", ui-monospace, monospace'
 const FONT_10 = `10px ${mono}`
@@ -12,6 +12,9 @@ const FONT_11 = `11px ${mono}`
 const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
+/** Uplink 悬浮投影：米数（lift*UPLINK_LIFT）与阴影贴地缩放（0.48 - lift*0.12）
+ *  三处共享（D15/C-21），阴影必须严格贴地，改一处即改三处。 */
+export const UPLINK_LIFT = 0.38
 const sources = {
   robot: new URL('../assets/robot.svg', import.meta.url).href,
   turret: new URL('../assets/turret.svg', import.meta.url).href,
@@ -181,7 +184,7 @@ export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number
   if (shield) {
     const sr = r * 1.65 + 5
     circle(ctx, x, y, sr); ctx.fillStyle = '#eff9ff12'; ctx.fill()
-    ctx.strokeStyle = '#f4fbff'; ctx.lineWidth = Math.max(3, cam.scale * 0.06); ctx.stroke()
+    ctx.strokeStyle = ink.white; ctx.lineWidth = Math.max(3, cam.scale * 0.06); ctx.stroke()
     circle(ctx, x, y, sr + 4); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 1; ctx.stroke()
     ctx.fillStyle = '#ffffff'
     for (let i = 0; i < 4; i++) {
@@ -232,7 +235,7 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
   if (!visible(cam, x, y)) return
   ctx.save(); ctx.globalAlpha = ready || progress > 0 ? 1 : 0.55
   if (lift > 0) {
-    const shadowY = y + lift * 0.38 * cam.scale
+    const shadowY = y + lift * UPLINK_LIFT * cam.scale
     ctx.fillStyle = '#02070c99'; ctx.beginPath(); ctx.ellipse(x, shadowY + size * 0.35, size * (0.48 - lift * 0.12), size * 0.16, 0, 0, tau); ctx.fill()
     ctx.strokeStyle = '#22d3ee55'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
   }
@@ -243,7 +246,7 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
     ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
     const a = -tau / 4 + Math.min(1, progress) * tau
     ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
-    ctx.fillStyle = '#f4fbff'; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
     ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
     ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
   }
@@ -283,7 +286,7 @@ export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
   const actualRatio = Math.min(1, Math.max(0, hp / 100))
   const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / 100))
-  if (delayedRatio > actualRatio) { ctx.fillStyle = '#f4fbff'; ctx.fillRect(x - w / 2, by, w * delayedRatio, 3) }
+  if (delayedRatio > actualRatio) { ctx.fillStyle = ink.white; ctx.fillRect(x - w / 2, by, w * delayedRatio, 3) }
   ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
   ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'

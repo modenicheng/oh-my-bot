@@ -2,7 +2,7 @@
 // say 气泡事件、结算覆盖层。令牌严格走 client/STYLE.md：radius 0、1px #1f2733
 // 描边、荧光只用于状态高亮。技能卡是状态显示（含键帽），不是可点击按钮。
 import type { WorldState, RobotEnt } from './world'
-import type { MapDefParsed, MapUplink } from './mapdef'
+import { HACK_MAX_X10, type MapDefParsed, type MapUplink } from './mapdef'
 import { phaseName } from './render'
 import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
@@ -17,7 +17,6 @@ const MAX_EN = 1000   // energy_x10（×10）
 const TICK_HZ = 60    // 服务器固定 60Hz 绝对 tick
 const FIRE_COST_EN = 5   // server sim.FireCost
 const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
-const HACK_MAX_X10 = 80  // progress_x10 满值（8s × 10）
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
 const INNER_MS = 4200
 const AIM_HINT_MS = 4000 // 瞄准 guard 提示节流间隔
@@ -66,6 +65,8 @@ export class Hud {
   private assistRenderedOn: boolean | undefined
   private takeoverRendered = ''
   private aimStatusText = AIM_STATUS_TEXT.unavailable
+  /** 瞄准能力信号（Workbench 上报），updateTakeover 供 aimControlStatus 用。 */
+  private aimCapable = false
 
   constructor(private root: HTMLElement) {
     this.hpFill = requireEl(root, 'hud-hp-fill')
@@ -116,6 +117,7 @@ export class Hud {
     if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
+    this.aimCapable = aimCapable
 
     // 常态机体用低饱和绿，能量用青色；数值与颜色共同标识状态。
     this.leftPanel.classList.toggle('dead', !!self?.dead)
@@ -159,7 +161,7 @@ export class Hud {
     }
 
     this.updateSkills(world, self)
-    this.updateTakeover(world, aimCapable)
+    this.updateTakeover(world, self)
     this.updateUplink(world, map, self)
   }
 
@@ -260,7 +262,7 @@ export class Hud {
       return
     }
     const dead = self.dead
-    const en = self ? self.energyX10 / 10 : 0
+    const en = self.energyX10 / 10
     const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick)
 
     // 开火：无 CD 概念外的能量门槛（5/发）；间隔 250ms 仅在射击后瞬时可见
@@ -345,11 +347,11 @@ export class Hud {
   // 输出某轴时对应卡标 data-takeover="script"（琥珀色，见 hud.css）。服务器逐
   // tick 回显仲裁来源，人一按键即抢占，标记随之消失。等值守卫：快照 60Hz 到达
   // 而接管组合极少变化。快照丢失/未初始化时旧标记保留，下一次快照修正。
-  private updateTakeover(world: WorldState, aimCapable: boolean): void {
+  private updateTakeover(world: WorldState, self: RobotEnt | undefined): void {
     const t = axisTakeover(world.self)
-    const aim = aimControlStatus(world.self, aimCapable)
+    const aim = aimControlStatus(world.self, this.aimCapable)
     this.aimStatusText = AIM_STATUS_TEXT[aim]
-    const dead = !!world.robots.get(world.self?.robotId ?? -1)?.dead
+    const dead = !!self?.dead
     const sig = `${world.self ? 1 : 0}${dead ? 1 : 0}${t.move ? 1 : 0}${aim}${t.fire ? 1 : 0}${t.ability ? 1 : 0}`
     if (sig === this.takeoverRendered) return
     this.takeoverRendered = sig

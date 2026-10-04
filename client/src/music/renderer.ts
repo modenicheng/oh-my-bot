@@ -31,10 +31,6 @@ export class SongRenderer {
     }
   }
 
-  get usingWorker(): boolean {
-    return this.worker !== null;
-  }
-
   render(song: SongSpec, sampleRate: number): Promise<SongRender> {
     const key = `${song.id}|${sampleRate}|${hash(JSON.stringify(song))}`;
     const cached = this.cache.get(key);

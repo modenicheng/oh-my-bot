@@ -30,8 +30,11 @@ export interface MapDefParsed {
 
 /** 三环半径（设计常量，渲染环线参照；实际锁区以 core_zone 为准） */
 export const RING_CORE = 30
-export const RING_MID = 55
 export const RING_OUTER = 80
+
+/** 黑入进度满值：progress_x10 的分母（8s × 10，对应 server sim.HackDuration=480）。
+ *  hud 进度条、渲染进度环、音效强度三处共享（D3）。 */
+export const HACK_MAX_X10 = 80
 
 type Raw = Record<string, unknown>
 

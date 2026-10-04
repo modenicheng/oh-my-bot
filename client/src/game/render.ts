@@ -4,7 +4,8 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
+import { ink, mono, UPLINK_LIFT, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
+import { HACK_MAX_X10 } from './mapdef'
 const ROBOT_R = 0.6
 const DEFAULT_VISION_RADIUS = 20
 const VISION_FEATHER = 3.5
@@ -79,9 +80,9 @@ export class Renderer {
     drawArena(ctx, map, cam, world.phase)
     for (const def of map.uplinks) {
       const st = world.uplinks.get(def.id)
-      const progress = st?.progressX10 ? st.progressX10 / 80 : 0
+      const progress = st?.progressX10 ? st.progressX10 / HACK_MAX_X10 : 0
       const lift = extras.feedback?.uplinkLift(progress) ?? 0
-      drawUplink(ctx, cam, def.pos.x, def.pos.y - lift * 0.38, def.main,
+      drawUplink(ctx, cam, def.pos.x, def.pos.y - lift * UPLINK_LIFT, def.main,
         world.phase >= def.activePhase && (st?.ready ?? true), progress, lift)
       const selfPos = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
       if (selfPos && world.phase >= def.activePhase && Math.hypot(selfPos.x - def.pos.x, selfPos.y - def.pos.y) <= def.interactR) {

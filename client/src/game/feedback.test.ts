@@ -7,6 +7,14 @@ import type { MapDefParsed } from './mapdef'
 
 const sound = vi.hoisted(() => ({ play: vi.fn(), setUplink: vi.fn(), stopGame: vi.fn() }))
 vi.mock('../audio', () => ({ audio: sound }))
+
+/** 共享测试环境（C-16）：清 mock + 默认 matchMedia/document 桩；
+ *  个别用例随后可用 vi.stubGlobal 覆盖 hidden/matches。 */
+function stubFeedbackEnv(): void {
+  vi.clearAllMocks()
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  vi.stubGlobal('document', { hidden: false })
+}
 const map: MapDefParsed = { version: 1, generatorVer: 2, seed: 1, mapHash: '', extent: 80,
   walls: [], sectors: [], corePads: [{ id: 20, pos: { x: 43, y: 0 }, group: 0, value: 10 }],
   healthPacks: [{ id: 1, pos: { x: 4, y: 5 } }],
@@ -40,9 +48,7 @@ const opening = (tick: number) => create(ServerEventSchema, { tick, kind: { case
 
 describe('confirmed feedback transitions', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
 
   it('emits start/cancel but never labels successful hacking as interrupted', () => {
@@ -352,9 +358,7 @@ describe('confirmed feedback transitions', () => {
 
 describe('combat motion presentation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
 
   it.each([false, true])('draws a thick irregular low-health edge (reduced=%s) without covering the center', reduced => {
@@ -396,6 +400,21 @@ describe('combat motion presentation', () => {
     expect(restore).toBeGreaterThan(deeper)
   })
 
+  it('advances zoom once per tick when draw and input loops call it twice on the same tick', () => {
+    // C-4：rAF drawFrame 与 60Hz sampleAndSend 同 tick 各调一次；同 tick 的第二次
+    // 调用必须返回缓存，否则每 tick 走两步、收敛速度随刷新率漂移（144Hz≈204 步/s）。
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const draw = f.feedback.cameraZoom(11, true)
+    const sample = f.feedback.cameraZoom(11, true)
+    expect(sample).toBe(draw)
+    const once = new GameFeedback(vi.fn())
+    once.cameraZoom(11, true)
+    const single = once.cameraZoom(12, true)
+    const twice: number[] = []
+    for (let tick = 11; tick <= 12; tick++) twice.push(f.feedback.cameraZoom(tick, true), f.feedback.cameraZoom(tick, true))
+    expect(twice[3]).toBe(single)
+  })
+
   it('raises hit pitch during a short confirmed impact chain', () => {
     const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
     f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } } }), seenAt: 0 })
@@ -413,9 +432,7 @@ describe('combat motion presentation', () => {
 
 describe('projectile impact presentation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
   function painted(feedback: GameFeedback): string[] {
     const colors: string[] = []

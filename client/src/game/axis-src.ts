@@ -3,6 +3,7 @@
 // 必发；fire_src/ability_src 缺失 = 旧服务器，不臆造，恒 false）。
 // 输出归因与辅助模式分开：空轴不标记正在输出，但已启用自瞄应显示辅助待机。
 import { ControlSource, type SelfState } from '@omb/protocol'
+import { AXIS_AIM } from './input'
 
 /** 各轴是否正被脚本/Snippet 接管（bit 对应技能卡组：move/aim/fire/ability）。 */
 export interface AxisTakeover {
@@ -27,7 +28,7 @@ export const AIM_STATUS_TEXT: Record<AimControlStatus, string> = {
 /** A loaded aim capability remains enabled even when this tick has no target/output. */
 export function aimControlStatus(self: SelfState | undefined, aimCapable: boolean): AimControlStatus {
   if (!self) return 'unavailable'
-  if (self.assistOn === false || self.turretSrc === ControlSource.CS_HUMAN || ((self.manualAxesMask ?? 0) & 2) !== 0) return 'manual'
+  if (self.assistOn === false || self.turretSrc === ControlSource.CS_HUMAN || (self.manualAxesMask ?? 0) & AXIS_AIM) return 'manual'
   if (scriptish(self.turretSrc)) return 'aiming'
   return self.assistOn && aimCapable ? 'standby' : 'manual'
 }

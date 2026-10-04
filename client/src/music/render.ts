@@ -249,13 +249,3 @@ export function renderSong(song: SongSpec, sampleRate: number, options: RenderOp
     headroom: mixPeak > 0 ? Math.min(2.2, DRY_HEADROOM / mixPeak) : 1,
   };
 }
-
-/** Find the note sounding at `frame` on one voice (notes are sorted by start). */
-export function noteAt(notes: ScheduledNote[], frame: number): ScheduledNote | null {
-  let best: ScheduledNote | null = null;
-  for (const note of notes) {
-    if (note.startFrame > frame) break;
-    if (frame < note.startFrame + note.gateFrames) best = note;
-  }
-  return best;
-}
