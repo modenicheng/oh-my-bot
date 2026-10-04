@@ -1,5 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
-import { sleep, until, startStaticServer } from './harness.mjs'
+import { sleep, until, startStaticServer, gen2MapJson, FixtureServer, frame } from './harness.mjs'
 // game-feel-check.mjs — focused browser regression for ongoing game-feel UI.
 //
 // Scope: client/scripts/game-feel-check.mjs + package.json "test:feel" only.
@@ -33,7 +33,6 @@ import {
 } from '../../packages/protocol/src/index.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { WebSocketServer } from 'ws'
 import assert from 'node:assert/strict'
 
 // ---------------------------------------------------------------- constants
@@ -54,27 +53,11 @@ const UPLINK_ID = 900
 const SELF_POS = { x: 0, y: 0 }
 const ENEMY_POS = { x: 8, y: -3 }
 
-// gen2 minimal valid map: walls non-empty but far away and never blocking,
-// one uplink with interactR 2.5 m ~1.8 m from self, one core pad, core zone.
-// Vec2/Rect use Go-style uppercase keys (mapdef.ts accepts both cases).
-const MAP_JSON = JSON.stringify({
-  version: 1,
-  generator_ver: 2,
-  seed: 20260206,
-  map_hash: 'feelfix01',
-  walls: [
-    { id: 1, min: { X: -66, Y: -60 }, max: { X: -58, Y: 60 } },
-    { id: 2, min: { X: 58, Y: -60 }, max: { X: 66, Y: 60 } },
-  ],
-  sectors: [
-    { id: 1, spawn_area: { Min: { X: -50, Y: -40 }, Max: { X: -35, Y: -25 } }, center: { X: -42, Y: -32 } },
-    { id: 2, spawn_area: { Min: { X: 35, Y: 25 }, Max: { X: 50, Y: 40 } }, center: { X: 42, Y: 32 } },
-  ],
-  uplinks: [{ id: UPLINK_ID, pos: { X: 1.5, Y: 1.0 }, main: false, interact_r: 2.5, active_phase: 1 }],
-  core_pads: [{ id: 1, pos: { X: 3, Y: 3 }, group: 0, value: 10 }],
-  health_packs: [{ id: 7, pos: { X: 20, Y: 0 } }],
-  core_zone: { radius: 30, unlock_phase: 2 },
-})
+// gen2 minimal valid map (harness.gen2MapJson): walls non-empty but far away and
+// never blocking, one uplink with interactR 2.5 m ~1.8 m from self, one core pad,
+// core zone. Vec2/Rect use Go-style uppercase keys (mapdef.ts accepts both cases).
+// This script pins the uplink at (1.5, 1.0) so its interact radius reaches self.
+const MAP_JSON = gen2MapJson('feelfix01', { uplink: { id: UPLINK_ID, pos: { X: 1.5, Y: 1.0 } } })
 
 // ---------------------------------------------------------------- fixture
 function freshState() {
@@ -94,36 +77,18 @@ function freshState() {
   }
 }
 
-class Fixture {
+class Fixture extends FixtureServer {
   constructor() {
-    this.conns = new Set()
+    super()
     this.inputs = []
     this.joins = 0
     this.assistToggles = 0
     this.st = freshState()
   }
 
-  attach(server) {
-    const wss = new WebSocketServer({ noServer: true })
-    this.wss = wss
-    server.on('upgrade', (req, sock, head) => {
-      const { pathname } = new URL(req.url, 'http://localhost')
-      if (pathname !== '/ws') { sock.destroy(); return }
-      wss.handleUpgrade(req, sock, head, ws => this.onWs(ws))
-    })
-  }
-
-  onWs(ws) {
-    const conn = { ws, joined: false }
-    this.conns.add(conn)
-    ws.on('message', data => this.onFrame(conn, Buffer.from(data)))
-    ws.on('close', () => this.conns.delete(conn))
-    ws.on('error', () => {})
-  }
-
   onFrame(conn, buf) {
-    if (buf[0] === 0x00) { conn.ws.send(Buffer.from([0x01])); return } // ping -> pong (net.ts 4s watchdog)
-    if (buf[0] !== 0x02) return
+    if (buf[0] === frame.ping) { conn.ws.send(Buffer.from([frame.pong])); return } // ping -> pong (net.ts 4s watchdog)
+    if (buf[0] !== frame.up) return
     let msg
     try { msg = fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
     const c = msg.payload
@@ -156,11 +121,9 @@ class Fixture {
     // roomAction / aiPrompt / snippetConfig: ignored by fixture
   }
 
-  send(conn, msg) { if (conn.ws.readyState === 1) conn.ws.send(Buffer.concat([Buffer.from([0x03]), toBinary(ServerMsgSchema, msg)])) }
-  bcast(msg) { for (const c of this.conns) this.send(c, msg) }
-
+  /** events default to the current sim tick, like the pre-harness fixture did */
   event(kindCase, schema, val, tick = this.st.tick) {
-    return create(ServerMsgSchema, { payload: { case: 'event', value: create(ServerEventSchema, { tick, kind: { case: kindCase, value: create(schema, val) } }) } })
+    return super.event(kindCase, schema, val, tick)
   }
 
   /** join acceptance: roomState -> mapBootstrap -> full snapshot (state resets each join) */

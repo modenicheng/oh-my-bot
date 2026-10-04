@@ -6,16 +6,15 @@
 // Real-server behavior is round2-check's job; this checks visuals only.
 // Prerequisite: pnpm build in client/. Screenshots: OMB_SHOTS || ../.artifacts/pickup
 import { startClient } from './startup-helpers.mjs'
-import { sleep, startStaticServer } from './harness.mjs'
+import { sleep, startStaticServer, gen2MapJson, FixtureServer, frame } from './harness.mjs'
 import { chromium } from 'playwright'
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
-  ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
+  ServerMsgSchema, ClientMsgSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema,
 } from '../../packages/protocol/src/index.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { WebSocketServer } from 'ws'
 import assert from 'node:assert/strict'
 
 const PORT = Number(process.env.OMB_PICKUP_PORT || 18449)
@@ -31,24 +30,10 @@ const SELF_ID = 101
 const PACK_POS = { x: 2.2, y: 0 }
 const CORE_POS = { x: -2.4, y: 0 }
 
-const MAP_JSON = JSON.stringify({
-  version: 1,
-  generator_ver: 2,
-  seed: 20260206,
-  map_hash: 'pickup01',
-  walls: [
-    { id: 1, min: { X: -66, Y: -60 }, max: { X: -58, Y: 60 } },
-    { id: 2, min: { X: 58, Y: -60 }, max: { X: 66, Y: 60 } },
-  ],
-  sectors: [
-    { id: 1, spawn_area: { Min: { X: -50, Y: -40 }, Max: { X: -35, Y: -25 } }, center: { X: -42, Y: -32 } },
-    { id: 2, spawn_area: { Min: { X: 35, Y: 25 }, Max: { X: 50, Y: 40 } }, center: { X: 42, Y: 32 } },
-  ],
-  uplinks: [{ id: 900, pos: { X: 40, Y: 0 }, main: false, interact_r: 2.5, active_phase: 1 }],
-  core_pads: [{ id: 1, pos: { X: -2.4, Y: 0 }, group: 0, value: 10 }],
-  health_packs: [{ id: 7, pos: { X: 2.2, Y: 0 } }],
-  core_zone: { radius: 30, unlock_phase: 2 },
-})
+// gen2 minimal valid map (harness.gen2MapJson): the self robot spawns at origin
+// next to the health pack (+2.2, 0) and the core pad (-2.4, 0), with the uplink
+// parked far away at (40, 0).
+const MAP_JSON = gen2MapJson('pickup01')
 
 function freshState() {
   return {
@@ -65,36 +50,17 @@ function freshState() {
   }
 }
 
-class Fixture {
-  constructor() { this.conns = new Set(); this.inputs = []; this.st = freshState() }
-  attach(server) {
-    const wss = new WebSocketServer({ noServer: true })
-    server.on('upgrade', (req, sock, head) => {
-      const { pathname } = new URL(req.url, 'http://localhost')
-      if (pathname !== '/ws') { sock.destroy(); return }
-      wss.handleUpgrade(req, sock, head, ws => this.onWs(ws))
-    })
-  }
-  onWs(ws) {
-    const conn = { ws, joined: false }
-    this.conns.add(conn)
-    ws.on('message', data => this.onFrame(conn, Buffer.from(data)))
-    ws.on('close', () => this.conns.delete(conn))
-    ws.on('error', () => {})
-  }
+class Fixture extends FixtureServer {
+  constructor() { super(); this.inputs = []; this.st = freshState() }
   onFrame(conn, buf) {
-    if (buf[0] === 0x00) { conn.ws.send(Buffer.from([0x01])); return }
-    if (buf[0] !== 0x02) return
+    if (buf[0] === frame.ping) { conn.ws.send(Buffer.from([frame.pong])); return }
+    if (buf[0] !== frame.up) return
     let msg
     try { msg = fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
     const c = msg.payload
     if (c.case === 'join') { conn.joined = true; this.accept(conn) }
     else if (c.case === 'input') this.inputs.push(c.value)
     else if (c.case === 'resyncRequest') this.sendFull(conn)
-  }
-  send(conn, msg) { if (conn.ws.readyState === 1) conn.ws.send(Buffer.concat([Buffer.from([0x03]), toBinary(ServerMsgSchema, msg)])) }
-  event(kindCase, schema, val, tick = this.st.tick) {
-    return create(ServerMsgSchema, { payload: { case: 'event', value: create(ServerEventSchema, { tick, kind: { case: kindCase, value: create(schema, val) } }) } })
   }
   accept(conn) {
     this.st = freshState()
