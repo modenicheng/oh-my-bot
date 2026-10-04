@@ -173,6 +173,8 @@ describe('confirmed feedback transitions', () => {
     f.feedback.event(ev, f.world, map, true); f.feedback.event(ev, f.world, map, true)
     expect(cueCount('uplinkCancel')).toBe(0)
     expect(cueCount('uplinkSuccess')).toBe(1)
+    expect(f.feedback.cameraShake(12)).toEqual({ x: 0, y: 0 })
+    expect(f.feedback.cameraShake(20)).toEqual({ x: 0, y: 0 })
     expect(f.message).toHaveBeenCalledExactlyOnceWith('黑入完成 · +15 分 · 本桩冷却 30s', 'uplink')
   })
 

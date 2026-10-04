@@ -7,7 +7,6 @@ import type { WorldState } from './world'
 
 const tau = Math.PI * 2
 const CAMERA_SHAKE_TICKS = 16
-const UPLINK_SLAM_TICKS = 12
 const DAMAGE_HOLD_MS = 420
 const DAMAGE_FADE_MS = 620
 const DAMAGE_POPUP_MS = 850
@@ -50,7 +49,6 @@ export class GameFeedback {
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
   private shake: { tick: number; seed: number } | undefined
-  private slam: { tick: number; seed: number } | undefined
   private selfLow = false
   private lowHitAt = -Infinity
   private dashZoom = { value: 1, tick: 0 }
@@ -70,12 +68,12 @@ export class GameFeedback {
     this.hackers.clear(); this.completed.clear(); this.near = 0; this.baseline = false; this.lastDenied = -Infinity
     this.quietThroughTick = -1; this.phase = undefined; this.innerOpened = false
     this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
-    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined; this.slam = undefined
+    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined
     this.selfLow = false; this.lowHitAt = -Infinity; this.dashZoom = { value: 1, tick: 0 }; this.hitChain = { at: -Infinity, count: 0 }; this.zoomAtTick = undefined
     audio.stopGame()
   }
 
-  pause(): void { this.effects = []; this.damage = []; this.trails.clear(); this.near = 0; this.baseline = false; this.shake = undefined; this.slam = undefined; audio.stopGame() }
+  pause(): void { this.effects = []; this.damage = []; this.trails.clear(); this.near = 0; this.baseline = false; this.shake = undefined; audio.stopGame() }
 
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
     const transitions = this.baseline && !snap.full && active && !document.hidden
@@ -232,7 +230,6 @@ export class GameFeedback {
         if (k.value.by === selfId) {
           audio.play('uplinkSuccess')
           this.completed.set(k.value.uplinkId, ev.tick)
-          this.slam = { tick: ev.tick, seed: ev.tick + k.value.uplinkId * 17 }
           this.message(`黑入完成 · +${k.value.value} 分 · 本桩冷却 30s`, 'uplink')
         } else {
           if (p) this.sound('uplinkSuccess', p, world)
@@ -297,17 +294,6 @@ export class GameFeedback {
         const decay = 1 - age / CAMERA_SHAKE_TICKS
         const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(shake.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
         x += Math.round(direction[0] * 8 * decay); y += Math.round(direction[1] * 6 * decay)
-      }
-    }
-    const slam = this.slam
-    if (slam) {
-      const age = Math.max(0, tick - slam.tick)
-      if (age >= UPLINK_SLAM_TICKS) this.slam = undefined
-      else {
-        const fall = age < 4 ? -8 + age * 4.5 : 10 * (1 - (age - 4) / (UPLINK_SLAM_TICKS - 4))
-        const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(slam.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
-        x += Math.round(direction[0] * 2 * (1 - age / UPLINK_SLAM_TICKS))
-        y += Math.round(fall)
       }
     }
     return { x, y }

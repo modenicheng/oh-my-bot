@@ -939,10 +939,13 @@ async function bannerPass(browser, fix, reduced = false) {
       fix.bcast(defeated); await sleep(80)
       assert.equal(await page.evaluate(() => window.__cameraShakes.length), count, 'duplicate self defeat does not restart camera shake')
     }
+    await page.evaluate(() => { window.__cameraShakes = [] })
     const hack = fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 })
     fix.bcast(hack)
     await until(async () => /黑入完成/.test(await hudMsgText(page)), 'uplink banner')
     assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'uplink')
+    await sleep(100)
+    assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'successful hacking never moves the camera')
     await shot(page, reduced ? '14-uplink-reduced.png' : '12-uplink-banner.png')
 
     await page.locator('#game-canvas').focus()
