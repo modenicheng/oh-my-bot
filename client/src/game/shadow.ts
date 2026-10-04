@@ -18,8 +18,9 @@ function cornerY(i: number, miny: number, maxy: number): number { return i === 0
 /**
  * 追加一堵墙的影多边形顶点（世界坐标）到 pts。
  * @returns 写入的数值个数；0 = 该墙不产生阴影（零面积 / 整体在视野圆外）。
- * 常规墙输出单一子路径共 len+2 个顶点（len∈[2,4] 为远侧链角数，链角点 +
- * 终点切线延长点 + 起点切线延长点）；自机在墙内时输出两个子路径（正向视野
+ * 常规墙输出单一子路径共 len+3 个顶点（len∈[2,4] 为远侧链角数，链角点 +
+ * 终点切线延长点 + 墙中心远向点 + 起点切线延长点）；中心点把远端封口保持在
+ * 视野圆外，避免自机贴墙时两条近乎平行的切线直接连边产生窄三角漏光。自机在墙内时输出两个子路径（正向视野
  * 大框 + 逆向墙身矩形，nonzero 绕向相消使墙身保持可见），以 NaN,NaN 分隔。
  */
 export function appendWallShadow(pts: number[], sx: number, sy: number, wall: ShadowAABB, range: number): number {
@@ -81,12 +82,17 @@ export function appendWallShadow(pts: number[], sx: number, sy: number, wall: Sh
   if (!(ed > 0) || !(sd > 0) || !Number.isFinite(reach)) return 0
   const endExtX = endX + (edx / ed) * reach, endExtY = endY + (edy / ed) * reach
   const startExtX = startX + (sdx / sd) * reach, startExtY = startY + (sdy / sd) * reach
-  if (!Number.isFinite(endExtX) || !Number.isFinite(endExtY) || !Number.isFinite(startExtX) || !Number.isFinite(startExtY)) return 0
+  const centerX = (minx + maxx) * 0.5, centerY = (miny + maxy) * 0.5
+  const mdx = centerX - sx, mdy = centerY - sy, md = Math.hypot(mdx, mdy)
+  if (!(md > 0)) return 0
+  const midExtX = centerX + (mdx / md) * reach, midExtY = centerY + (mdy / md) * reach
+  if (!Number.isFinite(endExtX) || !Number.isFinite(endExtY) || !Number.isFinite(midExtX) || !Number.isFinite(midExtY)
+    || !Number.isFinite(startExtX) || !Number.isFinite(startExtY)) return 0
 
   for (let k = 0; k < len; k++) {
     const idx = (start + k) & 3
     pts.push(cornerX(idx, minx, maxx), cornerY(idx, miny, maxy))
   }
-  pts.push(endExtX, endExtY, startExtX, startExtY)
-  return (len + 2) * 2
+  pts.push(endExtX, endExtY, midExtX, midExtY, startExtX, startExtY)
+  return (len + 3) * 2
 }

@@ -47,13 +47,13 @@ type robotStamp struct {
 	heading               float32
 	hpX10, energyX10      int32
 	shield, dashing, dead bool
-	respawn               uint32
+	respawn, invuln       uint32
 }
 
 func stampRobot(r *sim.RobotView) robotStamp {
 	return robotStamp{pos: r.Pos, heading: float32(r.Turret), hpX10: r.HpX10,
 		energyX10: r.EnergyX10, shield: r.ShieldOn, dashing: r.Dashing,
-		dead: r.Dead, respawn: r.RespawnInS}
+		dead: r.Dead, respawn: r.RespawnInS, invuln: r.InvulnS}
 }
 
 // projStamp / coreStamp / uplinkStamp：各类别的变化子集。
@@ -245,6 +245,8 @@ func encodeRobot(r *sim.RobotView, withMeta bool) *ombv1.RobotState {
 		Dead:       r.Dead,
 		RespawnInS: r.RespawnInS,
 	}
+	invuln := r.InvulnS
+	rs.InvulnS = &invuln
 	if withMeta {
 		rs.Nick = r.Nick
 		rs.Color = r.Color

@@ -168,6 +168,7 @@ message RobotState {
   string nick = 8;         // 仅 full 快照携带
   string color = 9;        // 仅 full 快照携带
   bool is_partner = 10 [deprecated = true]; // 旧客户端兼容；新对局恒 false
+  optional uint32 invuln_s = 11; // 权威无敌剩余秒数；缺失表示旧服务器，0=无
 }
 
 message ProjectileState {

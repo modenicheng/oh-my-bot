@@ -62,7 +62,7 @@ describe('派生量换算（X-3）', () => {
 })
 
 describe('world 消费 tuning（X-3）', () => {
-  it('emptyWorld 携带兜底 tuning；applySnapshot 用其推导无敌窗口', () => {
+  it('emptyWorld 携带兜底 tuning；旧服务器缺失 invuln_s 时用 dead→alive 推导窗口', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000_000)
     const world = emptyWorld()
@@ -81,5 +81,26 @@ describe('world 消费 tuning（X-3）', () => {
     const ent = world.robots.get(7)!
     expect(ent.invulnUntil! - performance.now()).toBeCloseTo(4250, -1)
     vi.useRealTimers()
+  })
+
+  it('权威 invuln_s 在 full/resync 中恢复绿色护盾并以 optional 0 明确关闭', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(2_000_000)
+    try {
+      const world = emptyWorld()
+      const full = create(SnapshotDeltaSchema, {
+        tick: 10, full: true, phase: 1,
+        robots: [create(RobotStateSchema, { base: create(EntityBaseSchema, { id: 7 }), hpX10: 1000, invulnS: 3 })],
+      })
+      expect(applySnapshot(world, full)).toBe('applied')
+      expect(world.robots.get(7)!.invulnUntil! - performance.now()).toBeCloseTo(3250, -1)
+
+      const ended = create(SnapshotDeltaSchema, {
+        tick: 11, baseTick: 10, phase: 1,
+        robots: [create(RobotStateSchema, { base: create(EntityBaseSchema, { id: 7 }), hpX10: 1000, invulnS: 0 })],
+      })
+      expect(applySnapshot(world, ended)).toBe('applied')
+      expect(world.robots.get(7)!.invulnUntil).toBeUndefined()
+    } finally { vi.useRealTimers() }
   })
 })

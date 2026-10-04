@@ -11,6 +11,8 @@ const FONT_10 = `10px ${mono}`
 const FONT_11 = `11px ${mono}`
 const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
+export const ROBOT_SHIELD_RADIUS = 2.05
+export const ROBOT_SHIELD_OUTER_RADIUS = 1.16
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 /** @deprecated 仅兼容旧调用方；Uplink 绘制不再使用悬浮偏移。 */
 export const UPLINK_LIFT = 0.38
@@ -179,22 +181,27 @@ export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number
     ctx.strokeStyle = color; ctx.lineWidth = 2
     for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(x, y, r + 6, i * tau / 4 + 0.15, i * tau / 4 + 0.65); ctx.stroke() }
   }
+  const guardR = r * ROBOT_SHIELD_RADIUS
+  const guardOuterR = guardR * ROBOT_SHIELD_OUTER_RADIUS
   if (shield) {
-    const sr = r * 1.65 + 5
-    circle(ctx, x, y, sr); ctx.fillStyle = '#eff9ff12'; ctx.fill()
-    ctx.strokeStyle = ink.white; ctx.lineWidth = Math.max(3, cam.scale * 0.06); ctx.stroke()
-    circle(ctx, x, y, sr + 4); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 1; ctx.stroke()
+    circle(ctx, x, y, guardR); ctx.fillStyle = '#eff9ff12'; ctx.fill()
+    ctx.strokeStyle = ink.white; ctx.lineWidth = r * 0.18; ctx.stroke()
+    circle(ctx, x, y, guardOuterR); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = r * 0.06; ctx.stroke()
+    const marker = r * 0.22
     ctx.fillStyle = '#ffffff'
     for (let i = 0; i < 4; i++) {
       const a = i * tau / 4
-      ctx.fillRect(Math.round(x + Math.cos(a) * sr) - 2, Math.round(y + Math.sin(a) * sr) - 2, 4, 4)
+      ctx.fillRect(x + Math.cos(a) * guardR - marker / 2, y + Math.sin(a) * guardR - marker / 2, marker, marker)
     }
   }
-  if (invulnerable || dashing) {
-    ctx.lineWidth = 1; ctx.strokeStyle = ink.cyan
-    ctx.globalAlpha = invulnerable && !motion.matches ? 0.65 + 0.25 * Math.sin(tick / 12) : 0.85
-    if (invulnerable) ctx.setLineDash([3, 4])
-    circle(ctx, x, y, r + (dashing ? 9 : 5)); ctx.stroke()
+  if (invulnerable) {
+    ctx.globalAlpha = motion.matches ? 0.64 : 0.64 + 0.1 * Math.sin(tick / 12)
+    circle(ctx, x, y, guardR); ctx.fillStyle = `${ink.lime}14`; ctx.fill()
+    ctx.strokeStyle = ink.lime; ctx.lineWidth = r * 0.12; ctx.setLineDash([r * 0.3, r * 0.2]); ctx.stroke()
+    circle(ctx, x, y, guardOuterR); ctx.globalAlpha *= 0.52; ctx.lineWidth = r * 0.06; ctx.setLineDash([]); ctx.stroke()
+  } else if (dashing) {
+    ctx.lineWidth = r * 0.07; ctx.strokeStyle = ink.cyan; ctx.globalAlpha = 0.85
+    circle(ctx, x, y, r * 1.75); ctx.stroke()
   }
   ctx.restore()
 }
@@ -328,13 +335,15 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
 export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false, delayedHp = hp): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
-  const clearance = shield ? r * 1.65 + 9 : r
+  const clearance = shield ? r * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : r
   const w = Math.max(24, r * 2.5), by = y - clearance - 12
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
   const actualRatio = Math.min(1, Math.max(0, hp / 100))
   const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / 100))
-  if (delayedRatio > actualRatio) { ctx.fillStyle = ink.white; ctx.fillRect(x - w / 2, by, w * delayedRatio, 3) }
-  ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
+  if (delayedRatio > actualRatio) {
+    ctx.fillStyle = '#ffb066'; ctx.fillRect(x - w / 2 + w * actualRatio, by, w * (delayedRatio - actualRatio), 3)
+  }
+  ctx.fillStyle = hp > 25 ? '#8cff66' : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
   ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()

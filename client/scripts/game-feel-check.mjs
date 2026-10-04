@@ -66,8 +66,8 @@ function freshState() {
     phase: PHASE_OUTER,
     timeLeftS: 480,
     robots: [
-      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'feeltest', color: '#22d3ee' },
-      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'ENEMY-A', color: '#ff756d' },
+      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, invulnS: 0, nick: 'feeltest', color: '#22d3ee' },
+      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, invulnS: 0, nick: 'ENEMY-A', color: '#ff756d' },
     ],
     projectiles: [], cores: [],
     healthPacks: [{ base: { id: 7, pos: { x: 20, y: 0 }, heading: 0 }, available: true, respawnInS: 0 }],
@@ -140,8 +140,8 @@ class Fixture extends FixtureServer {
     const st = this.st
     const ack = this.inputs.length ? this.inputs[this.inputs.length - 1].seq : 0
     const robots = st.robots.map(r => full
-      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, nick: r.nick, color: r.color }
-      : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS })
+      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, invulnS: r.invulnS ?? 0, nick: r.nick, color: r.color }
+      : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, invulnS: r.invulnS ?? 0 })
     return create(SnapshotDeltaSchema, {
       tick: st.tick, ackSeq: ack, phase: st.phase, timeLeftS: st.timeLeftS,
       full, baseTick,
@@ -222,10 +222,19 @@ const CAMERA_INIT = `(() => {
 })()`
 
 const COLOR_INIT = `(() => {
-  const log = window.__ombColors = { beams: [], impacts: [] }
+  const log = window.__ombColors = { beams: [], impacts: [], guards: [] }
   const gradients = new WeakMap()
   const proto = CanvasRenderingContext2D.prototype
   const gradient = proto.createLinearGradient, stop = CanvasGradient.prototype.addColorStop, fill = proto.fillRect
+  const begin = proto.beginPath, arc = proto.arc, strokePath = proto.stroke
+  proto.beginPath = function (...args) { this.__ombLastArc = null; return begin.apply(this, args) }
+  proto.arc = function (x, y, radius, ...args) { this.__ombLastArc = { x, y, radius }; return arc.call(this, x, y, radius, ...args) }
+  proto.stroke = function (...args) {
+    if (this.canvas.id === 'game-canvas' && this.strokeStyle === '#b9d985' && this.__ombLastArc) {
+      log.guards.push({ ...this.__ombLastArc, lineWidth: this.lineWidth }); if (log.guards.length > 200) log.guards.shift()
+    }
+    return strokePath.apply(this, args)
+  }
   proto.createLinearGradient = function (...args) {
     const value = gradient.apply(this, args); gradients.set(value, []); return value
   }
@@ -796,6 +805,7 @@ async function quickPass(browser, fix, viewport, label, shotName) {
 async function bannerPass(browser, fix, reduced = false) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reduced ? 'reduce' : 'no-preference' })
   await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(COLOR_INIT)
   await ctx.addInitScript(() => {
     const drawText = CanvasRenderingContext2D.prototype.fillText
     const setTransform = CanvasRenderingContext2D.prototype.setTransform
@@ -840,29 +850,70 @@ async function bannerPass(browser, fix, reduced = false) {
     fix.bcast(pickup); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate pickup is silent')
 
+    // 权威 invuln_s：显示绿色双层护盾；所有尺寸由机器人半径派生。
+    await page.evaluate(() => { window.__ombColors.guards = [] })
+    await fix.step(st => { st.robots[1].invulnS = 3; st.timeLeftS = 31 })
+    await until(async () => await page.evaluate(() => window.__ombColors.guards.length >= 2), 'green invulnerability shield')
+    const guards = await page.evaluate(() => {
+      const values = window.__ombColors.guards
+      for (let i = values.length - 2; i >= 0; i--) {
+        const inner = values[i], outer = values[i + 1]
+        if (Math.abs(outer.radius / inner.radius - 1.16) < 0.01
+          && Math.abs(inner.lineWidth / outer.lineWidth - 2) < 0.05) return [inner, outer]
+      }
+      return values.slice(-4)
+    })
+    assert.equal(guards.length, 2, `find a same-frame green shield pair (${JSON.stringify(guards)})`)
+    assert.ok(Math.abs(guards[1].radius / guards[0].radius - 1.16) < 0.01, `invulnerability shield matches the ordinary shield proportions (${guards[0].radius}, ${guards[1].radius})`)
+    assert.ok(Math.abs(guards[0].lineWidth / guards[1].lineWidth - 2) < 0.05, `invulnerability shield line widths stay proportional (${guards[0].lineWidth}, ${guards[1].lineWidth})`)
+    await shot(page, reduced ? '23-invulnerable-green-reduced.png' : '22-invulnerable-green.png')
+    await fix.step(st => { st.robots[1].invulnS = 0; st.timeLeftS = 31 })
+    await page.evaluate(() => { window.__ombColors.guards = [] })
+    await sleep(100)
+    const lingeringGuard = await page.evaluate(() => {
+      const values = window.__ombColors.guards
+      for (let i = 0; i < values.length - 1; i++) {
+        const inner = values[i], outer = values[i + 1]
+        if (Math.abs(inner.x - outer.x) < 0.01 && Math.abs(inner.y - outer.y) < 0.01
+          && Math.abs(outer.radius / inner.radius - 1.16) < 0.01
+          && Math.abs(inner.lineWidth / outer.lineWidth - 2) < 0.05) return [inner, outer]
+      }
+      return null
+    })
+    assert.equal(lingeringGuard, null, 'invulnerability shield disappears on authoritative zero')
+
     await fix.step(st => { st.robots[0].hpX10 = 200; st.timeLeftS = 31 })
-    await sleep(300)
-    const neonPixels = await page.locator('#game-canvas').evaluate(canvas => {
+    await sleep(80)
+    const hudDamage = await page.evaluate(() => {
+      const actual = getComputedStyle(document.querySelector('#hud-hp-fill'))
+      const delayed = getComputedStyle(document.querySelector('#hud-hp-delay'))
+      return { actualColor: actual.backgroundColor, delayedColor: delayed.backgroundColor, actualTransform: actual.transform, delayedTransform: delayed.transform }
+    })
+    assert.equal(hudDamage.actualColor, 'rgb(140, 255, 102)', 'HUD actual HP uses the brighter green')
+    assert.equal(hudDamage.delayedColor, 'rgb(255, 176, 102)', 'HUD delayed damage uses a high-contrast warm trail')
+    assert.notEqual(hudDamage.actualTransform, hudDamage.delayedTransform, 'HUD delayed damage remains behind the actual HP after a hit')
+    await sleep(220)
+    const lowHealthPixels = await page.locator('#game-canvas').evaluate(canvas => {
       const ctx = canvas.getContext('2d')
       const ratio = canvas.width / canvas.getBoundingClientRect().width
-      const depth = Math.max(1, Math.round(24 * ratio))
-      const top = ctx.getImageData(0, 0, canvas.width, depth).data
-      const bottom = ctx.getImageData(0, canvas.height - depth, canvas.width, depth).data
-      const left = ctx.getImageData(0, depth, depth, canvas.height - depth * 2).data
-      const right = ctx.getImageData(canvas.width - depth, depth, depth, canvas.height - depth * 2).data
-      let magenta = 0, cyan = 0
-      for (const pixels of [top, bottom, left, right]) {
+      const depth = Math.max(1, Math.round(12 * ratio))
+      const bands = [
+        ctx.getImageData(0, 0, canvas.width, depth).data,
+        ctx.getImageData(0, canvas.height - depth, canvas.width, depth).data,
+        ctx.getImageData(0, depth, depth, canvas.height - depth * 2).data,
+        ctx.getImageData(canvas.width - depth, depth, depth, canvas.height - depth * 2).data,
+      ]
+      return bands.map(pixels => {
+        let red = 0
         for (let i = 0; i < pixels.length; i += 4) {
           const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
-          if (r > 70 && b > 55 && r > g * 1.15) magenta++
-          if (g > 70 && b > 90 && b > r * 1.12) cyan++
+          if (r > 75 && r > g * 1.35 && r > b * 1.2) red++
         }
-      }
-      return { magenta, cyan }
+        return red
+      })
     })
-    assert.ok(neonPixels.magenta > 180, 'low-health frame has visible magenta/violet edge glow')
-    assert.ok(neonPixels.cyan > 20, 'low-health frame has cyan corner accents')
-    await shot(page, reduced ? '24-low-health-neon-reduced.png' : '23-low-health-neon.png')
+    assert.ok(lowHealthPixels.every(count => count > 120), `all four low-health edges are visibly red (${lowHealthPixels.join(', ')})`)
+    await shot(page, reduced ? '24-low-health-red-reduced.png' : '23-low-health-red.png')
 
     await fix.step(st => {
       st.robots[0].hpX10 = 700

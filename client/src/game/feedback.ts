@@ -22,7 +22,6 @@ const TRAIL_TICKS = 15
 const LOW_HEALTH_X10 = 250
 const CAMERA_SHAKE_DIRECTIONS = [[1, 1], [-1, 1], [-1, -1], [1, -1]] as const
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
-const neonMagenta = '#ff2d88', neonViolet = '#8b5cf6', neonCyan = '#00e5ff'
 export type FeedbackKind = 'status' | 'kill' | 'uplink'
 type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'splash' | 'dash' | 'death'
 interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: number; color: string; seed: number; heading: number }
@@ -414,44 +413,28 @@ export class GameFeedback {
       ctx.fillStyle = '#071019'; ctx.fillText(text, x + 1, y + 1)
       ctx.fillStyle = red; ctx.fillText(text, x, y)
     }
-    if (this.selfLow) this.drawLowHealthFrame(ctx, cam.cw, cam.ch, now)
-    ctx.restore()
-  }
-
-  /** Cyberpunk low-health frame: luminous edge rails and angular corner brackets.
-   *  Geometry is static (including reduced motion); only light intensity breathes. */
-  private drawLowHealthFrame(ctx: CanvasRenderingContext2D, width: number, height: number, now: number): void {
-    const flash = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
-    const pulse = this.reduced.matches ? 0.72 : 0.72 + Math.sin(now / 620) * 0.07
-    const alpha = Math.min(1, pulse + flash * 0.2)
-    const horizontal = ctx.createLinearGradient(0, 0, width, 0)
-    horizontal.addColorStop(0, `${neonCyan}00`); horizontal.addColorStop(0.12, neonViolet)
-    horizontal.addColorStop(0.5, neonMagenta); horizontal.addColorStop(0.88, neonViolet); horizontal.addColorStop(1, `${neonCyan}00`)
-    const vertical = ctx.createLinearGradient(0, 0, 0, height)
-    vertical.addColorStop(0, `${neonCyan}00`); vertical.addColorStop(0.12, neonViolet)
-    vertical.addColorStop(0.5, neonMagenta); vertical.addColorStop(0.88, neonViolet); vertical.addColorStop(1, `${neonCyan}00`)
-    ctx.save()
-    ctx.globalAlpha = alpha
-    ctx.shadowColor = neonMagenta; ctx.shadowBlur = this.reduced.matches ? 8 : 13 + flash * 7
-    const rails = [
-      { inset: 0, thick: 5, opacity: 0.82 },
-      { inset: 8, thick: 3, opacity: 0.52 },
-      { inset: 15, thick: 2, opacity: 0.28 },
-    ]
-    for (const rail of rails) {
-      ctx.globalAlpha = alpha * rail.opacity; ctx.fillStyle = horizontal
-      ctx.fillRect(0, rail.inset, width, rail.thick); ctx.fillRect(0, height - rail.inset - rail.thick, width, rail.thick)
-      ctx.fillStyle = vertical
-      ctx.fillRect(rail.inset, 0, rail.thick, height); ctx.fillRect(width - rail.inset - rail.thick, 0, rail.thick, height)
+    if (this.selfLow) {
+      // A confirmed hit while already low briefly brightens and expands the same restrained red frame.
+      const hit = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
+      const pulse = this.reduced.matches ? 0.34 : 0.34 + Math.sin(now / 700) * 0.02
+      const alpha = Math.min(0.52, pulse + hit * 0.16)
+      const shortSide = Math.min(cam.cw, cam.ch)
+      const horizontalDepth = shortSide * (0.012 + hit * 0.004)
+      const sideDepth = shortSide * (0.034 + hit * 0.008)
+      const steps = [0, 0.36, 0.7, 1]
+      const opacity = [0.9, 0.52, 0.24]
+      ctx.fillStyle = red
+      // Each band is one continuous rectangular ring. Corners share the same path, so no seams.
+      for (let i = 0; i < opacity.length; i++) {
+        const outerX = sideDepth * steps[i]!, outerY = horizontalDepth * steps[i]!
+        const innerX = sideDepth * steps[i + 1]!, innerY = horizontalDepth * steps[i + 1]!
+        ctx.globalAlpha = alpha * opacity[i]!
+        ctx.beginPath()
+        ctx.rect(outerX, outerY, cam.cw - outerX * 2, cam.ch - outerY * 2)
+        ctx.rect(innerX, innerY, cam.cw - innerX * 2, cam.ch - innerY * 2)
+        ctx.fill('evenodd')
+      }
     }
-    const inset = 11, arm = Math.max(34, Math.min(58, Math.min(width, height) * 0.09))
-    ctx.globalAlpha = alpha; ctx.strokeStyle = neonCyan; ctx.lineWidth = 2.5
-    ctx.beginPath()
-    ctx.moveTo(inset, inset + arm); ctx.lineTo(inset, inset); ctx.lineTo(inset + arm, inset)
-    ctx.moveTo(width - inset - arm, inset); ctx.lineTo(width - inset, inset); ctx.lineTo(width - inset, inset + arm)
-    ctx.moveTo(inset, height - inset - arm); ctx.lineTo(inset, height - inset); ctx.lineTo(inset + arm, height - inset)
-    ctx.moveTo(width - inset - arm, height - inset); ctx.lineTo(width - inset, height - inset); ctx.lineTo(width - inset, height - inset - arm)
-    ctx.stroke()
     ctx.restore()
   }
 

@@ -47,7 +47,7 @@ export class ReplayRenderer {
       }
       const follow = r.id === followRobotId
       drawRobot(ctx, cam, r.pos.x, r.pos.y, r.heading, r.color || ink.cyan, follow, false, false, r.invulnerable, frame.tick)
-      drawVitals(ctx, cam, r.pos.x, r.pos.y, r.hp, r.energy, r.nick, follow)
+      drawVitals(ctx, cam, r.pos.x, r.pos.y, r.hp, r.energy, r.nick, follow, r.invulnerable)
     }
     this.drawBubbles(frame, cam)
   }

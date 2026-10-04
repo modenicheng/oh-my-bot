@@ -439,7 +439,8 @@ export class GameController {
     this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     this.extras.feedback = this.feedback
     this.renderer.render(this.world, this.map, this.cam, this.extras)
-    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
+    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable,
+      self ? this.feedback.delayedHealth(selfId, self.hpX10) : undefined)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }

@@ -238,8 +238,8 @@ describe('drawVisionMask exact projected wall shadows', () => {
     for (const [wx, wy] of [[46, -2], [50, -2], [50, 2], [46, 2]] as const) {
       expect(poly).toContainEqual({ x: cam.toPxX(wx), y: cam.toPxY(wy) })
     }
-    expect(poly.length).toBe(6)
-    // 两个延长点都在视野圆之外（clip 前的世界延长 ≥ 2.5×视野半径）。
+    expect(poly.length).toBe(7)
+    // 两个切线延长点和一个远向中心封口点均在视野圆之外。
     const vcx = cam.toPxX(40), vcy = cam.toPxY(0), vr = 20 * cam.scale
     const exts = poly.filter(v => !([[46, -2], [50, -2], [50, 2], [46, 2]] as const).some(([wx, wy]) => v.x === cam.toPxX(wx) && v.y === cam.toPxY(wy)))
     expect(exts.length).toBeGreaterThanOrEqual(2)
@@ -289,7 +289,7 @@ describe('drawVisionMask exact projected wall shadows', () => {
 
   it('scales per wall: constant ops per wall, one clip + one fill regardless of wall count', async () => {
     // 64 面在视野内的墙（绕自机一圈）：结构成本 = 每墙 1 个 moveTo +
-    // 4–5 个 lineTo（远侧链 2–4 角 + 2 延长点，首顶点 moveTo），整体恰好
+    // 5–6 个 lineTo（远侧链 2–4 角 + 2 切线点 + 1 远向封口点），整体恰好
     // 1 次 clip + 1 次 fill —— 不存在旧实现的 512 射线 × 32 band 结构。
     const walls: MapWall[] = []
     for (let i = 0; i < 64; i++) {
@@ -305,10 +305,24 @@ describe('drawVisionMask exact projected wall shadows', () => {
     const moveTo = block.filter(o => o.op === 'moveTo').length
     const lineTo = block.filter(o => o.op === 'lineTo').length
     expect(moveTo).toBe(64)
-    expect(lineTo).toBeGreaterThanOrEqual(64 * 4)
-    expect(lineTo).toBeLessThanOrEqual(64 * 5)
+    expect(lineTo).toBeGreaterThanOrEqual(64 * 5)
+    expect(lineTo).toBeLessThanOrEqual(64 * 6)
     // 无墙内场景：每墙单子路径（无 NaN 分隔的双子路径）。
     expect(shadowSubpaths(ops)).toHaveLength(64)
+  })
+
+  it('keeps a wall-adjacent far region covered by the projected shadow', async () => {
+    const walls = [wall(40.601, -2, 44.601, 2)]
+    const { ops, cam } = await visionOps(1, 2, walls, { x: 40, y: 0 })
+    const poly = shadowSubpaths(ops)[0]!
+    // 自机中心距近墙面约 0.6m（机器人贴墙）：远向中心必须位于影内，不再出现窄三角漏光。
+    const far = { x: cam.toPxX(50), y: cam.toPxY(0) }
+    let inside = false
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i]!, b = poly[j]!
+      if ((a.y > far.y) !== (b.y > far.y) && far.x < ((b.x - a.x) * (far.y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+    }
+    expect(inside).toBe(true)
   })
 
   it('edge feather gradient stays after the shadow block (unchanged contract)', async () => {

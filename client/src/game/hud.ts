@@ -29,6 +29,7 @@ type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'standby'
 
 export class Hud {
   private hpFill: HTMLDivElement
+  private hpDelay: HTMLDivElement
   private enFill: HTMLDivElement
   private hpText: HTMLSpanElement
   private enText: HTMLSpanElement
@@ -55,6 +56,7 @@ export class Hud {
   private uplinkTrack: HTMLDivElement
   private uplinkFill: HTMLDivElement
   private lastHp = -1
+  private lastHpDelay = -1
   private lastEn = -1
   private lastRows: ScoreDisplay[] = NO_ROWS
   private uplinkPct = -1
@@ -66,6 +68,7 @@ export class Hud {
 
   constructor(private root: HTMLElement) {
     this.hpFill = requireEl(root, 'hud-hp-fill')
+    this.hpDelay = requireEl(root, 'hud-hp-delay')
     this.enFill = requireEl(root, 'hud-en-fill')
     this.hpText = requireEl(root, 'hud-hp-text')
     this.enText = requireEl(root, 'hud-en-text')
@@ -109,7 +112,7 @@ export class Hud {
   }
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
-  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false): void {
+  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false, delayedHp?: number): void {
     if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
@@ -120,15 +123,17 @@ export class Hud {
     this.leftPanel.classList.toggle('dead', !!self?.dead)
     if (self) {
       const hp = clamp01(self.hpX10 / tuning.maxHpX10)
+      const delayed = clamp01((delayedHp ?? self.hpX10 / 10) / (tuning.maxHpX10 / 10))
       const en = clamp01(self.energyX10 / tuning.maxEnergyX10)
       // scaleX 走合成器路径（app.css transition 同步为 transform），width 每帧触发 layout。
       if (hp !== this.lastHp) { this.lastHp = hp; this.hpFill.style.transform = `scaleX(${hp})` }
+      if (delayed !== this.lastHpDelay) { this.lastHpDelay = delayed; this.hpDelay.style.transform = `scaleX(${delayed})` }
       if (en !== this.lastEn) { this.lastEn = en; this.enFill.style.transform = `scaleX(${en})` }
       setText(this.hpText, self.dead ? `重生 ${self.respawnInS.toFixed(1)}s` : `${Math.round(self.hpX10 / 10)}`)
       setText(this.enText, `${Math.round(self.energyX10 / 10)}`)
     } else {
-      this.lastHp = this.lastEn = 0
-      this.hpFill.style.transform = this.enFill.style.transform = 'scaleX(0)'
+      this.lastHp = this.lastHpDelay = this.lastEn = 0
+      this.hpFill.style.transform = this.hpDelay.style.transform = this.enFill.style.transform = 'scaleX(0)'
       setText(this.hpText, '—'); setText(this.enText, '—')
     }
 

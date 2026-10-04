@@ -39,10 +39,10 @@ describe('appendWallShadow silhouette geometry', () => {
     const poly = run(0, 0, w)
     // 光线在 y 范围内：出口边绕满一圈 → 链 = 全部 4 角 + 经 c3/c0 的延长点。
     expect(poly.slice(0, 4)).toEqual(cw(w))
-    expect(poly).toHaveLength(6)
+    expect(poly).toHaveLength(7)
     for (const ext of poly.slice(4)) expect(Math.hypot(ext.x, ext.y)).toBeGreaterThan(20)
-    // 延长点在「光源→切线角点」射线上（叉积≈0 且在角点外侧）。
-    for (const [ext, c] of [[poly[4]!, cw(w)[3]!], [poly[5]!, cw(w)[0]!]] as const) {
+    // 两个切线延长点仍在「光源→切线角点」射线上；中间点沿墙中心远向封口。
+    for (const [ext, c] of [[poly[4]!, cw(w)[3]!], [poly[6]!, cw(w)[0]!]] as const) {
       const cross = c.x * ext.y - c.y * ext.x
       expect(Math.abs(cross)).toBeLessThan(1e-6)
       expect(c.x * (ext.x - c.x) + c.y * (ext.y - c.y)).toBeGreaterThan(0)
@@ -58,7 +58,7 @@ describe('appendWallShadow silhouette geometry', () => {
     const poly = run(0, 0, w)
     // start=c2：链从右上角起绕满 4 角（c2,c3,c0,c1），无任何 atan2 排序。
     expect(poly.slice(0, 4)).toEqual([cw(w)[2], cw(w)[3], cw(w)[0], cw(w)[1]])
-    expect(poly).toHaveLength(6)
+    expect(poly).toHaveLength(7)
     for (const ext of poly.slice(4)) {
       expect(Math.hypot(ext.x, ext.y)).toBeGreaterThan(20)
       expect(Number.isFinite(ext.x) && Number.isFinite(ext.y)).toBe(true)
@@ -71,7 +71,7 @@ describe('appendWallShadow silhouette geometry', () => {
     const w = wall(10, -0.2, 14, 0.2)
     const poly = run(0, 5, w)
     expect(poly.slice(0, 3)).toEqual([cw(w)[0], cw(w)[1], cw(w)[2]])
-    expect(poly).toHaveLength(5)
+    expect(poly).toHaveLength(6)
     for (const p of poly) {
       expect(Number.isFinite(p.x)).toBe(true)
       expect(Number.isFinite(p.y)).toBe(true)
@@ -84,7 +84,7 @@ describe('appendWallShadow silhouette geometry', () => {
     const poly = run(0, 0, w)
     // start=c1：链 c1,c2,c3 = 右下→右上→左上。
     expect(poly.slice(0, 3)).toEqual([cw(w)[1], cw(w)[2], cw(w)[3]])
-    expect(poly).toHaveLength(5)
+    expect(poly).toHaveLength(6)
     for (const p of poly) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true)
     expectWallVisible(w, poly)
     expect(inside({ x: 16, y: 16 }, poly)).toBe(true)
@@ -124,6 +124,15 @@ describe('appendWallShadow silhouette geometry', () => {
   it('self exactly on a wall edge (epsilon inside): treated as in-wall', () => {
     const pts: number[] = []
     expect(appendWallShadow(pts, 10, 0, wall(10, -2, 14, 2), 20)).toBe(18)
+  })
+
+  it('self just outside a wall face keeps the far shadow continuous without winding inversion', () => {
+    const w = wall(10, -2, 14, 2)
+    const poly = run(9.999, 0, w)
+    expect(poly).toHaveLength(7)
+    expect(signedArea(poly)).toBeLessThan(0)
+    expectWallVisible(w, poly)
+    for (const p of [{ x: 16, y: 0 }, { x: 18, y: -6 }, { x: 18, y: 6 }]) expect(inside(p, poly)).toBe(true)
   })
 
   it('zero-area / degenerate walls project nothing', () => {

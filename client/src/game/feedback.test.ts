@@ -363,29 +363,66 @@ describe('combat motion presentation', () => {
     stubFeedbackEnv()
   })
 
-  it.each([false, true])('draws a cyberpunk neon low-health frame (reduced=%s) without covering the center', reduced => {
+  it.each([false, true])('draws restrained seamless red edge rings (reduced=%s)', reduced => {
     vi.stubGlobal('matchMedia', () => ({ matches: reduced }))
     const f = fixture(), initial = snap(10, 0, true)
     initial.robots[0]!.hpX10 = 200; f.consume(initial)
-    const fills: Array<[number, number, number, number, unknown, number]> = [], strokes: string[] = [], gradients: string[][] = []
-    const ctx = { globalAlpha: 1, fillStyle: '' as unknown, strokeStyle: '', lineWidth: 1, shadowColor: '', shadowBlur: 0,
-      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
-      stroke() { strokes.push(this.strokeStyle) }, strokeRect() {},
-      fillRect(x: number, y: number, w: number, h: number) { fills.push([x, y, w, h, this.fillStyle, this.globalAlpha]) },
-      createLinearGradient() { const stops: string[] = []; gradients.push(stops); return { addColorStop(_at: number, color: string) { stops.push(color) } } },
+    const paths: Array<{ rects: number[][]; alpha: number; color: unknown; rule: unknown }> = []
+    let current: number[][] = []
+    const ctx = { globalAlpha: 1, fillStyle: '' as unknown, save() {}, restore() {}, strokeRect() {},
+      beginPath() { current = [] }, rect(...args: number[]) { current.push(args) },
+      fill(rule?: unknown) { paths.push({ rects: current.map(r => [...r]), alpha: this.globalAlpha, color: this.fillStyle, rule }) },
     }
     const camera = { cw: 800, ch: 600, scale: 10 }
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(gradients).toHaveLength(2)
-    expect(gradients.flat()).toEqual(expect.arrayContaining(['#8b5cf6', '#ff2d88']))
-    expect(strokes).toContain('#00e5ff')
-    expect(fills).toHaveLength(12)
-    expect(fills.some(([x, y, w, h]) => x === 0 && y === 0 && w === 800 && h === 5)).toBe(true)
-    expect(fills.some(([x, y, w, h]) => x! < 500 && x! + w! > 300 && y! < 400 && y! + h! > 200)).toBe(false)
-    expect(fills.some(([, , , , , alpha]) => alpha! >= 0.5)).toBe(true)
-    const healthy = snap(11, 10); f.consume(healthy); fills.length = 0; strokes.length = 0; gradients.length = 0
+    expect(paths).toHaveLength(3)
+    expect(paths.every(p => p.rule === 'evenodd' && p.color === '#ff756d' && p.rects.length === 2)).toBe(true)
+    if (reduced) {
+      expect(paths.map(p => p.alpha)).toEqual([expect.closeTo(0.306), expect.closeTo(0.1768), expect.closeTo(0.0816)])
+    } else expect(paths.map(p => p.alpha)).toEqual(expect.arrayContaining([expect.any(Number)]))
+    for (const path of paths) {
+      const [outer, inner] = path.rects
+      expect(outer![0]).toBeLessThanOrEqual(inner![0]!)
+      expect(outer![1]).toBeLessThanOrEqual(inner![1]!)
+      expect(outer![0]! + outer![2]!).toBeGreaterThanOrEqual(inner![0]! + inner![2]!)
+      expect(outer![1]! + outer![3]!).toBeGreaterThanOrEqual(inner![1]! + inner![3]!)
+    }
+    // Each band is a single rectangular ring, so all four corners belong to one path with no seams.
+    expect(paths[0]!.rects[0]).toEqual([0, 0, 800, 600])
+    expect(Math.max(...paths.map(p => p.alpha))).toBeLessThanOrEqual(0.52)
+    const healthy = snap(11, 10); f.consume(healthy); paths.length = 0
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(fills).toHaveLength(0); expect(strokes).toHaveLength(0); expect(gradients).toHaveLength(0)
+    expect(paths).toHaveLength(0)
+  })
+
+  it('briefly brightens and expands the red frame when hit again at low health', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(), initial = snap(10, 0, true)
+      initial.robots[0]!.hpX10 = 200; f.consume(initial)
+      const paths: Array<{ rects: number[][]; alpha: number }> = []
+      let current: number[][] = []
+      const ctx = { globalAlpha: 1, fillStyle: '' as unknown, save() {}, restore() {}, strokeRect() {}, fillText() {},
+        beginPath() { current = [] }, rect(...args: number[]) { current.push(args) },
+        fill() { paths.push({ rects: current.map(r => [...r]), alpha: this.globalAlpha }) },
+      }
+      const camera = { cw: 800, ch: 600, scale: 10, toPxX: (x: number) => x * 10, toPxY: (y: number) => y * 10 }
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      const base = paths.map(p => ({ rects: p.rects.map(r => [...r]), alpha: p.alpha }))
+
+      const hit = snap(11, 10); hit.robots[0]!.hpX10 = 100; f.consume(hit)
+      paths.length = 0
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      const active = paths.map(p => ({ rects: p.rects.map(r => [...r]), alpha: p.alpha }))
+      expect(active[0]!.rects[1]![0]).toBeGreaterThan(base[0]!.rects[1]![0]!)
+      expect(active[0]!.rects[1]![1]).toBeGreaterThan(base[0]!.rects[1]![1]!)
+      expect(active[0]!.alpha).toBeGreaterThan(base[0]!.alpha)
+
+      now += 241; paths.length = 0
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      expect(paths.map(p => p.rects)).toEqual(base.map(p => p.rects))
+    } finally { clock.mockRestore() }
   })
 
   it('holds the previous health as a delayed white-bar value across continuous hits', () => {

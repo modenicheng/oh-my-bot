@@ -12,7 +12,7 @@ import { FALLBACK_TUNING, invulnWindowMs } from './tuning'
 export interface RobotEnt extends RobotState {
   /** 本地渲染帧时间戳（无敌闪烁等动画用） */
   seenAt: number
-  /** 本地无敌近似截止（ms）：wire 无 invuln 字段，以 dead→alive 转变近似（重生后无敌时长 + 快照延迟容差，见 tuning） */
+  /** 无敌显示截止（ms）：优先使用权威 invuln_s；旧服务器缺失时以 dead→alive 近似。 */
   invulnUntil?: number
 }
 export interface ProjEnt extends ProjectileState { seenAt: number }
@@ -78,10 +78,11 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
   for (const r of snap.robots) {
     const id = r.base?.id ?? 0
     const prev = world.robots.get(id)
-    // 无敌近似：仅识别 delta 帧上的 dead→alive 转变（重生后 InvulnDuration tick，
-    // 时长由服务器 tuning 下发，X-3；旧服务器用兜底值）。
-    // full 重建时无 prev，不做近似（避免 resync 后全员误闪烁；代价是首帧出生闪烁缺失，可接受）。
-    const invulnUntil = prev?.dead && !r.dead ? now + invulnMs : prev?.invulnUntil
+    // 新服务器每帧状态携带 optional invuln_s，full/resync 也能恢复显示；
+    // 字段存在且为 0 时立即关闭。只有旧服务器缺失字段时才走 dead→alive 兜底。
+    const invulnUntil = r.invulnS !== undefined
+      ? r.invulnS > 0 ? now + r.invulnS * 1000 + 250 : undefined
+      : prev?.dead && !r.dead ? now + invulnMs : prev?.invulnUntil
     // delta 帧不带 nick/color（full 才带），保留旧 meta
     const nick = r.nick || prev?.nick || ''
     const color = r.color || prev?.color || ''

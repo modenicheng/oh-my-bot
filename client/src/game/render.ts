@@ -4,7 +4,7 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
+import { ink, mono, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
 import { appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
 const ROBOT_R = 0.6
@@ -94,9 +94,10 @@ export class Renderer {
       }
       const self = b.id === world.self?.robotId
       const heading = self && extras.localAim !== undefined ? extras.localAim : b.heading
+      const invulnerable = (r.invulnUntil ?? 0) > performance.now()
       drawRobot(ctx, cam, b.pos.x, b.pos.y, heading, r.color || ink.cyan, self,
-        r.shieldOn, r.dashing, (r.invulnUntil ?? 0) > performance.now(), world.tick)
-      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn,
+        r.shieldOn, r.dashing, invulnerable, world.tick)
+      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable,
         extras.feedback?.delayedHealth(b.id, r.hpX10) ?? r.hpX10 / 10)
     }
     // Dim the rendered world itself; HUD feedback and speech stay above the fog.
@@ -206,7 +207,8 @@ export class Renderer {
       if (age > 4) continue
       const x = cam.toPxX(pos.x)
       const radius = Math.max(6, ROBOT_R * cam.scale)
-      const anchorY = cam.toPxY(pos.y) - (r.shieldOn ? radius * 1.65 + 9 : radius) - 38
+      const guarded = r.shieldOn || (r.invulnUntil ?? 0) > now
+      const anchorY = cam.toPxY(pos.y) - (guarded ? radius * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : radius) - 38
       if (x < -radius || x > cam.cw + radius || anchorY > cam.ch) continue
       ctx.save()
       ctx.font = FONT_14

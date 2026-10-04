@@ -1923,7 +1923,8 @@ type RobotState struct {
 	Nick       string                 `protobuf:"bytes,8,opt,name=nick,proto3" json:"nick,omitempty"`                                  // 仅 full 快照携带
 	Color      string                 `protobuf:"bytes,9,opt,name=color,proto3" json:"color,omitempty"`                                // 仅 full 快照携带
 	// Deprecated: Marked as deprecated in proto/omb.proto.
-	IsPartner     bool `protobuf:"varint,10,opt,name=is_partner,json=isPartner,proto3" json:"is_partner,omitempty"` // 旧客户端兼容；新对局恒 false
+	IsPartner     bool    `protobuf:"varint,10,opt,name=is_partner,json=isPartner,proto3" json:"is_partner,omitempty"` // 旧客户端兼容；新对局恒 false
+	InvulnS       *uint32 `protobuf:"varint,11,opt,name=invuln_s,json=invulnS,proto3,oneof" json:"invuln_s,omitempty"` // 权威无敌剩余秒数；缺失表示旧服务器，0=无
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2027,6 +2028,13 @@ func (x *RobotState) GetIsPartner() bool {
 		return x.IsPartner
 	}
 	return false
+}
+
+func (x *RobotState) GetInvulnS() uint32 {
+	if x != nil && x.InvulnS != nil {
+		return *x.InvulnS
+	}
+	return 0
 }
 
 type ProjectileState struct {
@@ -5514,7 +5522,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"EntityBase\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1e\n" +
 	"\x03pos\x18\x02 \x01(\v2\f.omb.v1.Vec2R\x03pos\x12\x18\n" +
-	"\aheading\x18\x03 \x01(\x02R\aheading\"\xa4\x02\n" +
+	"\aheading\x18\x03 \x01(\x02R\aheading\"\xd1\x02\n" +
 	"\n" +
 	"RobotState\x12&\n" +
 	"\x04base\x18\x01 \x01(\v2\x12.omb.v1.EntityBaseR\x04base\x12\x15\n" +
@@ -5530,7 +5538,9 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05color\x18\t \x01(\tR\x05color\x12!\n" +
 	"\n" +
 	"is_partner\x18\n" +
-	" \x01(\bB\x02\x18\x01R\tisPartner\"j\n" +
+	" \x01(\bB\x02\x18\x01R\tisPartner\x12\x1e\n" +
+	"\binvuln_s\x18\v \x01(\rH\x00R\ainvulnS\x88\x01\x01B\v\n" +
+	"\t_invuln_s\"j\n" +
 	"\x0fProjectileState\x12&\n" +
 	"\x04base\x18\x01 \x01(\v2\x12.omb.v1.EntityBaseR\x04base\x12\x19\n" +
 	"\bowner_id\x18\x02 \x01(\rR\aownerId\x12\x14\n" +
@@ -6136,6 +6146,7 @@ func file_proto_omb_proto_init() {
 		(*ClientMsg_SnippetConfig)(nil),
 		(*ClientMsg_ScriptRollback)(nil),
 	}
+	file_proto_omb_proto_msgTypes[16].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[21].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[39].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[40].OneofWrappers = []any{}

@@ -148,6 +148,23 @@ func TestDeltaChangeDetection(t *testing.T) {
 	if r := robotByID(d, 2); r == nil || r.Dashing {
 		t.Fatal("dash end missing")
 	}
+
+	// 无敌开始、倒计时变化和结束帧都必须权威下发；optional 0 表示明确结束。
+	chg4.Robots[1].InvulnS = 4
+	d = enc.Encode(9, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || r.InvulnS == nil || r.GetInvulnS() != 4 {
+		t.Fatalf("invulnerability start missing: %+v", r)
+	}
+	chg4.Robots[1].InvulnS = 3
+	d = enc.Encode(10, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || r.InvulnS == nil || r.GetInvulnS() != 3 {
+		t.Fatalf("invulnerability countdown missing: %+v", r)
+	}
+	chg4.Robots[1].InvulnS = 0
+	d = enc.Encode(11, 0, sim.PhaseOuterRing, 476, obsOf(chg4, 1, 2, nil), selfIn(1))
+	if r := robotByID(d, 2); r == nil || r.InvulnS == nil || r.GetInvulnS() != 0 {
+		t.Fatalf("invulnerability end missing: %+v", r)
+	}
 }
 
 // Private state is sent on every snapshot, including reconnect/full while a CD is active.
