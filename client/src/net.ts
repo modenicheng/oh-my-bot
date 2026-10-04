@@ -3,7 +3,7 @@
 // 心跳与存活检测完全下沉到 WsTransport；本层负责握手超时、重试节奏与状态上报。
 // 断线后以相同 room/nick/color 自动重进；close() 后会话不可复用（重新 joinRoom）。
 import { WsTransport, decodeServer, encodeClient,
-         JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame,
+         JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinFailedReason,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
 
@@ -25,7 +25,6 @@ const HANDSHAKE_TIMEOUT_MS = 8000  // 连接 + 进房确认总超时
 const RETRY_BASE_MS = 500
 const RETRY_MAX_MS = 15000
 const STABLE_RESET_MS = 10000      // 连续在线 10s 后退避清零
-const JOIN_FAILED_PREFIX = 'join failed:'
 
 /** 浏览器/Node 环境探测：事件挂 globalThis（浏览器 window 上 navigator 非 EventTarget）。 */
 function netTarget(): EventTarget | undefined {
@@ -51,15 +50,6 @@ function isJoinAck(msg: ServerMsg): boolean {
     return kind === 'roomState' || kind === 'mapBootstrap'
   }
   return false
-}
-
-/** join failed 终结事件：net 层终止会话并透传给上层展示原因。 */
-function isJoinFailed(msg: ServerMsg): string | undefined {
-  if (msg.payload.case === 'event' && msg.payload.value.kind.case === 'say') {
-    const text = msg.payload.value.kind.value.text
-    if (msg.payload.value.kind.value.robot === 0 && text.startsWith(JOIN_FAILED_PREFIX)) return text.slice(JOIN_FAILED_PREFIX.length).trim()
-  }
-  return undefined
 }
 
 /** 带自动重连的房间会话；一次 connect 起步，断线自动以相同身份重进。 */
@@ -181,7 +171,7 @@ export class RoomSession {
       return // 畸形帧丢弃
     }
     if (!msg) return
-    const failReason = isJoinFailed(msg)
+    const failReason = joinFailedReason(msg)
     if (failReason !== undefined) {
       // 进房被拒（房间满/码无效等）：终结会话，原因交上层展示
       this.terminalFail(gen, failReason, msg)
@@ -232,7 +222,7 @@ export class RoomSession {
     this.transport = undefined
     this.state = 'disconnected'
     opts.onStateChange?.('disconnected')
-    opts.onMessage(msg) // 'join failed:' 透传，由上层收口 UI
+    opts.onMessage(msg) // join failed 透传，由上层收口 UI
     opts.onDisconnect(`进房失败：${reason}`)
   }
 

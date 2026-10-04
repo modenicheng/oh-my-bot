@@ -2,7 +2,7 @@
 // 连接层见 net.ts，游戏视图见 game/，页面样式与职责约定见 client/STYLE.md。
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, RoomActionSchema, LeaveRoomSchema,
-         RoomAction_Kind, EvRoomState_State,
+         RoomAction_Kind, EvRoomState_State, joinFailedReason,
          type ServerMsg } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
@@ -276,7 +276,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'scriptLog') { workbench.acceptScriptLog(ev.kind.value); return }
     if (ev.kind.case === 'matchEnd') workbench.resetMatch()
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && workbench.consumeAiDirectedSay(ev.kind.value.text)) return
-    if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
+    const joinFailed = ev.kind.case === 'say' ? joinFailedReason(msg) : undefined
+    if (joinFailed !== undefined) {
       connectionNotice.hidden = true
       awaitingFull = false
       stopRttLoop()
@@ -288,7 +289,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       syncWorkbench()
       setStatus('down', '进房失败')
       showView('join')
-      lobby.showError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
+      lobby.showError(`无法加入房间：${joinFailed}`)
       lobby.setJoining(false)
       return
     }

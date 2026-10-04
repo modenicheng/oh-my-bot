@@ -1,7 +1,7 @@
 // 回放数据模型：NDJSON 记录解析与按 tick 的状态重建。
 //
 // 服务器 Match Event Log（server/internal/sim/log.go）每行一个 JSON 对象：
-//   {"schema_version":1}                                    —— 头
+//   {"schema_version":1}                                    —— 头（版本校验，未知版本拒绝）
 //   {"type":"match_start","tick":0,"state":{...Checkpoint}} —— 初始全量
 //   {"type":"event","tick":N,"event":{...ServerEvent}}      —— 事件
 //   {"type":"input","tick":N,"robot_id":R,"input":{...}}    —— 输入（UI 忽略）
@@ -109,6 +109,10 @@ export interface ReplayData {
 
 export class ReplayParseError extends Error {}
 
+/** 当前客户端可解读的回放 NDJSON schema 版本（服务端 sim.SchemaVersion 单源；
+ * 更高版本可能含未知记录形态，显式拒绝而非静默错读）。 */
+export const REPLAY_SCHEMA_VERSION = 1
+
 export interface ReplayParser {
   pushLine(line: string, lineNo: number): void
   finish(): ReplayData
@@ -130,7 +134,15 @@ export function createReplayParser(): ReplayParser {
       } catch (e) {
         throw new ReplayParseError(`第 ${lineNo + 1} 行不是合法 JSON: ${(e as Error).message}`)
       }
-      if (obj && typeof obj.schema_version === 'number') return // 头行
+      if (obj && typeof obj.schema_version === 'number') {
+        // 头行：只认已知版本，未知版本显式报错（插位/改形态会全错，不能静默跳过）。
+        // 缺头行保持旧宽容行为——历史文件与测试的行内片段仍可解析。
+        if (obj.schema_version !== REPLAY_SCHEMA_VERSION) {
+          throw new ReplayParseError(
+            `不支持的回放版本 schema_version=${obj.schema_version}（支持 ${REPLAY_SCHEMA_VERSION}），请升级客户端`)
+        }
+        return
+      }
       if (!obj || typeof obj.type !== 'string') return
       // Input-only stretches still occupy time, even though this visual index
       // does not execute the authoritative server simulation.
@@ -178,7 +190,7 @@ export function createReplayParser(): ReplayParser {
   }
 }
 
-/** 解析完整 NDJSON 文本。头行（schema_version）跳过；空行容错。 */
+/** 解析完整 NDJSON 文本。头行（schema_version，未知版本拒绝）跳过；空行容错。 */
 export function parseReplayNDJSON(text: string): ReplayData {
   const parser = createReplayParser()
   const lines = text.split('\n')

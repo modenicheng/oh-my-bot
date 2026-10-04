@@ -1,7 +1,8 @@
 // MapDef 解析：EvMapBootstrap.map_json → 结构化地图。
 // JSON 形状对齐服务端 server/internal/sim/contract.go 的 MapDef（json tag 小写下划线），
 // 但 Vec2/Rect 无 json tag → 序列化为大写 X/Y、Min/Max，此处做大小写兼容。
-// 三环结构（docs/design/game_design_v0.3.md §3）：外环 55–80m / 中环 30–55m / 核心区 <30m。
+// 三环结构（docs/design/game_design_v0.3.md §3）：外环 55–80m / 中环 30–55m / 锁区 28m（mapgen coreZoneR）。
+// 注：设计文档的「核心区 <30m」是中环内边界表述；实际锁区半径以 mapgen 下发的 core_zone 为准。
 
 import { goNum, goVec2 } from '../lib/gojson'
 
@@ -28,8 +29,10 @@ export interface MapDefParsed {
   extent: number
 }
 
-/** 三环半径（设计常量，渲染环线参照；实际锁区以 core_zone 为准） */
-export const RING_CORE = 30
+/** 三环半径（设计常量，渲染环线参照；实际锁区以 core_zone 为准）。
+ * RING_CORE 仅作 mapdef 缺 core_zone.radius 时的兜底，取服务端实际锁区半径：
+ * mapgen/generator.go 的 coreZoneR = 28（<30m 中环内边界；旧值 30 与服务端不一致）。 */
+export const RING_CORE = 28
 export const RING_OUTER = 80
 
 /** 黑入进度满值：progress_x10 的分母（8s × 10，对应 server sim.HackDuration=480）。

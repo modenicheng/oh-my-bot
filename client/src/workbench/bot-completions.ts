@@ -25,6 +25,7 @@ const API_METHODS: CompletionSeed[] = [
   { label: 'interact', insert: 'interact()', kind: 'method', detail: 'interact() — 本 tick 引导 Uplink，持续引导需每 tick 调用' },
   { label: 'say', insert: 'say($1)', kind: 'method', detail: 'say(text: string) — L0 全场发言，3s 冷却' },
   { label: 'moveTo', insert: 'moveTo($1)', kind: 'method', detail: 'moveTo(pos: Vec2) — L1 朝目标点移动' },
+  { label: 'navigateTo', insert: 'navigateTo($1)', kind: 'method', detail: 'navigateTo(pos: Vec2) — L1 服务器确定性寻路，避开墙与未开放锁区' },
   { label: 'nearestEnemy', insert: 'nearestEnemy()', kind: 'method', detail: 'nearestEnemy(): RobotRef | null — L1 最近可见敌人' },
   { label: 'nearestCore', insert: 'nearestCore()', kind: 'method', detail: 'nearestCore(): Vec2 | null — L1 最近核心' },
   { label: 'nearestUplink', insert: 'nearestUplink()', kind: 'method', detail: 'nearestUplink(): Vec2 | null — L1 最近上行桩' },

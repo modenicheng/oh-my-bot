@@ -54,6 +54,18 @@ describe('parseReplayNDJSON', () => {
     expect(() => parseReplayNDJSON('{"schema_version":1}\n')).toThrow(ReplayParseError)
   })
 
+  it('未知 schema_version 显式拒绝（X-6/D12）', () => {
+    const v2 = '{"schema_version":2}\n' + JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } })
+    expect(() => parseReplayNDJSON(v2)).toThrow(ReplayParseError)
+    expect(() => parseReplayNDJSON(v2)).toThrow(/schema_version=2/)
+    expect(() => parseReplayNDJSON('{"schema_version":99}\n')).toThrow(/schema_version=99/)
+  })
+
+  it('已知 schema_version=1 正常解析；头行位置无关后续记录', () => {
+    const ok = parseReplayNDJSON('{"schema_version":1}\n' + JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }))
+    expect(ok.records).toHaveLength(1)
+  })
+
   it('非法 JSON 行报行号', () => {
     expect(() => parseReplayNDJSON('{"schema_version":1}\nnot json\n')).toThrow(/第 2 行/)
   })

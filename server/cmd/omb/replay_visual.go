@@ -34,7 +34,7 @@ func writeVisualReplay(w io.Writer, r io.Reader) error {
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 4096), 16*1024*1024)
+	scanner.Buffer(make([]byte, 4096), sim.MaxLogLine)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var header struct {

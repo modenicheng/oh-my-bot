@@ -14,6 +14,16 @@ import (
 
 func wsURL(s *testserverT) string { return "ws" + s.URL[4:] + "/ws" }
 
+// TestFrameBytesPinned 钉住 ADR-0012 首字节帧协议：与客户端
+// packages/protocol/src/messages.ts 的 frame 常量（由 golden.test.ts 互钉）
+// 保持同一组值。任一侧改动都会在两侧测试同时失败。
+func TestFrameBytesPinned(t *testing.T) {
+	if framePing != 0x00 || framePong != 0x01 || frameUp != 0x02 || frameDown != 0x03 {
+		t.Fatalf("frame bytes drifted: ping=%#02x pong=%#02x up=%#02x down=%#02x",
+			framePing, framePong, frameUp, frameDown)
+	}
+}
+
 // dialAndKick：拨号后发送一帧空 ClientMsg，触发 onUp（会话装配）。
 func dialAndKick(t *testing.T, ctx context.Context, s *testserverT) *websocket.Conn {
 	t.Helper()

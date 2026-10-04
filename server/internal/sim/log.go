@@ -19,7 +19,9 @@ import (
 
 const (
 	SchemaVersion = 1
-	maxLogLine    = 16 * 1024 * 1024
+	// MaxLogLine 是单条 JSONL 记录的字节上限（写入前校验与读取侧 scanner
+	// 缓冲共用；cmd/omb/replay_visual.go 等消费者必须引用本常量而非复制字面量）。
+	MaxLogLine = 16 * 1024 * 1024
 )
 
 // MatchPlayer records the stable identity and pairing used by the live projector.
@@ -219,7 +221,7 @@ func (l *MatchEventLog) append(record diskRecord) {
 		l.err = err
 		return
 	}
-	if len(data)+1 > maxLogLine {
+	if len(data)+1 > MaxLogLine {
 		l.err = errors.New("sim: log record exceeds size limit")
 		return
 	}
@@ -265,7 +267,7 @@ func NewMatchEventLogReader(r io.Reader) (*MatchEventLogReader, error) {
 		return nil, errors.New("sim: nil log reader")
 	}
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 4096), maxLogLine)
+	scanner.Buffer(make([]byte, 4096), MaxLogLine)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, err

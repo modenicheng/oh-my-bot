@@ -36,6 +36,12 @@ import (
 // version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
 var version = "dev"
 
+// joinFailedPrefix 是进房被拒的字符串协议前缀（短期约定，非 wire 字段）：
+// 服务器以 robot=0 的 EvSay 下发 "join failed: <原因>"，客户端 RoomSession
+// （packages/protocol joinFailedReason）据此终止重试并展示原因。
+// TS 侧前缀常量由 packages/protocol/test/golden.test.ts 互钉。
+const joinFailedPrefix = "join failed:"
+
 //go:embed all:web
 var webFS embed.FS
 
@@ -414,7 +420,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
 			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig:
-			sendReliable(glue.SystemSay("join failed: readonly spectator connection"))
+			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
 			return
 		}
 		return
@@ -481,7 +487,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
 		hub.Unregister(sess)
-		sendReliable(glue.SystemSay("join failed: " + err.Error()))
+		sendReliable(glue.SystemSay(joinFailedPrefix + " " + err.Error()))
 		return
 	}
 	if old := *sessOut; old != nil {
@@ -492,7 +498,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 }
 
 // handleSpectate attaches a read-only live observer. Reuses the established
-// "join failed:" robot-0 say prefix so the client RoomSession stops retrying
+// joinFailedPrefix robot-0 say prefix so the client RoomSession stops retrying
 // exactly like a rejected player join.
 func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
 	if spec == nil {
@@ -504,7 +510,7 @@ func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendL
 	hub.Register(sess)
 	if err := rc.BindSpectator(sess); err != nil {
 		hub.Unregister(sess)
-		sendReliable(glue.SystemSay("join failed: " + err.Error()))
+		sendReliable(glue.SystemSay(joinFailedPrefix + " " + err.Error()))
 		return
 	}
 	if old := *sessOut; old != nil {
