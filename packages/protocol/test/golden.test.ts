@@ -8,6 +8,8 @@ import {
   SimTuningSchema, EvControlNoticeSchema, EvControlNotice_Code,
   EvMapBootstrapSchema, TransportTiming,
   ReplaySchemaVersion, ReplayRecordType, ReplayVisualVersion,
+  ScriptOrigin, EvScriptVersionSchema, EvScriptVersionsSchema,
+  EvScriptRollbackResultSchema, ScriptRollbackSchema, EvScriptResultSchema,
   type ClientMsg, type SnapshotDelta, type EvControlNotice,
 } from '../src/gen/proto/omb_pb'
 import { encodeClient, decodeServer, frame, JOIN_FAILED_PREFIX, joinFailedReason, controlNotice, joinRejection, dedupeControlNoticeSay } from '../src/messages'
@@ -210,6 +212,57 @@ describe('EvControlNotice (X-4)', () => {
     expect(EvControlNotice_Code.CN_AI_COMPILE_FAILED).toBe(12)
     expect(EvControlNotice_Code.CN_AI_STALE_SCRIPT).toBe(13)
     expect(EvControlNotice_Code.CN_AI_EXPLAIN).toBe(14)
+    expect(EvControlNotice_Code.CN_SCRIPT_ROLLBACK_FAILED).toBe(15)
+  })
+})
+
+// ---- 脚本版本链（AI 直填 + 版本回退）：枚举编号、消息往返、ClientMsg 挂载 ----
+
+describe('script versions (AI apply + rollback)', () => {
+  it('ScriptOrigin / 新 notice 枚举值与 omb.proto 权威源互钉', () => {
+    expect(ScriptOrigin.SCRIPT_ORIGIN_UNSPECIFIED).toBe(0)
+    expect(ScriptOrigin.ORIGIN_MANUAL).toBe(1)
+    expect(ScriptOrigin.ORIGIN_AI).toBe(2)
+    expect(ScriptOrigin.ORIGIN_ROLLBACK).toBe(3)
+  })
+
+  it('EvScriptVersions 携带升序版本链与 current 指针，源码 owner-only 全量回传', () => {
+    const versions = create(EvScriptVersionsSchema, {
+      versions: [
+        create(EvScriptVersionSchema, { id: 1, scriptRev: 3, origin: ScriptOrigin.ORIGIN_MANUAL, wallMs: 1000, source: 'function tick(bot) {}' }),
+        create(EvScriptVersionSchema, { id: 2, scriptRev: 4, origin: ScriptOrigin.ORIGIN_AI, wallMs: 2000, source: 'function tick(bot) { bot.say("ai") }' }),
+      ],
+      currentId: 2,
+    })
+    const back = fromBinary(EvScriptVersionsSchema, toBinary(EvScriptVersionsSchema, versions))
+    expect(back.currentId).toBe(2)
+    expect(back.versions.map(v => [v.id, v.origin, v.scriptRev])).toEqual([[1, ScriptOrigin.ORIGIN_MANUAL, 3], [2, ScriptOrigin.ORIGIN_AI, 4]])
+    expect(back.versions[1].source).toContain('bot.say')
+  })
+
+  it('ScriptRollback 上行挂在 ClientMsg.script_rollback = 13；EvScriptRollbackResult 往返', () => {
+    const msg = create(ClientMsgSchema, {
+      payload: { case: 'scriptRollback', value: create(ScriptRollbackSchema, { versionId: 7 }) },
+    })
+    const back = fromBinary(ClientMsgSchema, toBinary(ClientMsgSchema, msg))
+    if (back.payload.case !== 'scriptRollback') throw new Error(`case ${back.payload.case}`)
+    expect(back.payload.value.versionId).toBe(7)
+
+    const result = create(EvScriptRollbackResultSchema, {
+      ok: true, versionId: 7, scriptRev: 9, source: 'function tick(bot) {}',
+    })
+    const backResult = fromBinary(EvScriptRollbackResultSchema, toBinary(EvScriptRollbackResultSchema, result))
+    expect(backResult).toMatchObject({ ok: true, versionId: 7, scriptRev: 9 })
+    expect(backResult.source).toContain('tick')
+  })
+
+  it('EvScriptResult 可选 origin/versionId 向后兼容：旧字段缺省可探测', () => {
+    const legacy = fromBinary(EvScriptResultSchema, toBinary(EvScriptResultSchema, create(EvScriptResultSchema, { clientScriptId: 5, ok: true, scriptRev: 3 })))
+    expect(legacy.origin).toBeUndefined() // 旧服务器：客户端按手动提交处理
+    expect(legacy.versionId).toBeUndefined()
+    const fresh = fromBinary(EvScriptResultSchema, toBinary(EvScriptResultSchema, create(EvScriptResultSchema, { clientScriptId: 5, ok: true, scriptRev: 3, origin: ScriptOrigin.ORIGIN_AI, versionId: 2 })))
+    expect(fresh.origin).toBe(ScriptOrigin.ORIGIN_AI)
+    expect(fresh.versionId).toBe(2)
   })
 })
 

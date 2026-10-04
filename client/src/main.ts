@@ -291,6 +291,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     const ev = msg.payload.value
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
     if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
+    if (ev.kind.case === 'scriptVersions') { workbench.acceptScriptVersions(ev.kind.value); return }
+    if (ev.kind.case === 'scriptRollbackResult') { workbench.acceptScriptRollbackResult(ev.kind.value); return }
     if (ev.kind.case === 'aiQuota') { workbench.acceptAiQuota(ev.kind.value); return }
     if (ev.kind.case === 'aiStream') { workbench.acceptAiStream(ev.kind.value); return }
     if (ev.kind.case === 'aiUsage') workbench.acceptAiUsage(ev.kind.value)

@@ -50,3 +50,62 @@ func TestServerMsgRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", snap)
 	}
 }
+
+// 脚本版本链（AI 直填 + 版本回退）：枚举编号与消息往返与 TS 侧
+// golden.test.ts 的 script versions describe 互钉；任一侧改 proto 编号都会双侧失败。
+func TestScriptVersionMessagesRoundTrip(t *testing.T) {
+	if ombv1.ScriptOrigin_SCRIPT_ORIGIN_UNSPECIFIED != 0 || ombv1.ScriptOrigin_ORIGIN_MANUAL != 1 ||
+		ombv1.ScriptOrigin_ORIGIN_AI != 2 || ombv1.ScriptOrigin_ORIGIN_ROLLBACK != 3 {
+		t.Fatal("ScriptOrigin enum values drifted from omb.proto")
+	}
+	msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_ScriptVersions{ScriptVersions: &ombv1.EvScriptVersions{
+			Versions: []*ombv1.EvScriptVersion{
+				{Id: 1, ScriptRev: 3, Origin: ombv1.ScriptOrigin_ORIGIN_MANUAL, WallMs: 1000, Source: "manual"},
+				{Id: 2, ScriptRev: 4, Origin: ombv1.ScriptOrigin_ORIGIN_AI, WallMs: 2000, Source: "ai"},
+			},
+			CurrentId: 2,
+		}},
+	}}}
+	b, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := &ombv1.ServerMsg{}
+	if err := proto.Unmarshal(b, back); err != nil {
+		t.Fatal(err)
+	}
+	vs := back.GetEvent().GetScriptVersions()
+	if vs == nil || vs.CurrentId != 2 || len(vs.Versions) != 2 {
+		t.Fatalf("versions round-trip mismatch: %+v", vs)
+	}
+	if vs.Versions[0].Origin != ombv1.ScriptOrigin_ORIGIN_MANUAL || vs.Versions[1].Source != "ai" {
+		t.Fatalf("version fields drifted: %+v", vs.Versions)
+	}
+
+	up := &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_ScriptRollback{ScriptRollback: &ombv1.ScriptRollback{VersionId: 7}}}
+	ub, err := proto.Marshal(up)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backUp := &ombv1.ClientMsg{}
+	if err := proto.Unmarshal(ub, backUp); err != nil {
+		t.Fatal(err)
+	}
+	if backUp.GetScriptRollback().GetVersionId() != 7 {
+		t.Fatalf("rollback round-trip mismatch: %+v", backUp.GetScriptRollback())
+	}
+
+	res := &ombv1.EvScriptRollbackResult{Ok: true, VersionId: 7, ScriptRev: 9, Source: "rolled"}
+	rb, err := proto.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backRes := &ombv1.EvScriptRollbackResult{}
+	if err := proto.Unmarshal(rb, backRes); err != nil {
+		t.Fatal(err)
+	}
+	if !backRes.Ok || backRes.VersionId != 7 || backRes.Source != "rolled" {
+		t.Fatalf("rollback result round-trip mismatch: %+v", backRes)
+	}
+}

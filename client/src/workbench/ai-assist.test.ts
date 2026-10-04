@@ -95,9 +95,11 @@ describe('aiQuotaText', () => {
 })
 
 describe('aiHotSwapNotice', () => {
-  it('草稿脏时提示差异未同步；不脏时说明未覆盖', () => {
-    expect(aiHotSwapNotice(true)).toContain('草稿未改动')
-    expect(aiHotSwapNotice(false)).toContain('未自动覆盖')
+  it('AI 版本直填语义：脏草稿提示已暂存可找回，干净草稿提示可回退', () => {
+    expect(aiHotSwapNotice(true)).toContain('已暂存')
+    expect(aiHotSwapNotice(true)).toContain('找回')
+    expect(aiHotSwapNotice(false)).toContain('已应用到编辑器')
+    expect(aiHotSwapNotice(false)).toContain('回退')
   })
 
   it('均不伪造源码回传', () => {

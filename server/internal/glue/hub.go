@@ -100,9 +100,12 @@ type RoomConn struct {
 	snippets     map[uint64][]snippet.Setting
 	scriptSource map[uint64]string
 	assist       map[uint64]bool
-	match        *Match
-	launcher     room.SimLauncher
-	launch       atomic.Pointer[asyncHandle]
+	// scriptVersions 每玩家脚本版本链（房间身份状态：AI 直填 + 版本回退的
+	// 服务器权威记录；跨局保留，显式离开清理，观战结构性不可见）。
+	scriptVersions map[uint64]*scriptVersionChain
+	match          *Match
+	launcher       room.SimLauncher
+	launch         atomic.Pointer[asyncHandle]
 
 	// ai is shared by warmup and its following scored match, so both consume
 	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
@@ -114,6 +117,7 @@ func newRoomConn(code string) *RoomConn {
 		Code: code, Room: room.NewRoom(code, 0),
 		sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{},
 		snippets: map[uint64][]snippet.Setting{}, scriptSource: map[uint64]string{}, assist: map[uint64]bool{},
+		scriptVersions: map[uint64]*scriptVersionChain{},
 	}
 }
 
@@ -170,6 +174,8 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 		}
 	}
 	rc.sessions[s.playerID] = s
+	// 版本链属房间身份：无对局的重连/接管也补发（AI 直填 + 回退的客户端基准）。
+	rc.sendScriptVersionsStateLocked(s.playerID)
 	if m := rc.match; m != nil && m.activeLocked() {
 		m.bootstrapLocked(s)
 	}
@@ -283,7 +289,31 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 			return
 		}
 		ok, errMsg, rev := m.submitScriptLocked(s.playerID, sub.GetSource())
-		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev}}}}})
+		var versionID uint32
+		if ok {
+			// 版本记录（不推送）：ScriptResult 回执先发，版本链快照随后，
+			// 客户端按固定顺序消费（回执 → 版本链）。
+			versionID = m.recordScriptVersionLocked(s.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, sub.GetSource())
+		}
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev, VersionId: &versionID}}}}})
+		if ok {
+			m.pushScriptVersionsLocked(s.playerID)
+		}
+	})
+}
+
+// ScriptRollback 把玩家自己的历史版本设为当前版本（仅房间玩家；观战者被
+// withRoom 结构性拒绝，上游路由还会提前拒绝并回结构化 notice）。
+func (s *Session) ScriptRollback(rb *ombv1.ScriptRollback) {
+	if rb == nil {
+		return
+	}
+	s.withRoom(func(rc *RoomConn) {
+		m := rc.match
+		if m == nil || !m.activeLocked() {
+			return
+		}
+		m.rollbackScriptLocked(s.playerID, rb.GetVersionId())
 	})
 }
 func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
@@ -337,6 +367,7 @@ func (s *Session) LeaveRoom() {
 		delete(rc.snippets, s.playerID)
 		delete(rc.scriptSource, s.playerID)
 		delete(rc.assist, s.playerID) // 身份释放：同房间 Bot 状态随之清理
+		delete(rc.scriptVersions, s.playerID)
 		_ = rc.Room.Leave(s.playerID)
 		if s.hub != nil {
 			s.hub.mu.Lock()

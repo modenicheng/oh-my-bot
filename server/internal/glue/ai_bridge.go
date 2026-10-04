@@ -289,11 +289,17 @@ func (m *Match) handleAgentResult(sess *Session, pid uint64, outcome ai.HandleOu
 		case !accepted:
 			aiNotice(sess, ombv1.EvControlNotice_CN_AI_STALE_SCRIPT, "AI 改码未生效：脚本已被手动更新，AI 结果丢弃（旧脚本继续运行）")
 		default:
+			// ScriptResult 先于版本链快照推送：客户端先终结 AI 面板 pending、
+			// 落 Editor loaded 基线，再由版本链快照触发直填（携带完整源码）。
+			originAI := ombv1.ScriptOrigin_ORIGIN_AI
+			versionID := m.recordScriptVersionLocked(pid, newRev, originAI, outcome.Result.NewScript)
 			sess.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 				Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{
 					ClientScriptId: aiClientScriptID, Ok: true, ScriptRev: newRev,
+					Origin: &originAI, VersionId: &versionID,
 				}},
 			}}})
+			m.pushScriptVersionsLocked(pid)
 		}
 	}
 

@@ -29,6 +29,7 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 		{Payload: &ombv1.ClientMsg_ScriptSubmit{ScriptSubmit: &ombv1.ScriptSubmit{Source: "function tick() {}"}}},
 		{Payload: &ombv1.ClientMsg_AssistToggle{AssistToggle: &ombv1.AssistToggle{}}},
 		{Payload: &ombv1.ClientMsg_AiPrompt{AiPrompt: &ombv1.AiPrompt{Text: "prompt"}}},
+		{Payload: &ombv1.ClientMsg_ScriptRollback{ScriptRollback: &ombv1.ScriptRollback{VersionId: 1}}},
 		{Payload: &ombv1.ClientMsg_Say{Say: &ombv1.Say{Text: "hello"}}},
 	}
 	for _, cmd := range commands {

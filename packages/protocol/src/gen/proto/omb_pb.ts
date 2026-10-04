@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file proto/omb.proto.
  */
 export const file_proto_omb: GenFile = /*@__PURE__*/
-  fileDesc("Cg9wcm90by9vbWIucHJvdG8SBm9tYi52MSIcCgRWZWMyEgkKAXgYASABKAESCQoBeRgCIAEoASKYAQoLQ2xpZW50SW5wdXQSCwoDc2VxGAEgASgNEg4KBm1vdmVfeBgCIAEoBRIOCgZtb3ZlX3kYAyABKAUSDAoEZmlyZRgEIAEoCBILCgNhaW0YBSABKAESDAoEZGFzaBgGIAEoCBIOCgZzaGllbGQYByABKAgSEAoIaW50ZXJhY3QYCCABKAgSEQoJYXhpc19tYXNrGAkgASgNIjoKCEpvaW5Sb29tEhEKCXJvb21fY29kZRgBIAEoCRIMCgRuaWNrGAIgASgJEg0KBWNvbG9yGAMgASgJIiEKDFNwZWN0YXRlUm9vbRIRCglyb29tX2NvZGUYASABKAkiCwoJTGVhdmVSb29tIg4KDEFzc2lzdFRvZ2dsZSKDAQoKUm9vbUFjdGlvbhIlCgRraW5kGAEgASgOMhcub21iLnYxLlJvb21BY3Rpb24uS2luZCJOCgRLaW5kEggKBE5PTkUQABIJCgVTVEFSVBABEgkKBUFCT1JUEAISCwoHUkVTVEFSVBADEgoKBldBUk1VUBAEEg0KCVNPTE9fQk9UUxAFIjgKDFNjcmlwdFN1Ym1pdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEg4KBnNvdXJjZRgCIAEoCSJoCg5TbmlwcGV0U2V0dGluZxIhCgRraW5kGAEgASgOMhMub21iLnYxLlNuaXBwZXRLaW5kEg8KB2VuYWJsZWQYAiABKAgSCgoCcDEYAyABKAESCgoCcDIYBCABKAESCgoCczEYBSABKAkiOQoNU25pcHBldENvbmZpZxIoCghzbmlwcGV0cxgBIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZyIYCghBaVByb21wdBIMCgR0ZXh0GAEgASgJIhMKA1NheRIMCgR0ZXh0GAEgASgJIg8KDVJlc3luY1JlcXVlc3QihwQKCUNsaWVudE1zZxIkCgVpbnB1dBgBIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEisKDHdhcm11cF9pbnB1dBgCIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEiAKBGpvaW4YAyABKAsyEC5vbWIudjEuSm9pblJvb21IABIiCgVsZWF2ZRgEIAEoCzIRLm9tYi52MS5MZWF2ZVJvb21IABIpCgtyb29tX2FjdGlvbhgFIAEoCzISLm9tYi52MS5Sb29tQWN0aW9uSAASLQoNc2NyaXB0X3N1Ym1pdBgGIAEoCzIULm9tYi52MS5TY3JpcHRTdWJtaXRIABIlCglhaV9wcm9tcHQYByABKAsyEC5vbWIudjEuQWlQcm9tcHRIABItCg1hc3Npc3RfdG9nZ2xlGAggASgLMhQub21iLnYxLkFzc2lzdFRvZ2dsZUgAEi8KDnJlc3luY19yZXF1ZXN0GAkgASgLMhUub21iLnYxLlJlc3luY1JlcXVlc3RIABIaCgNzYXkYCiABKAsyCy5vbWIudjEuU2F5SAASKAoIc3BlY3RhdGUYCyABKAsyFC5vbWIudjEuU3BlY3RhdGVSb29tSAASLwoOc25pcHBldF9jb25maWcYDCABKAsyFS5vbWIudjEuU25pcHBldENvbmZpZ0gAQgkKB3BheWxvYWQiRAoKRW50aXR5QmFzZRIKCgJpZBgBIAEoDRIZCgNwb3MYAiABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAMgASgCIs8BCgpSb2JvdFN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRIOCgZocF94MTAYAiABKBESEgoKZW5lcmd5X3gxMBgDIAEoERIRCglzaGllbGRfb24YBCABKAgSDwoHZGFzaGluZxgFIAEoCBIMCgRkZWFkGAYgASgIEhQKDHJlc3Bhd25faW5fcxgHIAEoDRIMCgRuaWNrGAggASgJEg0KBWNvbG9yGAkgASgJEhYKCmlzX3BhcnRuZXIYCiABKAhCAhgBIlQKD1Byb2plY3RpbGVTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USEAoIb3duZXJfaWQYAiABKA0SDQoFY29sb3IYAyABKAkiPAoJQ29yZVN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRINCgV2YWx1ZRgCIAEoESJ/CgtVcGxpbmtTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USDQoFcmVhZHkYAiABKAgSEgoKaGFja2luZ19pZBgDIAEoDRIUCgxwcm9ncmVzc194MTAYBCABKBESFQoNbXlfY29vbGRvd25fcxgFIAEoDSJcCg9IZWFsdGhQYWNrU3RhdGUSIAoEYmFzZRgBIAEoCzISLm9tYi52MS5FbnRpdHlCYXNlEhEKCWF2YWlsYWJsZRgCIAEoCBIUCgxyZXNwYXduX2luX3MYAyABKA0i3QMKCVNlbGZTdGF0ZRIQCghyb2JvdF9pZBgBIAEoDRInCghtb3ZlX3NyYxgCIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlEikKCnR1cnJldF9zcmMYAyABKA4yFS5vbWIudjEuQ29udHJvbFNvdXJjZRIWCg5haV9yb3VuZHNfbGVmdBgEIAEoDRIYChBhaV90b2tlbnNfbGVmdF9rGAUgASgNEhYKCWFzc2lzdF9vbhgGIAEoCEgAiAEBEhwKD2Rhc2hfcmVhZHlfdGljaxgHIAEoDUgBiAEBEhwKD2ZpcmVfcmVhZHlfdGljaxgIIAEoDUgCiAEBEiwKCGZpcmVfc3JjGAkgASgOMhUub21iLnYxLkNvbnRyb2xTb3VyY2VIA4gBARIvCgthYmlsaXR5X3NyYxgKIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlSASIAQESHQoQbWFudWFsX2F4ZXNfbWFzaxgLIAEoDUgFiAEBQgwKCl9hc3Npc3Rfb25CEgoQX2Rhc2hfcmVhZHlfdGlja0ISChBfZmlyZV9yZWFkeV90aWNrQgsKCV9maXJlX3NyY0IOCgxfYWJpbGl0eV9zcmNCEwoRX21hbnVhbF9heGVzX21hc2sirAMKDVNuYXBzaG90RGVsdGESDAoEdGljaxgBIAEoDRIPCgdhY2tfc2VxGAIgASgNEhwKBXBoYXNlGAMgASgOMg0ub21iLnYxLlBoYXNlEhMKC3RpbWVfbGVmdF9zGAQgASgNEgwKBGZ1bGwYBSABKAgSEQoJYmFzZV90aWNrGAYgASgNEiIKBnJvYm90cxgHIAMoCzISLm9tYi52MS5Sb2JvdFN0YXRlEhIKCnJvYm90X2dvbmUYCCADKA0SLAoLcHJvamVjdGlsZXMYCSADKAsyFy5vbWIudjEuUHJvamVjdGlsZVN0YXRlEhcKD3Byb2plY3RpbGVfZ29uZRgKIAMoDRIgCgVjb3JlcxgLIAMoCzIRLm9tYi52MS5Db3JlU3RhdGUSEQoJY29yZV9nb25lGAwgAygNEiQKB3VwbGlua3MYDSADKAsyEy5vbWIudjEuVXBsaW5rU3RhdGUSHwoEc2VsZhgOIAEoCzIRLm9tYi52MS5TZWxmU3RhdGUSLQoMaGVhbHRoX3BhY2tzGA8gAygLMhcub21iLnYxLkhlYWx0aFBhY2tTdGF0ZSJ7CgZFdktpbGwSDgoGa2lsbGVyGAEgASgNEg4KBnZpY3RpbRgCIAEoDRISCgZhc3Npc3QYAyABKA1CAhgBEhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzISDwoHYXNzaXN0cxgFIAMoDRISCgpraWxsX3N0ZWFsGAYgASgIIjoKDEV2Q29yZVBpY2t1cBIKCgJieRgBIAEoDRIPCgdjb3JlX2lkGAIgASgNEg0KBXZhbHVlGAMgASgRIjwKDEV2VXBsaW5rSGFjaxIKCgJieRgBIAEoDRIRCgl1cGxpbmtfaWQYAiABKA0SDQoFdmFsdWUYAyABKBEiRwoNRXZQaGFzZUNoYW5nZRIbCgRmcm9tGAEgASgOMg0ub21iLnYxLlBoYXNlEhkKAnRvGAIgASgOMg0ub21iLnYxLlBoYXNlIioKCUV2UmVzcGF3bhINCgVyb2JvdBgBIAEoDRIOCgZzZWN0b3IYAiABKA0iTAoGRXZIZWFsEgoKAmJ5GAEgASgNEgoKAmlkGAIgASgNEhAKCGhlYWxfeDEwGAMgASgREhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzIiJAoFRXZTYXkSDQoFcm9ib3QYASABKA0SDAoEdGV4dBgCIAEoCSIuCgVFdkhpdBIMCgRmcm9tGAEgASgNEgoKAnRvGAIgASgNEgsKA2RtZxgDIAEoESJlCgZFdlNob3QSEgoKcHJvamVjdGlsZRgBIAEoDRINCgVvd25lchgCIAEoDRIYCgJhdBgDIAEoCzIMLm9tYi52MS5WZWMyEg8KB2hlYWRpbmcYBCABKAISDQoFY29sb3IYBSABKAkilgEKEkV2UHJvamVjdGlsZUltcGFjdBISCgpwcm9qZWN0aWxlGAEgASgNEg0KBW93bmVyGAIgASgNEg4KBnRhcmdldBgDIAEoDRIYCgJhdBgEIAEoCzIMLm9tYi52MS5WZWMyEg4KBnNoaWVsZBgFIAEoCBIUCgxpbnZ1bG5lcmFibGUYBiABKAgSDQoFY29sb3IYByABKAkiMQoMRXZNYXRjaFN0YXJ0EhAKCG1hcF9zZWVkGAEgASgEEg8KB3BsYXllcnMYAiABKA0iRAoJRXZXYWxsSGl0Eg0KBXJvYm90GAEgASgNEhgKAmF0GAIgASgLMgwub21iLnYxLlZlYzISDgoGaW1wYWN0GAMgASgCIkEKDUV2U2NyaXB0RXJyb3ISDQoFcm9ib3QYASABKA0SDQoFZXJyb3IYAiABKAkSEgoKc2NyaXB0X3JldhgDIAEoDSIuCgpFdk1hdGNoRW5kEiAKBnNjb3JlcxgBIAMoCzIQLm9tYi52MS5TY29yZVJvdyJHCghTY29yZVJvdxINCgVyb2JvdBgBIAEoDRINCgVzY29yZRgCIAEoERIdCgZ0aXRsZXMYAyADKA4yDS5vbWIudjEuVGl0bGUiPAoMRXZTY29yZWJvYXJkEh4KBHJvd3MYASADKAsyEC5vbWIudjEuU2NvcmVSb3cSDAoEdGljaxgCIAEoDSJZCg5FdlNjcmlwdFJlc3VsdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJEhIKCnNjcmlwdF9yZXYYBCABKA0ifQoRU25pcHBldFNvdXJjZVZpZXcSIQoEa2luZBgBIAEoDjITLm9tYi52MS5TbmlwcGV0S2luZBINCgV0aXRsZRgCIAEoCRIOCgZzb3VyY2UYAyABKAkSEgoKZGVmYXVsdF9wMRgEIAEoARISCgpkZWZhdWx0X3MxGAUgASgJIpUBCg9FdlNuaXBwZXRSZXN1bHQSCgoCb2sYASABKAgSDQoFZXJyb3IYAiABKAkSJwoHYXBwbGllZBgDIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZxISCgpzY3JpcHRfcmV2GAQgASgNEioKB3NvdXJjZXMYBSADKAsyGS5vbWIudjEuU25pcHBldFNvdXJjZVZpZXcicgoORXZNYXBCb290c3RyYXASEAoIbWFwX2pzb24YASABKAkSEAoIbWFwX2hhc2gYAiABKAkSGQoRZ2VuZXJhdG9yX3ZlcnNpb24YAyABKA0SIQoGdHVuaW5nGAQgASgLMhEub21iLnYxLlNpbVR1bmluZyKwAQoJU2ltVHVuaW5nEhEKCXRpY2tfcmF0ZRgBIAEoDRISCgptYXhfaHBfeDEwGAIgASgREhYKDm1heF9lbmVyZ3lfeDEwGAMgASgREhEKCWZpcmVfY29zdBgEIAEoARIbChNoYWNrX2R1cmF0aW9uX3RpY2tzGAUgASgNEh0KFWludnVsbl9kdXJhdGlvbl90aWNrcxgGIAEoDRIVCg12aXNpb25fcmFkaXVzGAcgASgBIooCCg9FdkNvbnRyb2xOb3RpY2USKgoEY29kZRgBIAEoDjIcLm9tYi52MS5FdkNvbnRyb2xOb3RpY2UuQ29kZRIMCgR0ZXh0GAIgASgJIrwBCgRDb2RlEhIKDkNOX1VOU1BFQ0lGSUVEEAASEgoOQ05fSk9JTl9GQUlMRUQQARIZChVDTl9SRUFET05MWV9TUEVDVEFUT1IQAhIYChRDTl9BSV9SRVFVRVNUX0ZBSUxFRBAKEhIKDkNOX0FJX0RJU0FCTEVEEAsSGAoUQ05fQUlfQ09NUElMRV9GQUlMRUQQDBIWChJDTl9BSV9TVEFMRV9TQ1JJUFQQDRIRCg1DTl9BSV9FWFBMQUlOEA4iXQoJRXZBaVVzYWdlEg0KBXJvYm90GAEgASgNEhQKDHJvdW5kc19kZWx0YRgCIAEoDRIUCgx0b2tlbnNfZGVsdGEYAyABKA0SFQoNZ2xvYmFsX2xlZnRfaxgEIAEoDSKzAQoLRXZSb29tU3RhdGUSKAoFc3RhdGUYASABKA4yGS5vbWIudjEuRXZSb29tU3RhdGUuU3RhdGUSFQoNcm9ib3RzX29ubGluZRgCIAEoDRIRCglob3N0X25pY2sYAyABKAkSEQoJc29sb19ib3RzGAQgASgNIj0KBVN0YXRlEgoKBlJfSURMRRAAEgwKCFJfV0FSTVVQEAESDQoJUl9SVU5OSU5HEAISCwoHUl9FTkRFRBADIlUKCUV2QWlRdW90YRITCgtyb3VuZHNfbGVmdBgBIAEoDRIVCg10b2tlbnNfdXNlZF9rGAIgASgNEhwKFGdsb2JhbF90b2tlbnNfbGVmdF9rGAMgASgNImUKCkV2QWlTdHJlYW0SDQoFZGVsdGEYASABKAkSJQoEa2luZBgCIAEoDjIXLm9tYi52MS5FdkFpU3RyZWFtLktpbmQiIQoES2luZBIKCgZBTlNXRVIQABINCglSRUFTT05JTkcQASLvCAoLU2VydmVyRXZlbnQSDAoEdGljaxgBIAEoDRIoCgR3YWxsGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIeCgRraWxsGAogASgLMg4ub21iLnYxLkV2S2lsbEgAEisKC2NvcmVfcGlja3VwGAsgASgLMhQub21iLnYxLkV2Q29yZVBpY2t1cEgAEisKC3VwbGlua19oYWNrGAwgASgLMhQub21iLnYxLkV2VXBsaW5rSGFja0gAEi0KDHBoYXNlX2NoYW5nZRgNIAEoCzIVLm9tYi52MS5FdlBoYXNlQ2hhbmdlSAASJAoHcmVzcGF3bhgOIAEoCzIRLm9tYi52MS5FdlJlc3Bhd25IABIcCgNzYXkYDyABKAsyDS5vbWIudjEuRXZTYXlIABIcCgNoaXQYECABKAsyDS5vbWIudjEuRXZIaXRIABInCgltYXRjaF9lbmQYESABKAsyEi5vbWIudjEuRXZNYXRjaEVuZEgAEikKCnJvb21fc3RhdGUYEiABKAsyEy5vbWIudjEuRXZSb29tU3RhdGVIABIlCghhaV9xdW90YRgTIAEoCzIRLm9tYi52MS5FdkFpUXVvdGFIABIvCg1zY3JpcHRfcmVzdWx0GBQgASgLMhYub21iLnYxLkV2U2NyaXB0UmVzdWx0SAASKwoLbWF0Y2hfc3RhcnQYFSABKAsyFC5vbWIudjEuRXZNYXRjaFN0YXJ0SAASJQoId2FsbF9oaXQYFiABKAsyES5vbWIudjEuRXZXYWxsSGl0SAASLQoMc2NyaXB0X2Vycm9yGBcgASgLMhUub21iLnYxLkV2U2NyaXB0RXJyb3JIABIvCg1tYXBfYm9vdHN0cmFwGBggASgLMhYub21iLnYxLkV2TWFwQm9vdHN0cmFwSAASJQoIYWlfdXNhZ2UYGSABKAsyES5vbWIudjEuRXZBaVVzYWdlSAASHgoEc2hvdBgaIAEoCzIOLm9tYi52MS5FdlNob3RIABI3ChFwcm9qZWN0aWxlX2ltcGFjdBgbIAEoCzIaLm9tYi52MS5FdlByb2plY3RpbGVJbXBhY3RIABIqCgpzY29yZWJvYXJkGBwgASgLMhQub21iLnYxLkV2U2NvcmVib2FyZEgAEikKCnNjcmlwdF9sb2cYHSABKAsyEy5vbWIudjEuRXZTY3JpcHRMb2dIABIeCgRoZWFsGB4gASgLMg4ub21iLnYxLkV2SGVhbEgAEi8KDXNuaXBwZXRfdXNhZ2UYHyABKAsyFi5vbWIudjEuRXZTbmlwcGV0VXNhZ2VIABIxCg5zbmlwcGV0X3Jlc3VsdBggIAEoCzIXLm9tYi52MS5FdlNuaXBwZXRSZXN1bHRIABInCglhaV9zdHJlYW0YISABKAsyEi5vbWIudjEuRXZBaVN0cmVhbUgAEjEKDmNvbnRyb2xfbm90aWNlGCIgASgLMhcub21iLnYxLkV2Q29udHJvbE5vdGljZUgAQgYKBGtpbmQicQoLRXZTY3JpcHRMb2cSEAoIcm9ib3RfaWQYASABKA0SEgoKc2NyaXB0X3JldhgCIAEoDRIMCgR0aWNrGAMgASgNEg0KBWxldmVsGAQgASgJEgwKBHRleHQYBSABKAkSEQoJdHJ1bmNhdGVkGAYgASgIIi0KDkV2U25pcHBldFVzYWdlEg0KBXJvYm90GAEgASgNEgwKBGF4ZXMYAiABKA0iZwoJU2VydmVyTXNnEikKCHNuYXBzaG90GAEgASgLMhUub21iLnYxLlNuYXBzaG90RGVsdGFIABIkCgVldmVudBgCIAEoCzITLm9tYi52MS5TZXJ2ZXJFdmVudEgAQgkKB3BheWxvYWQixwEKEVJlcGxheVZpc3VhbEZyYW1lEiYKAXYYASABKA4yGy5vbWIudjEuUmVwbGF5VmlzdWFsVmVyc2lvbhIMCgR0aWNrGAIgASgNEhwKBXBoYXNlGAMgASgOMg0ub21iLnYxLlBoYXNlEikKBnJvYm90cxgEIAMoCzIZLm9tYi52MS5SZXBsYXlWaXN1YWxSb2JvdBIzCgtwcm9qZWN0aWxlcxgFIAMoCzIeLm9tYi52MS5SZXBsYXlWaXN1YWxQcm9qZWN0aWxlIowBChFSZXBsYXlWaXN1YWxSb2JvdBIKCgJpZBgBIAEoDRIZCgNwb3MYAiABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAMgASgBEgoKAmhwGAQgASgBEg4KBmVuZXJneRgFIAEoARINCgVhbGl2ZRgGIAEoCBIUCgxpbnZ1bG5lcmFibGUYByABKAgiXwoWUmVwbGF5VmlzdWFsUHJvamVjdGlsZRIKCgJpZBgBIAEoDRINCgVvd25lchgCIAEoDRIZCgNwb3MYAyABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAQgASgBKj0KBVBoYXNlEhUKEVBIQVNFX1VOU1BFQ0lGSUVEEAASDgoKT1VURVJfUklORxABEg0KCUNPUkVfT1BFThACKlAKDUNvbnRyb2xTb3VyY2USEgoOQ1NfVU5TUEVDSUZJRUQQABIMCghDU19IVU1BThABEg0KCUNTX1NDUklQVBACEg4KCkNTX1NOSVBQRVQQAyrwAQoPVHJhbnNwb3J0VGltaW5nEg4KCkZSQU1FX1BJTkcQABIOCgpGUkFNRV9QT05HEAESDAoIRlJBTUVfVVAQAhIOCgpGUkFNRV9ET1dOEAMSFwoSQ09OTkVDVF9USU1FT1VUX01TEMA+EhUKEFBJTkdfSU5URVJWQUxfTVMQ0A8SGAoTTElWRU5FU1NfVElNRU9VVF9NUxDAPhIWChFMSVZFTkVTU19DSEVDS19NUxDoBxIbChZTRVJWRVJfUkVBRF9USU1FT1VUX01TEJBOEhwKF1NFUlZFUl9XUklURV9USU1FT1VUX01TENAPGgIQASrBAQoLU25pcHBldEtpbmQSFwoTU05JUFBFVF9VTlNQRUNJRklFRBAAEhQKEFNOSVBQRVRfQVVUT19BSU0QARIcChhTTklQUEVUX0VNRVJHRU5DWV9TSElFTEQQBBIYChRTTklQUEVUX0RBTkdFUl9BVk9JRBAFEhIKDlNOSVBQRVRfUEFUUk9MEAYSFwoTU05JUFBFVF9HTE9CQUxfQ09SRRAHEh4KGlNOSVBQRVRfTE9XX0hQX0hFQUxUSF9QQUNLEAgqgAIKBVRpdGxlEhUKEVRJVExFX1VOU1BFQ0lGSUVEEAASDwoLV0FSX01BQ0hJTkUQARINCglTQ0FWRU5HRVIQAhIQCgxTSUdOQUxfVEhJRUYQAxIKCgZSVU5ORVIQBBINCglXQUxMX0hFQUQQBRIMCghTVVJWSVZPUhAGEg4KClBFQUNFTUFLRVIQBxIMCghBSV9JRElPVBAIEgsKB0JBUlJBR0UQCRIUCgxCRVNUX1BBUlRORVIQChoCCAESDgoKQUlfUkVHVUxBUhALEg4KCk9MRF9TQ0hPT0wQDBIICgRDTk1CEA0SDgoKS0lMTF9TVEVBTBAOEgoKBkhFQUxFUhAPKkwKE1JlcGxheVNjaGVtYVZlcnNpb24SHwobUkVQTEFZX1NDSEVNQV9WX1VOU1BFQ0lGSUVEEAASFAoQUkVQTEFZX1NDSEVNQV9WMRABKqQBChBSZXBsYXlSZWNvcmRUeXBlEhYKElJFUExBWV9VTlNQRUNJRklFRBAAEhAKDFJFUExBWV9FVkVOVBABEhYKElJFUExBWV9NQVRDSF9TVEFSVBACEhAKDFJFUExBWV9JTlBVVBADEhIKDlJFUExBWV9DT05UUk9MEAQSFQoRUkVQTEFZX0NIRUNLUE9JTlQQBRIRCg1SRVBMQVlfVklTVUFMEAYqYgoTUmVwbGF5VmlzdWFsVmVyc2lvbhIfChtSRVBMQVlfVklTVUFMX1ZfVU5TUEVDSUZJRUQQABIUChBSRVBMQVlfVklTVUFMX1YxEAESFAoQUkVQTEFZX1ZJU1VBTF9WMhACQkVaQ2dpdGh1Yi5jb20vbW9kZW5pY2hlbmcvb2gtbXktYm90L3NlcnZlci9pbnRlcm5hbC9wcm90b2NvbC9nZW47b21idjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("Cg9wcm90by9vbWIucHJvdG8SBm9tYi52MSIcCgRWZWMyEgkKAXgYASABKAESCQoBeRgCIAEoASKYAQoLQ2xpZW50SW5wdXQSCwoDc2VxGAEgASgNEg4KBm1vdmVfeBgCIAEoBRIOCgZtb3ZlX3kYAyABKAUSDAoEZmlyZRgEIAEoCBILCgNhaW0YBSABKAESDAoEZGFzaBgGIAEoCBIOCgZzaGllbGQYByABKAgSEAoIaW50ZXJhY3QYCCABKAgSEQoJYXhpc19tYXNrGAkgASgNIjoKCEpvaW5Sb29tEhEKCXJvb21fY29kZRgBIAEoCRIMCgRuaWNrGAIgASgJEg0KBWNvbG9yGAMgASgJIiEKDFNwZWN0YXRlUm9vbRIRCglyb29tX2NvZGUYASABKAkiCwoJTGVhdmVSb29tIg4KDEFzc2lzdFRvZ2dsZSKDAQoKUm9vbUFjdGlvbhIlCgRraW5kGAEgASgOMhcub21iLnYxLlJvb21BY3Rpb24uS2luZCJOCgRLaW5kEggKBE5PTkUQABIJCgVTVEFSVBABEgkKBUFCT1JUEAISCwoHUkVTVEFSVBADEgoKBldBUk1VUBAEEg0KCVNPTE9fQk9UUxAFIjgKDFNjcmlwdFN1Ym1pdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEg4KBnNvdXJjZRgCIAEoCSIkCg5TY3JpcHRSb2xsYmFjaxISCgp2ZXJzaW9uX2lkGAEgASgNImgKDlNuaXBwZXRTZXR0aW5nEiEKBGtpbmQYASABKA4yEy5vbWIudjEuU25pcHBldEtpbmQSDwoHZW5hYmxlZBgCIAEoCBIKCgJwMRgDIAEoARIKCgJwMhgEIAEoARIKCgJzMRgFIAEoCSI5Cg1TbmlwcGV0Q29uZmlnEigKCHNuaXBwZXRzGAEgAygLMhYub21iLnYxLlNuaXBwZXRTZXR0aW5nIhgKCEFpUHJvbXB0EgwKBHRleHQYASABKAkiEwoDU2F5EgwKBHRleHQYASABKAkiDwoNUmVzeW5jUmVxdWVzdCK6BAoJQ2xpZW50TXNnEiQKBWlucHV0GAEgASgLMhMub21iLnYxLkNsaWVudElucHV0SAASKwoMd2FybXVwX2lucHV0GAIgASgLMhMub21iLnYxLkNsaWVudElucHV0SAASIAoEam9pbhgDIAEoCzIQLm9tYi52MS5Kb2luUm9vbUgAEiIKBWxlYXZlGAQgASgLMhEub21iLnYxLkxlYXZlUm9vbUgAEikKC3Jvb21fYWN0aW9uGAUgASgLMhIub21iLnYxLlJvb21BY3Rpb25IABItCg1zY3JpcHRfc3VibWl0GAYgASgLMhQub21iLnYxLlNjcmlwdFN1Ym1pdEgAEiUKCWFpX3Byb21wdBgHIAEoCzIQLm9tYi52MS5BaVByb21wdEgAEi0KDWFzc2lzdF90b2dnbGUYCCABKAsyFC5vbWIudjEuQXNzaXN0VG9nZ2xlSAASLwoOcmVzeW5jX3JlcXVlc3QYCSABKAsyFS5vbWIudjEuUmVzeW5jUmVxdWVzdEgAEhoKA3NheRgKIAEoCzILLm9tYi52MS5TYXlIABIoCghzcGVjdGF0ZRgLIAEoCzIULm9tYi52MS5TcGVjdGF0ZVJvb21IABIvCg5zbmlwcGV0X2NvbmZpZxgMIAEoCzIVLm9tYi52MS5TbmlwcGV0Q29uZmlnSAASMQoPc2NyaXB0X3JvbGxiYWNrGA0gASgLMhYub21iLnYxLlNjcmlwdFJvbGxiYWNrSABCCQoHcGF5bG9hZCJECgpFbnRpdHlCYXNlEgoKAmlkGAEgASgNEhkKA3BvcxgCIAEoCzIMLm9tYi52MS5WZWMyEg8KB2hlYWRpbmcYAyABKAIizwEKClJvYm90U3RhdGUSIAoEYmFzZRgBIAEoCzISLm9tYi52MS5FbnRpdHlCYXNlEg4KBmhwX3gxMBgCIAEoERISCgplbmVyZ3lfeDEwGAMgASgREhEKCXNoaWVsZF9vbhgEIAEoCBIPCgdkYXNoaW5nGAUgASgIEgwKBGRlYWQYBiABKAgSFAoMcmVzcGF3bl9pbl9zGAcgASgNEgwKBG5pY2sYCCABKAkSDQoFY29sb3IYCSABKAkSFgoKaXNfcGFydG5lchgKIAEoCEICGAEiVAoPUHJvamVjdGlsZVN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRIQCghvd25lcl9pZBgCIAEoDRINCgVjb2xvchgDIAEoCSI8CglDb3JlU3RhdGUSIAoEYmFzZRgBIAEoCzISLm9tYi52MS5FbnRpdHlCYXNlEg0KBXZhbHVlGAIgASgRIn8KC1VwbGlua1N0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRINCgVyZWFkeRgCIAEoCBISCgpoYWNraW5nX2lkGAMgASgNEhQKDHByb2dyZXNzX3gxMBgEIAEoERIVCg1teV9jb29sZG93bl9zGAUgASgNIlwKD0hlYWx0aFBhY2tTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USEQoJYXZhaWxhYmxlGAIgASgIEhQKDHJlc3Bhd25faW5fcxgDIAEoDSLdAwoJU2VsZlN0YXRlEhAKCHJvYm90X2lkGAEgASgNEicKCG1vdmVfc3JjGAIgASgOMhUub21iLnYxLkNvbnRyb2xTb3VyY2USKQoKdHVycmV0X3NyYxgDIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlEhYKDmFpX3JvdW5kc19sZWZ0GAQgASgNEhgKEGFpX3Rva2Vuc19sZWZ0X2sYBSABKA0SFgoJYXNzaXN0X29uGAYgASgISACIAQESHAoPZGFzaF9yZWFkeV90aWNrGAcgASgNSAGIAQESHAoPZmlyZV9yZWFkeV90aWNrGAggASgNSAKIAQESLAoIZmlyZV9zcmMYCSABKA4yFS5vbWIudjEuQ29udHJvbFNvdXJjZUgDiAEBEi8KC2FiaWxpdHlfc3JjGAogASgOMhUub21iLnYxLkNvbnRyb2xTb3VyY2VIBIgBARIdChBtYW51YWxfYXhlc19tYXNrGAsgASgNSAWIAQFCDAoKX2Fzc2lzdF9vbkISChBfZGFzaF9yZWFkeV90aWNrQhIKEF9maXJlX3JlYWR5X3RpY2tCCwoJX2ZpcmVfc3JjQg4KDF9hYmlsaXR5X3NyY0ITChFfbWFudWFsX2F4ZXNfbWFzayKsAwoNU25hcHNob3REZWx0YRIMCgR0aWNrGAEgASgNEg8KB2Fja19zZXEYAiABKA0SHAoFcGhhc2UYAyABKA4yDS5vbWIudjEuUGhhc2USEwoLdGltZV9sZWZ0X3MYBCABKA0SDAoEZnVsbBgFIAEoCBIRCgliYXNlX3RpY2sYBiABKA0SIgoGcm9ib3RzGAcgAygLMhIub21iLnYxLlJvYm90U3RhdGUSEgoKcm9ib3RfZ29uZRgIIAMoDRIsCgtwcm9qZWN0aWxlcxgJIAMoCzIXLm9tYi52MS5Qcm9qZWN0aWxlU3RhdGUSFwoPcHJvamVjdGlsZV9nb25lGAogAygNEiAKBWNvcmVzGAsgAygLMhEub21iLnYxLkNvcmVTdGF0ZRIRCgljb3JlX2dvbmUYDCADKA0SJAoHdXBsaW5rcxgNIAMoCzITLm9tYi52MS5VcGxpbmtTdGF0ZRIfCgRzZWxmGA4gASgLMhEub21iLnYxLlNlbGZTdGF0ZRItCgxoZWFsdGhfcGFja3MYDyADKAsyFy5vbWIudjEuSGVhbHRoUGFja1N0YXRlInsKBkV2S2lsbBIOCgZraWxsZXIYASABKA0SDgoGdmljdGltGAIgASgNEhIKBmFzc2lzdBgDIAEoDUICGAESGAoCYXQYBCABKAsyDC5vbWIudjEuVmVjMhIPCgdhc3Npc3RzGAUgAygNEhIKCmtpbGxfc3RlYWwYBiABKAgiOgoMRXZDb3JlUGlja3VwEgoKAmJ5GAEgASgNEg8KB2NvcmVfaWQYAiABKA0SDQoFdmFsdWUYAyABKBEiPAoMRXZVcGxpbmtIYWNrEgoKAmJ5GAEgASgNEhEKCXVwbGlua19pZBgCIAEoDRINCgV2YWx1ZRgDIAEoESJHCg1FdlBoYXNlQ2hhbmdlEhsKBGZyb20YASABKA4yDS5vbWIudjEuUGhhc2USGQoCdG8YAiABKA4yDS5vbWIudjEuUGhhc2UiKgoJRXZSZXNwYXduEg0KBXJvYm90GAEgASgNEg4KBnNlY3RvchgCIAEoDSJMCgZFdkhlYWwSCgoCYnkYASABKA0SCgoCaWQYAiABKA0SEAoIaGVhbF94MTAYAyABKBESGAoCYXQYBCABKAsyDC5vbWIudjEuVmVjMiIkCgVFdlNheRINCgVyb2JvdBgBIAEoDRIMCgR0ZXh0GAIgASgJIi4KBUV2SGl0EgwKBGZyb20YASABKA0SCgoCdG8YAiABKA0SCwoDZG1nGAMgASgRImUKBkV2U2hvdBISCgpwcm9qZWN0aWxlGAEgASgNEg0KBW93bmVyGAIgASgNEhgKAmF0GAMgASgLMgwub21iLnYxLlZlYzISDwoHaGVhZGluZxgEIAEoAhINCgVjb2xvchgFIAEoCSKWAQoSRXZQcm9qZWN0aWxlSW1wYWN0EhIKCnByb2plY3RpbGUYASABKA0SDQoFb3duZXIYAiABKA0SDgoGdGFyZ2V0GAMgASgNEhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzISDgoGc2hpZWxkGAUgASgIEhQKDGludnVsbmVyYWJsZRgGIAEoCBINCgVjb2xvchgHIAEoCSIxCgxFdk1hdGNoU3RhcnQSEAoIbWFwX3NlZWQYASABKAQSDwoHcGxheWVycxgCIAEoDSJECglFdldhbGxIaXQSDQoFcm9ib3QYASABKA0SGAoCYXQYAiABKAsyDC5vbWIudjEuVmVjMhIOCgZpbXBhY3QYAyABKAIiQQoNRXZTY3JpcHRFcnJvchINCgVyb2JvdBgBIAEoDRINCgVlcnJvchgCIAEoCRISCgpzY3JpcHRfcmV2GAMgASgNIi4KCkV2TWF0Y2hFbmQSIAoGc2NvcmVzGAEgAygLMhAub21iLnYxLlNjb3JlUm93IkcKCFNjb3JlUm93Eg0KBXJvYm90GAEgASgNEg0KBXNjb3JlGAIgASgREh0KBnRpdGxlcxgDIAMoDjINLm9tYi52MS5UaXRsZSI8CgxFdlNjb3JlYm9hcmQSHgoEcm93cxgBIAMoCzIQLm9tYi52MS5TY29yZVJvdxIMCgR0aWNrGAIgASgNIrcBCg5FdlNjcmlwdFJlc3VsdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJEhIKCnNjcmlwdF9yZXYYBCABKA0SKQoGb3JpZ2luGAUgASgOMhQub21iLnYxLlNjcmlwdE9yaWdpbkgAiAEBEhcKCnZlcnNpb25faWQYBiABKA1IAYgBAUIJCgdfb3JpZ2luQg0KC192ZXJzaW9uX2lkIngKD0V2U2NyaXB0VmVyc2lvbhIKCgJpZBgBIAEoDRISCgpzY3JpcHRfcmV2GAIgASgNEiQKBm9yaWdpbhgDIAEoDjIULm9tYi52MS5TY3JpcHRPcmlnaW4SDwoHd2FsbF9tcxgEIAEoBBIOCgZzb3VyY2UYBSABKAkiUQoQRXZTY3JpcHRWZXJzaW9ucxIpCgh2ZXJzaW9ucxgBIAMoCzIXLm9tYi52MS5FdlNjcmlwdFZlcnNpb24SEgoKY3VycmVudF9pZBgCIAEoDSJrChZFdlNjcmlwdFJvbGxiYWNrUmVzdWx0EgoKAm9rGAEgASgIEg0KBWVycm9yGAIgASgJEhIKCnZlcnNpb25faWQYAyABKA0SEgoKc2NyaXB0X3JldhgEIAEoDRIOCgZzb3VyY2UYBSABKAkifQoRU25pcHBldFNvdXJjZVZpZXcSIQoEa2luZBgBIAEoDjITLm9tYi52MS5TbmlwcGV0S2luZBINCgV0aXRsZRgCIAEoCRIOCgZzb3VyY2UYAyABKAkSEgoKZGVmYXVsdF9wMRgEIAEoARISCgpkZWZhdWx0X3MxGAUgASgJIpUBCg9FdlNuaXBwZXRSZXN1bHQSCgoCb2sYASABKAgSDQoFZXJyb3IYAiABKAkSJwoHYXBwbGllZBgDIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZxISCgpzY3JpcHRfcmV2GAQgASgNEioKB3NvdXJjZXMYBSADKAsyGS5vbWIudjEuU25pcHBldFNvdXJjZVZpZXcicgoORXZNYXBCb290c3RyYXASEAoIbWFwX2pzb24YASABKAkSEAoIbWFwX2hhc2gYAiABKAkSGQoRZ2VuZXJhdG9yX3ZlcnNpb24YAyABKA0SIQoGdHVuaW5nGAQgASgLMhEub21iLnYxLlNpbVR1bmluZyKwAQoJU2ltVHVuaW5nEhEKCXRpY2tfcmF0ZRgBIAEoDRISCgptYXhfaHBfeDEwGAIgASgREhYKDm1heF9lbmVyZ3lfeDEwGAMgASgREhEKCWZpcmVfY29zdBgEIAEoARIbChNoYWNrX2R1cmF0aW9uX3RpY2tzGAUgASgNEh0KFWludnVsbl9kdXJhdGlvbl90aWNrcxgGIAEoDRIVCg12aXNpb25fcmFkaXVzGAcgASgBIqkCCg9FdkNvbnRyb2xOb3RpY2USKgoEY29kZRgBIAEoDjIcLm9tYi52MS5FdkNvbnRyb2xOb3RpY2UuQ29kZRIMCgR0ZXh0GAIgASgJItsBCgRDb2RlEhIKDkNOX1VOU1BFQ0lGSUVEEAASEgoOQ05fSk9JTl9GQUlMRUQQARIZChVDTl9SRUFET05MWV9TUEVDVEFUT1IQAhIYChRDTl9BSV9SRVFVRVNUX0ZBSUxFRBAKEhIKDkNOX0FJX0RJU0FCTEVEEAsSGAoUQ05fQUlfQ09NUElMRV9GQUlMRUQQDBIWChJDTl9BSV9TVEFMRV9TQ1JJUFQQDRIRCg1DTl9BSV9FWFBMQUlOEA4SHQoZQ05fU0NSSVBUX1JPTExCQUNLX0ZBSUxFRBAPIl0KCUV2QWlVc2FnZRINCgVyb2JvdBgBIAEoDRIUCgxyb3VuZHNfZGVsdGEYAiABKA0SFAoMdG9rZW5zX2RlbHRhGAMgASgNEhUKDWdsb2JhbF9sZWZ0X2sYBCABKA0iswEKC0V2Um9vbVN0YXRlEigKBXN0YXRlGAEgASgOMhkub21iLnYxLkV2Um9vbVN0YXRlLlN0YXRlEhUKDXJvYm90c19vbmxpbmUYAiABKA0SEQoJaG9zdF9uaWNrGAMgASgJEhEKCXNvbG9fYm90cxgEIAEoDSI9CgVTdGF0ZRIKCgZSX0lETEUQABIMCghSX1dBUk1VUBABEg0KCVJfUlVOTklORxACEgsKB1JfRU5ERUQQAyJVCglFdkFpUXVvdGESEwoLcm91bmRzX2xlZnQYASABKA0SFQoNdG9rZW5zX3VzZWRfaxgCIAEoDRIcChRnbG9iYWxfdG9rZW5zX2xlZnRfaxgDIAEoDSJlCgpFdkFpU3RyZWFtEg0KBWRlbHRhGAEgASgJEiUKBGtpbmQYAiABKA4yFy5vbWIudjEuRXZBaVN0cmVhbS5LaW5kIiEKBEtpbmQSCgoGQU5TV0VSEAASDQoJUkVBU09OSU5HEAEi5gkKC1NlcnZlckV2ZW50EgwKBHRpY2sYASABKA0SKAoEd2FsbBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASHgoEa2lsbBgKIAEoCzIOLm9tYi52MS5FdktpbGxIABIrCgtjb3JlX3BpY2t1cBgLIAEoCzIULm9tYi52MS5FdkNvcmVQaWNrdXBIABIrCgt1cGxpbmtfaGFjaxgMIAEoCzIULm9tYi52MS5FdlVwbGlua0hhY2tIABItCgxwaGFzZV9jaGFuZ2UYDSABKAsyFS5vbWIudjEuRXZQaGFzZUNoYW5nZUgAEiQKB3Jlc3Bhd24YDiABKAsyES5vbWIudjEuRXZSZXNwYXduSAASHAoDc2F5GA8gASgLMg0ub21iLnYxLkV2U2F5SAASHAoDaGl0GBAgASgLMg0ub21iLnYxLkV2SGl0SAASJwoJbWF0Y2hfZW5kGBEgASgLMhIub21iLnYxLkV2TWF0Y2hFbmRIABIpCgpyb29tX3N0YXRlGBIgASgLMhMub21iLnYxLkV2Um9vbVN0YXRlSAASJQoIYWlfcXVvdGEYEyABKAsyES5vbWIudjEuRXZBaVF1b3RhSAASLwoNc2NyaXB0X3Jlc3VsdBgUIAEoCzIWLm9tYi52MS5FdlNjcmlwdFJlc3VsdEgAEisKC21hdGNoX3N0YXJ0GBUgASgLMhQub21iLnYxLkV2TWF0Y2hTdGFydEgAEiUKCHdhbGxfaGl0GBYgASgLMhEub21iLnYxLkV2V2FsbEhpdEgAEi0KDHNjcmlwdF9lcnJvchgXIAEoCzIVLm9tYi52MS5FdlNjcmlwdEVycm9ySAASLwoNbWFwX2Jvb3RzdHJhcBgYIAEoCzIWLm9tYi52MS5Fdk1hcEJvb3RzdHJhcEgAEiUKCGFpX3VzYWdlGBkgASgLMhEub21iLnYxLkV2QWlVc2FnZUgAEh4KBHNob3QYGiABKAsyDi5vbWIudjEuRXZTaG90SAASNwoRcHJvamVjdGlsZV9pbXBhY3QYGyABKAsyGi5vbWIudjEuRXZQcm9qZWN0aWxlSW1wYWN0SAASKgoKc2NvcmVib2FyZBgcIAEoCzIULm9tYi52MS5FdlNjb3JlYm9hcmRIABIpCgpzY3JpcHRfbG9nGB0gASgLMhMub21iLnYxLkV2U2NyaXB0TG9nSAASHgoEaGVhbBgeIAEoCzIOLm9tYi52MS5FdkhlYWxIABIvCg1zbmlwcGV0X3VzYWdlGB8gASgLMhYub21iLnYxLkV2U25pcHBldFVzYWdlSAASMQoOc25pcHBldF9yZXN1bHQYICABKAsyFy5vbWIudjEuRXZTbmlwcGV0UmVzdWx0SAASJwoJYWlfc3RyZWFtGCEgASgLMhIub21iLnYxLkV2QWlTdHJlYW1IABIxCg5jb250cm9sX25vdGljZRgiIAEoCzIXLm9tYi52MS5FdkNvbnRyb2xOb3RpY2VIABIzCg9zY3JpcHRfdmVyc2lvbnMYIyABKAsyGC5vbWIudjEuRXZTY3JpcHRWZXJzaW9uc0gAEkAKFnNjcmlwdF9yb2xsYmFja19yZXN1bHQYJCABKAsyHi5vbWIudjEuRXZTY3JpcHRSb2xsYmFja1Jlc3VsdEgAQgYKBGtpbmQicQoLRXZTY3JpcHRMb2cSEAoIcm9ib3RfaWQYASABKA0SEgoKc2NyaXB0X3JldhgCIAEoDRIMCgR0aWNrGAMgASgNEg0KBWxldmVsGAQgASgJEgwKBHRleHQYBSABKAkSEQoJdHJ1bmNhdGVkGAYgASgIIi0KDkV2U25pcHBldFVzYWdlEg0KBXJvYm90GAEgASgNEgwKBGF4ZXMYAiABKA0iZwoJU2VydmVyTXNnEikKCHNuYXBzaG90GAEgASgLMhUub21iLnYxLlNuYXBzaG90RGVsdGFIABIkCgVldmVudBgCIAEoCzITLm9tYi52MS5TZXJ2ZXJFdmVudEgAQgkKB3BheWxvYWQixwEKEVJlcGxheVZpc3VhbEZyYW1lEiYKAXYYASABKA4yGy5vbWIudjEuUmVwbGF5VmlzdWFsVmVyc2lvbhIMCgR0aWNrGAIgASgNEhwKBXBoYXNlGAMgASgOMg0ub21iLnYxLlBoYXNlEikKBnJvYm90cxgEIAMoCzIZLm9tYi52MS5SZXBsYXlWaXN1YWxSb2JvdBIzCgtwcm9qZWN0aWxlcxgFIAMoCzIeLm9tYi52MS5SZXBsYXlWaXN1YWxQcm9qZWN0aWxlIowBChFSZXBsYXlWaXN1YWxSb2JvdBIKCgJpZBgBIAEoDRIZCgNwb3MYAiABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAMgASgBEgoKAmhwGAQgASgBEg4KBmVuZXJneRgFIAEoARINCgVhbGl2ZRgGIAEoCBIUCgxpbnZ1bG5lcmFibGUYByABKAgiXwoWUmVwbGF5VmlzdWFsUHJvamVjdGlsZRIKCgJpZBgBIAEoDRINCgVvd25lchgCIAEoDRIZCgNwb3MYAyABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAQgASgBKj0KBVBoYXNlEhUKEVBIQVNFX1VOU1BFQ0lGSUVEEAASDgoKT1VURVJfUklORxABEg0KCUNPUkVfT1BFThACKlAKDUNvbnRyb2xTb3VyY2USEgoOQ1NfVU5TUEVDSUZJRUQQABIMCghDU19IVU1BThABEg0KCUNTX1NDUklQVBACEg4KCkNTX1NOSVBQRVQQAypkCgxTY3JpcHRPcmlnaW4SHQoZU0NSSVBUX09SSUdJTl9VTlNQRUNJRklFRBAAEhEKDU9SSUdJTl9NQU5VQUwQARINCglPUklHSU5fQUkQAhITCg9PUklHSU5fUk9MTEJBQ0sQAyrwAQoPVHJhbnNwb3J0VGltaW5nEg4KCkZSQU1FX1BJTkcQABIOCgpGUkFNRV9QT05HEAESDAoIRlJBTUVfVVAQAhIOCgpGUkFNRV9ET1dOEAMSFwoSQ09OTkVDVF9USU1FT1VUX01TEMA+EhUKEFBJTkdfSU5URVJWQUxfTVMQ0A8SGAoTTElWRU5FU1NfVElNRU9VVF9NUxDAPhIWChFMSVZFTkVTU19DSEVDS19NUxDoBxIbChZTRVJWRVJfUkVBRF9USU1FT1VUX01TEJBOEhwKF1NFUlZFUl9XUklURV9USU1FT1VUX01TENAPGgIQASrBAQoLU25pcHBldEtpbmQSFwoTU05JUFBFVF9VTlNQRUNJRklFRBAAEhQKEFNOSVBQRVRfQVVUT19BSU0QARIcChhTTklQUEVUX0VNRVJHRU5DWV9TSElFTEQQBBIYChRTTklQUEVUX0RBTkdFUl9BVk9JRBAFEhIKDlNOSVBQRVRfUEFUUk9MEAYSFwoTU05JUFBFVF9HTE9CQUxfQ09SRRAHEh4KGlNOSVBQRVRfTE9XX0hQX0hFQUxUSF9QQUNLEAgqgAIKBVRpdGxlEhUKEVRJVExFX1VOU1BFQ0lGSUVEEAASDwoLV0FSX01BQ0hJTkUQARINCglTQ0FWRU5HRVIQAhIQCgxTSUdOQUxfVEhJRUYQAxIKCgZSVU5ORVIQBBINCglXQUxMX0hFQUQQBRIMCghTVVJWSVZPUhAGEg4KClBFQUNFTUFLRVIQBxIMCghBSV9JRElPVBAIEgsKB0JBUlJBR0UQCRIUCgxCRVNUX1BBUlRORVIQChoCCAESDgoKQUlfUkVHVUxBUhALEg4KCk9MRF9TQ0hPT0wQDBIICgRDTk1CEA0SDgoKS0lMTF9TVEVBTBAOEgoKBkhFQUxFUhAPKkwKE1JlcGxheVNjaGVtYVZlcnNpb24SHwobUkVQTEFZX1NDSEVNQV9WX1VOU1BFQ0lGSUVEEAASFAoQUkVQTEFZX1NDSEVNQV9WMRABKqQBChBSZXBsYXlSZWNvcmRUeXBlEhYKElJFUExBWV9VTlNQRUNJRklFRBAAEhAKDFJFUExBWV9FVkVOVBABEhYKElJFUExBWV9NQVRDSF9TVEFSVBACEhAKDFJFUExBWV9JTlBVVBADEhIKDlJFUExBWV9DT05UUk9MEAQSFQoRUkVQTEFZX0NIRUNLUE9JTlQQBRIRCg1SRVBMQVlfVklTVUFMEAYqYgoTUmVwbGF5VmlzdWFsVmVyc2lvbhIfChtSRVBMQVlfVklTVUFMX1ZfVU5TUEVDSUZJRUQQABIUChBSRVBMQVlfVklTVUFMX1YxEAESFAoQUkVQTEFZX1ZJU1VBTF9WMhACQkVaQ2dpdGh1Yi5jb20vbW9kZW5pY2hlbmcvb2gtbXktYm90L3NlcnZlci9pbnRlcm5hbC9wcm90b2NvbC9nZW47b21idjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message omb.v1.Vec2
@@ -255,6 +255,28 @@ export const ScriptSubmitSchema: GenMessage<ScriptSubmit> = /*@__PURE__*/
   messageDesc(file_proto_omb, 7);
 
 /**
+ * 房间作用域脚本版本回退：把某玩家自己的历史版本设为当前版本。
+ * 只能回退自己的版本；观战/他人 → 拒绝（版本链 owner-only）。
+ *
+ * @generated from message omb.v1.ScriptRollback
+ */
+export type ScriptRollback = Message<"omb.v1.ScriptRollback"> & {
+  /**
+   * 目标历史版本 id（EvScriptVersion.id；0/未知 → 拒绝保旧）
+   *
+   * @generated from field: uint32 version_id = 1;
+   */
+  versionId: number;
+};
+
+/**
+ * Describes the message omb.v1.ScriptRollback.
+ * Use `create(ScriptRollbackSchema)` to create a new message.
+ */
+export const ScriptRollbackSchema: GenMessage<ScriptRollback> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 8);
+
+/**
  * 单条 Snippet 开关与参数。参数最多 2 个：浮点参数走 p1/p2，
  * 路径点等字符串参数走 s1（范围校验在服务端 catalog，坏值整条拒绝保旧）。
  *
@@ -298,7 +320,7 @@ export type SnippetSetting = Message<"omb.v1.SnippetSetting"> & {
  * Use `create(SnippetSettingSchema)` to create a new message.
  */
 export const SnippetSettingSchema: GenMessage<SnippetSetting> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 8);
+  messageDesc(file_proto_omb, 9);
 
 /**
  * 整机 Snippet 配置上行：全量替换语义（enabled=false 的条目可省略）。
@@ -317,7 +339,7 @@ export type SnippetConfig = Message<"omb.v1.SnippetConfig"> & {
  * Use `create(SnippetConfigSchema)` to create a new message.
  */
 export const SnippetConfigSchema: GenMessage<SnippetConfig> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 9);
+  messageDesc(file_proto_omb, 10);
 
 /**
  * @generated from message omb.v1.AiPrompt
@@ -334,7 +356,7 @@ export type AiPrompt = Message<"omb.v1.AiPrompt"> & {
  * Use `create(AiPromptSchema)` to create a new message.
  */
 export const AiPromptSchema: GenMessage<AiPrompt> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 10);
+  messageDesc(file_proto_omb, 11);
 
 /**
  * @generated from message omb.v1.Say
@@ -351,7 +373,7 @@ export type Say = Message<"omb.v1.Say"> & {
  * Use `create(SaySchema)` to create a new message.
  */
 export const SaySchema: GenMessage<Say> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 11);
+  messageDesc(file_proto_omb, 12);
 
 /**
  * @generated from message omb.v1.ResyncRequest
@@ -364,7 +386,7 @@ export type ResyncRequest = Message<"omb.v1.ResyncRequest"> & {
  * Use `create(ResyncRequestSchema)` to create a new message.
  */
 export const ResyncRequestSchema: GenMessage<ResyncRequest> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 12);
+  messageDesc(file_proto_omb, 13);
 
 /**
  * @generated from message omb.v1.ClientMsg
@@ -449,6 +471,14 @@ export type ClientMsg = Message<"omb.v1.ClientMsg"> & {
      */
     value: SnippetConfig;
     case: "snippetConfig";
+  } | {
+    /**
+     * 脚本版本回退（仅房间玩家；观战拒绝）
+     *
+     * @generated from field: omb.v1.ScriptRollback script_rollback = 13;
+     */
+    value: ScriptRollback;
+    case: "scriptRollback";
   } | { case: undefined; value?: undefined };
 };
 
@@ -457,7 +487,7 @@ export type ClientMsg = Message<"omb.v1.ClientMsg"> & {
  * Use `create(ClientMsgSchema)` to create a new message.
  */
 export const ClientMsgSchema: GenMessage<ClientMsg> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 13);
+  messageDesc(file_proto_omb, 14);
 
 /**
  * @generated from message omb.v1.EntityBase
@@ -486,7 +516,7 @@ export type EntityBase = Message<"omb.v1.EntityBase"> & {
  * Use `create(EntityBaseSchema)` to create a new message.
  */
 export const EntityBaseSchema: GenMessage<EntityBase> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 14);
+  messageDesc(file_proto_omb, 15);
 
 /**
  * @generated from message omb.v1.RobotState
@@ -557,7 +587,7 @@ export type RobotState = Message<"omb.v1.RobotState"> & {
  * Use `create(RobotStateSchema)` to create a new message.
  */
 export const RobotStateSchema: GenMessage<RobotState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 15);
+  messageDesc(file_proto_omb, 16);
 
 /**
  * @generated from message omb.v1.ProjectileState
@@ -586,7 +616,7 @@ export type ProjectileState = Message<"omb.v1.ProjectileState"> & {
  * Use `create(ProjectileStateSchema)` to create a new message.
  */
 export const ProjectileStateSchema: GenMessage<ProjectileState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 16);
+  messageDesc(file_proto_omb, 17);
 
 /**
  * @generated from message omb.v1.CoreState
@@ -610,7 +640,7 @@ export type CoreState = Message<"omb.v1.CoreState"> & {
  * Use `create(CoreStateSchema)` to create a new message.
  */
 export const CoreStateSchema: GenMessage<CoreState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 17);
+  messageDesc(file_proto_omb, 18);
 
 /**
  * @generated from message omb.v1.UplinkState
@@ -655,7 +685,7 @@ export type UplinkState = Message<"omb.v1.UplinkState"> & {
  * Use `create(UplinkStateSchema)` to create a new message.
  */
 export const UplinkStateSchema: GenMessage<UplinkState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 18);
+  messageDesc(file_proto_omb, 19);
 
 /**
  * @generated from message omb.v1.HealthPackState
@@ -682,7 +712,7 @@ export type HealthPackState = Message<"omb.v1.HealthPackState"> & {
  * Use `create(HealthPackStateSchema)` to create a new message.
  */
 export const HealthPackStateSchema: GenMessage<HealthPackState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 19);
+  messageDesc(file_proto_omb, 20);
 
 /**
  * 自机私有状态（不下发他机）
@@ -765,7 +795,7 @@ export type SelfState = Message<"omb.v1.SelfState"> & {
  * Use `create(SelfStateSchema)` to create a new message.
  */
 export const SelfStateSchema: GenMessage<SelfState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 20);
+  messageDesc(file_proto_omb, 21);
 
 /**
  * @generated from message omb.v1.SnapshotDelta
@@ -864,7 +894,7 @@ export type SnapshotDelta = Message<"omb.v1.SnapshotDelta"> & {
  * Use `create(SnapshotDeltaSchema)` to create a new message.
  */
 export const SnapshotDeltaSchema: GenMessage<SnapshotDelta> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 21);
+  messageDesc(file_proto_omb, 22);
 
 /**
  * @generated from message omb.v1.EvKill
@@ -913,7 +943,7 @@ export type EvKill = Message<"omb.v1.EvKill"> & {
  * Use `create(EvKillSchema)` to create a new message.
  */
 export const EvKillSchema: GenMessage<EvKill> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 22);
+  messageDesc(file_proto_omb, 23);
 
 /**
  * @generated from message omb.v1.EvCorePickup
@@ -940,7 +970,7 @@ export type EvCorePickup = Message<"omb.v1.EvCorePickup"> & {
  * Use `create(EvCorePickupSchema)` to create a new message.
  */
 export const EvCorePickupSchema: GenMessage<EvCorePickup> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 23);
+  messageDesc(file_proto_omb, 24);
 
 /**
  * @generated from message omb.v1.EvUplinkHack
@@ -967,7 +997,7 @@ export type EvUplinkHack = Message<"omb.v1.EvUplinkHack"> & {
  * Use `create(EvUplinkHackSchema)` to create a new message.
  */
 export const EvUplinkHackSchema: GenMessage<EvUplinkHack> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 24);
+  messageDesc(file_proto_omb, 25);
 
 /**
  * @generated from message omb.v1.EvPhaseChange
@@ -989,7 +1019,7 @@ export type EvPhaseChange = Message<"omb.v1.EvPhaseChange"> & {
  * Use `create(EvPhaseChangeSchema)` to create a new message.
  */
 export const EvPhaseChangeSchema: GenMessage<EvPhaseChange> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 25);
+  messageDesc(file_proto_omb, 26);
 
 /**
  * @generated from message omb.v1.EvRespawn
@@ -1011,7 +1041,7 @@ export type EvRespawn = Message<"omb.v1.EvRespawn"> & {
  * Use `create(EvRespawnSchema)` to create a new message.
  */
 export const EvRespawnSchema: GenMessage<EvRespawn> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 26);
+  messageDesc(file_proto_omb, 27);
 
 /**
  * @generated from message omb.v1.EvHeal
@@ -1043,7 +1073,7 @@ export type EvHeal = Message<"omb.v1.EvHeal"> & {
  * Use `create(EvHealSchema)` to create a new message.
  */
 export const EvHealSchema: GenMessage<EvHeal> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 27);
+  messageDesc(file_proto_omb, 28);
 
 /**
  * @generated from message omb.v1.EvSay
@@ -1065,7 +1095,7 @@ export type EvSay = Message<"omb.v1.EvSay"> & {
  * Use `create(EvSaySchema)` to create a new message.
  */
 export const EvSaySchema: GenMessage<EvSay> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 28);
+  messageDesc(file_proto_omb, 29);
 
 /**
  * @generated from message omb.v1.EvHit
@@ -1092,7 +1122,7 @@ export type EvHit = Message<"omb.v1.EvHit"> & {
  * Use `create(EvHitSchema)` to create a new message.
  */
 export const EvHitSchema: GenMessage<EvHit> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 29);
+  messageDesc(file_proto_omb, 30);
 
 /**
  * 表现事件只报告已发生的攻击，客户端不从弹丸消失推断命中。
@@ -1131,7 +1161,7 @@ export type EvShot = Message<"omb.v1.EvShot"> & {
  * Use `create(EvShotSchema)` to create a new message.
  */
 export const EvShotSchema: GenMessage<EvShot> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 30);
+  messageDesc(file_proto_omb, 31);
 
 /**
  * @generated from message omb.v1.EvProjectileImpact
@@ -1182,7 +1212,7 @@ export type EvProjectileImpact = Message<"omb.v1.EvProjectileImpact"> & {
  * Use `create(EvProjectileImpactSchema)` to create a new message.
  */
 export const EvProjectileImpactSchema: GenMessage<EvProjectileImpact> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 31);
+  messageDesc(file_proto_omb, 32);
 
 /**
  * @generated from message omb.v1.EvMatchStart
@@ -1204,7 +1234,7 @@ export type EvMatchStart = Message<"omb.v1.EvMatchStart"> & {
  * Use `create(EvMatchStartSchema)` to create a new message.
  */
 export const EvMatchStartSchema: GenMessage<EvMatchStart> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 32);
+  messageDesc(file_proto_omb, 33);
 
 /**
  * @generated from message omb.v1.EvWallHit
@@ -1231,7 +1261,7 @@ export type EvWallHit = Message<"omb.v1.EvWallHit"> & {
  * Use `create(EvWallHitSchema)` to create a new message.
  */
 export const EvWallHitSchema: GenMessage<EvWallHit> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 33);
+  messageDesc(file_proto_omb, 34);
 
 /**
  * @generated from message omb.v1.EvScriptError
@@ -1258,7 +1288,7 @@ export type EvScriptError = Message<"omb.v1.EvScriptError"> & {
  * Use `create(EvScriptErrorSchema)` to create a new message.
  */
 export const EvScriptErrorSchema: GenMessage<EvScriptError> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 34);
+  messageDesc(file_proto_omb, 35);
 
 /**
  * @generated from message omb.v1.EvMatchEnd
@@ -1275,7 +1305,7 @@ export type EvMatchEnd = Message<"omb.v1.EvMatchEnd"> & {
  * Use `create(EvMatchEndSchema)` to create a new message.
  */
 export const EvMatchEndSchema: GenMessage<EvMatchEnd> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 35);
+  messageDesc(file_proto_omb, 36);
 
 /**
  * @generated from message omb.v1.ScoreRow
@@ -1302,7 +1332,7 @@ export type ScoreRow = Message<"omb.v1.ScoreRow"> & {
  * Use `create(ScoreRowSchema)` to create a new message.
  */
 export const ScoreRowSchema: GenMessage<ScoreRow> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 36);
+  messageDesc(file_proto_omb, 37);
 
 /**
  * 局内实时积分榜（服务器权威，约 1s 一拍；不落 Match Event Log，仅下发）
@@ -1326,7 +1356,7 @@ export type EvScoreboard = Message<"omb.v1.EvScoreboard"> & {
  * Use `create(EvScoreboardSchema)` to create a new message.
  */
 export const EvScoreboardSchema: GenMessage<EvScoreboard> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 37);
+  messageDesc(file_proto_omb, 38);
 
 /**
  * ScriptSubmit 的应答（nack 不落事件日志，仅下发）
@@ -1357,6 +1387,20 @@ export type EvScriptResult = Message<"omb.v1.EvScriptResult"> & {
    * @generated from field: uint32 script_rev = 4;
    */
   scriptRev: number;
+
+  /**
+   * 本版本写入来源（AI 改码回执必带；手动提交缺省）
+   *
+   * @generated from field: optional omb.v1.ScriptOrigin origin = 5;
+   */
+  origin?: ScriptOrigin | undefined;
+
+  /**
+   * 本版本在房间版本链中的 id（成功时携带）
+   *
+   * @generated from field: optional uint32 version_id = 6;
+   */
+  versionId?: number | undefined;
 };
 
 /**
@@ -1364,7 +1408,134 @@ export type EvScriptResult = Message<"omb.v1.EvScriptResult"> & {
  * Use `create(EvScriptResultSchema)` to create a new message.
  */
 export const EvScriptResultSchema: GenMessage<EvScriptResult> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 38);
+  messageDesc(file_proto_omb, 39);
+
+/**
+ * 单个脚本版本记录（房间作用域，玩家自己的版本链；bounded history）。
+ *
+ * @generated from message omb.v1.EvScriptVersion
+ */
+export type EvScriptVersion = Message<"omb.v1.EvScriptVersion"> & {
+  /**
+   * 版本 id（房间内按玩家单调递增；0 保留）
+   *
+   * @generated from field: uint32 id = 1;
+   */
+  id: number;
+
+  /**
+   * 该版本装载后的 runtime rev（回显用）
+   *
+   * @generated from field: uint32 script_rev = 2;
+   */
+  scriptRev: number;
+
+  /**
+   * 写入来源（手动/AI/回退）
+   *
+   * @generated from field: omb.v1.ScriptOrigin origin = 3;
+   */
+  origin: ScriptOrigin;
+
+  /**
+   * 写入墙钟（Unix 毫秒；展示排序用，非权威时序）
+   *
+   * @generated from field: uint64 wall_ms = 4;
+   */
+  wallMs: bigint;
+
+  /**
+   * 完整源码（owner-only：仅版本主人可收）
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+};
+
+/**
+ * Describes the message omb.v1.EvScriptVersion.
+ * Use `create(EvScriptVersionSchema)` to create a new message.
+ */
+export const EvScriptVersionSchema: GenMessage<EvScriptVersion> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 40);
+
+/**
+ * EvScriptVersions 玩家脚本版本链的 owner-only 定向快照：任一版本写入
+ * （手动/AI/回退，成功才记录）后下发，重连/bootstrap 时补发当前链。
+ * current_id 指向当前生效版本；历史有界（旧版本自动淘汰，淘汰后不再出现）。
+ * 不落 Match Event Log：版本链属房间身份状态，非对局事件。
+ *
+ * @generated from message omb.v1.EvScriptVersions
+ */
+export type EvScriptVersions = Message<"omb.v1.EvScriptVersions"> & {
+  /**
+   * 按时间升序（旧 → 新）
+   *
+   * @generated from field: repeated omb.v1.EvScriptVersion versions = 1;
+   */
+  versions: EvScriptVersion[];
+
+  /**
+   * 当前生效版本 id（0 = 无已记录版本）
+   *
+   * @generated from field: uint32 current_id = 2;
+   */
+  currentId: number;
+};
+
+/**
+ * Describes the message omb.v1.EvScriptVersions.
+ * Use `create(EvScriptVersionsSchema)` to create a new message.
+ */
+export const EvScriptVersionsSchema: GenMessage<EvScriptVersions> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 41);
+
+/**
+ * EvScriptRollbackResult ScriptRollback 的定向回执（owner-only，不落事件日志）。
+ *
+ * @generated from message omb.v1.EvScriptRollbackResult
+ */
+export type EvScriptRollbackResult = Message<"omb.v1.EvScriptRollbackResult"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * 拒绝原因（版本不存在/不属于你/编译失败等）
+   *
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * ok 时 = 回退后的当前版本 id；失败时 = 当前版本 id
+   *
+   * @generated from field: uint32 version_id = 3;
+   */
+  versionId: number;
+
+  /**
+   * ok 时 = 回退装载后的 runtime rev（失败保旧 = 旧 rev）
+   *
+   * @generated from field: uint32 script_rev = 4;
+   */
+  scriptRev: number;
+
+  /**
+   * ok 时 = 回退后的完整源码（owner-only；失败为空）
+   *
+   * @generated from field: string source = 5;
+   */
+  source: string;
+};
+
+/**
+ * Describes the message omb.v1.EvScriptRollbackResult.
+ * Use `create(EvScriptRollbackResultSchema)` to create a new message.
+ */
+export const EvScriptRollbackResultSchema: GenMessage<EvScriptRollbackResult> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 42);
 
 /**
  * 单条官方 Snippet 的可查看源码（当教材）
@@ -1405,7 +1576,7 @@ export type SnippetSourceView = Message<"omb.v1.SnippetSourceView"> & {
  * Use `create(SnippetSourceViewSchema)` to create a new message.
  */
 export const SnippetSourceViewSchema: GenMessage<SnippetSourceView> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 39);
+  messageDesc(file_proto_omb, 43);
 
 /**
  * SnippetConfig 的定向回执（不落事件日志，仅下发）
@@ -1452,7 +1623,7 @@ export type EvSnippetResult = Message<"omb.v1.EvSnippetResult"> & {
  * Use `create(EvSnippetResultSchema)` to create a new message.
  */
 export const EvSnippetResultSchema: GenMessage<EvSnippetResult> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 40);
+  messageDesc(file_proto_omb, 44);
 
 /**
  * 开赛一次性可靠下发：地图定义（服务器为唯一 owner）
@@ -1492,7 +1663,7 @@ export type EvMapBootstrap = Message<"omb.v1.EvMapBootstrap"> & {
  * Use `create(EvMapBootstrapSchema)` to create a new message.
  */
 export const EvMapBootstrapSchema: GenMessage<EvMapBootstrap> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 41);
+  messageDesc(file_proto_omb, 45);
 
 /**
  * SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
@@ -1559,7 +1730,7 @@ export type SimTuning = Message<"omb.v1.SimTuning"> & {
  * Use `create(SimTuningSchema)` to create a new message.
  */
 export const SimTuningSchema: GenMessage<SimTuning> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 42);
+  messageDesc(file_proto_omb, 46);
 
 /**
  * EvControlNotice（审计 X-4）：结构化控制通知，取代 "join failed:" / "AI …"
@@ -1588,7 +1759,7 @@ export type EvControlNotice = Message<"omb.v1.EvControlNotice"> & {
  * Use `create(EvControlNoticeSchema)` to create a new message.
  */
 export const EvControlNoticeSchema: GenMessage<EvControlNotice> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 43);
+  messageDesc(file_proto_omb, 47);
 
 /**
  * @generated from enum omb.v1.EvControlNotice.Code
@@ -1651,13 +1822,20 @@ export enum EvControlNotice_Code {
    * @generated from enum value: CN_AI_EXPLAIN = 14;
    */
   CN_AI_EXPLAIN = 14,
+
+  /**
+   * 版本回退失败（版本不存在/编译失败；现役脚本保旧）
+   *
+   * @generated from enum value: CN_SCRIPT_ROLLBACK_FAILED = 15;
+   */
+  CN_SCRIPT_ROLLBACK_FAILED = 15,
 }
 
 /**
  * Describes the enum omb.v1.EvControlNotice.Code.
  */
 export const EvControlNotice_CodeSchema: GenEnum<EvControlNotice_Code> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 43, 0);
+  enumDesc(file_proto_omb, 47, 0);
 
 /**
  * AI 配额事实（每次扣减/护栏触顶）
@@ -1695,7 +1873,7 @@ export type EvAiUsage = Message<"omb.v1.EvAiUsage"> & {
  * Use `create(EvAiUsageSchema)` to create a new message.
  */
 export const EvAiUsageSchema: GenMessage<EvAiUsage> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 44);
+  messageDesc(file_proto_omb, 48);
 
 /**
  * 房间生命周期广播（含 Session 榜）
@@ -1731,7 +1909,7 @@ export type EvRoomState = Message<"omb.v1.EvRoomState"> & {
  * Use `create(EvRoomStateSchema)` to create a new message.
  */
 export const EvRoomStateSchema: GenMessage<EvRoomState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 45);
+  messageDesc(file_proto_omb, 49);
 
 /**
  * @generated from enum omb.v1.EvRoomState.State
@@ -1762,7 +1940,7 @@ export enum EvRoomState_State {
  * Describes the enum omb.v1.EvRoomState.State.
  */
 export const EvRoomState_StateSchema: GenEnum<EvRoomState_State> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 45, 0);
+  enumDesc(file_proto_omb, 49, 0);
 
 /**
  * @generated from message omb.v1.EvAiQuota
@@ -1791,7 +1969,7 @@ export type EvAiQuota = Message<"omb.v1.EvAiQuota"> & {
  * Use `create(EvAiQuotaSchema)` to create a new message.
  */
 export const EvAiQuotaSchema: GenMessage<EvAiQuota> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 46);
+  messageDesc(file_proto_omb, 50);
 
 /**
  * AI provider 的实时增量：服务端解析上游 SSE 后立即定向推入玩家 WS。
@@ -1816,7 +1994,7 @@ export type EvAiStream = Message<"omb.v1.EvAiStream"> & {
  * Use `create(EvAiStreamSchema)` to create a new message.
  */
 export const EvAiStreamSchema: GenMessage<EvAiStream> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 47);
+  messageDesc(file_proto_omb, 51);
 
 /**
  * @generated from enum omb.v1.EvAiStream.Kind
@@ -1837,7 +2015,7 @@ export enum EvAiStream_Kind {
  * Describes the enum omb.v1.EvAiStream.Kind.
  */
 export const EvAiStream_KindSchema: GenEnum<EvAiStream_Kind> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 47, 0);
+  enumDesc(file_proto_omb, 51, 0);
 
 /**
  * @generated from message omb.v1.ServerEvent
@@ -2020,6 +2198,22 @@ export type ServerEvent = Message<"omb.v1.ServerEvent"> & {
      */
     value: EvControlNotice;
     case: "controlNotice";
+  } | {
+    /**
+     * 脚本版本链 owner-only 快照（不落事件日志）
+     *
+     * @generated from field: omb.v1.EvScriptVersions script_versions = 35;
+     */
+    value: EvScriptVersions;
+    case: "scriptVersions";
+  } | {
+    /**
+     * 版本回退定向回执（不落事件日志）
+     *
+     * @generated from field: omb.v1.EvScriptRollbackResult script_rollback_result = 36;
+     */
+    value: EvScriptRollbackResult;
+    case: "scriptRollbackResult";
   } | { case: undefined; value?: undefined };
 };
 
@@ -2028,7 +2222,7 @@ export type ServerEvent = Message<"omb.v1.ServerEvent"> & {
  * Use `create(ServerEventSchema)` to create a new message.
  */
 export const ServerEventSchema: GenMessage<ServerEvent> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 48);
+  messageDesc(file_proto_omb, 52);
 
 /**
  * @generated from message omb.v1.EvScriptLog
@@ -2070,7 +2264,7 @@ export type EvScriptLog = Message<"omb.v1.EvScriptLog"> & {
  * Use `create(EvScriptLogSchema)` to create a new message.
  */
 export const EvScriptLogSchema: GenMessage<EvScriptLog> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 49);
+  messageDesc(file_proto_omb, 53);
 
 /**
  * 古法编程（OLD_SCHOOL）埋点：真实 snippet 控制活动
@@ -2096,7 +2290,7 @@ export type EvSnippetUsage = Message<"omb.v1.EvSnippetUsage"> & {
  * Use `create(EvSnippetUsageSchema)` to create a new message.
  */
 export const EvSnippetUsageSchema: GenMessage<EvSnippetUsage> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 50);
+  messageDesc(file_proto_omb, 54);
 
 /**
  * @generated from message omb.v1.ServerMsg
@@ -2125,7 +2319,7 @@ export type ServerMsg = Message<"omb.v1.ServerMsg"> & {
  * Use `create(ServerMsgSchema)` to create a new message.
  */
 export const ServerMsgSchema: GenMessage<ServerMsg> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 51);
+  messageDesc(file_proto_omb, 55);
 
 /**
  * v2 visual 采样行载荷（{"type":"visual","v":2,"tick":N,...}）。
@@ -2168,7 +2362,7 @@ export type ReplayVisualFrame = Message<"omb.v1.ReplayVisualFrame"> & {
  * Use `create(ReplayVisualFrameSchema)` to create a new message.
  */
 export const ReplayVisualFrameSchema: GenMessage<ReplayVisualFrame> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 52);
+  messageDesc(file_proto_omb, 56);
 
 /**
  * @generated from message omb.v1.ReplayVisualRobot
@@ -2219,7 +2413,7 @@ export type ReplayVisualRobot = Message<"omb.v1.ReplayVisualRobot"> & {
  * Use `create(ReplayVisualRobotSchema)` to create a new message.
  */
 export const ReplayVisualRobotSchema: GenMessage<ReplayVisualRobot> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 53);
+  messageDesc(file_proto_omb, 57);
 
 /**
  * @generated from message omb.v1.ReplayVisualProjectile
@@ -2251,7 +2445,7 @@ export type ReplayVisualProjectile = Message<"omb.v1.ReplayVisualProjectile"> & 
  * Use `create(ReplayVisualProjectileSchema)` to create a new message.
  */
 export const ReplayVisualProjectileSchema: GenMessage<ReplayVisualProjectile> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 54);
+  messageDesc(file_proto_omb, 58);
 
 /**
  * @generated from enum omb.v1.Phase
@@ -2311,6 +2505,47 @@ export enum ControlSource {
  */
 export const ControlSourceSchema: GenEnum<ControlSource> = /*@__PURE__*/
   enumDesc(file_proto_omb, 1);
+
+/**
+ * 脚本版本来源：谁写入了这个版本（编辑器草稿提交 / AI 改码 / 版本回退）。
+ *
+ * @generated from enum omb.v1.ScriptOrigin
+ */
+export enum ScriptOrigin {
+  /**
+   * 兼容缺省：按 ORIGIN_MANUAL 处理
+   *
+   * @generated from enum value: SCRIPT_ORIGIN_UNSPECIFIED = 0;
+   */
+  SCRIPT_ORIGIN_UNSPECIFIED = 0,
+
+  /**
+   * 玩家编辑器手动提交
+   *
+   * @generated from enum value: ORIGIN_MANUAL = 1;
+   */
+  ORIGIN_MANUAL = 1,
+
+  /**
+   * AI 改码热更
+   *
+   * @generated from enum value: ORIGIN_AI = 2;
+   */
+  ORIGIN_AI = 2,
+
+  /**
+   * 玩家版本回退
+   *
+   * @generated from enum value: ORIGIN_ROLLBACK = 3;
+   */
+  ORIGIN_ROLLBACK = 3,
+}
+
+/**
+ * Describes the enum omb.v1.ScriptOrigin.
+ */
+export const ScriptOriginSchema: GenEnum<ScriptOrigin> = /*@__PURE__*/
+  enumDesc(file_proto_omb, 2);
 
 /**
  * WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
@@ -2402,7 +2637,7 @@ export enum TransportTiming {
  * Describes the enum omb.v1.TransportTiming.
  */
 export const TransportTimingSchema: GenEnum<TransportTiming> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 2);
+  enumDesc(file_proto_omb, 3);
 
 /**
  * @generated from enum omb.v1.SnippetKind
@@ -2463,7 +2698,7 @@ export enum SnippetKind {
  * Describes the enum omb.v1.SnippetKind.
  */
 export const SnippetKindSchema: GenEnum<SnippetKind> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 3);
+  enumDesc(file_proto_omb, 4);
 
 /**
  * @generated from enum omb.v1.Title
@@ -2585,7 +2820,7 @@ export enum Title {
  * Describes the enum omb.v1.Title.
  */
 export const TitleSchema: GenEnum<Title> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 4);
+  enumDesc(file_proto_omb, 5);
 
 /**
  * 回放 JSONL 文件的 schema 版本（logHeader.schema_version）。历史文件 = 1；
@@ -2611,7 +2846,7 @@ export enum ReplaySchemaVersion {
  * Describes the enum omb.v1.ReplaySchemaVersion.
  */
 export const ReplaySchemaVersionSchema: GenEnum<ReplaySchemaVersion> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 5);
+  enumDesc(file_proto_omb, 6);
 
 /**
  * 回放记录的 "type" 盘上字符串（枚举值名去掉 REPLAY_ 前缀后小写下划线即盘上
@@ -2672,7 +2907,7 @@ export enum ReplayRecordType {
  * Describes the enum omb.v1.ReplayRecordType.
  */
 export const ReplayRecordTypeSchema: GenEnum<ReplayRecordType> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 6);
+  enumDesc(file_proto_omb, 7);
 
 /**
  * visual 采样行的形态版本（ReplayVisualFrame.v）。
@@ -2709,5 +2944,5 @@ export enum ReplayVisualVersion {
  * Describes the enum omb.v1.ReplayVisualVersion.
  */
 export const ReplayVisualVersionSchema: GenEnum<ReplayVisualVersion> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 7);
+  enumDesc(file_proto_omb, 8);
 

@@ -410,6 +410,9 @@ func (m *Match) bootstrapLocked(s *Session) {
 	m.sendMapBootstrapLocked(s)
 	m.forceResyncLocked(s.playerID)
 	m.sendSnippetStateLocked(s)
+	// 版本链补发：异步 NewMatch 装配期间发生的写入只到旧会话；接管/重连
+	// 后由此对齐（Bind 已对无对局场景补发，这里覆盖发布时点）。
+	m.rc.sendScriptVersionsStateLocked(s.playerID)
 }
 
 // applySavedPlayerScripts restores room-scoped player code before snippets are

@@ -68,11 +68,15 @@ export function isAiDirectedSay(text: string, _pending: boolean): boolean {
 /** ScriptResult(client_script_id=0) → AI 改码成功热更（服务器保留 id）。 */
 export const AI_SCRIPT_RESULT_ID = 0
 
-/** AI 成功热更后的编辑器安全策略：协议不回传源码，绝不伪造。 */
+/**
+ * AI 成功落地后的说明（新版语义）：AI 版本已直填编辑器并装载运行；
+ * 旧版本可从编辑器「版本」抽屉回退找回。dirtyAtSend 仅用于提示手改已
+ * 被暂存（可从抽屉「找回未提交改动」恢复）。
+ */
 export function aiHotSwapNotice(draftDirty: boolean): string {
   return draftDirty
-    ? 'AI 已热更脚本。服务器未返回新源码，编辑器草稿未改动；确认效果后请自行同步差异。'
-    : 'AI 已热更脚本。服务器未返回新源码，编辑器未自动覆盖本地草稿。'
+    ? 'AI 版本已应用到编辑器并装载运行；你此前的未提交手改已暂存，可在编辑器「版本」抽屉找回。'
+    : 'AI 版本已应用到编辑器并装载运行；可在编辑器「版本」抽屉回退到之前的版本。'
 }
 
 /** 配额行文案（千 token 计数换算为 k 显示）。 */

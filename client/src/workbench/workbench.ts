@@ -1,6 +1,6 @@
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, encodeClient,
-         EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type EvControlNotice, type SnippetSetting } from '@omb/protocol'
+import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, ScriptRollbackSchema, encodeClient,
+         EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type EvControlNotice, type EvScriptVersions, type EvScriptRollbackResult, type SnippetSetting } from '@omb/protocol'
 import { ensureEditorModule } from './editor-loader'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
@@ -11,6 +11,8 @@ import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from '.
 import { SnippetPanelView } from './snippet-panel'
 import { AiPanelView } from './ai-panel'
 import { AI_SCRIPT_RESULT_ID } from './ai-assist'
+import { applyScriptVersions, currentVersion, emptyScriptVersionState, planEditorSync, shouldAutoFillEditor, type ScriptVersionState } from './script-versions'
+import { ScriptVersionDrawer } from './script-version-drawer'
 import { el as domEl } from '../ui/dom'
 import './workbench.css'
 
@@ -90,6 +92,11 @@ export class Workbench {
   private compiling = false
   private pending?: { id: number; source: string; timer: ReturnType<typeof setTimeout> }
   private loaded?: { source: string; revision: number }
+  /** 服务器权威脚本版本链（AI 直填 + 回退视图基准；快照整体替换）。 */
+  private scriptVersions: ScriptVersionState = emptyScriptVersionState()
+  /** AI 直填覆盖前的未提交手改（一键找回；提交/切换语言/身份清理）。 */
+  private stashedDraft?: string
+  private versionDrawer?: ScriptVersionDrawer
   /** 辅助脚本具备瞄准能力（玩家脚本含 aimAt / 已应用自瞄 Snippet）；变更
    * 时回调通知 GameController 重算瞄准 guard。 */
   private assistAimCapable = false
@@ -154,6 +161,7 @@ export class Workbench {
               <button type="button" data-lang="js" aria-pressed="true" title="编辑 JavaScript，按原样提交">JS</button>
               <button type="button" data-lang="ts" aria-pressed="false" title="编辑 TypeScript，提交前在浏览器内编译为 JavaScript">TS</button>
             </span>
+            <span id="script-versions-drawer" class="script-versions-drawer"></span>
             <button type="button" id="workbench-submit" class="primary" disabled title="提交当前草稿（Ctrl / ⌘ + Enter）"><span data-icon="play"></span>提交</button>
             <button type="button" id="workbench-assist" aria-pressed="false" disabled aria-keyshortcuts="Space">辅助 OFF</button>
             <button type="button" id="workbench-console-toggle" aria-expanded="true" aria-controls="workbench-console">Console <span data-console-trigger-count>0</span></button>
@@ -192,6 +200,13 @@ export class Workbench {
         this.consoleHeight = height
         this.saveLayout()
       },
+    })
+    this.versionDrawer = new ScriptVersionDrawer({
+      root: this.el('script-versions-drawer'),
+      rollback: versionId => this.rollbackScript(versionId),
+      restoreStash: () => this.restoreStashedDraft(),
+      hasStash: () => this.stashedDraft !== undefined,
+      availability: () => ({ online: this.online, inMatch: this.inMatch }),
     })
     this.snippetPane = this.el('workbench-snippets')
     this.aiPane = this.el('workbench-ai')
@@ -246,6 +261,10 @@ export class Workbench {
       if (target.closest('.monaco-editor, button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])')) return
       const pane = target.closest<HTMLElement>('.workbench-pane') ?? deps.root
       pane.focus({ preventScroll: true })
+    })
+    // 版本抽屉 Esc 收起：面板获焦时的键盘路径（workbench 焦点链内）。
+    this.editorPane.addEventListener('keydown', event => {
+      if (this.versionDrawer?.handleKeydown(event)) event.stopPropagation()
     })
     this.bindResize(this.resizeHandle, 'width')
     this.bindResize(this.splitHandle, 'split')
@@ -489,6 +508,9 @@ export class Workbench {
     this.aiPanel.resetSession('identity')
     this.loaded = undefined
     this.assistOn = false
+    this.stashedDraft = undefined
+    this.scriptVersions = emptyScriptVersionState()
+    this.versionDrawer?.render(this.scriptVersions)
     this.resetMatch()
     this.updateAssistAim()
   }
@@ -500,6 +522,9 @@ export class Workbench {
       this.aiPanel.resetSession('identity')
       this.loaded = undefined
       this.assistOn = false
+      this.stashedDraft = undefined
+      this.scriptVersions = emptyScriptVersionState()
+      this.versionDrawer?.render(this.scriptVersions)
       this.updateAssistAim()
     }
     const prefKey = languagePrefKey(roomCode, nick)
@@ -543,6 +568,7 @@ export class Workbench {
   /** 切换语言：标题/按钮/诊断提示同步，编辑器模型与草稿键跟随；不改内容。 */
   setLanguage(language: BotLanguage): void {
     if (language === this.language) return
+    this.stashedDraft = undefined
     this.applyLanguage(language, true)
     const nextKey = this.languageKeyFor()
     if (this.draftKey) {
@@ -621,11 +647,13 @@ export class Workbench {
       if (hadPending) this.scriptConsole.appendClient('warn', '连接中断，提交结果未知；重连后可重新提交。')
       this.snippetPanel.markOffline()
       this.aiPanel.markOffline()
+      this.versionDrawer?.markOffline()
     }
     this.online = online
     this.inMatch = inMatch
     this.renderButtons()
     this.renderToolPanels()
+    this.versionDrawer?.render(this.scriptVersions)
   }
 
   resetMatch(): void {
@@ -716,8 +744,11 @@ export class Workbench {
   acceptResult(result: EvScriptResult): void {
     if (result.clientScriptId === AI_SCRIPT_RESULT_ID) {
       // 服务器保留 id 0：AI 改码回执（非玩家提交）。成功热更交 AI 面板，
-      // 失败已走 robot=0 定向说明；两种都不碰玩家提交 pending。
-      if (result.ok) this.aiPanel.acceptHotSwap()
+      // 失败已走结构化 notice；两种都不碰玩家提交 pending。
+      if (result.ok) {
+        // AI 版本链快照紧随其后到达（携带源码）；这里先终结面板 pending。
+        this.aiPanel.acceptHotSwap()
+      }
       return
     }
     if (!this.pending || result.clientScriptId !== this.pending.id) return
@@ -725,12 +756,75 @@ export class Workbench {
     this.clearPending()
     if (result.ok) {
       this.loaded = { source, revision: result.scriptRev }
-      this.scriptConsole.appendClient('info', `服务器已加载脚本 r${result.scriptRev}。${source !== this.source ? '当前草稿已有新修改。' : '开启辅助后运行；手操仍可逐轴接管。'}`)
+      this.stashedDraft = undefined // 提交成功：草稿已入库，stash 失效
+      this.scriptConsole.appendClient('info', `服务器已加载脚本 r${result.scriptRev}。开启辅助后运行；手操仍可逐轴接管。`)
     } else {
       this.scriptConsole.appendClient('error', `加载失败：${result.error || '服务器拒绝了脚本'}。原脚本保持不变。`)
     }
     this.updateAssistAim()
     this.renderButtons()
+  }
+
+  /** EvScriptVersions：服务器权威版本链快照（整体替换）。首次携带 AI 新版本时
+   * 直填编辑器（脏草稿先 stash），回退/手动版本不自动覆盖（编辑器已是其源码）。 */
+  acceptScriptVersions(snapshot: EvScriptVersions): void {
+    const previousCurrent = currentVersion(this.scriptVersions)?.id ?? 0
+    this.scriptVersions = applyScriptVersions(this.scriptVersions, snapshot)
+    this.versionDrawer?.render(this.scriptVersions)
+    const current = currentVersion(this.scriptVersions)
+    // 仅「新出现的 AI 当前版本」直填（手动/回退/重连补发不覆盖，见纯函数注释）。
+    if (current && shouldAutoFillEditor(previousCurrent, current)) {
+      this.fillEditorFromServer(current.source, current.scriptRev, `AI 已改码并装载 r${current.scriptRev}，编辑器已同步为 AI 版本。`)
+    }
+  }
+
+  /** EvScriptRollbackResult：成功回退直填编辑器；失败提示保旧。 */
+  acceptScriptRollbackResult(result: EvScriptRollbackResult): void {
+    this.versionDrawer?.acceptResult(result)
+    if (!result.ok) {
+      this.scriptConsole.appendClient('error', `${result.error || '回退失败'}。当前脚本保持不变。`)
+      return
+    }
+    if (result.source) {
+      this.fillEditorFromServer(result.source, result.scriptRev, `已回退到 v${result.versionId} 并装载 r${result.scriptRev}，编辑器已同步。`)
+    }
+    this.updateAssistAim()
+  }
+
+  /** 服务器权威源码写入编辑器：脏草稿先 stash（可从版本抽屉找回）。 */
+  private fillEditorFromServer(source: string, revision: number, message: string): void {
+    const plan = planEditorSync(this.loaded?.source, this.source, source)
+    if (plan.kind === 'ignore') return
+    if (plan.stashed !== undefined) this.stashedDraft = plan.stashed
+    this.source = plan.source
+    this.loaded = { source: plan.source, revision }
+    this.editor?.setValue(plan.source)
+    this.flushDraft()
+    this.scriptConsole.appendClient('info', message)
+    this.updateAssistAim()
+    this.renderButtons()
+  }
+
+  /** 找回未提交手改（AI 直填覆盖前）：放回编辑器但不提交（不覆盖版本链）。 */
+  private restoreStashedDraft(): boolean {
+    if (this.stashedDraft === undefined) return false
+    this.source = this.stashedDraft
+    this.stashedDraft = undefined
+    this.editor?.setValue(this.source)
+    this.versionDrawer?.render(this.scriptVersions)
+    this.renderButtons()
+    return true
+  }
+
+  /** ScriptRollback 上行（仅在线对局中）。 */
+  rollbackScript(versionId: number): boolean {
+    if (!this.online || !this.inMatch) return false
+    const frame = encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'scriptRollback', value: create(ScriptRollbackSchema, { versionId }) },
+    }))
+    if (!this.deps.send(frame)) return false
+    this.versionDrawer?.setPending(versionId)
+    return true
   }
 
   /** 瞄准能力信号：玩家脚本含 aimAt 调用或已应用自瞄 Snippet。
