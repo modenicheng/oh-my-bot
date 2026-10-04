@@ -77,27 +77,39 @@ async function open(options = {}) {
 }
 const ready = page => page.locator('#startup[data-state="ready"]').waitFor({ timeout: 20000 })
 const geometry = []
-async function centered(page, label) {
+async function centered(page, label, promptVisible) {
   const measurements = await page.evaluate(() => {
     const bounds = selector => {
-      const rect = document.querySelector(selector).getBoundingClientRect()
-      return { center: rect.x + rect.width / 2, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
+      const element = document.querySelector(selector)
+      const rect = element.getBoundingClientRect()
+      return { center: rect.x + rect.width / 2, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        width: rect.width, height: rect.height, display: getComputedStyle(element).display }
     }
     const prompt = bounds('#startup-start')
+    const promptWrapper = bounds('.startup-float')
+    const brand = bounds('.startup-brand')
+    const loader = bounds('.startup-loader')
+    const footer = bounds('.startup-footer')
     const selectors = ['.startup-loader', '.startup-load-list', '.startup-progress', '#startup-track', '#startup-percent', '.startup-load-note']
-    return { viewport: innerWidth, prompt, overflow: document.documentElement.scrollWidth > innerWidth,
+    return { viewport: innerWidth, height: innerHeight, prompt, promptWrapper, brand, loader, footer,
+      overflow: document.documentElement.scrollWidth > innerWidth,
       parts: selectors.map(selector => ({ selector, ...bounds(selector) })) }
   })
   assert.equal(measurements.overflow, false, `${label}: no horizontal document overflow`)
+  const renderedPrompt = measurements.promptWrapper.display !== 'none' && measurements.promptWrapper.width > 0 && measurements.promptWrapper.height > 0
+  assert.equal(renderedPrompt, promptVisible, `${label}: PRESS TO START visibility`)
+  assert.ok(measurements.brand.bottom <= measurements.loader.top, `${label}: brand does not overlap loader`)
+  assert.ok(measurements.loader.bottom <= measurements.footer.top, `${label}: loader does not overlap footer`)
+  assert.ok(measurements.loader.top >= 0 && measurements.loader.bottom <= measurements.height, `${label}: loader stays vertically visible`)
   for (const part of measurements.parts) {
     assert.ok(Math.abs(part.center - measurements.viewport / 2) <= 2, `${label} ${part.selector}: viewport axis`)
-    assert.ok(Math.abs(part.center - measurements.prompt.center) <= 2, `${label} ${part.selector}: prompt axis`)
+    if (promptVisible) assert.ok(Math.abs(part.center - measurements.prompt.center) <= 2, `${label} ${part.selector}: prompt axis`)
     assert.ok(part.left >= 0 && part.right <= measurements.viewport, `${label} ${part.selector}: no clipping`)
-    assert.ok(part.top >= measurements.prompt.bottom, `${label} ${part.selector}: below PRESS TO START`)
   }
-  geometry.push({ label, viewport: measurements.viewport,
+  geometry.push({ label, viewport: measurements.viewport, height: measurements.height,
     viewportDelta: Math.max(...measurements.parts.map(part => Math.abs(part.center - measurements.viewport / 2))),
-    promptDelta: Math.max(...measurements.parts.map(part => Math.abs(part.center - measurements.prompt.center))) })
+    promptDelta: promptVisible ? Math.max(...measurements.parts.map(part => Math.abs(part.center - measurements.prompt.center))) : null,
+    loaderFont: await page.locator('.startup-loader').evaluate(element => parseFloat(getComputedStyle(element).fontSize)) })
 }
 const sampleProgress = page => page.locator('#startup-progress').evaluate(element => ({
   visual: Number(element.dataset.visual), real: Number(element.dataset.real), cap: Number(element.dataset.cap),
@@ -194,13 +206,20 @@ try {
   }
   assert.ok(new Set(samples.map(sample => sample.track)).size > 1, 'character track itself animates')
   assert.equal(await preload.locator('#startup-status').textContent(), liveBefore, 'animation does not mutate the live region')
-  await centered(preload, 'desktop-loading')
-  await preload.screenshot({ path: resolve(shots, 'resource-loading.png') })
-  await preload.setViewportSize({ width: 390, height: 844 })
-  await centered(preload, 'mobile-loading')
-  await preload.screenshot({ path: resolve(shots, 'resource-loading-mobile.png') })
-  await preload.setViewportSize({ width: 320, height: 740 })
-  await centered(preload, 'narrow-mobile-loading')
+  const loadingViewports = [
+    { label: 'wide-desktop-loading', width: 2540, height: 1520, shot: 'resource-loading-wide.png' },
+    { label: 'desktop-loading', width: 1440, height: 900, shot: 'resource-loading.png' },
+    { label: 'laptop-loading', width: 1280, height: 720 },
+    { label: 'mobile-loading', width: 390, height: 844, shot: 'resource-loading-mobile.png' },
+    { label: 'narrow-mobile-loading', width: 320, height: 740 },
+    { label: 'mobile-landscape-loading', width: 844, height: 390, shot: 'resource-loading-landscape.png' },
+  ]
+  for (const viewport of loadingViewports) {
+    await preload.setViewportSize({ width: viewport.width, height: viewport.height })
+    await centered(preload, viewport.label, false)
+    assert.equal(await preload.locator('#startup-start').isVisible(), false, `${viewport.label}: CTA hidden while loading`)
+    if (viewport.shot) await preload.screenshot({ path: resolve(shots, viewport.shot) })
+  }
   await preload.setViewportSize({ width: 1440, height: 900 })
   await preload.mouse.click(30, 30)
   assert.equal(await preload.evaluate(() => window.__startupContexts.length), 0, 'loading splash does not consume a gesture')
@@ -213,11 +232,18 @@ try {
   assert.equal(await preload.locator('#startup-progress').getAttribute('aria-valuenow'), '100')
   assert.equal(await preload.locator('#startup-load-note').textContent(), 'ALL SYSTEMS READY')
   await preload.waitForTimeout(1250)
-  await centered(preload, 'desktop-ready')
-  await preload.screenshot({ path: resolve(shots, 'resource-ready.png') })
-  await preload.setViewportSize({ width: 390, height: 844 })
-  await centered(preload, 'mobile-ready')
-  await preload.screenshot({ path: resolve(shots, 'resource-ready-mobile.png') })
+  const readyViewports = [
+    { label: 'wide-desktop-ready', width: 2540, height: 1520, shot: 'resource-ready-wide.png' },
+    { label: 'desktop-ready', width: 1440, height: 900, shot: 'resource-ready.png' },
+    { label: 'mobile-ready', width: 390, height: 844, shot: 'resource-ready-mobile.png' },
+    { label: 'mobile-landscape-ready', width: 844, height: 390 },
+  ]
+  for (const viewport of readyViewports) {
+    await preload.setViewportSize({ width: viewport.width, height: viewport.height })
+    await centered(preload, viewport.label, true)
+    assert.equal(await preload.locator('#startup-start').isVisible(), true, `${viewport.label}: CTA appears only when ready`)
+    if (viewport.shot) await preload.screenshot({ path: resolve(shots, viewport.shot) })
+  }
   await preload.setViewportSize({ width: 1440, height: 900 })
   console.log('Held-editor progress:', JSON.stringify(samples))
   await preload.keyboard.press('Enter')
