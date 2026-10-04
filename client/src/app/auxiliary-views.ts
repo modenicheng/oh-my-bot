@@ -2,8 +2,8 @@ import { ManualView } from '../manual/manual'
 import { ReplayLibrary } from '../replay/library'
 import { LiveSpectator } from '../live'
 import { readRoute, type RouteExtra, type View } from '../route'
+import { $ } from '../ui/dom'
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 interface AuxiliaryViewDeps {
   show: (view: View, extra?: RouteExtra) => void
   hasGame: () => boolean

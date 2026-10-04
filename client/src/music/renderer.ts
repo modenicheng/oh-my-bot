@@ -5,18 +5,7 @@
 
 import { renderSong, type SongRender } from './render';
 import type { SongSpec } from './types';
-
-interface RenderRequest {
-  token: number;
-  song: SongSpec;
-  sampleRate: number;
-}
-
-interface RenderResponse {
-  token: number;
-  render?: SongRender;
-  error?: string;
-}
+import type { RenderRequest, RenderResponse } from './render-protocol';
 
 const CACHE_LIMIT = 2;
 

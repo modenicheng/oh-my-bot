@@ -19,7 +19,7 @@
 
 import { notesFromTokens, tokenizePattern } from './pattern';
 import { renderVoice, voiceTailSeconds, type ScheduledNote } from './synth';
-import { clamp } from './music';
+import { clamp } from '../lib/math';
 import { loopSeconds, loopSteps, type SongSpec, type StageId } from './types';
 
 /** Corner frequency of the DC blocker, in Hz. */

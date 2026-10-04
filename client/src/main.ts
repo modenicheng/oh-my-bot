@@ -19,14 +19,13 @@ import { artReady } from './game/art'
 import { bgm } from './music/bgm'
 import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
+import { $ } from './ui/dom'
 
 export const ready = Promise.all([artReady, bgm.preload()])
 
 mountIcons(document)
 
 // ---- DOM ---------------------------------------------------------------
-
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
 const app = $('app') as HTMLDivElement & { classList: DOMTokenList }
 const viewJoin = $<HTMLElement>('view-join')

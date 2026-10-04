@@ -9,7 +9,9 @@
 //
 // Checkpoint（server/internal/sim/sim.go）字段：tick/seed/phase/ended/robots/
 // walls/map/rng/next_projectile/projectiles/cores/uplinks。
-// Vec2/Rect 无 json tag → Go 序列化为大写 X/Y（mapdef.ts 同样处理）。
+// Vec2/Rect 无 json tag → Go 序列化为大写 X/Y（lib/gojson.ts 统一处理）。
+
+import { goNum, goVec2 } from '../lib/gojson'
 
 export interface ReplayVec2 {
   X?: number
@@ -133,7 +135,7 @@ export function createReplayParser(): ReplayParser {
       // Input-only stretches still occupy time, even though this visual index
       // does not execute the authoritative server simulation.
       if (['match_start', 'checkpoint', 'event', 'input', 'control'].includes(obj.type)) {
-        endTick = Math.max(endTick, num(obj.tick, 0))
+        endTick = Math.max(endTick, goNum(obj.tick, 0))
       }
       switch (obj.type) {
         case 'match_start':
@@ -214,36 +216,36 @@ export async function parseReplayNDJSONAsync(text: string): Promise<ReplayData> 
 function normalizeCheckpoint(st: any): ReplayCheckpoint {
   if (!st || typeof st !== 'object') throw new ReplayParseError('checkpoint 缺少 state')
   return {
-    tick: num(st.tick, 0),
-    phase: num(st.phase, 1),
+    tick: goNum(st.tick, 0),
+    phase: goNum(st.phase, 1),
     ended: !!st.ended,
     robots: (st.robots || []).map((r: any) => normalizeRobot(r)),
     // CoreView 无 json tag → 大写键 ID/Pos/Value/Alive
     cores: (st.cores || []).map((c: any) => ({
-      id: num(c.ID ?? c.id, 0),
-      pos: vec(c.Pos ?? c.pos),
-      value: num(c.Value ?? c.value, 0),
+      id: goNum(c.ID ?? c.id, 0),
+      pos: goVec2(c.Pos ?? c.pos),
+      value: goNum(c.Value ?? c.value, 0),
       taken: !(c.Alive ?? c.alive ?? true),
     })),
     healthPacks: (st.health_packs || st.healthPacks || []).map((h: any) => ({
-      id: num(h.id ?? h.ID, 0),
-      pos: vec(h.pos ?? h.Pos),
-      readyAt: num(h.ready_at ?? h.readyAt ?? h.ReadyAt, 0),
+      id: goNum(h.id ?? h.ID, 0),
+      pos: goVec2(h.pos ?? h.Pos),
+      readyAt: goNum(h.ready_at ?? h.readyAt ?? h.ReadyAt, 0),
     })),
     // Uplink{def, hacking_id}；def（UplinkDef）带 id/pos
     uplinks: (st.uplinks || []).map((u: any) => {
       const def = u.def || {}
       return {
-        id: num(def.id != null ? def.id : u.id, 0),
-        pos: vec(def.pos ?? def.Pos),
-        hackingId: num(u.hacking_id, 0),
+        id: goNum(def.id != null ? def.id : u.id, 0),
+        pos: goVec2(def.pos ?? def.Pos),
+        hackingId: goNum(u.hacking_id, 0),
       }
     }),
     projectiles: (st.projectiles || []).map((p: any) => ({
-      id: num(p.id ?? p.ID, 0),
-      owner: num(p.owner ?? p.Owner, 0),
-      pos: vec(p.pos ?? p.Pos),
-      heading: num(p.heading ?? p.Heading, 0),
+      id: goNum(p.id ?? p.ID, 0),
+      owner: goNum(p.owner ?? p.Owner, 0),
+      pos: goVec2(p.pos ?? p.Pos),
+      heading: goNum(p.heading ?? p.Heading, 0),
     })),
     mapJson: st.map != null ? JSON.stringify(st.map) : null,
   }
@@ -251,16 +253,16 @@ function normalizeCheckpoint(st: any): ReplayCheckpoint {
 
 function normalizeRobot(r: any): ReplayRobotState {
   return {
-    id: num(r.id, 0),
-    nick: typeof r.nick === 'string' && r.nick ? r.nick : `ROBOT-${num(r.id, 0)}`,
+    id: goNum(r.id, 0),
+    nick: typeof r.nick === 'string' && r.nick ? r.nick : `ROBOT-${goNum(r.id, 0)}`,
     color: typeof r.color === 'string' && r.color ? r.color : '#22d3ee',
     position: r.position || { X: 0, Y: 0 },
     velocity: r.velocity || { X: 0, Y: 0 },
-    hp: num(r.hp, 0),
-    energy: num(r.energy, 0),
+    hp: goNum(r.hp, 0),
+    energy: goNum(r.energy, 0),
     state: r.state === 'dead' ? 'dead' : 'alive',
-    heading: num(r.heading, 0),
-    sector: num(r.sector, 0),
+    heading: goNum(r.heading, 0),
+    sector: goNum(r.sector, 0),
     respawnPending: !!r.respawn_pending,
     invulnerable: !!r.invulnerable,
   }
@@ -270,26 +272,26 @@ function normalizeVisualFrame(obj: any): ReplayVisualFrame {
   const robots = Array.isArray(obj.robots) ? obj.robots : []
   const projectiles = Array.isArray(obj.projectiles) ? obj.projectiles : []
   return {
-    tick: num(obj.tick, 0),
-    phase: num(obj.phase, 1),
+    tick: goNum(obj.tick, 0),
+    phase: goNum(obj.phase, 1),
     robots: robots.map((row: unknown) => {
       const values = Array.isArray(row) ? row : []
       return {
-        id: num(values[0], 0),
-        pos: { x: num(values[1], 0), y: num(values[2], 0) },
-        heading: num(values[3], 0),
-        hp: num(values[4], 0),
-        energy: num(values[5], 0),
-        alive: num(values[6], 0) !== 0,
-        invulnerable: num(values[7], 0) !== 0,
+        id: goNum(values[0], 0),
+        pos: { x: goNum(values[1], 0), y: goNum(values[2], 0) },
+        heading: goNum(values[3], 0),
+        hp: goNum(values[4], 0),
+        energy: goNum(values[5], 0),
+        alive: goNum(values[6], 0) !== 0,
+        invulnerable: goNum(values[7], 0) !== 0,
       }
     }),
     projectiles: projectiles.map((row: unknown) => {
       const values = Array.isArray(row) ? row : []
       return {
-        id: num(values[0], 0), owner: num(values[1], 0),
-        pos: { x: num(values[2], 0), y: num(values[3], 0) },
-        heading: num(values[4], 0),
+        id: goNum(values[0], 0), owner: goNum(values[1], 0),
+        pos: { x: goNum(values[2], 0), y: goNum(values[3], 0) },
+        heading: goNum(values[4], 0),
       }
     }),
   }
@@ -300,17 +302,8 @@ function normalizeEvent(obj: any): ReplayEvent {
   // ServerEvent protojson：{tick, kill:{...}} / {tick, say:{...}} ...
   const kind = Object.keys(ev).find((k) => k !== 'tick' && k !== 'wall' && ev[k] !== null) || ''
   return {
-    tick: num(ev.tick != null ? ev.tick : obj.tick, num(obj.tick, 0)),
+    tick: goNum(ev.tick != null ? ev.tick : obj.tick, goNum(obj.tick, 0)),
     kind,
     payload: kind ? ev[kind] : null,
   }
-}
-
-function num(v: any, dflt: number): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : dflt
-}
-
-/** Vec2 无 json tag：Go 大写 X/Y；兼容小写。 */
-function vec(v: any): { x: number; y: number } {
-  return { x: num(v?.X ?? v?.x, 0), y: num(v?.Y ?? v?.y, 0) }
 }

@@ -11,6 +11,8 @@
 
 import { Title } from '@omb/protocol'
 import type { ScoreEntry } from '../game/scoreboard'
+import { goVec2Lenient } from '../lib/gojson'
+import { lerp, lerpAngle } from '../lib/math'
 import {
   ReplayData,
   ReplayEvent,
@@ -147,7 +149,7 @@ export class ReplayIndex {
           id: r.id,
           nick: r.nick,
           color: r.color,
-          pos: vec(r.position),
+          pos: goVec2Lenient(r.position),
           heading: r.heading,
           hp: r.hp,
           energy: r.energy,
@@ -176,7 +178,7 @@ export class ReplayIndex {
             id: r.id,
             nick: r.nick,
             color: r.color,
-            pos: vec(r.position),
+            pos: goVec2Lenient(r.position),
             heading: r.heading,
             hp: r.hp,
             energy: r.energy,
@@ -351,17 +353,6 @@ function cloneScores(m: Map<number, ScoreAcc>): Map<number, ScoreAcc> {
   const out = new Map()
   for (const [k, v] of m) out.set(k, { ...v })
   return out
-}
-
-function lerp(a: number, b: number, t: number): number { return a + (b - a) * t }
-
-function lerpAngle(a: number, b: number, t: number): number {
-  const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a))
-  return a + delta * t
-}
-
-function vec(v: any): { x: number; y: number } {
-  return { x: Number(v?.X ?? v?.x ?? 0), y: Number(v?.Y ?? v?.y ?? 0) }
 }
 
 /** 事件叠加：更新工作态并产出时间轴标记。 */

@@ -8,6 +8,8 @@ import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
 import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
+import { requireEl, setText, fmtClock } from '../ui/dom'
+import { clamp01 } from '../lib/math'
 import './hud.css'
 
 const MAX_HP = 1000   // hp_x10（×10）
@@ -66,23 +68,23 @@ export class Hud {
   private aimStatusText = AIM_STATUS_TEXT.unavailable
 
   constructor(private root: HTMLElement) {
-    this.hpFill = req(root, 'hud-hp-fill')
-    this.enFill = req(root, 'hud-en-fill')
-    this.hpText = req(root, 'hud-hp-text')
-    this.enText = req(root, 'hud-en-text')
-    this.leftPanel = req(root, 'hud-left')
-    this.phaseEl = req(root, 'hud-phase')
-    this.timeEl = req(root, 'hud-time')
-    this.scoreRows = req(root, 'hud-score-rows')
+    this.hpFill = requireEl(root, 'hud-hp-fill')
+    this.enFill = requireEl(root, 'hud-en-fill')
+    this.hpText = requireEl(root, 'hud-hp-text')
+    this.enText = requireEl(root, 'hud-en-text')
+    this.leftPanel = requireEl(root, 'hud-left')
+    this.phaseEl = requireEl(root, 'hud-phase')
+    this.timeEl = requireEl(root, 'hud-time')
+    this.scoreRows = requireEl(root, 'hud-score-rows')
     const ownScore = document.createElement('div')
     ownScore.id = 'hud-self-score'
     ownScore.append(document.createTextNode('当前积分'))
     this.selfScore = document.createElement('strong')
     ownScore.append(this.selfScore)
     this.leftPanel.append(ownScore)
-    this.assistEl = req(root, 'hud-assist')
-    this.assistCard = req(root, 'skill-assist')
-    this.msgLine = req(root, 'hud-msg')
+    this.assistEl = requireEl(root, 'hud-assist')
+    this.assistCard = requireEl(root, 'skill-assist')
+    this.msgLine = requireEl(root, 'hud-msg')
     this.msgLine.setAttribute('role', 'status')
     if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
     this.msgLine.setAttribute('aria-atomic', 'true')
@@ -96,17 +98,17 @@ export class Hud {
     this.innerBanner.hidden = true
     root.append(this.innerBanner)
     this.skills = {
-      move: { root: req(root, 'skill-move'), cd: req(root, 'skill-move-cd') },
-      aim: { root: req(root, 'skill-aim'), cd: req(root, 'skill-aim-cd') },
-      fire: { root: req(root, 'skill-fire'), cd: req(root, 'skill-fire-cd') },
-      dash: { root: req(root, 'skill-dash'), cd: req(root, 'skill-dash-cd') },
-      shield: { root: req(root, 'skill-shield'), cd: req(root, 'skill-shield-cd') },
-      uplink: { root: req(root, 'skill-uplink'), cd: req(root, 'skill-uplink-cd') },
+      move: { root: requireEl(root, 'skill-move'), cd: requireEl(root, 'skill-move-cd') },
+      aim: { root: requireEl(root, 'skill-aim'), cd: requireEl(root, 'skill-aim-cd') },
+      fire: { root: requireEl(root, 'skill-fire'), cd: requireEl(root, 'skill-fire-cd') },
+      dash: { root: requireEl(root, 'skill-dash'), cd: requireEl(root, 'skill-dash-cd') },
+      shield: { root: requireEl(root, 'skill-shield'), cd: requireEl(root, 'skill-shield-cd') },
+      uplink: { root: requireEl(root, 'skill-uplink'), cd: requireEl(root, 'skill-uplink-cd') },
     }
-    this.uplinkPanel = req(root, 'hud-uplink')
-    this.uplinkText = req(root, 'hud-uplink-text')
-    this.uplinkTrack = req(root, 'hud-uplink-track')
-    this.uplinkFill = req(root, 'hud-uplink-fill')
+    this.uplinkPanel = requireEl(root, 'hud-uplink')
+    this.uplinkText = requireEl(root, 'hud-uplink-text')
+    this.uplinkTrack = requireEl(root, 'hud-uplink-track')
+    this.uplinkFill = requireEl(root, 'hud-uplink-fill')
   }
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
@@ -137,11 +139,8 @@ export class Hud {
 
     // 阶段 / 时间
     setText(this.phaseEl, phaseName(world.phase))
-    const t = Math.max(0, world.timeLeftS)
-    const m = Math.floor(t / 60)
-    const s = Math.floor(t % 60)
-    const clock = world.initialized ? `${m}:${String(s).padStart(2, '0')}` : '—:—'
-    if (this.timeEl.textContent !== clock) this.timeEl.textContent = clock
+    const clock = world.initialized ? fmtClock(world.timeLeftS) : '—:—'
+    setText(this.timeEl, clock)
     this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
     setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
@@ -408,16 +407,3 @@ function nearestUplink(map: MapDefParsed, phase: number, x: number, y: number): 
   return best
 }
 
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v
-}
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text
-}
-
-function req<T extends HTMLElement>(root: HTMLElement, id: string): T {
-  const el = root.querySelector(`#${id}`) as T | null
-  if (!el) throw new Error(`HUD 缺少元素 #${id}`)
-  return el
-}

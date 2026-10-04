@@ -197,50 +197,30 @@ export function createBotEditor(
     }),
     // Bot API 前缀补全：bot / bot.scan() / metadata 成员链。TS worker 已覆盖能推断的
     // 通用补全，这里只补 JSDoc 类型链失效时仍可用的入口与方法，随编辑器销毁。
-    monaco.languages.registerCompletionItemProvider('javascript', {
-      triggerCharacters: ['.'],
-      provideCompletionItems(model, position) {
-        const linePrefix = model.getValueInRange({
-          startLineNumber: position.lineNumber,
-          startColumn: 1,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        })
-        const context = completionContext(linePrefix)
-        const seeds = seedsForContext(context)
-        if (seeds.length === 0) return { suggestions: [] }
-        const word = model.getWordUntilPosition(position)
-        const range = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: context.atDot ? position.column : word.startColumn,
-          endColumn: position.column,
-        }
-        return { suggestions: seeds.map(seed => ({ ...toCompletionItem(seed), range })) }
-      },
-    }),
-    monaco.languages.registerCompletionItemProvider('typescript', {
-      triggerCharacters: ['.'],
-      provideCompletionItems(model, position) {
-        const linePrefix = model.getValueInRange({
-          startLineNumber: position.lineNumber,
-          startColumn: 1,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        })
-        const context = completionContext(linePrefix)
-        const seeds = seedsForContext(context)
-        if (seeds.length === 0) return { suggestions: [] }
-        const word = model.getWordUntilPosition(position)
-        const range = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: context.atDot ? position.column : word.startColumn,
-          endColumn: position.column,
-        }
-        return { suggestions: seeds.map(seed => ({ ...toCompletionItem(seed), range })) }
-      },
-    }),
+    // 两种语言注册同一 provideCompletionItems：实现只依赖 model/position，与语言无关。
+    ...(['javascript', 'typescript'] as const).map(lang =>
+      monaco.languages.registerCompletionItemProvider(lang, {
+        triggerCharacters: ['.'],
+        provideCompletionItems(model, position) {
+          const linePrefix = model.getValueInRange({
+            startLineNumber: position.lineNumber,
+            startColumn: 1,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          })
+          const context = completionContext(linePrefix)
+          const seeds = seedsForContext(context)
+          if (seeds.length === 0) return { suggestions: [] }
+          const word = model.getWordUntilPosition(position)
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: context.atDot ? position.column : word.startColumn,
+            endColumn: position.column,
+          }
+          return { suggestions: seeds.map(seed => ({ ...toCompletionItem(seed), range })) }
+        },
+      })),
   ]
   reportDiagnostics()
   let disposed = false

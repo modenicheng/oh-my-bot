@@ -5,19 +5,7 @@
  */
 
 import { renderSong } from './render';
-import type { SongSpec } from './types';
-
-interface RenderRequest {
-  token: number;
-  song: SongSpec;
-  sampleRate: number;
-}
-
-interface RenderResponse {
-  token: number;
-  render?: ReturnType<typeof renderSong>;
-  error?: string;
-}
+import type { RenderRequest, RenderResponse } from './render-protocol';
 
 const scope = globalThis as unknown as {
   onmessage: ((event: MessageEvent<RenderRequest>) => void) | null;

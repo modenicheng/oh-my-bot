@@ -3,6 +3,7 @@ import {
   aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
   type AiFeedItem, type AiQuotaState,
 } from './ai-assist'
+import { escapeHtml } from '../lib/escape'
 import './ai-panel.css'
 
 // marked + highlight.js 只服务 AI 面板：动态加载以移出首屏主 chunk（启动时并行
@@ -16,7 +17,7 @@ const markdownReady: Promise<AiMarkdownModule> = import('./ai-markdown').then(mo
 
 function renderAiMarkdownLazy(source: string, streaming = false): string {
   if (markdownModule) return markdownModule.renderAiMarkdown(source, streaming)
-  return source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return escapeHtml(source)
 }
 
 export type AiStreamChannel = 'reasoning' | 'answer'

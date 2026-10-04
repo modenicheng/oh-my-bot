@@ -10,6 +10,7 @@ import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from '.
 import { SnippetPanelView } from './snippet-panel'
 import { AiPanelView } from './ai-panel'
 import { AI_SCRIPT_RESULT_ID } from './ai-assist'
+import { el as domEl } from '../ui/dom'
 import './workbench.css'
 
 export const INITIAL_SOURCE_TS = `import type { BotContext } from '@omb/bot-api'
@@ -259,7 +260,7 @@ export class Workbench {
   }
 
   private el<T extends HTMLElement>(id: string): T {
-    return this.deps.root.querySelector<T>(`#${id}`)!
+    return domEl<T>(this.deps.root, id)
   }
 
   get isOpen(): boolean { return this.panels.size > 0 }

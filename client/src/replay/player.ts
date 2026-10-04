@@ -10,6 +10,7 @@ import { artReady } from '../game/art'
 import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
 import { ReplayIndex, type ReplayFrame, phaseName, numOr } from './index'
+import { fmtClock, setText } from '../ui/dom'
 import { parseReplayNDJSONAsync, type ReplayData } from './model'
 import { ReplayRenderer } from './render'
 import { fetchReplayText, ReplayApiError } from './api'
@@ -307,7 +308,7 @@ export class ReplayPlayer {
     const el = this.el['rp-follow']
     if (!el || !this.index) return
     const r = this.followRobotId === null ? undefined : this.index.robots.get(this.followRobotId)
-    setTxt(el, r ? `跟随: ${r.nick}` : '视角: 全景')
+    setText(el, r ? `跟随: ${r.nick}` : '视角: 全景')
     if (el.hidden) el.hidden = false
   }
 
@@ -406,7 +407,7 @@ export class ReplayPlayer {
       const select = this.el['sp-follow'] as HTMLSelectElement | undefined
       const followValue = this.followRobotId === null ? '' : String(this.followRobotId)
       if (select && select.value !== followValue) select.value = followValue
-      setTxt(this.el['sp-zoom'], `${this.spectator.zoom.toFixed(1)}×`)
+      setText(this.el['sp-zoom'], `${this.spectator.zoom.toFixed(1)}×`)
     } else if (this.followRobotId !== null) {
       this.cam.scale = Math.min(this.cam.cw / 40, this.cam.ch / 25)
       const r = frame.robots.find((x) => x.id === this.followRobotId)
@@ -441,9 +442,9 @@ export class ReplayPlayer {
   // ---- HUD ---------------------------------------------------------------
 
   private updateHud(frame: ReplayFrame): void {
-    setTxt(this.el['rp-tick'], String(frame.tick))
-    setTxt(this.el['rp-time'], fmtClock(frame.tick / TICK_HZ))
-    setTxt(this.el['rp-phase'], phaseName(frame.phase as any))
+    setText(this.el['rp-tick'], String(frame.tick))
+    setText(this.el['rp-time'], fmtClock(frame.tick / TICK_HZ))
+    setText(this.el['rp-phase'], phaseName(frame.phase as any))
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
       const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
@@ -523,18 +524,8 @@ export class ReplayPlayer {
 
 // ---- 工具 ----------------------------------------------------------------
 
-/** 从解析结果中提取 checkpoint.map（MapDef JSON 字符串化）。 */
-/** HUD 文本等值守卫：textContent 同值写入也会替换文本节点并触发无效变更。 */
-function setTxt(el: HTMLElement | undefined, text: string): void {
-  if (el && el.textContent !== text) el.textContent = text
-}
-
 function extractMapJson(data: ReplayData): string | null {
   const rec = data.records.find((r) => r.state?.mapJson)
   return rec?.state?.mapJson ?? null
 }
 
-function fmtClock(sec: number): string {
-  const s = Math.max(0, Math.floor(sec))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}

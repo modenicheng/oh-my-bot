@@ -1,9 +1,9 @@
 import { EvRoomState_State, RoomAction_Kind } from '@omb/protocol'
 import type { JoinProfile } from '../route'
+import { $ } from '../ui/dom'
 
 const COLORS = ['#22d3ee', '#a3e635', '#f472b6', '#ff5c5c', '#fbbf24', '#a78bfa', '#34d399', '#f97316']
 const ROOM_CODE_RE = /^[A-Z0-9]{4,8}$/
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 interface LobbyDeps {
   selfNick: () => string

@@ -7,7 +7,8 @@
  *  - NES-ish waveform quirks (16-step triangle, LFSR noise) are easy to keep
  */
 
-import { clamp, midiToFreq } from './music';
+import { midiToFreq } from './music';
+import { clamp } from '../lib/math';
 import type { InstrumentSpec } from './types';
 
 const TAU = Math.PI * 2;

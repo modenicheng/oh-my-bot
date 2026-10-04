@@ -7,15 +7,12 @@ import { Renderer, phaseName, type SayBubble } from './game/render'
 import { Scoreboard, type ScoreDisplay, scoreRow } from './game/scoreboard'
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
+import { el as domEl, fmtClock, setText } from './ui/dom'
 
 export interface LiveSpectatorDeps {
   root: HTMLElement
   canvas: HTMLCanvasElement
   onExit: () => void
-}
-
-function setTxt(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text
 }
 
 /** A spectator owns only its camera and snapshot consumer, never gameplay input. */
@@ -100,7 +97,7 @@ export class LiveSpectator {
   }
 
   private el<T extends HTMLElement = HTMLElement>(id: string): T {
-    return this.deps.root.querySelector<T>(`#${id}`)!
+    return domEl<T>(this.deps.root, id)
   }
 
   /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径都可安全高频调用）。 */
@@ -136,10 +133,9 @@ export class LiveSpectator {
       this.resyncSent = false
       this.status.textContent = '已连接'
       this.deps.root.dataset.tick = String(this.world.tick)
-      setTxt(this.phaseEl, phaseName(this.world.phase))
-      const seconds = Math.max(0, Math.floor(this.world.timeLeftS))
-      setTxt(this.timeEl, `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`)
-      setTxt(this.countEl, `机器人 ${this.world.robots.size}`)
+      setText(this.phaseEl, phaseName(this.world.phase))
+      setText(this.timeEl, fmtClock(this.world.timeLeftS))
+      setText(this.countEl, `机器人 ${this.world.robots.size}`)
       // 花名册只依赖 full 快照（nick 仅 full 携带）与机器人集合规模变化，
       // delta 帧跳过逐快照的排序/序列化。
       if (snap.full || this.world.robots.size !== this.rosterSize) this.updateRoster()
@@ -259,7 +255,7 @@ export class LiveSpectator {
     this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
-    setTxt(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
+    setText(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
     if (this.bubbles.length) this.bubbles = this.bubbles.filter(b => performance.now() - b.at < 4000)
     this.renderer.render(this.world, this.map, this.camera.camera, { bubbles: this.bubbles })
   }

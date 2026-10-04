@@ -11,6 +11,7 @@
 // 其余 token 交 Parser 正常渲染。
 
 import { Marked, type Token, type Tokens } from 'marked'
+import { escapeHtml } from '../lib/escape'
 
 // ---- 基础设施 ---------------------------------------------------------------
 
@@ -18,11 +19,6 @@ const marked = new Marked({ gfm: true, breaks: false })
 
 function renderInline(text: string): string {
   return marked.parseInline(text, { async: false }) as string
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  // 引号在 <pre><code> 文本节点里无危险，不转义以保持源码原样
 }
 
 /** 语言标签显示名（大写惯例）：常用别名归一。 */
