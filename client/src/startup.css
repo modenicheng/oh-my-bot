@@ -31,12 +31,12 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   filter: drop-shadow(0 0 14px #22d3ee20);
 }
 .startup-tagline { margin: 20px 0 0; color: var(--fg-dim); font: 12px/1.5 var(--pixel); letter-spacing: .22em; }
-.startup-center { position: absolute; left: 0; top: 56%; width: 100%; transform: translateY(-50%); text-align: center; padding: 0 16px; }
+.startup-center { position: absolute; inset-inline: 16px; top: 47%; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
 .startup-float { display: inline-block; }
 #startup-start {
   display: block; margin: 0; color: #e9f4fa; white-space: nowrap;
   font: 400 clamp(12px, 2.2vw, 18px)/1.8 var(--pixel); letter-spacing: .26em;
-  padding-left: .26em; opacity: 0; user-select: none;
+  padding-left: .26em; opacity: .38; user-select: none;
 }
 #startup[data-state="ready"] .startup-float { animation: startup-float 4.4s ease-in-out 1.2s infinite; }
 #startup[data-state="ready"] #startup-start {
@@ -44,16 +44,28 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
 }
 #startup:focus-visible #startup-start { text-decoration: underline; text-underline-offset: 8px; text-decoration-color: #406374; text-decoration-thickness: 1px; }
 .startup-footer { position: absolute; bottom: max(24px, 7%); left: 20px; right: 20px; text-align: center; }
-#startup-status { margin: 0; color: var(--fg-dim); font: 12px/1.8 var(--pixel); }
-#startup-progress { display: block; width: 120px; height: 2px; margin: 14px auto 20px; border: 0; border-radius: 0; accent-color: var(--accent); }
-#startup-progress::-webkit-progress-bar { background: var(--line); }
-#startup-progress::-webkit-progress-value { background: var(--accent); }
-#startup[data-state="ready"] #startup-progress, #startup[data-state="eroding"] #startup-progress { visibility: hidden; }
+/* One axis: prompt, 28-cell track, percentage, and centered fixed-width rows.
+   Right-hand sigils balance the text instead of adding a left hanging gutter. */
+.startup-loader { width: 32ch; max-width: 100%; display: grid; justify-items: center; gap: 12px; font: 12px/1.5 'Fusion Pixel', monospace; font-variant-ligatures: none; }
+.startup-progress { width: 100%; display: grid; justify-items: center; gap: 3px; color: var(--accent); font: inherit; white-space: pre; }
+#startup-track { display: block; width: 30ch; text-align: center; letter-spacing: 0; }
+#startup-percent { min-width: 4ch; color: var(--fg); text-align: center; font-variant-numeric: tabular-nums; }
+.startup-load-list { width: 24ch; max-width: 100%; display: grid; gap: 3px; color: var(--fg-dim); text-align: left; }
+.startup-load-row { display: grid; grid-template-columns: 18ch 4ch; column-gap: 2ch; margin: 0; white-space: nowrap; }
+.startup-load-label { min-width: 0; }
+.startup-load-sigil { color: var(--accent); text-align: right; }
+.startup-load-row[data-state="done"] .startup-load-sigil { color: var(--lime); }
+.startup-load-row[data-state="done"] .startup-load-text { color: #a8bcc6; }
+.startup-load-row[data-state="error"] .startup-load-sigil, .startup-load-row[data-state="error"] .startup-load-text { color: var(--danger); }
+.startup-load-dots { display: inline-block; width: 3ch; color: var(--accent); letter-spacing: 0; }
+.startup-load-note { width: 100%; min-height: 2.8em; margin: 0; color: var(--fg-dim); font: 10px/1.4 'Fusion Pixel', monospace; text-align: center; text-wrap: balance; }
+#startup[data-assets="complete"] .startup-progress, #startup[data-assets="complete"] .startup-load-note { color: var(--lime); }
+#startup[data-assets="background"] .startup-load-note, #startup[data-assets="degraded"] .startup-load-note { color: var(--amber); }
+#startup[data-state="eroding"] .startup-progress { visibility: hidden; }
 #startup-help { margin: 0; color: var(--fg-dim); font: 12px/1.8 var(--pixel); }
 #startup-retry { display: inline-block; margin-top: 14px; color: var(--accent); font-size: 12px; }
 #startup-retry[hidden] { display: none; }
-#startup[data-state="error"] #startup-status { color: var(--danger); }
-#startup[data-state="error"] #startup-progress { display: none; }
+#startup[data-state="error"] .startup-load-note { color: var(--danger); }
 .startup-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @keyframes startup-arrive {
   from { opacity: 0; letter-spacing: .9em; padding-left: .9em; transform: translateY(7px); filter: blur(3px); }
@@ -64,14 +76,23 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   0%, 100% { color: #d8dee9; text-shadow: 0 0 4px #22d3ee15; }
   50% { color: #f1fcff; text-shadow: 0 0 8px #22d3ee90, 0 0 22px #22d3ee45; }
 }
-@media (max-width: 600px) { .startup-brand { top: 24%; } .startup-tagline { margin-top: 16px; } }
+@media (max-width: 600px) {
+  .startup-brand { top: 19%; }
+  .startup-tagline { margin-top: 16px; }
+  .startup-center { top: 43%; gap: 14px; }
+  .startup-footer { bottom: max(20px, env(safe-area-inset-bottom)); }
+  #startup-help { font-size: 11px; }
+}
 @media (max-height: 600px) {
   .startup-brand { top: 8%; }
   .startup-ascii { font-size: min(10px, calc((100vw - 48px) / 48)); }
   .startup-tagline { margin-top: 10px; }
-  .startup-center { top: 59%; }
-  .startup-footer { bottom: 14px; }
-  #startup-progress { margin: 4px auto; }
+  .startup-center { top: 37%; gap: 5px; }
+  .startup-footer { bottom: 10px; }
+  .startup-loader { font-size: 10px; gap: 5px; }
+  .startup-load-list { gap: 0; }
+  .startup-progress { gap: 0; }
+  .startup-load-note { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .startup-erosion { display: none; }

@@ -23,16 +23,15 @@ const sources = {
   healthPack: new URL('../assets/health-pack.svg', import.meta.url).href,
 }
 const sprites = {} as Record<keyof typeof sources, HTMLImageElement>
-export const artReady = Promise.all([
-  document.fonts.load(`12px ${mono}`).catch(() => []),
-  ...Object.entries(sources).map(([name, url]) => new Promise<void>(resolve => {
+export const fontReady = document.fonts.load(`12px ${mono}`).then(fonts => fonts.length > 0, () => false)
+export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]) => new Promise<boolean>(resolve => {
   const image = new Image()
   sprites[name as keyof typeof sources] = image
-  image.onload = () => resolve()
-  image.onerror = () => resolve()
+  image.onload = () => resolve(true)
+  image.onerror = () => resolve(false)
   image.src = url
-})),
-])
+}))).then(results => results.every(Boolean))
+export const artReady = Promise.all([fontReady, spritesReady])
 
 function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: number, y: number, size: number): void {
   const image = sprites[name]

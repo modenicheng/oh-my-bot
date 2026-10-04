@@ -11,21 +11,18 @@ import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
-import { preloadEditorModule } from './workbench/editor-loader'
 import { battleKeyAction } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
-import { artReady } from './game/art'
 import { bgm } from './music/bgm'
 import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
 import { $ } from './ui/dom'
+import { startupReady } from './startup-resources'
 
-// 开屏准备期并行加载字体/素材、音频与 Monaco。外层 startup.ts 仍有 8 秒
-// 超时兜底；编辑器预取失败只告警，实际打开时可重试。
-export const ready = Promise.all([artReady, bgm.preload(), preloadEditorModule()])
+export const ready = startupReady
 
 mountIcons(document)
 
