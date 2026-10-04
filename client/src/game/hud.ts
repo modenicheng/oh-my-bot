@@ -25,7 +25,7 @@ interface SkillCard {
   cd: HTMLElement
 }
 
-type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'takeover' | 'standby'
+type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'standby'
 
 export class Hud {
   private hpFill: HTMLDivElement
@@ -367,14 +367,16 @@ export class Hud {
       return
     }
     // 自瞄已启用但本 tick 没有输出时保持待机，不误报手操或正在跟踪。
+    // C-20：接管归一走 data-takeover 轨（含微光，见 hud.css）；aim 的 standby
+    // 是独立语义位（data-state），不再另设接管轨。
     this.setTakeover(this.skills.move, t.move)
     this.setTakeover(this.skills.aim, !dead && aim === 'aiming')
     if (dead) {
       this.setCard(this.skills.move, 'off', '阵亡')
       this.setCard(this.skills.aim, 'off', '阵亡')
     } else {
-      this.setCard(this.skills.move, t.move ? 'takeover' : 'ready', t.move ? '脚本' : '手操')
-      this.setCard(this.skills.aim, aim === 'aiming' ? 'takeover' : aim === 'standby' ? 'standby' : 'ready', this.aimStatusText)
+      this.setCard(this.skills.move, 'ready', t.move ? '脚本' : '手操')
+      this.setCard(this.skills.aim, aim === 'standby' ? 'standby' : 'ready', this.aimStatusText)
     }
   }
 

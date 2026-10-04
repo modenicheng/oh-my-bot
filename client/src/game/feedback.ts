@@ -1,5 +1,6 @@
 import type { ClientInput, ServerEvent, SnapshotDelta } from '@omb/protocol'
 import { audio, type SoundCue } from '../audio'
+import { hash32 } from '../lib/hash'
 import type { Camera } from './camera'
 import { type MapDefParsed, type MapUplink, type MapVec2 } from './mapdef'
 import { hackMaxX10 } from './tuning'
@@ -421,8 +422,8 @@ export class GameFeedback {
         const length = side < 2 ? cam.cw : cam.ch
         for (let row = 0; row < layers; row++) {
           for (let along = 0; along < length; along += cell) {
-            let hash = Math.imul((along / cell + 1) ^ ((row + 1) * 193) ^ ((side + 1) * 941), 0x45d9f3b)
-            hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b) >>> 0
+            let hash = hash32((along / cell + 1) ^ ((row + 1) * 193) ^ ((side + 1) * 941))
+            hash = hash32(hash ^ (hash >>> 16))
             const random = (hash % 997) / 997
             if (row > 0 && random > 1 - row * 0.19) continue
             const size = Math.min(cell, length - along)

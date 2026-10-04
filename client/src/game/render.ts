@@ -85,7 +85,7 @@ export class Renderer {
         world.phase >= def.activePhase && (st?.ready ?? true), progress, lift)
       const selfPos = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
       if (selfPos && world.phase >= def.activePhase && Math.hypot(selfPos.x - def.pos.x, selfPos.y - def.pos.y) <= def.interactR) {
-        ctx.save(); ctx.strokeStyle = '#22d3ee66'; ctx.lineWidth = 1; ctx.setLineDash([5, 7])
+        ctx.save(); ctx.strokeStyle = `${ink.cyan}66`; ctx.lineWidth = 1; ctx.setLineDash([5, 7])
         ctx.beginPath(); ctx.arc(cam.toPxX(def.pos.x), cam.toPxY(def.pos.y), def.interactR * cam.scale, 0, Math.PI * 2); ctx.stroke(); ctx.restore()
       }
     }
@@ -140,6 +140,18 @@ export class Renderer {
     // Fill only outside the 20m circle. Do not use destination-out here:
     // erasing the canvas would reveal the page background, not the world below.
     ctx.fillStyle = 'rgba(5, 9, 14, 0.78)'
+
+    // X-9：未解锁核心区整体压黑（服务器裁剪区内实体，但雾不能「照亮」本应
+    // 全黑的锁区——与弹丸撞锁区消失的体验对齐）。圆心与 drawArena 的锁区
+    // 圈同为场地原点（非自机），直接填充锁区内部；解锁判定与 drawArena 的
+    // unlocked（phase >= unlock_phase && phase > 0）互补。墙影/边缘渐变随后
+    // 叠加只会更暗，不会重新「照亮」锁区。
+    if (world.phase > 0 && world.phase < map.coreZone.unlockPhase) {
+      ctx.beginPath()
+      ctx.arc(cam.toPxX(0), cam.toPxY(0), map.coreZone.radius * cam.scale, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
     ctx.beginPath()
     ctx.rect(0, 0, cam.cw, cam.ch)
     ctx.arc(x, y, radius, 0, Math.PI * 2, true)

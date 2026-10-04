@@ -12,6 +12,7 @@ import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldStat
 import { Camera } from './camera'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
 import { InputSampler, AXIS_AIM } from './input'
+import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback } from './feedback'
@@ -315,12 +316,16 @@ export class GameController {
 
   /** 每帧按本地信号更新瞄准 guard：辅助开启 + 瞄准能力脚本在场 + 人未
    * 持有炮塔轴（本地粘滞位）时，鼠标移动不抢炮塔轴，R 显式夺取。
+   * 判定与 HUD 文案同源（axis-src.isAimUnderScript，C-28）：能力信号在服务器
+   * turret_src 回显之前就生效（本地先行时序不变）。
    * 字段缺失（旧服务器）不启用 guard，保持逐帧鼠标抢占。 */
   private syncAimGuard(): void {
-    const self = this.world.self
-    this.input.aimUnderScript = this.input.assistOn
-      && (this.assistAimCapable || self?.turretSrc === ControlSource.CS_SCRIPT || self?.turretSrc === ControlSource.CS_SNIPPET)
-      && !this.input.holdsAim()
+    this.input.aimUnderScript = isAimUnderScript(
+      this.input.assistOn,
+      this.assistAimCapable,
+      this.world.self?.turretSrc,
+      this.input.holdsAim(),
+    )
   }
 
   /** Space assist 开关：转发给服务器 */

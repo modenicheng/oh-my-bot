@@ -55,7 +55,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   for (let i = 0; i < 8; i++) {
     const a = (i - 0.5) * tau / 8
     ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 80 * s, a, a + tau / 8); ctx.closePath()
-    ctx.fillStyle = i % 2 ? '#13212b' : '#101b25'; ctx.fill()
+    ctx.fillStyle = i % 2 ? '#13212b' : ink.floor; ctx.fill()
   }
   ctx.lineWidth = 1; ctx.strokeStyle = '#263b4760'
   const left = Math.max(-80, Math.floor(cam.toWorldX(0) / 4) * 4)
@@ -222,7 +222,7 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.globalAlpha = available ? 1 : 0.35
   sprite(ctx, 'healthPack', x, y + bob, size)
   if (available) {
-    ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
+    ctx.strokeStyle = `${ink.lime}88`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
   } else if (respawnInS > 0) {
     ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
     ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)
@@ -237,7 +237,7 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
   if (lift > 0) {
     const shadowY = y + lift * UPLINK_LIFT * cam.scale
     ctx.fillStyle = '#02070c99'; ctx.beginPath(); ctx.ellipse(x, shadowY + size * 0.35, size * (0.48 - lift * 0.12), size * 0.16, 0, 0, tau); ctx.fill()
-    ctx.strokeStyle = '#22d3ee55'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
+    ctx.strokeStyle = `${ink.cyan}55`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
   }
   circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
   sprite(ctx, 'uplink', x, y, size)
@@ -271,7 +271,7 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   if (!trail) {
     // One bounded beam, no frame-history allocations and no trail beyond the authoritative projectile.
     trail = ctx.createLinearGradient(-bucket, 0, 0, 0)
-    trail.addColorStop(0, '#22d3ee00'); trail.addColorStop(1, color)
+    trail.addColorStop(0, `${ink.cyan}00`); trail.addColorStop(1, color)
     cached.set(key, trail)
   }
   ctx.fillStyle = trail; ctx.fillRect(-length, -2, length, 4)

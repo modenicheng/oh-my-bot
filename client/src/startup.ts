@@ -1,4 +1,5 @@
 import { asciiField, asciiTitle, erodeText } from './startup-art'
+import { hash32 } from './lib/hash'
 import { initAppVersion } from './version'
 
 const root = document.getElementById('startup')!
@@ -38,7 +39,7 @@ function erodeScreen(): void {
   const tiles: { x: number; y: number; at: number; glyph: string }[] = []
   for (let y = 0; y < height; y += cell) {
     for (let x = 0; x < width; x += cell) {
-      const hash = Math.imul((x / cell + 1) * 73 + (y / cell + 1) * 193, 0x45d9f3b) >>> 0
+      const hash = hash32((x / cell + 1) * 73 + (y / cell + 1) * 193)
       const distance = Math.hypot(x + cell / 2 - ox, y + cell / 2 - oy) / farthest
       tiles.push({ x, y, at: 0.15 + distance * 0.52 + (hash % 101) / 101 * 0.17, glyph: '01[]{}+*#'[hash % 9]! })
     }
