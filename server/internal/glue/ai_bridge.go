@@ -118,10 +118,7 @@ func (m *Match) aiScriptSnapshot(pid uint64) aiScriptSnapshot {
 	if !ok {
 		return snap
 	}
-	obs := snapshot.BuildObservation(snapshot.World{
-		FrameView: wv.Frame, Robots: wv.Robots, Projectiles: wv.Projectiles,
-		Cores: wv.Cores, HealthPacks: wv.HealthPacks, Uplinks: wv.Uplinks,
-	}, m.wallIX, rid, 0, wv.ScanRadius(rid))
+	obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rid, 0, wv.ScanRadius(rid))
 	snap.perception = marshalAIPerception(self, obs)
 	return snap
 }
@@ -360,10 +357,11 @@ func (ms *matchScripts) SubmitSource(playerID uint64, rev uint32, source string)
 // pipeline: scored matches persist it, the projector consumes it, and clients
 // receive the public usage counters (never prompts, scripts, or credentials).
 func (m *Match) emitNonSimEvent(ev *ombv1.ServerEvent) {
-	if m.log != nil {
-		m.log.OnEvent(m.tick, ev)
+	if ev == nil {
+		return
 	}
-	glueSink{m: m}.OnEvent(m.tick, ev)
+	ev.Tick = m.tick
+	m.sink.OnEvent(m.tick, ev)
 }
 
 // logAIRequestError 仅记录定位所需的错误元数据，不记录 prompt、脚本或密钥。

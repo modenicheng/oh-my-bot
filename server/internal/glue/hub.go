@@ -378,6 +378,11 @@ func say(text string) *ombv1.ServerMsg {
 	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Text: text}}}}}
 }
 
+// SystemSay is the exported robot-0 system Say used outside glue (cmd/omb
+// upstream routing). The "join failed: " prefix is a client contract: the
+// RoomSession treats it as a terminal join failure and stops retrying.
+func SystemSay(text string) *ombv1.ServerMsg { return say(text) }
+
 type launcherAdapter struct{ rc *RoomConn }
 
 func (la *launcherAdapter) Launch(seed uint64, ids []uint64) room.MatchHandle {

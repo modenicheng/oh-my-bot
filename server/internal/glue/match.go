@@ -7,6 +7,7 @@
 package glue
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -27,12 +28,6 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/stats"
 )
 
-const (
-	tickHz     = 60
-	frameDue   = 12 * time.Millisecond
-	matchTicks = 8 * 60 * tickHz // 28800
-)
-
 // Match 一个运行中的对局。
 type Match struct {
 	rc *RoomConn
@@ -41,6 +36,10 @@ type Match struct {
 	mapDef *sim.MapDef
 	proj   *stats.ProjectorImpl
 	log    *sim.MatchEventLog
+	// sink is the effective event pipeline assembled in NewMatch (glue-only or
+	// log+glue multiSink). Non-sim events must flow through the same chain so
+	// they are persisted and projected identically.
+	sink sim.EventSink
 
 	// scoreboard 记录最近一次已广播的实时积分榜指纹与事件，用于变更时才重发与观战者 catch-up。
 	lastScoreboard     string
@@ -155,6 +154,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		sinkAll = multiSink{primary: ml, secondary: sinkAll}
 	}
 	m.sim = sim.NewSim(seed, ids, sinkAll)
+	m.sink = sinkAll
 	if err := m.sim.SetMap(def); err != nil {
 		if m.log != nil {
 			_ = m.log.Close()
@@ -497,14 +497,7 @@ func (m *Match) forceSpectatorResyncLocked(pid uint64) {
 func (m *Match) spectatorReplayEndLocked(s *Session) {
 	m.sendMapBootstrapLocked(s)
 	wv := m.sim.WorldView()
-	obs := snapshot.BuildSpectatorObservation(snapshot.World{
-		FrameView:   wv.Frame,
-		Robots:      wv.Robots,
-		Projectiles: wv.Projectiles,
-		Cores:       wv.Cores,
-		HealthPacks: wv.HealthPacks,
-		Uplinks:     wv.Uplinks,
-	})
+	obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
 	enc := m.specEncoders[s.playerID]
 	if enc == nil {
 		enc = snapshot.NewEncoder()
@@ -534,7 +527,7 @@ func (m *Match) run() {
 			}
 		}
 	}()
-	ticker := time.NewTicker(time.Second / tickHz)
+	ticker := time.NewTicker(time.Second / sim.TickRate)
 	defer ticker.Stop()
 	for {
 		select {
@@ -581,14 +574,7 @@ func (m *Match) step() {
 			enc.ForceFull()
 			m.encoders[rv.ID] = enc
 		}
-		obs := snapshot.BuildObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
 		robot, _ := m.sim.Robot(rv.ID)
@@ -619,16 +605,9 @@ func (m *Match) step() {
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
-	ended := m.tick >= matchTicks && !m.warmup
+	ended := m.tick >= sim.MatchTicks && !m.warmup
 	if len(m.rc.spectators) > 0 {
-		obs := snapshot.BuildSpectatorObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		})
+		obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
 		for pid, s := range m.rc.spectators {
 			enc := m.specEncoders[pid]
 			if enc == nil {
@@ -658,7 +637,7 @@ func (m *Match) step() {
 		}
 	}
 
-	if m.tick >= matchTicks && !m.warmup {
+	if m.tick >= sim.MatchTicks && !m.warmup {
 		m.finish(wv)
 		m.Stop()
 		return
@@ -682,7 +661,7 @@ func (m *Match) persistAssistStateLocked() {
 
 // scoreboardEveryTicks 实时积分榜最小广播间隔（2s）：榜是低频信息，无需 60Hz；
 // 变化时立即重发，最多每 2s 一拍，兼顾带宽与新鲜度。
-const scoreboardEveryTicks = 2 * tickHz
+const scoreboardEveryTicks = 2 * sim.TickRate
 
 // maybeBroadcastScoreboard 在局内定期（或积分变化时）向全部玩家与观战者广播实时积分榜。
 // 不落 Match Event Log：榜属于低价值可再生态，重连/观战 catch-up 用 lastScoreboardEv。
@@ -734,20 +713,13 @@ func (m *Match) runScripts(wv sim.WorldView) {
 	if len(m.runtimes) == 0 {
 		return
 	}
-	deadline := time.Now().Add(frameDue)
+	deadline := time.Now().Add(sim.FrameBudget)
 	for rid := range m.runtimes {
 		self, ok := robotOf(wv, rid)
 		if !ok {
 			continue
 		}
-		obs := snapshot.BuildObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rid, 0, wv.ScanRadius(rid))
+		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rid, 0, wv.ScanRadius(rid))
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
@@ -807,12 +779,12 @@ func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
 	return out
 }
 
-// stableRobotID：playerID → 稳定 robotID（FNV-1a 32 位；冲突在 NewSim 排序时自然暴露）。
+// stableRobotID：playerID → 稳定 robotID（FNV-1a 32 位，小端字节序；冲突在 NewSim 排序时自然暴露）。
+// 输出与旧手写实现逐位一致（见 golden 测试）——这是线上身份算法，改动词须带回归验证。
 func stableRobotID(pid uint64) uint32 {
-	h := uint32(2166136261)
-	for i := 0; i < 8; i++ {
-		h ^= uint32(pid >> (i * 8) & 0xff)
-		h *= 16777619
-	}
-	return h
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], pid)
+	h := fnv.New32a()
+	_, _ = h.Write(buf[:])
+	return h.Sum32()
 }

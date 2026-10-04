@@ -414,9 +414,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
 			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig:
-			sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-				Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: readonly spectator connection"}},
-			}}})
+			sendReliable(glue.SystemSay("join failed: readonly spectator connection"))
 			return
 		}
 		return
@@ -483,9 +481,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
 		hub.Unregister(sess)
-		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
-		}}})
+		sendReliable(glue.SystemSay("join failed: " + err.Error()))
 		return
 	}
 	if old := *sessOut; old != nil {
@@ -508,9 +504,7 @@ func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendL
 	hub.Register(sess)
 	if err := rc.BindSpectator(sess); err != nil {
 		hub.Unregister(sess)
-		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
-		}}})
+		sendReliable(glue.SystemSay("join failed: " + err.Error()))
 		return
 	}
 	if old := *sessOut; old != nil {
