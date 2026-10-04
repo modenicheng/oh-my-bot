@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-alpha.3](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-10-04)
+
+
+### Features
+
+* **bot-api:** expose projectile owner/heading in scan() and add predictive-shield example ([4b03cb0](https://github.com/modenicheng/oh-my-bot/commit/4b03cb0381606b1cfd991863d5bf95c2409182aa))
+* **client:** R seizes the turret axis; mouse aim yields to script aim (guard) ([742ff53](https://github.com/modenicheng/oh-my-bot/commit/742ff5315023a4812c11dec671e84c1d1ad2a7da))
+* **client:** suppress text selection in main panels and HUD ([421a9b9](https://github.com/modenicheng/oh-my-bot/commit/421a9b9e1d3cb15694305120292f3fab5545860f))
+* **game:** improve feedback objectives and map generation ([1301cdc](https://github.com/modenicheng/oh-my-bot/commit/1301cdcf16523e722213b8d607d0646d4ee2bdd7))
+* **snippet:** trim catalog to six modules; autoAim becomes pure direct aim ([5bbe31f](https://github.com/modenicheng/oh-my-bot/commit/5bbe31f4f2403a850bbb57fc01806931a47d59db))
+
+### Bug Fixes
+
+* **client:** aim guard engages on local script capability, not turret_src echo ([b62c4d0](https://github.com/modenicheng/oh-my-bot/commit/b62c4d003bac97e076599a338ac9397d9af6ece7))
+
 ## [1.0.0-alpha.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-10-03)
 
 
