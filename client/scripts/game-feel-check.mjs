@@ -212,6 +212,15 @@ const AUDIO_INIT = `(() => {
 })()`
 
 // Observe actual Canvas calls, not application internals or screenshot heuristics.
+const CAMERA_INIT = `(() => {
+  const radii = window.__ombArenaRadii = []
+  const arc = CanvasRenderingContext2D.prototype.arc
+  CanvasRenderingContext2D.prototype.arc = function (x, y, radius, ...rest) {
+    if (this.canvas?.id === 'game-canvas' && radius > 1000) { radii.push(radius); if (radii.length > 500) radii.shift() }
+    return arc.call(this, x, y, radius, ...rest)
+  }
+})()`
+
 const COLOR_INIT = `(() => {
   const log = window.__ombColors = { beams: [], impacts: [] }
   const gradients = new WeakMap()
@@ -374,6 +383,7 @@ async function skillHudText(page) {
 async function fullPass(browser, fix) {
   const ctx = await browser.newContext({ viewport: { width: 2048, height: 1152 }, deviceScaleFactor: 1.25, permissions: ['clipboard-read', 'clipboard-write'] })
   await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(CAMERA_INIT)
   const page = await ctx.newPage()
   page.setDefaultTimeout(9000)
   const errors = []
@@ -401,9 +411,9 @@ async function fullPass(browser, fix) {
     // --- stationary aim: mouse move changes ClientInput aim (AXIS_AIM), no move echo
     const aimMark = lastSeq(fix)
     await page.mouse.move(1024, 400)
-    await sleep(200)
+    await sleep(350)
     await page.mouse.move(1500, 700)
-    await sleep(200)
+    await sleep(350)
     const aimFrames = framesSince(fix, aimMark).filter(f => (f.axisMask & 0b10) !== 0)
     assert.ok(aimFrames.length >= 5, `aim takeover frames >=5, got ${aimFrames.length}`)
     const aimSpread = Math.max(...aimFrames.map(f => f.aim)) - Math.min(...aimFrames.map(f => f.aim))
@@ -471,12 +481,12 @@ async function fullPass(browser, fix) {
     await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist OFF after all-script branch')
 
     // --- held E then F across >=10 input frames, release false
-    // hold 窗口 600ms：断言仍是「≥10 个持续 interact 帧 + 释放后全 false」，
-    // 只是把观察窗拉长以兼容低采样吞吐的宿主（本机 headless ~20Hz，300ms 仅 6-7 帧）。
+    // hold 窗口 800ms：断言仍是「≥10 个持续 interact 帧 + 释放后全 false」，
+    // 只延长观察窗以兼容低采样吞吐的宿主；不降低持续输入帧数契约。
     for (const key of ['e', 'f']) {
       const mark = lastSeq(fix)
       await page.keyboard.down(key)
-      await sleep(600)
+      await sleep(800)
       const held = framesSince(fix, mark)
       const on = held.filter(f => f.interact === true && f.fire === false)
       assert.ok(on.length >= 10, `held ${key.toUpperCase()}: >=10 interact frames (got ${on.length}/${held.length})`)
@@ -603,13 +613,26 @@ async function fullPass(browser, fix) {
     assert.equal(await audioStarted(page), aQuiet, 'full resync must not replay shot/impact/spawn audio')
     assert.equal(await hudMsgText(page), quietMessage, 'full resync must not replay messages')
 
-    // --- uplink: hold E; 25% / 75% visuals, completion, personal CD deny, interruption
+    // --- uplink: the authoritative object stays fixed; self hacking pulls the camera back.
+    const arenaRadius = async () => page.evaluate(() => {
+      const values = window.__ombArenaRadii || []
+      const value = values.length ? values.at(-1) : 0
+      values.length = 0
+      return value
+    })
+    await page.evaluate(() => { window.__ombArenaRadii.length = 0 })
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusIdle = await arenaRadius()
+    assert.ok(radiusIdle > 1000, `baseline arena radius captured (${radiusIdle})`)
     await page.keyboard.down('e')
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: true, hackingId: SELF_ID, progressX10: 5, myCooldownS: 0 } })
     await fix.step(st => { st.uplinks[0].progressX10 = 20 }) // 2.0s / 8.0s = 25%
     assert.match(await hudMsgText(page), /黑入/, `uplink 25%: hacking banner expected (got "${await hudMsgText(page)}")`)
     assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '25')
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '25%')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusHacking = await arenaRadius()
+    assert.ok(radiusHacking < radiusIdle - 5, `hacking zooms the camera out (${radiusIdle} -> ${radiusHacking})`)
     await shot(page, '04-uplink25.png')
     const vis25 = await canvasCenter(page)
     await fix.step(st => { st.uplinks[0].progressX10 = 40 })
@@ -626,6 +649,10 @@ async function fullPass(browser, fix) {
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: false, hackingId: 0, progressX10: 0, myCooldownS: 30 } })
     await page.keyboard.up('e')
     await sleep(120)
+    await fix.step(() => {}); await fix.step(() => {}); await fix.step(() => {})
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusRecovered = await arenaRadius()
+    assert.ok(radiusRecovered > radiusHacking + 5, `camera restores after hacking (${radiusHacking} -> ${radiusRecovered})`)
     assert.ok((await audioStarted(page)) > aDone, 'uplink completion must fire success audio')
     assert.match(await hudMsgText(page), /黑入完成/)
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '30s')
@@ -815,17 +842,27 @@ async function bannerPass(browser, fix, reduced = false) {
 
     await fix.step(st => { st.robots[0].hpX10 = 200; st.timeLeftS = 31 })
     await sleep(300)
-    const borderPixels = await page.locator('#game-canvas').evaluate(canvas => {
+    const neonPixels = await page.locator('#game-canvas').evaluate(canvas => {
       const ctx = canvas.getContext('2d')
       const ratio = canvas.width / canvas.getBoundingClientRect().width
-      const y = Math.round(20 * ratio)
-      const pixels = ctx.getImageData(0, y, canvas.width, Math.max(1, Math.round(8 * ratio))).data
-      let red = 0
-      for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 65 && pixels[i] > pixels[i + 1] * 1.4 && pixels[i] > pixels[i + 2] * 1.3) red++
-      return red
+      const depth = Math.max(1, Math.round(24 * ratio))
+      const top = ctx.getImageData(0, 0, canvas.width, depth).data
+      const bottom = ctx.getImageData(0, canvas.height - depth, canvas.width, depth).data
+      const left = ctx.getImageData(0, depth, depth, canvas.height - depth * 2).data
+      const right = ctx.getImageData(canvas.width - depth, depth, depth, canvas.height - depth * 2).data
+      let magenta = 0, cyan = 0
+      for (const pixels of [top, bottom, left, right]) {
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
+          if (r > 70 && b > 55 && r > g * 1.15) magenta++
+          if (g > 70 && b > 90 && b > r * 1.12) cyan++
+        }
+      }
+      return { magenta, cyan }
     })
-    assert.ok(borderPixels > 100, 'low-health mosaic is visibly present 20px inside the screen edge')
-    await shot(page, reduced ? '24-low-health-reduced.png' : '23-low-health-mosaic.png')
+    assert.ok(neonPixels.magenta > 180, 'low-health frame has visible magenta/violet edge glow')
+    assert.ok(neonPixels.cyan > 20, 'low-health frame has cyan corner accents')
+    await shot(page, reduced ? '24-low-health-neon-reduced.png' : '23-low-health-neon.png')
 
     await fix.step(st => {
       st.robots[0].hpX10 = 700

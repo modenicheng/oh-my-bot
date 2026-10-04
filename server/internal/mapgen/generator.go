@@ -4,7 +4,8 @@
 // 55–80m 内的轴对齐方块）、三环（外 55–80 / 中 30–55 / 中央 <30m）、6 个普通
 // Uplink 位于中环且角度 = k*45°+22.5°、1 个中央主 Uplink（CORE_OPEN 激活）、
 // 外 16 + 中 12 + 中央 6 个 CorePad。gen2 资源按环带和角度槽位抖动；
-// 短掩体按分层候选生成，中环密、外环疏。全部墙体为 AABB。
+// Core 实际常驻量和补货周期按参赛机器人数量确定性缩放。掩体按分层候选
+// 生成，中央两层长掩体、中环密、外环疏。全部墙体为 AABB。
 //
 // 墙体八楔统计对称、90° 几何对称：每个掩体原型同时盖 8 块，
 // 各楔拥有相同的数量、面积和尺寸。候选整批接受或重选（净空/连通检查），
@@ -50,7 +51,7 @@ const (
 )
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
-const GeneratorVer = 6
+const GeneratorVer = 7
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
@@ -59,10 +60,13 @@ const (
 	saltWalls   uint64 = 0x9F03C2D15E47A8B0
 )
 
-// Generate 按 seed 生成确定性 MapDef：固定骨架（扇区/Uplink 角度/锁区/刷新
-// 规则）+ seed 驱动的 Uplink 半径、CorePad 与掩体布局。产出前经双模式 BFS
-// 连通性验证（1m 网格：OUTER_RING 锁区封闭、CORE_OPEN 全图连通）。
-func Generate(seed uint64) (*sim.MapDef, error) {
+// Generate 为单人/工具调用生成地图；真实对局用 GenerateForPlayers 将场上
+// 人数编码进 Core 供给规则。两者都只依赖显式参数，保持可回放确定性。
+func Generate(seed uint64) (*sim.MapDef, error) { return GenerateForPlayers(seed, 1) }
+
+// GenerateForPlayers 按 seed 与完整参赛机器人数量生成确定性 MapDef：固定骨架
+// + 人数自适应 Core 供给 + seed 驱动布局。产出前经双模式 BFS 连通验证。
+func GenerateForPlayers(seed uint64, participants int) (*sim.MapDef, error) {
 	uplinks := genUplinks(newRng(seed ^ saltUplinks))
 	pads := genCorePads(newRng(seed ^ saltPads))
 	healthPacks := genHealthPacks()
@@ -71,6 +75,7 @@ func Generate(seed uint64) (*sim.MapDef, error) {
 		return nil, fmt.Errorf("mapgen: walls: %w", err)
 	}
 
+	period, target := coreSupply(participants)
 	def := &sim.MapDef{
 		Version:      1,
 		GeneratorVer: GeneratorVer,
@@ -85,7 +90,8 @@ func Generate(seed uint64) (*sim.MapDef, error) {
 			UnlockPhase: sim.PhaseCoreOpen,
 		},
 		CoreRules: sim.CoreRulesDef{
-			PeriodTicks: corePeriodTick,
+			PeriodTicks: period,
+			TargetAlive: target,
 			GroupWeights: map[sim.Phase][]float64{
 				sim.PhaseOuterRing: {0.6, 0.4, 0.0},
 				sim.PhaseCoreOpen:  {0.2, 0.4, 0.4},
@@ -98,6 +104,33 @@ func Generate(seed uint64) (*sim.MapDef, error) {
 	}
 	def.MapHash = h
 	return def, nil
+}
+
+// coreSupply 保持单人也有 4 个目标可选；之后约每 2 名机器人增加 1 个
+// 常驻 Core，最多 28 个（锁区关闭时外/中环全部 Pad）。高人数房间缩短
+// 补货周期，但不使用墙钟或在线状态：
+// 参数被写入 MapDef/回放，重放时完全复现。
+func coreSupply(participants int) (periodTicks, targetAlive int) {
+	if participants < 1 {
+		participants = 1
+	}
+	targetAlive = 4 + (participants-1+1)/2
+	if targetAlive > 28 {
+		targetAlive = 28
+	}
+	switch {
+	case participants >= 40:
+		periodTicks = 8 * sim.TickRate
+	case participants >= 24:
+		periodTicks = 10 * sim.TickRate
+	case participants >= 12:
+		periodTicks = 12 * sim.TickRate
+	case participants >= 5:
+		periodTicks = 15 * sim.TickRate
+	default:
+		periodTicks = corePeriodTick
+	}
+	return periodTicks, targetAlive
 }
 
 // hashDef 计算 MapDef 的内容哈希：MapHash 置空后 canonical JSON（结构体字段

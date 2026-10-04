@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.3...v1.0.0-beta.1) (2026-10-04)
+
+
+### Features
+
+* **bot-api:** single-source Monaco declarations, AI prompts, and Go runtime contracts ([62d675b](https://github.com/modenicheng/oh-my-bot/commit/62d675b))
+* **bots:** add the Oracle combat bot with route planning and predictive fire control ([dfbb8fc](https://github.com/modenicheng/oh-my-bot/commit/dfbb8fc))
+* **protocol:** deliver authoritative simulation tuning and structured control notices ([dbd7c66](https://github.com/modenicheng/oh-my-bot/commit/dbd7c66))
+* **protocol:** single-source heartbeat, frame, and replay schema versions across TypeScript and Go ([ceb69bd](https://github.com/modenicheng/oh-my-bot/commit/ceb69bd), [51cec6e](https://github.com/modenicheng/oh-my-bot/commit/51cec6e))
+* **script:** preserve JavaScript/TypeScript editor sources through version history and rollback ([4a1dbde](https://github.com/modenicheng/oh-my-bot/commit/4a1dbde))
+* **workbench:** add language-aware script versions in an anchored body-portal overlay ([90d5819](https://github.com/modenicheng/oh-my-bot/commit/90d5819))
+* **startup:** add a truthful resource-driven character loader with responsive layouts ([0a0177d](https://github.com/modenicheng/oh-my-bot/commit/0a0177d), [11c3cf5](https://github.com/modenicheng/oh-my-bot/commit/11c3cf5))
+
+### Bug Fixes
+
+* **feedback:** keep the camera stationary while hacking ([3c5588d](https://github.com/modenicheng/oh-my-bot/commit/3c5588d))
+* **manual:** restore battlefield focus before global shortcuts ([c646a80](https://github.com/modenicheng/oh-my-bot/commit/c646a80))
+* **startup:** prevent loading progress and resource text from being selected
+
+### Performance
+
+* **startup:** preload Monaco with splash resources so entering a room adds no editor module waterfall ([cdbeb14](https://github.com/modenicheng/oh-my-bot/commit/cdbeb14))
+
+### Refactoring
+
+* **client:** share Live and Replay spectator controls ([10ec947](https://github.com/modenicheng/oh-my-bot/commit/10ec947))
+* **client:** unify takeover state, aim ownership, deterministic hashes, and locked-core fog ([5087ce8](https://github.com/modenicheng/oh-my-bot/commit/5087ce8))
+* **server:** deduplicate room launch preparation, runtime assembly, and score ordering ([436f46d](https://github.com/modenicheng/oh-my-bot/commit/436f46d))
+
 ## [1.0.0-alpha.3](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-10-04)
 
 

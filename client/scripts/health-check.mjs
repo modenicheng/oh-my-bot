@@ -263,7 +263,7 @@ try {
   const startFrame = [...encodeClient(create(ClientMsgSchema, { payload: { case: 'roomAction', value: create(RoomActionSchema, { kind: RoomAction_Kind.START }) } }))]
   await host.evaluate(bytes => window.__healthSockets.at(-1).send(Uint8Array.from(bytes)), startFrame)
   await until(() => observed.map?.healthPacks.length === 4 && observed.robot?.base?.pos && shooter.world.robots.get(shooter.world.selfId)?.base?.pos, 'match bootstrap', 20_000)
-  assert.equal(observed.map.generatorVer, 6, 'actual match uses gen6')
+  assert.equal(observed.map.generatorVer, 7, 'actual match uses gen7')
 
   const pack = observed.map.healthPacks
     .map(value => ({ ...value, distance: Math.hypot(value.pos.x - observed.robot.base.pos.x, value.pos.y - observed.robot.base.pos.y) }))

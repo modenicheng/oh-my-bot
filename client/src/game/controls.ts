@@ -405,6 +405,12 @@ export class GameController {
     this.resizeObserver = undefined
   }
 
+  private selfHacking(selfId: number): boolean {
+    if (selfId === 0) return false
+    for (const uplink of this.world.uplinks.values()) if (uplink.hackingId === selfId) return true
+    return false
+  }
+
   private drawFrame(): void {
     if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
@@ -416,7 +422,8 @@ export class GameController {
     // 防止重生后残余 held 键第一帧重新抢占。
     if (self?.dead) this.input.resetTakeover()
     const pos = self?.base?.pos
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
+    const hacking = this.selfHacking(selfId)
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
@@ -445,7 +452,8 @@ export class GameController {
     const pos = self?.base?.pos
     const sx = pos?.x ?? 0
     const sy = pos?.y ?? 0
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
+    const hacking = this.selfHacking(selfId)
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
     if (pos) this.cam.follow(pos.x, pos.y)
     const { msg, active } = this.input.sample(sx, sy)
     this.feedback.input(msg, this.world, this.map)

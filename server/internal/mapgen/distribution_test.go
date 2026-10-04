@@ -67,7 +67,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			counts[int(angleDeg(center.X, center.Y)/45)][band]++
 			width, height := w.Max.X-w.Min.X, w.Max.Y-w.Min.Y
 			long, short := math.Max(width, height), math.Min(width, height)
-			if math.Abs(short-0.7) > 1e-9 || (math.Abs(long-4) > 1e-9 && math.Abs(long-3) > 1e-9 && math.Abs(long-2) > 1e-9) {
+			if math.Abs(short-0.7) > 1e-9 || (math.Abs(long-6) > 1e-9 && math.Abs(long-5) > 1e-9 && math.Abs(long-4) > 1e-9 && math.Abs(long-3) > 1e-9 && math.Abs(long-2) > 1e-9) {
 				t.Fatalf("seed %d invalid grid cover size %.2fx%.2f", seed, width, height)
 			}
 			for _, p := range []sim.Vec2{w.Min, w.Max, {X: w.Min.X, Y: w.Max.Y}, {X: w.Max.X, Y: w.Min.Y}} {
@@ -98,7 +98,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			}
 		}
 		for k, c := range counts {
-			if c != [3]int{1, 6, 2} {
+			if c != [3]int{2, 6, 2} {
 				t.Fatalf("seed %d wedge %d cover counts %v", seed, k, c)
 			}
 		}
@@ -143,9 +143,9 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 // 与垂直短杠（0.7×2 或 2×0.7），正面积相交约 0.7×0.7。只豁免这对组合
 // 自身的重叠；任何其他独立墙对仍受 2.2m 间距约束。
 func isLPair(other, w sim.Wall) bool {
-	// Gen6 的第三、第四层各有 8 套装配；每套都是连续 base/stub ID。
-	inFirst := other.ID >= 17 && other.ID <= 31 && (other.ID-17)%2 == 0
-	inSecond := other.ID >= 33 && other.ID <= 47 && (other.ID-33)%2 == 0
+	// Gen7 的第四、第五层各有 8 套装配；每套都是连续 base/stub ID。
+	inFirst := other.ID >= 25 && other.ID <= 39 && (other.ID-25)%2 == 0
+	inSecond := other.ID >= 41 && other.ID <= 55 && (other.ID-41)%2 == 0
 	if (!inFirst && !inSecond) || w.ID != other.ID+1 {
 		return false
 	}
@@ -199,7 +199,7 @@ func TestPlayableGridIsCircular(t *testing.T) {
 	}
 }
 
-// TestLASsemblySilhouette：Gen6 两个 L 层的形状契约。每楔各有一个两件套装配：
+// TestLASsemblySilhouette：Gen7 两个 L 层的形状契约。每楔各有一个两件套装配：
 // 4×0.7 基座与垂直 2×0.7 短杠正面积相交 0.7×0.7（并集连通为真实 L 剪影，
 // 而非仅相接/分离）；基座定向遵循 coverXLong 约定（k0/3/4/7 横向，其余
 // 纵向）；同批楔 k 与 k+2 的装配互为精确 90° 旋转像。装配外的任何墙对

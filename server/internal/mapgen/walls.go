@@ -10,7 +10,7 @@ const (
 	coverThick      = 0.7
 	poiClearance    = 2.5
 	wallClearance   = 2.2
-	innerCoverCells = 1
+	innerCoverCells = 2
 	midCoverCells   = 4
 	outerCoverCells = 2
 )
@@ -135,8 +135,9 @@ func overlapDims(a, b rect) (float64, float64) {
 	return min(a.MaxX, b.MaxX) - max(a.MinX, b.MinX), min(a.MaxY, b.MaxY) - max(a.MinY, b.MinY)
 }
 
-// genWalls lays out deterministic grid-sized cover cells. Six single-piece
-// strata stamp one AABB per wedge; two offset mid-ring strata stamp genuine
+// genWalls lays out deterministic grid-sized cover cells. The unlocked core has
+// two offset long-cover strata (5m and 6m per wedge); remaining single-piece
+// strata stamp one AABB per wedge, while two offset mid-ring strata stamp genuine
 // two-piece L silhouettes per wedge (4×0.7 base plus a perpendicular 2×0.7
 // stub crossing near the end with a positive 0.7×0.7 overlap). The paired
 // L layers make cover denser and less visually regular without sacrificing
@@ -154,7 +155,8 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPack
 	// radial lattice. The lShape stratum additionally stamps a perpendicular
 	// stub over the base bar so the union forms an L-shaped cover.
 	cells := []coverCell{
-		{radius: 20, angle: 0, halfLen: 1.0, halfThick: coverThick / 2}, // inner ring: short cover inside the unlocked core
+		{radius: 19.5, angle: 0, halfLen: 2.5, halfThick: coverThick / 2},    // inner ring: 5m cover, axis-aligned per wedge family
+		{radius: 24.0, angle: 22.5, halfLen: 3.0, halfThick: coverThick / 2}, // inner ring: 6m offset cover near the lock boundary
 		{radius: 36, angle: 8, halfLen: 2.0, halfThick: coverThick / 2},
 		{radius: 36, angle: 37, halfLen: 2.0, halfThick: coverThick / 2, lShape: true}, // inner-mid L stratum
 		{radius: 49, angle: 8, halfLen: 2.0, halfThick: coverThick / 2, lShape: true},  // outer-mid L stratum
@@ -206,11 +208,11 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPack
 		for attempt := 0; attempt < 49; attempt++ {
 			index := (start + attempt) % 49
 			var radius, angle float64
-			if cell == 0 {
-				// The inner stratum is inside the lock while closed and becomes
-				// useful cover when CORE_OPEN. Search a deterministic 1m grid.
-				radius = 19 + float64(index/7)*0.5 + radialJitter
-				angle = float64(index%7)*7.5 + angularJitter
+			if cell < innerCoverCells {
+				// Inner strata are inaccessible while locked and become meaningful
+				// cover after CORE_OPEN. Each searches its own bounded local lattice.
+				radius = c.radius + float64(index/7-3)*0.5 + radialJitter
+				angle = c.angle + float64(index%7-3)*1.2 + angularJitter
 			} else {
 				radius = c.radius + float64(index/7-3)*0.8 + radialJitter
 				angle = c.angle + float64(index%7-3)*1.2 + angularJitter
@@ -221,7 +223,7 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPack
 			valid := true
 			for k := 0; k < 8 && valid; k++ {
 				for _, pc := range stampCell(c, proto, k) {
-					if clear(pc.r, cell == 0) != 0 {
+					if clear(pc.r, cell < innerCoverCells) != 0 {
 						clearReject++
 						valid = false
 						break

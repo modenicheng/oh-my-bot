@@ -337,22 +337,24 @@ describe('render() uplink anchoring', () => {
     return { ops, cam }
   }
 
-  it('keeps the progress ring centered at def.pos across progress changes, lift stays 0', async () => {
+  it('keeps the armored chassis centered at def.pos across progress changes, lift stays 0', async () => {
     for (const px10 of [0, 40, 80]) {
       const { ops, cam } = await renderUplink(px10)
       const px = cam.toPxX(36), py = cam.toPxY(0)
-      // drawUplink 的实体圆以实体像素坐标为圆心（坐标不随进度漂移）。
-      const arcs = ops.filter(o => o.op === 'arc' && o.args[0] === px && o.args[1] === py)
-      expect(arcs.length).toBeGreaterThanOrEqual(1)
+      const size = Math.max(12, 2.1 * cam.scale)
+      // 主 Uplink 使用装甲路径而非旧圆形 sprite；中心舱矩形直接锁定权威坐标。
+      const center = ops.find(o => o.op === 'fillRect'
+        && Math.abs((o.args[0] as number) - (px - size * 0.04)) < 1e-9
+        && Math.abs((o.args[1] as number) - (py - size * 0.04)) < 1e-9
+        && Math.abs((o.args[2] as number) - size * 0.08) < 1e-9
+        && Math.abs((o.args[3] as number) - size * 0.08) < 1e-9)
+      expect(center).toBeDefined()
       if (px10 > 0) {
-        // 主环 + 进度弧（-τ/4 起）+ 实体圆 = 3 段，圆心全部等于 def.pos。
-        expect(arcs.length).toBeGreaterThanOrEqual(3)
-        expect(arcs.some(o => Math.abs((o.args[3] as number) + Math.PI / 2) < 1e-9)).toBe(true)
         const pct = ops.filter(o => o.op === 'fillText' && String(o.args[0]).endsWith('%'))
-        expect(pct.length).toBeGreaterThanOrEqual(1)
-        expect(pct[0]!.args[1]).toBe(px)
+        expect(pct).toHaveLength(1)
+        expect(pct[0]!.args.slice(1)).toEqual([px, py + size + 5])
       }
-      // lift=0：不出现悬浮投影阴影椭圆（lift>0 时 drawUplink 会画 ellipse）。
+      // lift=0：不出现任何悬浮投影阴影椭圆。
       expect(ops.filter(o => o.op === 'ellipse')).toHaveLength(0)
     }
   })
@@ -367,10 +369,15 @@ describe('render() uplink anchoring', () => {
       expect(ring.args[0]).toBe(cam.toPxX(36))
       expect(ring.args[1]).toBe(cam.toPxY(0))
       expect(ring.args[2]).toBeCloseTo(2.5 * cam.scale, 6)
-      // 实体圆/进度环圆心与交互圈一致（同一坐标，进度变化不漂移）：
-      // px10=0 → 实体圆+交互圈；px10>0 → 实体圆+主环+进度弧+交互圈。
-      const at = ops.filter(o => o.op === 'arc' && o.args[0] === cam.toPxX(36) && o.args[1] === cam.toPxY(0))
-      expect(at.length).toBeGreaterThanOrEqual(px10 > 0 ? 4 : 2)
+      // 交互圈与装甲主机身共享同一权威中心；进度只改变内部能量格。
+      const size = Math.max(12, 2.1 * cam.scale)
+      const center = ops.find(o => o.op === 'fillRect'
+        && Math.abs((o.args[0] as number) - (cam.toPxX(36) - size * 0.04)) < 1e-9
+        && Math.abs((o.args[1] as number) - (cam.toPxY(0) - size * 0.04)) < 1e-9
+        && Math.abs((o.args[2] as number) - size * 0.08) < 1e-9
+        && Math.abs((o.args[3] as number) - size * 0.08) < 1e-9)
+      expect(center).toBeDefined()
+      expect(ops.filter(o => o.op === 'ellipse')).toHaveLength(0)
     }
   })
 })

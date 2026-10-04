@@ -31,17 +31,16 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   filter: drop-shadow(0 0 14px #22d3ee20);
 }
 .startup-tagline { margin: 20px 0 0; color: var(--fg-dim); font: 12px/1.5 var(--pixel); letter-spacing: .22em; }
-.startup-center { position: absolute; inset-inline: 16px; top: 47%; display: flex; flex-direction: column; align-items: center; gap: 0; text-align: center; }
-/* The call-to-action does not exist visually during loading. It enters only after
-   the real readiness gate opens, so the boot sequence remains the sole focus. */
-.startup-float { display: none; }
+.startup-center { position: absolute; inset-inline: 16px; top: 47%; display: flex; flex-direction: column; align-items: center; gap: clamp(14px, 1.8vh, 24px); text-align: center; }
+/* Reserve the CTA slot from the first frame so readiness never reflows the loader.
+   The prompt remains visually and interactively absent until the real gate opens. */
+.startup-float { display: inline-block; visibility: hidden; pointer-events: none; }
 #startup-start {
   display: block; margin: 0; color: #e9f4fa; white-space: nowrap;
   font: 400 clamp(13px, min(1.15vw, 1.7vh), 21px)/1.8 var(--pixel); letter-spacing: .26em;
   padding-left: .26em; user-select: none;
 }
-#startup[data-state="ready"] .startup-center, #startup[data-state="eroding"] .startup-center { gap: clamp(14px, 1.8vh, 24px); }
-#startup[data-state="ready"] .startup-float, #startup[data-state="eroding"] .startup-float { display: inline-block; }
+#startup[data-state="ready"] .startup-float, #startup[data-state="eroding"] .startup-float { visibility: visible; pointer-events: auto; }
 #startup[data-state="ready"] .startup-float { animation: startup-float 4.4s ease-in-out 1.2s infinite; }
 #startup[data-state="ready"] #startup-start {
   animation: startup-arrive 1.2s cubic-bezier(.16,1,.3,1) both, startup-glow 3.6s ease-in-out 1.2s infinite;
@@ -54,7 +53,7 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   width: 34ch; max-width: calc(100vw - 32px); display: grid; justify-items: center;
   gap: clamp(11px, 1.35vh, 20px); padding-block: clamp(4px, .7vh, 10px);
   font: clamp(12px, min(1.05vw, 1.6vh), 18px)/1.55 'Fusion Pixel', monospace;
-  font-variant-ligatures: none;
+  font-variant-ligatures: none; user-select: none; -webkit-user-select: none;
 }
 .startup-progress { width: 100%; display: grid; justify-items: center; gap: .28em; color: var(--accent); font: inherit; white-space: pre; }
 #startup-track { display: block; width: 30ch; max-width: 100%; text-align: center; letter-spacing: 0; }
@@ -97,7 +96,7 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   .startup-brand { top: 8%; }
   .startup-ascii { font-size: min(10px, calc((100vw - 48px) / 48)); }
   .startup-tagline { margin-top: 10px; }
-  .startup-center { top: 35%; }
+  .startup-center { top: 35%; gap: 5px; }
   .startup-footer { bottom: 10px; }
   .startup-loader { font-size: clamp(9px, min(1.5vw, 2.25vh), 11px); gap: 4px; padding-block: 0; }
   .startup-load-list { gap: 0; }
@@ -108,8 +107,7 @@ body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: 
   .startup-brand { top: 4%; }
   .startup-ascii { font-size: min(8px, calc((100vw - 48px) / 48)); }
   .startup-tagline { margin-top: 4px; font-size: 10px; line-height: 1.35; }
-  .startup-center { top: 38%; }
-  #startup[data-state="ready"] .startup-center, #startup[data-state="eroding"] .startup-center { gap: 8px; }
+  .startup-center { top: 38%; gap: 8px; }
   #startup-start { font-size: 11px; line-height: 1.5; }
   .startup-footer { bottom: 6px; }
 }

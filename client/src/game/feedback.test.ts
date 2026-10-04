@@ -363,23 +363,29 @@ describe('combat motion presentation', () => {
     stubFeedbackEnv()
   })
 
-  it.each([false, true])('draws a thick irregular low-health edge (reduced=%s) without covering the center', reduced => {
+  it.each([false, true])('draws a cyberpunk neon low-health frame (reduced=%s) without covering the center', reduced => {
     vi.stubGlobal('matchMedia', () => ({ matches: reduced }))
     const f = fixture(), initial = snap(10, 0, true)
     initial.robots[0]!.hpX10 = 200; f.consume(initial)
-    const cells: number[][] = []
-    const ctx = { globalAlpha: 1, save() {}, restore() {}, strokeRect() {},
-      fillRect(x: number, y: number, w: number, h: number) { cells.push([x, y, w, h, this.globalAlpha]) } }
+    const fills: Array<[number, number, number, number, unknown, number]> = [], strokes: string[] = [], gradients: string[][] = []
+    const ctx = { globalAlpha: 1, fillStyle: '' as unknown, strokeStyle: '', lineWidth: 1, shadowColor: '', shadowBlur: 0,
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+      stroke() { strokes.push(this.strokeStyle) }, strokeRect() {},
+      fillRect(x: number, y: number, w: number, h: number) { fills.push([x, y, w, h, this.fillStyle, this.globalAlpha]) },
+      createLinearGradient() { const stops: string[] = []; gradients.push(stops); return { addColorStop(_at: number, color: string) { stops.push(color) } } },
+    }
     const camera = { cw: 800, ch: 600, scale: 10 }
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(cells.length).toBeGreaterThan(100)
-    expect(cells.some(([x, y, w, h]) => y! + h! > 18 && y! + h! < 50 && x! > 50 && x! + w! < 750)).toBe(true)
-    expect(new Set(cells.filter(([x, y]) => x! > 50 && x! < 750 && y! < 50).map(([, y]) => y)).size).toBeGreaterThan(3)
-    expect(cells.some(([x, y, w, h]) => x! < 500 && x! + w! > 300 && y! < 400 && y! + h! > 200)).toBe(false)
-    expect(cells.some(([, , , , alpha]) => alpha! >= 0.5)).toBe(true)
-    const healthy = snap(11, 10); f.consume(healthy); cells.length = 0
+    expect(gradients).toHaveLength(2)
+    expect(gradients.flat()).toEqual(expect.arrayContaining(['#8b5cf6', '#ff2d88']))
+    expect(strokes).toContain('#00e5ff')
+    expect(fills).toHaveLength(12)
+    expect(fills.some(([x, y, w, h]) => x === 0 && y === 0 && w === 800 && h === 5)).toBe(true)
+    expect(fills.some(([x, y, w, h]) => x! < 500 && x! + w! > 300 && y! < 400 && y! + h! > 200)).toBe(false)
+    expect(fills.some(([, , , , , alpha]) => alpha! >= 0.5)).toBe(true)
+    const healthy = snap(11, 10); f.consume(healthy); fills.length = 0; strokes.length = 0; gradients.length = 0
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(cells).toHaveLength(0)
+    expect(fills).toHaveLength(0); expect(strokes).toHaveLength(0); expect(gradients).toHaveLength(0)
   })
 
   it('holds the previous health as a delayed white-bar value across continuous hits', () => {
@@ -402,18 +408,35 @@ describe('combat motion presentation', () => {
     expect(restore).toBeGreaterThan(deeper)
   })
 
+  it('pulls the camera back while hacking, lets dash take priority, and restores afterwards', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const start = f.feedback.cameraZoom(10, false, false)
+    const hack = f.feedback.cameraZoom(11, false, true)
+    const deeper = f.feedback.cameraZoom(14, false, true)
+    const dash = f.feedback.cameraZoom(15, true, true)
+    const restore = f.feedback.cameraZoom(22, false, false)
+    expect(start).toBe(1)
+    expect(hack).toBeLessThan(1)
+    expect(deeper).toBeLessThan(hack)
+    expect(dash).toBeLessThan(deeper)
+    expect(restore).toBeGreaterThan(dash)
+
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    expect(new GameFeedback(vi.fn()).cameraZoom(11, false, true)).toBe(1)
+  })
+
   it('advances zoom once per tick when draw and input loops call it twice on the same tick', () => {
     // C-4：rAF drawFrame 与 60Hz sampleAndSend 同 tick 各调一次；同 tick 的第二次
     // 调用必须返回缓存，否则每 tick 走两步、收敛速度随刷新率漂移（144Hz≈204 步/s）。
     const f = fixture(); f.consume(snap(10, 0, true))
-    const draw = f.feedback.cameraZoom(11, true)
-    const sample = f.feedback.cameraZoom(11, true)
+    const draw = f.feedback.cameraZoom(11, false, true)
+    const sample = f.feedback.cameraZoom(11, false, true)
     expect(sample).toBe(draw)
     const once = new GameFeedback(vi.fn())
-    once.cameraZoom(11, true)
-    const single = once.cameraZoom(12, true)
+    once.cameraZoom(11, false, true)
+    const single = once.cameraZoom(12, false, true)
     const twice: number[] = []
-    for (let tick = 11; tick <= 12; tick++) twice.push(f.feedback.cameraZoom(tick, true), f.feedback.cameraZoom(tick, true))
+    for (let tick = 11; tick <= 12; tick++) twice.push(f.feedback.cameraZoom(tick, false, true), f.feedback.cameraZoom(tick, false, true))
     expect(twice[3]).toBe(single)
   })
 

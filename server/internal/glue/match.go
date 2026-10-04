@@ -118,7 +118,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	// scored match share one budget as required by ADR-0010.
 
 	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
-	def, err := mapgen.Generate(seed)
+	def, err := mapgen.GenerateForPlayers(seed, len(players))
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: %w", err)
 	}

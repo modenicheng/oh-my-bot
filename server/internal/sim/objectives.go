@@ -78,6 +78,9 @@ func (s *Sim) SetMap(def *MapDef) error {
 	if len(m.CorePads) > 0 && (m.CoreRules.PeriodTicks <= 0 || uint64(m.CoreRules.PeriodTicks) > math.MaxUint32) {
 		return fmt.Errorf("sim: invalid core period")
 	}
+	if m.CoreRules.TargetAlive < 0 || m.CoreRules.TargetAlive > len(m.CorePads) {
+		return fmt.Errorf("sim: invalid core target")
+	}
 	for phase, weights := range m.CoreRules.GroupWeights {
 		if !validPhase(phase) {
 			return fmt.Errorf("sim: invalid weight phase")
@@ -316,7 +319,7 @@ func (s *Sim) stepCores() {
 		return
 	}
 	if s.tick == 1 || s.tick%uint32(s.mapDef.CoreRules.PeriodTicks) == 0 {
-		s.spawnCore()
+		s.replenishCores()
 	}
 	for i := range s.cores {
 		core := &s.cores[i]
@@ -338,9 +341,32 @@ func (s *Sim) stepCores() {
 	}
 }
 
-// Each period chooses one non-full group by its current phase weight, then one
-// empty pad uniformly. Existing live cores are never duplicated or removed.
-func (s *Sim) spawnCore() {
+// Each period refills to the map-authored live target. Historical maps omit
+// TargetAlive and retain their exact one-core-per-period semantics. Existing
+// live cores are never duplicated or removed.
+func (s *Sim) replenishCores() {
+	target := s.mapDef.CoreRules.TargetAlive
+	if target <= 0 {
+		s.spawnCore()
+		return
+	}
+	alive := 0
+	for _, core := range s.cores {
+		if core.Alive && (!s.zoneLocked() || core.Pos.Len() >= s.mapDef.CoreZone.Radius) {
+			alive++
+		}
+	}
+	for alive < target {
+		if !s.spawnCore() {
+			return
+		}
+		alive++
+	}
+}
+
+// spawnCore chooses one non-full group by phase weight, then one empty pad.
+// It returns false when no weighted legal pad remains.
+func (s *Sim) spawnCore() bool {
 	weights := s.mapDef.CoreRules.GroupWeights[Phase(s.phase)]
 	available := make([][]int, len(weights))
 	total := 0.0
@@ -355,7 +381,7 @@ func (s *Sim) spawnCore() {
 		}
 	}
 	if total <= 0 {
-		return
+		return false
 	}
 	pick := s.randomUnit() * total
 	for g, ids := range available {
@@ -365,7 +391,8 @@ func (s *Sim) spawnCore() {
 		pick -= weights[g]
 		if pick < 0 {
 			s.cores[ids[int(s.random()%uint64(len(ids)))]].Alive = true
-			return
+			return true
 		}
 	}
+	return false
 }

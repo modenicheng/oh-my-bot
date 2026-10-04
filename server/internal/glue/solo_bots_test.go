@@ -141,6 +141,9 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 	if n := len(m.scriptPool.IDs()); n != 3 || len(m.sim.Snapshot().Robots) != 4 {
 		t.Fatalf("bots not assembled: %d runtimes", n)
 	}
+	if rules := m.mapDef.CoreRules; rules.TargetAlive != 6 || rules.PeriodTicks != 1200 {
+		t.Fatalf("full human+bot roster did not scale core supply: %+v", rules)
+	}
 	for rid := range m.botRobots {
 		r, _ := m.sim.Robot(rid)
 		if !r.Control.Assist {

@@ -169,7 +169,7 @@ docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发�
 | 工作流 | 触发 | 作用 |
 |---|---|---|
 | CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ 完整 `go test` + `go test -race -short`（排除 race 下无意义的严格墙钟性能门）；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e） |
-| Release Please (`.github/workflows/release-please.yml`) | push main、手动 | 自动维护 `chore: release` PR（由 conventional commits 汇总）；手动可填高于最新 tag 的 `release_as`（如 `v0.2.0-rc.1`）产指定 release PR；merge 后打 tag + 建 GitHub release |
+| Release Please (`.github/workflows/release-please.yml`) | push main、手动 | 自动维护 `chore: release` PR（由 conventional commits 汇总）；手动可填高于最新 tag 的 `release_as`（如 `v1.0.0-beta.1`）产指定 release PR；merge 后打 tag + 建 GitHub release |
 | Release (`.github/workflows/release.yml`) | push `v*` tag、手动（tag 必填，须为已存在的 `vX.Y.Z[-pre]` tag） | resolve 校验 tag 并输出 tag+commit，五平台构建（linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64）精确 checkout 该 commit + linux/amd64 smoke（`-version` 严格等于 tag、`/healthz` 200）+ SHA256SUMS + 幂等上传到 GitHub release；五平台产物缺一不发 |
 | Dependabot (`.github/dependabot.yml`) | 每周 | github-actions / gomod（根 go.mod）/ npm（根 pnpm workspace）更新 PR |
 
@@ -178,13 +178,13 @@ docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发�
 1. push 到 main 后 Release Please 自动开/更新 `chore: release` PR（版本号由 conventional commits 推导：`feat:` 进 minor、`fix:`/`perf:` 进 patch、`feat!:`/`BREAKING CHANGE:` 进 major）。
 2. 人工核对 CHANGELOG 后 merge 该 PR → 自动打 `vX.Y.Z` tag 并创建 GitHub release，触发 Release 工作流出五平台产物。
 
-### rc（预发布）发版
+### beta（预发布）发版
 
-Release Please action 本身无 prerelease 输入；rc 走手动 `release_as`：
+Release Please action 本身无 prerelease 输入；beta 走手动 `release_as`：
 
-1. 在 Actions 页从 `main` 运行 Release Please，`release_as` 显式填一个**高于最新 tag** 的版本，例如当前从已有 `v0.1.0` 基线开始使用 `v0.2.0-rc.1`；后续可填 `v0.2.0-rc.2`。工作流用严格 SemVer 校验并拒绝不递增版本。
+1. 在 Actions 页从 `main` 运行 Release Please，`release_as` 显式填一个**高于最新 tag** 的版本，例如从 `v1.0.0-alpha.3` 晋级时使用 `v1.0.0-beta.1`；后续可填 `v1.0.0-beta.2`。工作流用严格 SemVer 校验并拒绝不递增版本。
 2. merge 产出的 release PR → 对应 tag + 预发布 GitHub release（config `prerelease: true`：0.x 或带预发布后缀的 release 标为 prerelease，1.x 及之后无后缀的版本转正）。自动构建产物需要下文的 PAT 配置；否则手动运行 Release。
-3. 从 RC 发布无后缀版本时，用 `release_as` 显式指定目标版本，例如 `v0.2.0`。当前采用默认版本策略；`prerelease-type: rc` 不是自动递增策略。
+3. 从 beta 发布无后缀版本时，用 `release_as` 显式指定目标版本，例如 `v1.0.0`。当前 beta 通道使用 `prerelease-type: beta`；手动 `release_as` 仍是指定目标版本的唯一权威。
 
 ### 下载与校验
 

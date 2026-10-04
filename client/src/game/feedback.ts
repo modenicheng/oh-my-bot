@@ -1,6 +1,5 @@
 import type { ClientInput, ServerEvent, SnapshotDelta } from '@omb/protocol'
 import { audio, type SoundCue } from '../audio'
-import { hash32 } from '../lib/hash'
 import type { Camera } from './camera'
 import { type MapDefParsed, type MapUplink, type MapVec2 } from './mapdef'
 import { hackMaxX10 } from './tuning'
@@ -15,12 +14,15 @@ const HIT_CHAIN_MS = 520
 const HIT_CHAIN_MAX = 6
 const HIT_CHAIN_PITCH_STEP = 0.07
 const ZOOM_DASH_TARGET = 0.92
+const ZOOM_HACK_TARGET = 0.96
 const ZOOM_DASH_BLEND = 0.64
+const ZOOM_HACK_BLEND = 0.82
 const ZOOM_NORMAL_BLEND = 0.78
 const TRAIL_TICKS = 15
 const LOW_HEALTH_X10 = 250
 const CAMERA_SHAKE_DIRECTIONS = [[1, 1], [-1, 1], [-1, -1], [1, -1]] as const
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
+const neonMagenta = '#ff2d88', neonViolet = '#8b5cf6', neonCyan = '#00e5ff'
 export type FeedbackKind = 'status' | 'kill' | 'uplink'
 type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'splash' | 'dash' | 'death'
 interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: number; color: string; seed: number; heading: number }
@@ -300,14 +302,15 @@ export class GameFeedback {
     return { x, y }
   }
 
-  cameraZoom(tick: number, dashing: boolean): number {
+  cameraZoom(tick: number, dashing: boolean, hacking = false): number {
     if (this.reduced.matches) return 1
     // rAF drawFrame 与 60Hz sampleAndSend 同 tick 各调一次（C-4）：同 tick 返回
     // 缓存，每 tick 只推进一步，收敛速度不随刷新率变化（此前 144Hz≈204 步/s）。
     if (this.zoomAtTick === tick) return this.dashZoom.value
     const elapsed = Math.max(1, Math.min(6, tick - this.dashZoom.tick || 1))
-    const target = dashing ? ZOOM_DASH_TARGET : 1
-    const blend = 1 - Math.pow(dashing ? ZOOM_DASH_BLEND : ZOOM_NORMAL_BLEND, elapsed)
+    const target = dashing ? ZOOM_DASH_TARGET : hacking ? ZOOM_HACK_TARGET : 1
+    const base = dashing ? ZOOM_DASH_BLEND : hacking ? ZOOM_HACK_BLEND : ZOOM_NORMAL_BLEND
+    const blend = 1 - Math.pow(base, elapsed)
     this.dashZoom.value += (target - this.dashZoom.value) * blend
     this.dashZoom.tick = tick
     this.zoomAtTick = tick
@@ -411,32 +414,44 @@ export class GameFeedback {
       ctx.fillStyle = '#071019'; ctx.fillText(text, x + 1, y + 1)
       ctx.fillStyle = red; ctx.fillText(text, x, y)
     }
-    if (this.selfLow) {
-      const flash = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
-      const pulse = this.reduced.matches ? 0.64 : 0.64 + Math.sin(now / 650) * 0.06
-      const alpha = Math.min(0.9, pulse + flash * 0.24)
-      const cell = 8, layers = Math.min(5, Math.floor(Math.min(cam.cw, cam.ch) / (cell * 5)))
-      ctx.fillStyle = red
-      // Spatial noise stays stable between frames: irregular damage, not strobing static.
-      for (let side = 0; side < 4; side++) {
-        const length = side < 2 ? cam.cw : cam.ch
-        for (let row = 0; row < layers; row++) {
-          for (let along = 0; along < length; along += cell) {
-            let hash = hash32((along / cell + 1) ^ ((row + 1) * 193) ^ ((side + 1) * 941))
-            hash = hash32(hash ^ (hash >>> 16))
-            const random = (hash % 997) / 997
-            if (row > 0 && random > 1 - row * 0.19) continue
-            const size = Math.min(cell, length - along)
-            const depth = row * cell
-            ctx.globalAlpha = alpha * (0.8 + (hash % 17) / 85) * (1 - row * 0.13)
-            if (side === 0) ctx.fillRect(along, depth, size, cell)
-            else if (side === 1) ctx.fillRect(along, cam.ch - depth - cell, size, cell)
-            else if (side === 2) ctx.fillRect(depth, along, cell, size)
-            else ctx.fillRect(cam.cw - depth - cell, along, cell, size)
-          }
-        }
-      }
+    if (this.selfLow) this.drawLowHealthFrame(ctx, cam.cw, cam.ch, now)
+    ctx.restore()
+  }
+
+  /** Cyberpunk low-health frame: luminous edge rails and angular corner brackets.
+   *  Geometry is static (including reduced motion); only light intensity breathes. */
+  private drawLowHealthFrame(ctx: CanvasRenderingContext2D, width: number, height: number, now: number): void {
+    const flash = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
+    const pulse = this.reduced.matches ? 0.72 : 0.72 + Math.sin(now / 620) * 0.07
+    const alpha = Math.min(1, pulse + flash * 0.2)
+    const horizontal = ctx.createLinearGradient(0, 0, width, 0)
+    horizontal.addColorStop(0, `${neonCyan}00`); horizontal.addColorStop(0.12, neonViolet)
+    horizontal.addColorStop(0.5, neonMagenta); horizontal.addColorStop(0.88, neonViolet); horizontal.addColorStop(1, `${neonCyan}00`)
+    const vertical = ctx.createLinearGradient(0, 0, 0, height)
+    vertical.addColorStop(0, `${neonCyan}00`); vertical.addColorStop(0.12, neonViolet)
+    vertical.addColorStop(0.5, neonMagenta); vertical.addColorStop(0.88, neonViolet); vertical.addColorStop(1, `${neonCyan}00`)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.shadowColor = neonMagenta; ctx.shadowBlur = this.reduced.matches ? 8 : 13 + flash * 7
+    const rails = [
+      { inset: 0, thick: 5, opacity: 0.82 },
+      { inset: 8, thick: 3, opacity: 0.52 },
+      { inset: 15, thick: 2, opacity: 0.28 },
+    ]
+    for (const rail of rails) {
+      ctx.globalAlpha = alpha * rail.opacity; ctx.fillStyle = horizontal
+      ctx.fillRect(0, rail.inset, width, rail.thick); ctx.fillRect(0, height - rail.inset - rail.thick, width, rail.thick)
+      ctx.fillStyle = vertical
+      ctx.fillRect(rail.inset, 0, rail.thick, height); ctx.fillRect(width - rail.inset - rail.thick, 0, rail.thick, height)
     }
+    const inset = 11, arm = Math.max(34, Math.min(58, Math.min(width, height) * 0.09))
+    ctx.globalAlpha = alpha; ctx.strokeStyle = neonCyan; ctx.lineWidth = 2.5
+    ctx.beginPath()
+    ctx.moveTo(inset, inset + arm); ctx.lineTo(inset, inset); ctx.lineTo(inset + arm, inset)
+    ctx.moveTo(width - inset - arm, inset); ctx.lineTo(width - inset, inset); ctx.lineTo(width - inset, inset + arm)
+    ctx.moveTo(inset, height - inset - arm); ctx.lineTo(inset, height - inset); ctx.lineTo(inset + arm, height - inset)
+    ctx.moveTo(width - inset - arm, height - inset); ctx.lineTo(width - inset, height - inset); ctx.lineTo(width - inset, height - inset - arm)
+    ctx.stroke()
     ctx.restore()
   }
 
