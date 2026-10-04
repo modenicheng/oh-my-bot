@@ -36,3 +36,6 @@ server/tmp/
 *.pid
 /.v2c/
 /.zcode/
+
+# git worktrees（隔离工作区，见 .worktrees/）
+.worktrees/
