@@ -7,9 +7,11 @@ import {
   ServerMsgSchema, ServerEventSchema, EvSaySchema,
   SimTuningSchema, EvControlNoticeSchema, EvControlNotice_Code,
   EvMapBootstrapSchema, TransportTiming,
+  ReplaySchemaVersion, ReplayRecordType, ReplayVisualVersion,
   type ClientMsg, type SnapshotDelta, type EvControlNotice,
 } from '../src/gen/proto/omb_pb'
 import { encodeClient, decodeServer, frame, JOIN_FAILED_PREFIX, joinFailedReason, controlNotice, joinRejection, dedupeControlNoticeSay } from '../src/messages'
+import { REPLAY_SCHEMA_VERSION, replayRecordDiskName, replayRecordTypeFromDisk, decodeVisualFrameV2 } from '../src/replay'
 
 // 回放/契约测试运行于 vitest（Node）环境；node:fs/node:url 仅用于读取权威源文本。
 // （同 client/src/replay/test/replay.test.ts 的既有做法。）
@@ -208,5 +210,58 @@ describe('EvControlNotice (X-4)', () => {
     expect(EvControlNotice_Code.CN_AI_COMPILE_FAILED).toBe(12)
     expect(EvControlNotice_Code.CN_AI_STALE_SCRIPT).toBe(13)
     expect(EvControlNotice_Code.CN_AI_EXPLAIN).toBe(14)
+  })
+})
+
+// ---- 回放 JSONL schema（X-6）：权威枚举与 .proto 源互拍 ----
+// Go 侧断言：server/internal/sim/log_schema_test.go TestReplaySchemaPinnedToProto。
+// 改 protocol/proto/omb.proto 忘跑 pnpm --filter @omb/protocol gen 时，
+// 下面「生成代码 ↔ .proto 文本」互拍失败；改值则「值互钉」双侧失败。
+
+describe('replay schema golden (X-6)', () => {
+  it('schema/record/visual 枚举值与权威源互钉', () => {
+    expect(ReplaySchemaVersion.REPLAY_SCHEMA_V1).toBe(1)
+    expect(ReplayRecordType.REPLAY_EVENT).toBe(1)
+    expect(ReplayRecordType.REPLAY_MATCH_START).toBe(2)
+    expect(ReplayRecordType.REPLAY_INPUT).toBe(3)
+    expect(ReplayRecordType.REPLAY_CONTROL).toBe(4)
+    expect(ReplayRecordType.REPLAY_CHECKPOINT).toBe(5)
+    expect(ReplayRecordType.REPLAY_VISUAL).toBe(6)
+    expect(ReplayVisualVersion.REPLAY_VISUAL_V1).toBe(1)
+    expect(ReplayVisualVersion.REPLAY_VISUAL_V2).toBe(2)
+    expect(REPLAY_SCHEMA_VERSION).toBe(1)
+  })
+
+  it('生成代码与 omb.proto 权威源同步（X-6）', () => {
+    const protoPath = fileURLToPath(new URL('../../../protocol/proto/omb.proto', import.meta.url))
+    const protoSrc = readFileSync(protoPath, 'utf8')
+    const specs: Array<[string, number]> = [
+      ['REPLAY_SCHEMA_V1', 1],
+      ['REPLAY_EVENT', 1], ['REPLAY_MATCH_START', 2], ['REPLAY_INPUT', 3],
+      ['REPLAY_CONTROL', 4], ['REPLAY_CHECKPOINT', 5], ['REPLAY_VISUAL', 6],
+      ['REPLAY_VISUAL_V1', 1], ['REPLAY_VISUAL_V2', 2],
+    ]
+    for (const [name, val] of specs) {
+      expect(protoSrc).toContain(`${name} = ${val};`)
+    }
+  })
+
+  it('盘上名推导与 Go RecordTypeDiskName 同规则', () => {
+    // Go 侧 log_schema_test.go 对同一映射断言；两侧规则分叉即失败。
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_MATCH_START)).toBe('match_start')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_VISUAL)).toBe('visual')
+    expect(replayRecordTypeFromDisk('checkpoint')).toBe(ReplayRecordType.REPLAY_CHECKPOINT)
+    expect(replayRecordTypeFromDisk('nonsense')).toBeUndefined()
+  })
+
+  it('visual v2 载荷经生成 schema 校验（信封 type 键被忽略）', () => {
+    const line = { type: 'visual', v: 2, tick: 6, phase: 2, robots: [{ id: 1, pos: { x: 1, y: 2 }, heading: 0, hp: 90, energy: 80, alive: true, invulnerable: false }], projectiles: [] }
+    const frame = decodeVisualFrameV2(line)
+    expect(frame.tick).toBe(6)
+    expect(frame.robots[0]?.pos?.x).toBe(1)
+    // 错版本拒绝
+    expect(() => decodeVisualFrameV2({ ...line, v: 1 })).toThrow(/not v2/)
+    // 坏载荷拒绝
+    expect(() => decodeVisualFrameV2({ type: 'visual', v: 2, tick: 'x' })).toThrow()
   })
 })

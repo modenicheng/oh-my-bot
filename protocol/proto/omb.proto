@@ -399,3 +399,69 @@ message ServerMsg {
     ServerEvent event = 2;
   }
 }
+
+// ============ 回放 JSONL 记录 schema（审计 X-6） ============
+// 本节是回放 Match Event Log（data/matches/*.jsonl）记录形态的唯一权威源。
+// 这些值不经 WS 传输；两侧（Go sim/log.go + 客户端 replay/model.ts）从生成
+// 代码取值，测试互钉，防止手抄常量漂移。
+// 磁盘形态仍是 NDJSON 信封：{"schema_version":1} 头行 + 每行
+// {"type":"<record_type>","tick":N,...}；本节只权威化版本号、记录类型名
+// 与 visual 采样行 —— checkpoint/event 载荷本身分别是 sim 状态与 ServerEvent
+// 的既有序列化，不在此重复声明。
+
+// 回放 JSONL 文件的 schema 版本（logHeader.schema_version）。历史文件 = 1；
+// 未知更高版本必须显式拒绝，不得静默错读。
+enum ReplaySchemaVersion {
+  REPLAY_SCHEMA_V_UNSPECIFIED = 0;
+  REPLAY_SCHEMA_V1 = 1; // 当前：NDJSON 信封 + type 字符串记录
+}
+
+// 回放记录的 "type" 盘上字符串（枚举值名去掉 REPLAY_ 前缀后小写下划线即盘上
+// 名，如 REPLAY_MATCH_START → "match_start"）。记录同一 tick 内的顺序有意义。
+enum ReplayRecordType {
+  REPLAY_UNSPECIFIED = 0;
+  REPLAY_EVENT = 1;        // {"type":"event","tick":N,"event":ServerEvent(protojson)}
+  REPLAY_MATCH_START = 2;  // {"type":"match_start","tick":0,"state":Checkpoint,...}
+  REPLAY_INPUT = 3;        // {"type":"input","tick":N,"robot_id":R,"input":ClientInput(protojson)}
+  REPLAY_CONTROL = 4;      // {"type":"control","tick":N,"robot_id":R,"control":ControlRecord}
+  REPLAY_CHECKPOINT = 5;   // {"type":"checkpoint","tick":N,"state":Checkpoint}
+  REPLAY_VISUAL = 6;       // 浏览器导出行（cmd/omb ?visual=1）；载荷见 ReplayVisualFrame
+}
+
+// visual 采样行的形态版本（ReplayVisualFrame.v）。
+// v1（历史）：无版本字段；robots/projectiles 为位置数组 [id,x,y,heading,hp,
+// energy,alive,invuln] / [id,owner,x,y,heading]，字段含义只由位置约定 ——
+// 这就是审计指出的「紧凑数组二义性」。v2 起显式带 v 命名字段，新导出恒 v2。
+enum ReplayVisualVersion {
+  REPLAY_VISUAL_V_UNSPECIFIED = 0; // 读侧视为 v1（历史行无 v 字段）
+  REPLAY_VISUAL_V1 = 1;           // 历史位置数组形态（只读兼容，不再写出）
+  REPLAY_VISUAL_V2 = 2;           // 命名字段形态（protojson），自本版起导出
+}
+
+// v2 visual 采样行载荷（{"type":"visual","v":2,"tick":N,...}）。
+// 来源于服务器确定性重放（sim.ReplayVisualFrames）；紧凑数组形态（v1）不再
+// 写出，v1 行由读侧适配器解出本消息的等价字段。
+message ReplayVisualFrame {
+  ReplayVisualVersion v = 1; // 形态版本；v2 导出恒为 REPLAY_VISUAL_V2
+  uint32 tick = 2;
+  Phase phase = 3;
+  repeated ReplayVisualRobot robots = 4;
+  repeated ReplayVisualProjectile projectiles = 5;
+}
+
+message ReplayVisualRobot {
+  uint32 id = 1;
+  Vec2 pos = 2;
+  double heading = 3; // 炮塔朝向（弧度）
+  double hp = 4;      // 游戏单位（非 x10），与 v1 历史行一致
+  double energy = 5;
+  bool alive = 6;
+  bool invulnerable = 7;
+}
+
+message ReplayVisualProjectile {
+  uint32 id = 1;
+  uint32 owner = 2;
+  Vec2 pos = 3;
+  double heading = 4;
+}

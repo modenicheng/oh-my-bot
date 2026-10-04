@@ -98,7 +98,7 @@ func TestMultiSinkForwardsControlsAndCheckpoints(t *testing.T) {
 	}
 	foundControl := false
 	for _, record := range records {
-		if record.Type == "control" && record.Control != nil && record.Control.Say == "hello" {
+		if record.Type == sim.RecordControl && record.Control != nil && record.Control.Say == "hello" {
 			foundControl = true
 		}
 	}
@@ -153,7 +153,7 @@ func TestFormalMatchPersistsFinalCheckpointIdentityAndSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) == 0 || records[0].Type != "match_start" || len(records[0].Players) != 1 {
+	if len(records) == 0 || records[0].Type != sim.RecordMatchStart || len(records[0].Players) != 1 {
 		t.Fatalf("missing match identity: %+v", records[:1])
 	}
 	if records[0].Players[0].RobotID != rid || records[0].Players[0].PlayerID != pilot.playerID {
@@ -161,7 +161,7 @@ func TestFormalMatchPersistsFinalCheckpointIdentityAndSettlement(t *testing.T) {
 	}
 	ends, finalCheckpoint := 0, 0
 	for _, record := range records {
-		if record.Type == "checkpoint" && record.Tick == sim.MatchTicks {
+		if record.Type == sim.RecordCheckpoint && record.Tick == sim.MatchTicks {
 			finalCheckpoint++
 		}
 		if record.Event != nil && record.Event.GetMatchEnd() != nil {

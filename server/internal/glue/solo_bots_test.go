@@ -169,7 +169,7 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 	}
 	botControls := map[uint32]int{}
 	for _, rec := range records {
-		if rec.Type == "control" {
+		if rec.Type == sim.RecordControl {
 			if m.botRobots[rec.RobotID] && rec.Control.Script != nil {
 				botControls[rec.RobotID]++
 			}

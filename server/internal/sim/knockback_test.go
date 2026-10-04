@@ -418,7 +418,7 @@ func TestKnockbackLogRejectsUnknownSimulationVersions(t *testing.T) {
 		if log.Err() == nil {
 			t.Fatalf("writer accepted simulation version %d", version)
 		}
-		raw, err := json.Marshal(diskRecord{Type: "match_start", State: &cp})
+		raw, err := json.Marshal(diskRecord{Type: RecordTypeDiskName(RecordMatchStart), State: &cp})
 		if err != nil {
 			t.Fatal(err)
 		}
