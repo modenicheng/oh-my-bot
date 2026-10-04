@@ -73,6 +73,11 @@ button.danger:hover:not(:disabled) { box-shadow: 0 0 12px #ff5c5c40; }
 .ok .dot { background: var(--accent); box-shadow: 0 0 8px #22d3ee40; }
 .down #status { color: var(--danger); }
 [hidden] { display: none !important; }
+/* 选中策略：主页面板与对局 HUD 禁止选中文本，避免拖拽/双击误选；输入框与错误提示、
+   房间码等需要复制的内容放开。手册阅读器与工作台（文档/编辑器/AI）不在禁选范围，选中不受影响。 */
+#view-join, #view-room, #view-replays, #hud, #game-options { user-select: none; }
+input, textarea { user-select: text; }
+.error-line, #room-code { user-select: text; }
 #view-join, #view-room { display: flex; flex-direction: column; gap: 14px; }
 .robot-mark { width: 72px; height: 72px; align-self: center; margin: 0 0 8px; }
 #btn-join, #btn-start { background: var(--accent); color: #09151e; font-weight: 600; }
