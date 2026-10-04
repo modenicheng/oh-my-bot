@@ -88,7 +88,7 @@ func visualFrame(view WorldView) ReplayVisualFrame {
 	for i, robot := range view.Robots {
 		frame.Robots[i] = ReplayVisualRobot{
 			ID: robot.ID, Pos: robot.Pos, Heading: robot.Turret,
-			HP: float64(robot.HpX10) / 10, Energy: float64(robot.EnergyX10) / 10,
+			HP: FromX10(robot.HpX10), Energy: FromX10(robot.EnergyX10),
 			Alive: !robot.Dead, Invulnerable: robot.InvulnS > 0,
 		}
 	}

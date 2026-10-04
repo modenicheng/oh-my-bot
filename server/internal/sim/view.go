@@ -1,7 +1,5 @@
 package sim
 
-import "math"
-
 // WorldView supplements the frozen FrameView, which intentionally contains no
 // entity table. Published data never aliases live simulation state. Readers
 // may retain or mutate returned values, even while the owner advances Tick.
@@ -54,7 +52,7 @@ func (s *Sim) publishView() {
 				invuln = InvulnDuration / TickRate
 			}
 		}
-		v.Robots[i] = RobotView{ID: r.ID, Pos: r.Position, Vel: r.Velocity, Turret: r.Heading, HpX10: int32(math.Round(r.HP * 10)), EnergyX10: int32(math.Round(r.Energy * 10)),
+		v.Robots[i] = RobotView{ID: r.ID, Pos: r.Position, Vel: r.Velocity, Turret: r.Heading, HpX10: ToX10(r.HP), EnergyX10: ToX10(r.Energy),
 			ShieldOn: r.Combat.ShieldOn, Dashing: r.Combat.DashUntil > s.tick, Dead: r.State == Dead, RespawnInS: secondsLeft(s.tick, r.Combat.RespawnAt), InvulnS: invuln, Nick: r.Nick, Color: r.Color}
 		v.Controls[r.ID] = r.Control.Output
 		v.AckSeqs[r.ID] = r.ConsumedSeq
@@ -92,12 +90,7 @@ func (s *Sim) View() FrameView {
 	f.Map = cloneMap(f.Map)
 	return f
 }
-func (s *Sim) RobotViews() []RobotView     { return append([]RobotView{}, s.view.Load().Robots...) }
-func (s *Sim) ProjectileViews() []ProjView { return append([]ProjView{}, s.view.Load().Projectiles...) }
-func (s *Sim) CoreViews() []CoreView       { return append([]CoreView{}, s.view.Load().Cores...) }
-func (s *Sim) HealthPackViews() []HealthPackView {
-	return append([]HealthPackView{}, s.view.Load().HealthPacks...)
-}
+func (s *Sim) RobotViews() []RobotView { return append([]RobotView{}, s.view.Load().Robots...) }
 func cloneUplinkViews(in []UplinkView) []UplinkView {
 	out := make([]UplinkView, len(in))
 	for i, u := range in {

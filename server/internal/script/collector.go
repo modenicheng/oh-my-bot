@@ -159,7 +159,7 @@ func toJSRobotRef(vm *goja.Runtime, ro sim.RobotView) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("id", float64(ro.ID))
 	_ = o.Set("position", toJSVec2(vm, ro.Pos))
-	_ = o.Set("hp", x10ToFloat(ro.HpX10))
+	_ = o.Set("hp", sim.FromX10(ro.HpX10))
 	_ = o.Set("velocity", toJSVec2(vm, ro.Vel))
 	return o
 }
@@ -195,9 +195,6 @@ func argEntityID(v goja.Value) (uint32, bool) {
 	}
 	return uint32(v.ToInteger()), true
 }
-
-// x10ToFloat HP/Energy ×10 定点 → JS number。
-func x10ToFloat(v int32) float64 { return float64(v) / 10 }
 
 // phaseName Phase → 手册 GameInfo.phase 字符串。
 func phaseName(p sim.Phase) string {

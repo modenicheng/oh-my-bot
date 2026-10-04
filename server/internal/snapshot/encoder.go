@@ -244,8 +244,6 @@ func encodeRobot(r *sim.RobotView, withMeta bool) *ombv1.RobotState {
 		Dashing:    r.Dashing,
 		Dead:       r.Dead,
 		RespawnInS: r.RespawnInS,
-		//nolint:staticcheck // IsPartner 已弃用：写入恒 false 保持旧 replay 客户端兼容
-		IsPartner: false,
 	}
 	if withMeta {
 		rs.Nick = r.Nick

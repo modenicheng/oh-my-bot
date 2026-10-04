@@ -181,12 +181,12 @@ func marshalAIPerception(self sim.RobotView, obs sim.Observation) string {
 		Projectiles []projectile `json:"projectiles"`
 		Walls       []wall       `json:"walls"`
 	}{Tick: obs.Frame.Tick, Phase: phase, TimeLeft: obs.Frame.TimeLeftS}
-	doc.Self = robot{ID: self.ID, Position: toVec(self.Pos), Velocity: toVec(self.Vel), HP: float64(self.HpX10) / 10, Energy: float64(self.EnergyX10) / 10, Shield: self.ShieldOn, Dead: self.Dead}
+	doc.Self = robot{ID: self.ID, Position: toVec(self.Pos), Velocity: toVec(self.Vel), HP: sim.FromX10(self.HpX10), Energy: sim.FromX10(self.EnergyX10), Shield: self.ShieldOn, Dead: self.Dead}
 	for _, r := range obs.Robots {
 		if r.ID == self.ID {
 			continue
 		}
-		doc.Robots = append(doc.Robots, robot{ID: r.ID, Position: toVec(r.Pos), Velocity: toVec(r.Vel), HP: float64(r.HpX10) / 10, Shield: r.ShieldOn, Dead: r.Dead})
+		doc.Robots = append(doc.Robots, robot{ID: r.ID, Position: toVec(r.Pos), Velocity: toVec(r.Vel), HP: sim.FromX10(r.HpX10), Shield: r.ShieldOn, Dead: r.Dead})
 	}
 	for _, c := range obs.Cores {
 		if c.Alive {

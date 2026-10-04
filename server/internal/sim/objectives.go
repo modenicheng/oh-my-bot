@@ -1,11 +1,20 @@
 package sim
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+)
+
+// ErrMapRequired 与 ErrIdentityFrozen 供上层以 errors.Is 判别
+// 「地图缺失/对局已并进」这类无法恢复的装配期错误（S-18）；
+// 文案保持不变以免破坏依赖错误字符串的现有调用方。
+var (
+	ErrMapRequired    = errors.New("sim: map required before match start")
+	ErrIdentityFrozen = errors.New("sim: identity already set or match started")
 )
 
 func cloneMap(m *MapDef) *MapDef {
@@ -28,7 +37,7 @@ func cloneMap(m *MapDef) *MapDef {
 // spawn selection are transactional; caller mutation cannot affect the match.
 func (s *Sim) SetMap(def *MapDef) error {
 	if s.tick != 0 || def == nil {
-		return fmt.Errorf("sim: map required before match start")
+		return ErrMapRequired
 	}
 	m := cloneMap(def)
 	sort.Slice(m.Walls, func(i, j int) bool { return m.Walls[i].ID < m.Walls[j].ID })
@@ -295,7 +304,7 @@ func (s *Sim) stepHealthPacks() {
 			r.HP += heal
 			pack.ReadyAt = s.tick + HealthPackCooldown
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Heal{Heal: &ombv1.EvHeal{
-				By: r.ID, Id: pack.ID, HealX10: int32(math.Round(heal * 10)), At: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y},
+				By: r.ID, Id: pack.ID, HealX10: ToX10(heal), At: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y},
 			}}})
 			break
 		}

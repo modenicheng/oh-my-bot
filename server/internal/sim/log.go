@@ -137,7 +137,7 @@ func (l *MatchEventLog) SetPlayers(players []MatchPlayer) error {
 		return l.err
 	}
 	if l.players != nil || l.started {
-		return errors.New("sim: identity already set or match started")
+		return ErrIdentityFrozen
 	}
 	seen := make(map[uint32]bool, len(players))
 	for _, player := range players {

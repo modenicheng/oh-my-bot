@@ -122,6 +122,12 @@ type ProjView struct {
 	Color     string // 服务器权威射手颜色：射手离 AOI 后弹丸仍可自足着色（表现层专用）
 }
 
+// ToX10 / FromX10 是游戏单位（HP/能量/治疗量）与协议 x10 定点表示之间
+// 唯一的换算实现（S-16）。快照编码器中按截断语义量化的 progress 字段
+// （int32(x*10)）刻意不经此换算：四舍五入会改变已下发数值。
+func ToX10(v float64) int32   { return int32(math.Round(v * 10)) }
+func FromX10(v int32) float64 { return float64(v) / 10 }
+
 type CoreView struct {
 	ID    uint32
 	Pos   Vec2
