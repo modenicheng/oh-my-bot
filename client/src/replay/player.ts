@@ -10,6 +10,7 @@ import { artReady } from '../game/art'
 import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
 import { ReplayIndex, type ReplayFrame, phaseName, numOr } from './index'
+import { bindSpectateControls } from './spectate-controls'
 import { fmtClock, setText } from '../ui/dom'
 import { parseReplayNDJSONAsync, type ReplayData } from './model'
 import { ReplayRenderer } from './render'
@@ -34,7 +35,7 @@ export class ReplayPlayer {
   private renderer: ReplayRenderer | null = null
   private cam = new Camera()
   private spectator: SpectatorCamera | null = null
-  private drag: { id: number; x: number; y: number } | null = null
+  private disposeControls: (() => void) | null = null
   private raf = 0
   private disposed = false
 
@@ -185,72 +186,21 @@ export class ReplayPlayer {
   }
 
   private bindSpectatorEvents(): void {
-    const canvas = this.deps.canvas
-    const camera = this.spectator!
-    const signal = this.events.signal
-    const select = this.el['sp-follow'] as HTMLSelectElement | undefined
-    select?.addEventListener('change', () => {
-      camera.follow(select.value === '' ? null : Number(select.value))
-      this.drawFrame()
-    }, { signal })
-    this.el['sp-free']?.addEventListener('click', () => { camera.follow(null); this.drawFrame() }, { signal })
-    this.el['sp-fit']?.addEventListener('click', () => { camera.fit(); this.drawFrame() }, { signal })
-    this.el['sp-in']?.addEventListener('click', () => { camera.zoomAt(1.25); this.drawFrame() }, { signal })
-    this.el['sp-out']?.addEventListener('click', () => { camera.zoomAt(0.8); this.drawFrame() }, { signal })
-    canvas.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || !e.isPrimary || !this.index) return
-      canvas.focus({ preventScroll: true })
-      canvas.setPointerCapture(e.pointerId)
-      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }
-      canvas.classList.add('dragging')
-      e.preventDefault()
-    }, { signal })
-    canvas.addEventListener('pointermove', e => {
-      if (!this.drag || e.pointerId !== this.drag.id) return
-      const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y
-      if (dx === 0 && dy === 0) return
-      camera.pan(dx, dy)
-      this.drag.x = e.clientX; this.drag.y = e.clientY
-      this.drawFrame()
-    }, { signal })
-    const release = (e: PointerEvent) => { if (e.pointerId === this.drag?.id) this.endDrag() }
-    canvas.addEventListener('pointerup', release, { signal })
-    canvas.addEventListener('pointercancel', release, { signal })
-    canvas.addEventListener('lostpointercapture', release, { signal })
-    window.addEventListener('blur', () => this.endDrag(), { signal })
-    canvas.addEventListener('wheel', e => {
-      if (!this.index) return
-      e.preventDefault()
-      const rect = canvas.getBoundingClientRect()
-      const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1
-      camera.zoomAt(Math.exp(-Math.max(-400, Math.min(400, e.deltaY * units)) * 0.002), e.clientX - rect.left, e.clientY - rect.top)
-      this.drawFrame()
-    }, { signal, passive: false })
-    this.deps.root.addEventListener('keydown', e => {
-      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 'Escape') { e.preventDefault(); this.deps.onExit(); return }
-      if (e.target !== canvas || !this.index) return
-      switch (e.key) {
-        case 'ArrowLeft': camera.pan(48, 0); break
-        case 'ArrowRight': camera.pan(-48, 0); break
-        case 'ArrowUp': camera.pan(0, 48); break
-        case 'ArrowDown': camera.pan(0, -48); break
-        case '+': case '=': camera.zoomAt(1.25); break
-        case '-': case '_': camera.zoomAt(0.8); break
-        case 'Home': camera.fit(); break
-        case ' ': this.togglePlay(); break
-        default: return
-      }
-      e.preventDefault()
-      this.drawFrame()
-    }, { signal })
-  }
-
-  private endDrag(): void {
-    const id = this.drag?.id
-    this.drag = null
-    this.deps.canvas.classList.remove('dragging')
-    if (id !== undefined && this.deps.canvas.hasPointerCapture(id)) this.deps.canvas.releasePointerCapture(id)
+    // 与实况观战共用的滚轮/拖拽/键盘/按钮交互；Space 经 onSpace 切换播放。
+    this.disposeControls = bindSpectateControls({
+      root: this.deps.root,
+      canvas: this.deps.canvas,
+      camera: this.spectator!,
+      enabled: () => this.index !== null,
+      onExit: () => this.deps.onExit(),
+      follow: this.el['sp-follow'] as HTMLSelectElement | undefined,
+      free: this.el['sp-free'],
+      fit: this.el['sp-fit'],
+      zoomIn: this.el['sp-in'],
+      zoomOut: this.el['sp-out'],
+      onSpace: () => this.togglePlay(),
+      requestDraw: () => this.drawFrame(),
+    })
   }
 
   private onResize = (): void => {
@@ -516,7 +466,7 @@ export class ReplayPlayer {
     this.disposed = true
     this.pause()
     cancelAnimationFrame(this.raf)
-    this.endDrag()
+    this.disposeControls?.()
     this.events.abort()
     this.resizeObserver?.disconnect()
   }
