@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { sleep, until } from './harness.mjs'
 import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
 import { ServerMsgSchema, ClientMsgSchema } from '../../packages/protocol/src/index.ts'
@@ -16,12 +17,6 @@ const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-
 let browser
 const errors = []
 const base = `http://127.0.0.1:${port}`
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-async function until(fn, label, timeout = 10000) {
-  const end = Date.now() + timeout
-  while (Date.now() < end) { if (await fn()) return; await sleep(50) }
-  throw new Error(`Timed out: ${label}`)
-}
 try {
   await until(() => fetch(`${base}/healthz`).then(r => r.ok).catch(() => false), 'server')
   browser = await chromium.launch()

@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { sleep } from './harness.mjs'
 // Real-server acceptance for the optional built-in test opponents.
 import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
@@ -14,7 +15,6 @@ const shots = resolve(process.env.OMB_SHOTS || '../.artifacts/bots')
 mkdirSync(shots, { recursive: true })
 const base = 'http://127.0.0.1:18423'
 const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', '127.0.0.1:18423'], { cwd: work, stdio: 'ignore' })
-const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function until(fn, label, timeout = 15000) {
   const end = Date.now() + timeout
   while (Date.now() < end) { if (await fn()) return; await sleep(50) }

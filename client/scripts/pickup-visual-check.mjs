@@ -6,15 +6,15 @@
 // Real-server behavior is round2-check's job; this checks visuals only.
 // Prerequisite: pnpm build in client/. Screenshots: OMB_SHOTS || ../.artifacts/pickup
 import { startClient } from './startup-helpers.mjs'
+import { sleep, startStaticServer } from './harness.mjs'
 import { chromium } from 'playwright'
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema,
 } from '../../packages/protocol/src/index.ts'
-import http from 'node:http'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve, extname } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { WebSocketServer } from 'ws'
 import assert from 'node:assert/strict'
 
@@ -49,14 +49,6 @@ const MAP_JSON = JSON.stringify({
   health_packs: [{ id: 7, pos: { X: 2.2, Y: 0 } }],
   core_zone: { radius: 30, unlock_phase: 2 },
 })
-
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' }
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-async function until(fn, label, timeout = 10000) {
-  const end = Date.now() + timeout
-  while (Date.now() < end) { if (await fn()) return true; await sleep(50) }
-  throw new Error(`Timed out: ${label}`)
-}
 
 function freshState() {
   return {
@@ -143,17 +135,7 @@ class Fixture {
   }
 }
 
-function startHttp() {
-  const server = http.createServer((req, res) => {
-    let p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
-    if (p === '/' || !existsSync(join(DIST, p))) p = '/index.html'
-    const file = join(DIST, p)
-    if (!existsSync(file) || !file.startsWith(DIST)) { res.writeHead(404); res.end('not found'); return }
-    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' })
-    res.end(readFileSync(file))
-  })
-  return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)))
-}
+function startHttp() { return startStaticServer(PORT, DIST) }
 
 async function joinGame(page) {
   const errors = []
