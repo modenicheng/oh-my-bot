@@ -11,7 +11,6 @@ import (
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
-	"github.com/modenicheng/oh-my-bot/server/internal/script"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 	"github.com/modenicheng/oh-my-bot/server/internal/snapshot"
 )
@@ -345,13 +344,16 @@ func (ms *matchScripts) SubmitSource(playerID uint64, rev uint32, source string)
 	if !ok {
 		return 0, false, fmt.Errorf("player not in match")
 	}
-	rt := ms.m.scriptPool.RuntimeOf(rid)
+	rt := ms.m.scriptPool.Ensure(rid)
 	if rt == nil {
-		rt = script.NewGojaRuntime(script.Config{})
-		ms.m.scriptPool.Register(rid, rt)
-		ms.m.runtimes[rid] = rt
+		return 0, false, fmt.Errorf("match stopped")
 	}
 	newRev, accepted, err := rt.LoadIfRev(rev, source)
+	if err != nil && rt.Source() == "" && len(rt.Snippets()) == 0 {
+		// Ensure 刚建的空 VM 首次装载失败：注销，不留每帧产出 ErrNoModule 的
+		// 空转运行时。已有旧版本则保旧（Hot Swap 语义）。
+		ms.m.scriptPool.Unregister(rid)
+	}
 	if accepted {
 		ms.m.rc.scriptSource[playerID] = source
 		ms.m.sendScriptLogsLocked(rid, rt)

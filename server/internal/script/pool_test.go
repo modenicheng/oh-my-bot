@@ -258,6 +258,68 @@ func TestHotSwapDuringPool(t *testing.T) {
 
 // ---- Unregister / Close ----
 
+func TestPoolEnsureRegistersMissingRuntimeAndKeepsExisting(t *testing.T) {
+	p := NewRunPool(Config{PoolSize: 1})
+	defer p.Close()
+
+	// Missing id: Ensure creates and registers an empty runtime; the caller
+	// then loads into it (Ensure + Load is the assembly path).
+	rt := p.Ensure(11)
+	if rt == nil {
+		t.Fatal("Ensure returned nil for missing runtime")
+	}
+	if p.RuntimeOf(11) != rt {
+		t.Fatal("Ensure did not register the created runtime")
+	}
+	if err := rt.Load(`function tick(ctx){}`); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	// Existing id: Ensure returns the very same runtime.
+	if again := p.Ensure(11); again != rt {
+		t.Fatal("Ensure replaced an existing runtime")
+	}
+
+	// A failed first load must not leave an idle runtime registered.
+	bad := p.Ensure(12)
+	if err := bad.Load(`function tick(ctx){ syntax error(`); err == nil {
+		t.Fatal("bad source unexpectedly loaded")
+	}
+	p.Unregister(12)
+	if p.RuntimeOf(12) != nil {
+		t.Fatal("failed-load runtime stayed registered after Unregister")
+	}
+}
+
+func TestPoolEnsureAfterCloseReturnsNil(t *testing.T) {
+	p := NewRunPool(Config{PoolSize: 1})
+	p.Close()
+	if rt := p.Ensure(3); rt != nil {
+		t.Fatal("Ensure after Close must return nil")
+	}
+}
+
+func TestPoolIDsSortedSnapshot(t *testing.T) {
+	p := NewRunPool(Config{PoolSize: 1})
+	defer p.Close()
+	for _, id := range []uint32{42, 7, 30} {
+		p.Register(id, NewGojaRuntime(Config{}))
+	}
+	ids := p.IDs()
+	if len(ids) != 3 || ids[0] != 7 || ids[1] != 30 || ids[2] != 42 {
+		t.Fatalf("IDs not sorted ascending: %v", ids)
+	}
+	// Snapshot semantics: mutating the returned slice must not affect the pool.
+	ids[0] = 99
+	if got := p.IDs(); got[0] != 7 {
+		t.Fatalf("IDs leaked internal state: %v", got)
+	}
+	p.Unregister(7)
+	if got := p.IDs(); len(got) != 2 || got[0] != 30 {
+		t.Fatalf("IDs after Unregister: %v", got)
+	}
+}
+
 func TestPoolUnregisterAndNoSuchScript(t *testing.T) {
 	p := NewRunPool(Config{})
 	rt := NewGojaRuntime(Config{})

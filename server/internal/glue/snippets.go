@@ -100,14 +100,12 @@ func (m *Match) applySnippetsLocked(rid uint32, cfg []snippet.Setting) (uint32, 
 			return 0, fmt.Errorf("装载失败：%w", err)
 		}
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
 		return rt.Rev(), nil
 	}
 	if len(cfg) == 0 && rt.Source() == "" {
 		// snippet-only 清空：runtime 无存在意义，注销释放配额
 		//（v2 语义下无脚本结果自动各轴中立）。
 		m.scriptPool.Unregister(rid)
-		delete(m.runtimes, rid)
 		return 0, nil
 	}
 	if err := rt.LoadSnippets(cfg); err != nil {

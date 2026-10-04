@@ -138,8 +138,8 @@ func TestSoloBotsMatchControlsReplayAndScores(t *testing.T) {
 	if len(rc.identities) != 1 || len(rc.sessions) != 1 || rc.Room.StateBroadcast().RobotsOnline != 1 {
 		t.Fatal("synthetic bots leaked into membership or online count")
 	}
-	if len(m.runtimes) != 3 || len(m.sim.Snapshot().Robots) != 4 {
-		t.Fatal("bots not assembled")
+	if n := len(m.scriptPool.IDs()); n != 3 || len(m.sim.Snapshot().Robots) != 4 {
+		t.Fatalf("bots not assembled: %d runtimes", n)
 	}
 	for rid := range m.botRobots {
 		r, _ := m.sim.Robot(rid)
@@ -238,11 +238,24 @@ func TestSoloBotsCancelledAssemblyClosesRuntimes(t *testing.T) {
 	rc.launch.Store(a)
 	a.Abort()
 	(&launcherAdapter{rc}).publish(a, m)
+	// Snapshot the bot runtimes before teardown — pool Close empties its
+	// registry, so the pointers must be captured up front.
+	bots := make(map[uint32]*script.GojaRuntime, len(m.botRobots))
+	for rid := range m.botRobots {
+		bots[rid] = m.scriptPool.RuntimeOf(rid)
+	}
 	stopTestMatch(t, m)
 	if rc.currentMatch() != nil {
 		t.Fatal("cancelled bot match published")
 	}
-	for rid, rt := range m.runtimes {
+	// Pool Close reclaims every registered runtime; a closed VM rejects loads.
+	if len(bots) != 3 {
+		t.Fatalf("bots not assembled: %d runtimes", len(bots))
+	}
+	for rid, rt := range bots {
+		if rt == nil {
+			t.Fatalf("bot %d runtime vanished from pool before check", rid)
+		}
 		if err := rt.Load(soloBotSource(rid)); err != script.ErrClosed {
 			t.Fatalf("bot %d runtime not closed: %v", rid, err)
 		}

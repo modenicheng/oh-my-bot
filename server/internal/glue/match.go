@@ -49,7 +49,6 @@ type Match struct {
 	wallIX   *snapshot.WallIndex
 
 	scriptPool *script.RunPool
-	runtimes   map[uint32]*script.GojaRuntime // robotID -> runtime（脚本装载/热更）
 
 	robotOf      map[uint64]uint32 // playerID -> robotID
 	playerOf     map[uint32]uint64 // robotID -> playerID
@@ -186,7 +185,6 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
-	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
 	for rid := range m.botRobots {
 		rt := script.NewGojaRuntime(script.Config{})
@@ -199,7 +197,6 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 			return nil, fmt.Errorf("test bot %d: %w", rid, err)
 		}
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
 		m.sim.AssistToggle(rid)
 	}
 	// 玩家脚本和 assist 是房间身份状态：新局重新装配运行时，但不丢失
@@ -336,13 +333,16 @@ func (m *Match) submitScriptLocked(pid uint64, src string) (ok bool, errMsg stri
 	if !ok {
 		return false, "not in match", 0
 	}
-	rt := m.scriptPool.RuntimeOf(rid)
+	rt := m.scriptPool.Ensure(rid)
 	if rt == nil {
-		rt = script.NewGojaRuntime(script.Config{})
-		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
+		return false, "match stopped", 0
 	}
 	if err := rt.Load(src); err != nil {
+		if rt.Source() == "" && len(rt.Snippets()) == 0 {
+			// Ensure 刚建的空 VM 首次装载失败：注销，不留每帧产出 ErrNoModule
+			// 的空转运行时。已有旧版本则保旧（Hot Swap 语义）。
+			m.scriptPool.Unregister(rid)
+		}
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
 	m.rc.scriptSource[pid] = src
@@ -432,7 +432,6 @@ func (m *Match) applySavedPlayerScripts(players map[uint64]SessionInfo) {
 			continue
 		}
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
 	}
 }
 
@@ -728,12 +727,14 @@ func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 }
 
 // runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
+// 遍历注册表（scriptPool 是运行时唯一权威）；id 升序保证 Submit 顺序确定化。
 func (m *Match) runScripts(wv sim.WorldView) {
-	if len(m.runtimes) == 0 {
+	ids := m.scriptPool.IDs()
+	if len(ids) == 0 {
 		return
 	}
 	deadline := time.Now().Add(sim.FrameBudget)
-	for rid := range m.runtimes {
+	for _, rid := range ids {
 		self, ok := robotOf(wv, rid)
 		if !ok {
 			continue
@@ -742,7 +743,7 @@ func (m *Match) runScripts(wv sim.WorldView) {
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
-		rt := m.runtimes[res.ID]
+		rt := m.scriptPool.RuntimeOf(res.ID)
 		if res.Err != nil || res.Deferred {
 			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
 			if rt != nil && !res.Deferred {

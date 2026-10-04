@@ -63,3 +63,58 @@ func TestPlayerBotStateSurvivesMatchReplacementAndLeavesWithRoom(t *testing.T) {
 		t.Fatal("assist preference survived explicit room leave")
 	}
 }
+
+// A player whose first-ever script submit fails compilation must not leave a
+// registered empty runtime behind (it would tick as ErrNoModule forever).
+// A player with an already-loaded script keeps the old version on failure
+// (Hot Swap semantics).
+func TestFailedFirstScriptLoadLeavesNoRuntime(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("BADJS")
+	player, _ := bindLogged(t, h, rc, "pilot")
+	m := assembledTestMatch(t, rc, player)
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+	rid := m.robotOf[player.playerID]
+
+	// First submit with broken source: rejected, and no runtime registered.
+	rc.mu.Lock()
+	ok, errMsg, _ := m.submitScriptLocked(player.playerID, "function tick(ctx){ broken")
+	rc.mu.Unlock()
+	if ok || errMsg == "" {
+		t.Fatalf("broken first submit accepted: ok=%t err=%q", ok, errMsg)
+	}
+	if rt := m.scriptPool.RuntimeOf(rid); rt != nil {
+		t.Fatal("failed first load left an empty runtime registered")
+	}
+	if n := len(m.scriptPool.IDs()); n != 0 {
+		t.Fatalf("pool holds %d runtimes after failed first load", n)
+	}
+
+	// A valid submit then registers and runs normally.
+	rc.mu.Lock()
+	ok, errMsg, _ = m.submitScriptLocked(player.playerID, "function tick(bot){}")
+	rc.mu.Unlock()
+	if !ok || errMsg != "" {
+		t.Fatalf("valid submit rejected: ok=%t err=%q", ok, errMsg)
+	}
+	if m.scriptPool.RuntimeOf(rid) == nil {
+		t.Fatal("valid submit did not register a runtime")
+	}
+
+	// A later broken submit keeps the loaded version registered (Hot Swap).
+	rc.mu.Lock()
+	ok, errMsg, _ = m.submitScriptLocked(player.playerID, "function tick(ctx){ still broken")
+	rc.mu.Unlock()
+	if ok || errMsg == "" {
+		t.Fatalf("broken resubmit accepted: ok=%t err=%q", ok, errMsg)
+	}
+	if m.scriptPool.RuntimeOf(rid) == nil {
+		t.Fatal("broken resubmit dropped the loaded runtime (must keep old version)")
+	}
+	m.step() // must not panic and must keep the runtime alive.
+	if m.scriptPool.RuntimeOf(rid) == nil {
+		t.Fatal("runtime dropped after step")
+	}
+}
