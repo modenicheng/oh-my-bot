@@ -528,4 +528,3 @@ function extractMapJson(data: ReplayData): string | null {
   const rec = data.records.find((r) => r.state?.mapJson)
   return rec?.state?.mapJson ?? null
 }
-

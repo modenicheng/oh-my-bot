@@ -408,4 +408,3 @@ function nearestUplink(map: MapDefParsed, phase: number, x: number, y: number): 
   }
   return best
 }
-
