@@ -1,30 +1,27 @@
 package ai
 
 import (
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/modenicheng/oh-my-bot/server/internal/botapi"
 )
 
-// Bot Script API 漂移对拍（审计 X-1/D1）：AI system prompt 的类型摘要
-// （provider_prompt.go botAPITypes 手抄镜像）必须覆盖 @omb/bot-api 声明的
-// 全部可调用方法，防止 AI 助手建议不存在的 API 或漏掉新增 API。
+// Bot Script API 漂移对拍（审计 X-1）：AI system prompt 的类型摘要不再
+// 手抄，而是内嵌 internal/botapi 的权威源副本。本测试双保险：
+//   1. prompt 必须逐段包含权威源全文（防摘要被截断/手改）；
+//   2. 权威源声明的全部可调用方法必须在 prompt 文本中出现。
+//
 // 与 script/bot_api_drift_test.go（goja 绑定对拍）、
 // client/src/workbench/bot-api-drift.test.ts（补全表对拍）三侧互钉。
-
-const botApiPath = "../../../packages/bot-api/src/index.ts"
 
 var botApiMethodPat = regexp.MustCompile(`(?m)^\s{2}(?:readonly\s+)?([A-Za-z_$][\w$]*)\s*\(`)
 
 func botApiCallables(t *testing.T) []string {
 	t.Helper()
-	raw, err := os.ReadFile(botApiPath)
-	if err != nil {
-		t.Skipf("bot-api source not readable: %v", err)
-	}
-	src := string(raw)
+	src := botapi.Source
 	seen := map[string]bool{}
 	for _, name := range []string{"L0", "L1", "BotContext"} {
 		body := interfaceBody(src, name)
@@ -69,8 +66,9 @@ func interfaceBody(src, name string) string {
 	return ""
 }
 
+// TestSystemPromptCoversBotApiMethods 权威源每个可调用方法都在 prompt 中。
 func TestSystemPromptCoversBotApiMethods(t *testing.T) {
-	prompt := systemInstruction() + botAPITypes()
+	prompt := systemInstruction()
 	var missing []string
 	for _, name := range botApiCallables(t) {
 		if !strings.Contains(prompt, name+"(") {
@@ -78,6 +76,28 @@ func TestSystemPromptCoversBotApiMethods(t *testing.T) {
 		}
 	}
 	if len(missing) > 0 {
-		t.Fatalf("AI system prompt missing bot-api methods %v — update provider_prompt.go botAPITypes mirror", missing)
+		t.Fatalf("AI system prompt missing bot-api methods %v", missing)
+	}
+}
+
+// TestSystemPromptEmbedsAuthoritativeSource prompt 的 API 段必须包含
+// 权威源全文（注释剥离后）。手抄摘要回归（如重新引入镜像表）在此失败。
+func TestSystemPromptEmbedsAuthoritativeSource(t *testing.T) {
+	prompt := systemInstruction()
+	for _, line := range strings.Split(botapi.Source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if i := strings.Index(line, " //"); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		trimmed = strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.Contains(prompt, trimmed) {
+			t.Fatalf("system prompt API 段缺权威源行: %q\n（prompt 应内嵌 botapi.Source；勿手抄镜像）", trimmed)
+		}
 	}
 }

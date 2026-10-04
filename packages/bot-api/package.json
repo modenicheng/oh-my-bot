@@ -9,6 +9,9 @@
     ".": "./src/index.ts",
     "./runtime": "./src/runtime.ts"
   },
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "gen": "node scripts/gen.mjs",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": { "typescript": "^5.8.0" }
 }
