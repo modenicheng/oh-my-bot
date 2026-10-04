@@ -284,15 +284,16 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 // executable JavaScript from the owner editor model. Missing or unknown language
 // values use JavaScript compatibility semantics.
 func normalizeScriptEditorSource(sub *ombv1.ScriptSubmit) (string, ombv1.ScriptLanguage) {
-	language := sub.GetLanguage()
-	if language != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS {
-		language = ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS
+	if sub.GetLanguage() != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS {
+		// JavaScript has one source of truth: version exactly what the runtime
+		// loaded, ignoring a mismatched optional editor_source.
+		return sub.GetSource(), ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS
 	}
 	editorSource := sub.GetSource()
 	if sub.EditorSource != nil {
 		editorSource = sub.GetEditorSource()
 	}
-	return editorSource, language
+	return editorSource, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS
 }
 
 func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {

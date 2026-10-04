@@ -189,6 +189,63 @@ func TestManualThenAIThenRollbackPreservesChain(t *testing.T) {
 	}
 }
 
+// TypeScript 版本分别保存编辑器原文与可执行 JavaScript。
+func TestManualTypeScriptVersionRollsBackEditorAndRuntimeSources(t *testing.T) {
+	h := NewHub()
+	rc := h.EnsureRoom("TS-VER")
+	p, log := bindLogged(t, h, rc, "pilot")
+	m := assembledTestMatch(t, rc, p)
+	rc.mu.Lock()
+	rc.match = m
+	rc.mu.Unlock()
+
+	runtimeJS := "function tick(bot) { bot.move(1, 0) }"
+	editorTS := "export function tick(bot: BotContext) { bot.move(1, 0) }"
+	ts := ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS
+	p.SubmitScript(&ombv1.ScriptSubmit{ClientScriptId: 1, Source: runtimeJS, EditorSource: &editorTS, Language: &ts})
+	waitForCondition(t, "TypeScript version recorded", func() bool {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		return rc.scriptVersions[p.playerID] != nil && len(rc.scriptVersions[p.playerID].versions) == 1
+	})
+	log.take()
+
+	rc.mu.Lock()
+	first := rc.scriptVersions[p.playerID].versions[0]
+	view := rc.scriptVersions[p.playerID].toProto().Versions[0]
+	rc.mu.Unlock()
+	if first.runtimeSource != runtimeJS || first.editorSource != editorTS || first.language != ts {
+		t.Fatalf("stored TypeScript version = %+v", first)
+	}
+	if view.GetSource() != editorTS || view.GetLanguage() != ts {
+		t.Fatalf("TypeScript owner view = %+v", view)
+	}
+
+	p.SubmitScript(&ombv1.ScriptSubmit{ClientScriptId: 2, Source: "function tick(bot) { bot.move(0, 1) }"})
+	waitForCondition(t, "newer JavaScript version recorded", func() bool {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		return len(rc.scriptVersions[p.playerID].versions) == 2
+	})
+	log.take()
+	p.ScriptRollback(&ombv1.ScriptRollback{VersionId: first.id})
+	waitForCondition(t, "TypeScript rollback recorded", func() bool {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		return len(rc.scriptVersions[p.playerID].versions) == 3
+	})
+
+	result := onlyRollbackResult(t, log.take())
+	if !result.GetOk() || result.GetSource() != editorTS || result.GetLanguage() != ts {
+		t.Fatalf("TypeScript rollback result = %+v", result)
+	}
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if got := m.scriptPool.RuntimeOf(m.robotOf[p.playerID]).Source(); got != runtimeJS {
+		t.Fatalf("runtime after TypeScript rollback = %q want %q", got, runtimeJS)
+	}
+}
+
 // 编译失败保旧：AI 产出坏脚本 → 无新版本、无 ScriptResult、现役脚本与当前指针不动。
 func TestAICompileFailureKeepsOldCodeAndVersion(t *testing.T) {
 	h := NewHub()
