@@ -24,7 +24,9 @@ const DIST = join(CLIENT_DIR, 'dist')
 const SHOTS = resolve(process.env.OMB_SHOTS || '../.artifacts/pickup')
 
 const CS_HUMAN = 1
-const PHASE_OUTER = 1
+// 本脚本只验收血包美术；使用核心区已开放阶段，避免 X-9 锁区雾
+// 正确遮黑原点附近 fixture 后把“不可见”误判成血包渲染失败。
+const PHASE_CORE_OPEN = 2
 const R_PLAYING = 2
 const SELF_ID = 101
 const PACK_POS = { x: 2.2, y: 0 }
@@ -37,7 +39,7 @@ const MAP_JSON = gen2MapJson('pickup01')
 
 function freshState() {
   return {
-    tick: 600, phase: PHASE_OUTER, timeLeftS: 480,
+    tick: 600, phase: PHASE_CORE_OPEN, timeLeftS: 480,
     robots: [
       { base: { id: SELF_ID, pos: { x: 0, y: 0 }, heading: 0 }, hpX10: 550, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'medic', color: '#22d3ee' },
     ],
