@@ -3,6 +3,7 @@ package sim
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -74,12 +75,18 @@ func TestInputRecordProtoJSONGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 键序为 protojson 的字段号序（seq..axis_mask）；JSON 对象键序对读者无语义，
-	// 字段名与旧 tag 逐字相同才是兼容面。与客户端 golden.test.ts 断言同一行。
-	got := string(data)
-	want := `{"seq":42, "move_x":500, "move_y":-500, "fire":true, "aim":1.5, "dash":true, "shield":true, "interact":true, "axis_mask":5}`
-	if got != want {
-		t.Fatalf("input protojson:\n got %s\nwant %s", got, want)
+	// JSON 空白与对象键序没有协议语义；只钉住字段集合、字段名和值。
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"seq": float64(42), "move_x": float64(500), "move_y": float64(-500),
+		"fire": true, "aim": 1.5, "dash": true, "shield": true,
+		"interact": true, "axis_mask": float64(5),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("input protojson shape:\n got %#v\nwant %#v", got, want)
 	}
 	back, err := decodeInputJSON(data)
 	if err != nil || *back != input {
