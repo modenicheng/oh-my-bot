@@ -291,7 +291,7 @@ func (m *Match) handleAgentResult(sess *Session, pid uint64, outcome ai.HandleOu
 			// ScriptResult 先于版本链快照推送：客户端先终结 AI 面板 pending、
 			// 落 Editor loaded 基线，再由版本链快照触发直填（携带完整源码）。
 			originAI := ombv1.ScriptOrigin_ORIGIN_AI
-			versionID := m.recordScriptVersionLocked(pid, newRev, originAI, outcome.Result.NewScript)
+			versionID := m.recordScriptVersionLocked(pid, newRev, originAI, outcome.Result.NewScript, outcome.Result.NewScript, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 			sess.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 				Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{
 					ClientScriptId: aiClientScriptID, Ok: true, ScriptRev: newRev,

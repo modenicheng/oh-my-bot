@@ -8,8 +8,8 @@ import {
   SimTuningSchema, EvControlNoticeSchema, EvControlNotice_Code,
   EvMapBootstrapSchema, TransportTiming,
   ReplaySchemaVersion, ReplayRecordType, ReplayVisualVersion,
-  ScriptOrigin, EvScriptVersionSchema, EvScriptVersionsSchema,
-  EvScriptRollbackResultSchema, ScriptRollbackSchema, EvScriptResultSchema,
+  ScriptOrigin, EvScriptVersionSchema, EvScriptVersionsSchema, ScriptLanguage,
+  EvScriptRollbackResultSchema, ScriptRollbackSchema, EvScriptResultSchema, ScriptSubmitSchema,
   type ClientMsg, type SnapshotDelta, type EvControlNotice,
 } from '../src/gen/proto/omb_pb'
 import { encodeClient, decodeServer, frame, JOIN_FAILED_PREFIX, joinFailedReason, controlNotice, joinRejection, dedupeControlNoticeSay } from '../src/messages'
@@ -219,11 +219,15 @@ describe('EvControlNotice (X-4)', () => {
 // ---- 脚本版本链（AI 直填 + 版本回退）：枚举编号、消息往返、ClientMsg 挂载 ----
 
 describe('script versions (AI apply + rollback)', () => {
-  it('ScriptOrigin / 新 notice 枚举值与 omb.proto 权威源互钉', () => {
+  it('ScriptOrigin / ScriptLanguage / 新 notice 枚举值与 omb.proto 权威源互钉', () => {
     expect(ScriptOrigin.SCRIPT_ORIGIN_UNSPECIFIED).toBe(0)
     expect(ScriptOrigin.ORIGIN_MANUAL).toBe(1)
     expect(ScriptOrigin.ORIGIN_AI).toBe(2)
     expect(ScriptOrigin.ORIGIN_ROLLBACK).toBe(3)
+    expect(ScriptLanguage.UNSPECIFIED).toBe(0)
+    expect(ScriptLanguage.JS).toBe(1)
+    expect(ScriptLanguage.TS).toBe(2)
+    // protoc-gen-es 剥公共前缀生成短名（与 ScriptOrigin 一致）；Go 侧断言全名值。
   })
 
   it('EvScriptVersions 携带升序版本链与 current 指针，源码 owner-only 全量回传', () => {
@@ -240,6 +244,19 @@ describe('script versions (AI apply + rollback)', () => {
     expect(back.versions[1].source).toContain('bot.say')
   })
 
+  it('版本语言字段向后兼容：旧服务器缺省可探测，新服务器携带 JS/TS', () => {
+    const legacy = fromBinary(EvScriptVersionsSchema, toBinary(EvScriptVersionsSchema, create(EvScriptVersionsSchema, {
+      versions: [create(EvScriptVersionSchema, { id: 1, scriptRev: 3, origin: ScriptOrigin.ORIGIN_MANUAL, wallMs: 1000, source: 'js' })],
+      currentId: 1,
+    })))
+    expect(legacy.versions[0].language).toBeUndefined() // 旧服务器：客户端按 JS 处理
+    const fresh = fromBinary(EvScriptVersionsSchema, toBinary(EvScriptVersionsSchema, create(EvScriptVersionsSchema, {
+      versions: [create(EvScriptVersionSchema, { id: 1, scriptRev: 3, origin: ScriptOrigin.ORIGIN_MANUAL, wallMs: 1000, source: 'let x: number = 1', language: ScriptLanguage.TS })],
+      currentId: 1,
+    })))
+    expect(fresh.versions[0].language).toBe(ScriptLanguage.TS)
+  })
+
   it('ScriptRollback 上行挂在 ClientMsg.script_rollback = 13；EvScriptRollbackResult 往返', () => {
     const msg = create(ClientMsgSchema, {
       payload: { case: 'scriptRollback', value: create(ScriptRollbackSchema, { versionId: 7 }) },
@@ -249,11 +266,36 @@ describe('script versions (AI apply + rollback)', () => {
     expect(back.payload.value.versionId).toBe(7)
 
     const result = create(EvScriptRollbackResultSchema, {
-      ok: true, versionId: 7, scriptRev: 9, source: 'function tick(bot) {}',
+      ok: true, versionId: 7, scriptRev: 9, source: 'function tick(bot) {}', language: ScriptLanguage.TS,
     })
     const backResult = fromBinary(EvScriptRollbackResultSchema, toBinary(EvScriptRollbackResultSchema, result))
     expect(backResult).toMatchObject({ ok: true, versionId: 7, scriptRev: 9 })
     expect(backResult.source).toContain('tick')
+    expect(backResult.language).toBe(ScriptLanguage.TS)
+    // 旧服务器：无 language 字段，客户端按 JS 回退
+    const legacyResult = fromBinary(EvScriptRollbackResultSchema, toBinary(EvScriptRollbackResultSchema, create(EvScriptRollbackResultSchema, { ok: true, versionId: 7, scriptRev: 9, source: 'js' })))
+    expect(legacyResult.language).toBeUndefined()
+  })
+
+  it('ScriptSubmit 携带运行源码 + TS 提交的编辑器原文与语言（往返）', () => {
+    const msg = create(ClientMsgSchema, {
+      payload: { case: 'scriptSubmit', value: create(ScriptSubmitSchema, {
+        clientScriptId: 3, source: 'function tick(bot) {}',
+        editorSource: 'export function tick(bot: BotContext) {}', language: ScriptLanguage.TS,
+      }) },
+    })
+    const back = fromBinary(ClientMsgSchema, toBinary(ClientMsgSchema, msg))
+    if (back.payload.case !== 'scriptSubmit') throw new Error(`case ${back.payload.case}`)
+    expect(back.payload.value.source).toBe('function tick(bot) {}')
+    expect(back.payload.value.editorSource).toBe('export function tick(bot: BotContext) {}')
+    expect(back.payload.value.language).toBe(ScriptLanguage.TS)
+    // 旧客户端兼容：仅 source + id，新字段缺省
+    const legacy = fromBinary(ClientMsgSchema, toBinary(ClientMsgSchema, create(ClientMsgSchema, {
+      payload: { case: 'scriptSubmit', value: create(ScriptSubmitSchema, { clientScriptId: 3, source: 'js' }) },
+    })))
+    if (legacy.payload.case !== 'scriptSubmit') throw new Error('case')
+    expect(legacy.payload.value.editorSource).toBeUndefined()
+    expect(legacy.payload.value.language).toBeUndefined()
   })
 
   it('EvScriptResult 可选 origin/versionId 向后兼容：旧字段缺省可探测', () => {

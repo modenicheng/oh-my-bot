@@ -208,7 +208,7 @@ func TestAICompileFailureKeepsOldCodeAndVersion(t *testing.T) {
 	if _, _, rev := m.submitScriptLocked(p.playerID, manual); rev == 0 {
 		t.Fatal("manual submit failed")
 	}
-	m.recordScriptVersionLocked(p.playerID, 1, ombv1.ScriptOrigin_ORIGIN_MANUAL, manual)
+	m.recordScriptVersionLocked(p.playerID, 1, ombv1.ScriptOrigin_ORIGIN_MANUAL, manual, manual, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	m.bootstrapLocked(p)
 	rc.mu.Unlock()
 	log.take()
@@ -251,9 +251,9 @@ func TestRollbackCompileFailureKeepsCurrent(t *testing.T) {
 	rc.mu.Lock()
 	rc.match = m
 	_, _, rev := m.submitScriptLocked(p.playerID, current)
-	id := m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, current)
+	id := m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, current, current, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	// 直接注入坏历史版本（模拟坏源码入库；真实路径 SubmitScript 会拒绝）。
-	m.rc.scriptVersions[p.playerID].append(rev, ombv1.ScriptOrigin_ORIGIN_AI, 1, "broken {")
+	m.rc.scriptVersions[p.playerID].append(rev, ombv1.ScriptOrigin_ORIGIN_AI, 1, "broken {", "broken {", ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	badID := id + 1
 	m.bootstrapLocked(p)
 	rc.mu.Unlock()
@@ -299,7 +299,7 @@ func TestVersionHistorySurvivesMatchReplacementAndReconnect(t *testing.T) {
 	rc.mu.Lock()
 	rc.match = m1
 	_, _, rev := m1.submitScriptLocked(p.playerID, manual)
-	m1.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, manual)
+	m1.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, manual, manual, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	rc.mu.Unlock()
 	stopTestMatch(t, m1)
 
@@ -382,12 +382,12 @@ func TestVersionIsolationBetweenPlayersAndSpectators(t *testing.T) {
 	rc.mu.Lock()
 	rc.match = m
 	_, _, rev := m.submitScriptLocked(owner.playerID, source)
-	m.recordScriptVersionLocked(owner.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, source)
+	m.recordScriptVersionLocked(owner.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, source, source, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	_, _, rev2 := m.submitScriptLocked(owner.playerID, source+" ")
 	// ownerOnlyVersion = owner 链中存在、peer 链中不存在的 id（id 按链独立编号）。
-	ownerOnlyVersion := m.recordScriptVersionLocked(owner.playerID, rev2, ombv1.ScriptOrigin_ORIGIN_MANUAL, source+" ")
+	ownerOnlyVersion := m.recordScriptVersionLocked(owner.playerID, rev2, ombv1.ScriptOrigin_ORIGIN_MANUAL, source+" ", source+" ", ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	_, _, peerRev := m.submitScriptLocked(peer.playerID, source)
-	m.recordScriptVersionLocked(peer.playerID, peerRev, ombv1.ScriptOrigin_ORIGIN_MANUAL, source)
+	m.recordScriptVersionLocked(peer.playerID, peerRev, ombv1.ScriptOrigin_ORIGIN_MANUAL, source, source, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	m.bootstrapLocked(owner)
 	m.bootstrapLocked(peer)
 	rc.mu.Unlock()
@@ -449,7 +449,7 @@ func TestVersionHistoryIsBounded(t *testing.T) {
 	defer rc.mu.Unlock()
 	for i := 0; i < maxScriptVersions+3; i++ {
 		_, _, rev := m.submitScriptLocked(p.playerID, "function tick(bot) { bot.move(1, 0) }")
-		m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, "function tick(bot) { bot.move(1, 0) }")
+		m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, "function tick(bot) { bot.move(1, 0) }", "function tick(bot) { bot.move(1, 0) }", ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	}
 	chain := rc.scriptVersions[p.playerID]
 	if len(chain.versions) != maxScriptVersions {
@@ -536,7 +536,7 @@ func TestLeaveRoomClearsVersionHistory(t *testing.T) {
 	rc.mu.Lock()
 	rc.match = m
 	_, _, rev := m.submitScriptLocked(p.playerID, "function tick(bot) { bot.move(1, 0) }")
-	m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, "function tick(bot) { bot.move(1, 0) }")
+	m.recordScriptVersionLocked(p.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, "function tick(bot) { bot.move(1, 0) }", "function tick(bot) { bot.move(1, 0) }", ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 	rc.mu.Unlock()
 	p.LeaveRoom()
 	rc.mu.Lock()

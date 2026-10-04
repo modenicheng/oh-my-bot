@@ -279,6 +279,22 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 		rc.broadcastRoomStateLocked()
 	})
 }
+
+// normalizeScriptEditorSource preserves legacy submissions while separating
+// executable JavaScript from the owner editor model. Missing or unknown language
+// values use JavaScript compatibility semantics.
+func normalizeScriptEditorSource(sub *ombv1.ScriptSubmit) (string, ombv1.ScriptLanguage) {
+	language := sub.GetLanguage()
+	if language != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS {
+		language = ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS
+	}
+	editorSource := sub.GetSource()
+	if sub.EditorSource != nil {
+		editorSource = sub.GetEditorSource()
+	}
+	return editorSource, language
+}
+
 func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 	if sub == nil {
 		return
@@ -288,12 +304,15 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 		if m == nil || !m.activeLocked() {
 			return
 		}
-		ok, errMsg, rev := m.submitScriptLocked(s.playerID, sub.GetSource())
+		runtimeSource := sub.GetSource()
+		editorSource, language := normalizeScriptEditorSource(sub)
+		ok, errMsg, rev := m.submitScriptLocked(s.playerID, runtimeSource)
 		var versionID uint32
 		if ok {
 			// 版本记录（不推送）：ScriptResult 回执先发，版本链快照随后，
-			// 客户端按固定顺序消费（回执 → 版本链）。
-			versionID = m.recordScriptVersionLocked(s.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, sub.GetSource())
+			// 客户端按固定顺序消费（回执 → 版本链）。运行时始终装载 JS，
+			// 版本链另存编辑器源码与语言供 owner 恢复 JS/TS 模型。
+			versionID = m.recordScriptVersionLocked(s.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, runtimeSource, editorSource, language)
 		}
 		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev, VersionId: &versionID}}}}})
 		if ok {

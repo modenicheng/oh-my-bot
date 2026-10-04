@@ -25,13 +25,18 @@ import (
 // 32 条 × 平均 8 KiB 源码 ≈ 256 KiB/玩家 上界，房间 64 人时 <16 MiB。
 const maxScriptVersions = 32
 
-// scriptVersion 单条版本记录（房间身份状态，不可变；source 为玩家提交原文）。
+// scriptVersion 单条版本记录（房间身份状态，不可变）。
+// runtimeSource：服务器执行用的 JavaScript（手动 JS = 编辑器原文；手动 TS =
+// 浏览器编译产物；AI 产出恒为 JavaScript）。回退用它重新装载运行时。
+// editorSource + language：owner 客户端恢复编辑器用（TS 版 = TS 原文）。
 type scriptVersion struct {
-	id     uint32
-	rev    uint32 // 该版本装载后的 runtime rev（回显用；与当前 match 的 rev 无跨局对应关系）
-	origin ombv1.ScriptOrigin
-	wallMs int64
-	source string
+	id            uint32
+	rev           uint32 // 该版本装载后的 runtime rev（回显用；与当前 match 的 rev 无跨局对应关系）
+	origin        ombv1.ScriptOrigin
+	wallMs        int64
+	runtimeSource string
+	editorSource  string
+	language      ombv1.ScriptLanguage
 }
 
 // scriptVersionChain 单玩家版本链：append-only + 当前指针（恒为链尾）+ 房间内
@@ -44,13 +49,14 @@ type scriptVersionChain struct {
 
 // append 记录一个成功落地的版本并前移当前指针；超出上限淘汰最旧版本。
 // 返回新版本 id。调用方持 rc.mu。
-func (c *scriptVersionChain) append(rev uint32, origin ombv1.ScriptOrigin, wallMs int64, source string) uint32 {
+func (c *scriptVersionChain) append(rev uint32, origin ombv1.ScriptOrigin, wallMs int64, runtimeSource, editorSource string, language ombv1.ScriptLanguage) uint32 {
 	if c.nextID == 0 {
 		c.nextID = 1
 	}
 	id := c.nextID
 	c.nextID++
-	c.versions = append(c.versions, scriptVersion{id: id, rev: rev, origin: origin, wallMs: wallMs, source: source})
+	c.versions = append(c.versions, scriptVersion{id: id, rev: rev, origin: origin, wallMs: wallMs,
+		runtimeSource: runtimeSource, editorSource: editorSource, language: language})
 	if len(c.versions) > maxScriptVersions {
 		c.versions = c.versions[len(c.versions)-maxScriptVersions:]
 	}
@@ -68,13 +74,19 @@ func (c *scriptVersionChain) byID(id uint32) (scriptVersion, bool) {
 	return scriptVersion{}, false
 }
 
-// toProto 转协议视图（升序旧 → 新）。
+// toProto 转协议视图（升序旧 → 新）。source 为编辑器恢复源码；language 仅在
+// 非 JS 时携带（JS 走缺省，旧客户端零成本兼容）。
 func (c *scriptVersionChain) toProto() *ombv1.EvScriptVersions {
 	out := &ombv1.EvScriptVersions{CurrentId: c.current, Versions: make([]*ombv1.EvScriptVersion, 0, len(c.versions))}
 	for _, v := range c.versions {
-		out.Versions = append(out.Versions, &ombv1.EvScriptVersion{
-			Id: v.id, ScriptRev: v.rev, Origin: v.origin, WallMs: uint64(v.wallMs), Source: v.source,
-		})
+		ev := &ombv1.EvScriptVersion{
+			Id: v.id, ScriptRev: v.rev, Origin: v.origin, WallMs: uint64(v.wallMs), Source: v.editorSource,
+		}
+		if v.language != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS {
+			lang := v.language
+			ev.Language = &lang
+		}
+		out.Versions = append(out.Versions, ev)
 	}
 	return out
 }
@@ -84,15 +96,16 @@ var nowWallMs = func() int64 { return time.Now().UnixMilli() }
 
 // recordScriptVersionLocked 记录一个成功落地的版本（不推送——调用方先发
 // 各自的回执消息，再显式 pushScriptVersionsLocked，保证客户端看到
-// 「回执 → 版本链快照」的固定顺序）。
+// 「回执 → 版本链快照」的固定顺序）。runtimeSource = 服务器执行的 JS；
+// editorSource/language = owner 编辑器恢复语义。
 // 调用方持 rc.mu。
-func (m *Match) recordScriptVersionLocked(pid uint64, rev uint32, origin ombv1.ScriptOrigin, source string) uint32 {
+func (m *Match) recordScriptVersionLocked(pid uint64, rev uint32, origin ombv1.ScriptOrigin, runtimeSource, editorSource string, language ombv1.ScriptLanguage) uint32 {
 	chain := m.rc.scriptVersions[pid]
 	if chain == nil {
 		chain = &scriptVersionChain{}
 		m.rc.scriptVersions[pid] = chain
 	}
-	return chain.append(rev, origin, nowWallMs(), source)
+	return chain.append(rev, origin, nowWallMs(), runtimeSource, editorSource, language)
 }
 
 // pushScriptVersionsLocked 定向下发该玩家版本链快照（owner-only，不广播）。
@@ -123,9 +136,10 @@ func (rc *RoomConn) sendScriptVersionsStateLocked(pid uint64) {
 	}}})
 }
 
-// rollbackScriptLocked 处理版本回退：定位版本 → 以当前 snippet 配置装载 →
-// 成功则记录回退版本（新 id，来源 ROLLBACK，源码同回退目标）并更新房间
-// scriptSource；失败保旧（现役脚本与当前版本指针均不动）。
+// rollbackScriptLocked 处理版本回退：定位版本 → 以当前 snippet 配置装载该版本
+// 的 runtimeSource（服务器执行 JS；手动 TS 版 = 存库的编译产物）→ 成功则记录
+// 回退版本（新 id，来源 ROLLBACK，编辑器语义同回退目标）并更新房间 scriptSource；
+// 失败保旧（现役脚本与当前版本指针均不动）。回执携带编辑器恢复源码 + 语言。
 // 仅房间玩家可达（withRoom 结构性隔离观战者）；版本链按玩家隔离，他人版本
 // id 天然查不到（not found）。
 func (m *Match) rollbackScriptLocked(pid uint64, versionID uint32) {
@@ -135,33 +149,33 @@ func (m *Match) rollbackScriptLocked(pid uint64, versionID uint32) {
 	}
 	chain := m.rc.scriptVersions[pid]
 	if chain == nil {
-		m.sendRollbackResultLocked(sess, false, "版本不存在或已被淘汰（历史仅保留最近 32 个版本）", 0, 0, "")
+		m.sendRollbackResultLocked(sess, false, "版本不存在或已被淘汰（历史仅保留最近 32 个版本）", 0, 0, "", nil)
 		return
 	}
 	target, ok := chain.byID(versionID)
 	if !ok {
-		m.sendRollbackResultLocked(sess, false, "版本不存在或已被淘汰（历史仅保留最近 32 个版本）", 0, 0, "")
+		m.sendRollbackResultLocked(sess, false, "版本不存在或已被淘汰（历史仅保留最近 32 个版本）", 0, 0, "", nil)
 		return
 	}
 	if _, inMatch := m.robotOf[pid]; !inMatch {
-		m.sendRollbackResultLocked(sess, false, "当前不在对局中，无法回退", chain.current, 0, "")
+		m.sendRollbackResultLocked(sess, false, "当前不在对局中，无法回退", chain.current, 0, "", nil)
 		return
 	}
-	rollbackOk, rollbackErrMsg, newRev := m.submitScriptLocked(pid, target.source)
+	rollbackOk, rollbackErrMsg, newRev := m.submitScriptLocked(pid, target.runtimeSource)
 	if !rollbackOk {
 		// 编译失败保旧：现役脚本、当前版本指针、编辑器均不动。
-		m.sendRollbackResultLocked(sess, false, "回退目标编译失败，已保留当前脚本："+rollbackErrMsg, chain.current, m.currentScriptRevLocked(pid), "")
+		m.sendRollbackResultLocked(sess, false, "回退目标编译失败，已保留当前脚本："+rollbackErrMsg, chain.current, m.currentScriptRevLocked(pid), "", nil)
 		return
 	}
-	newVersionID := m.recordScriptVersionLocked(pid, newRev, ombv1.ScriptOrigin_ORIGIN_ROLLBACK, target.source)
-	m.sendRollbackResultLocked(sess, true, "", newVersionID, newRev, target.source)
+	newVersionID := m.recordScriptVersionLocked(pid, newRev, ombv1.ScriptOrigin_ORIGIN_ROLLBACK, target.runtimeSource, target.editorSource, target.language)
+	m.sendRollbackResultLocked(sess, true, "", newVersionID, newRev, target.editorSource, &target.language)
 	m.pushScriptVersionsLocked(pid)
 }
 
-func (m *Match) sendRollbackResultLocked(sess *Session, ok bool, errMsg string, versionID, rev uint32, source string) {
+func (m *Match) sendRollbackResultLocked(sess *Session, ok bool, errMsg string, versionID, rev uint32, source string, language *ombv1.ScriptLanguage) {
 	sess.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 		Kind: &ombv1.ServerEvent_ScriptRollbackResult{ScriptRollbackResult: &ombv1.EvScriptRollbackResult{
-			Ok: ok, Error: errMsg, VersionId: versionID, ScriptRev: rev, Source: source,
+			Ok: ok, Error: errMsg, VersionId: versionID, ScriptRev: rev, Source: source, Language: language,
 		}},
 	}}})
 }

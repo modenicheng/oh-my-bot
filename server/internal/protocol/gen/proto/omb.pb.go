@@ -177,6 +177,56 @@ func (ScriptOrigin) EnumDescriptor() ([]byte, []int) {
 	return file_proto_omb_proto_rawDescGZIP(), []int{2}
 }
 
+// 脚本编辑语言（版本链/回退的编辑器恢复语义；服务器 runtime 恒为 JavaScript）。
+type ScriptLanguage int32
+
+const (
+	ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED ScriptLanguage = 0 // 兼容缺省：按 SCRIPT_LANGUAGE_JS 处理
+	ScriptLanguage_SCRIPT_LANGUAGE_JS          ScriptLanguage = 1 // JavaScript：editor_source 即运行源码
+	ScriptLanguage_SCRIPT_LANGUAGE_TS          ScriptLanguage = 2 // TypeScript：editor_source 为 TS 原文，运行源码为浏览器编译后的 JS
+)
+
+// Enum value maps for ScriptLanguage.
+var (
+	ScriptLanguage_name = map[int32]string{
+		0: "SCRIPT_LANGUAGE_UNSPECIFIED",
+		1: "SCRIPT_LANGUAGE_JS",
+		2: "SCRIPT_LANGUAGE_TS",
+	}
+	ScriptLanguage_value = map[string]int32{
+		"SCRIPT_LANGUAGE_UNSPECIFIED": 0,
+		"SCRIPT_LANGUAGE_JS":          1,
+		"SCRIPT_LANGUAGE_TS":          2,
+	}
+)
+
+func (x ScriptLanguage) Enum() *ScriptLanguage {
+	p := new(ScriptLanguage)
+	*p = x
+	return p
+}
+
+func (x ScriptLanguage) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ScriptLanguage) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_omb_proto_enumTypes[3].Descriptor()
+}
+
+func (ScriptLanguage) Type() protoreflect.EnumType {
+	return &file_proto_omb_proto_enumTypes[3]
+}
+
+func (x ScriptLanguage) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ScriptLanguage.Descriptor instead.
+func (ScriptLanguage) EnumDescriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{3}
+}
+
 // WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
 // TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
 // 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
@@ -239,11 +289,11 @@ func (x TransportTiming) String() string {
 }
 
 func (TransportTiming) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[3].Descriptor()
+	return file_proto_omb_proto_enumTypes[4].Descriptor()
 }
 
 func (TransportTiming) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[3]
+	return &file_proto_omb_proto_enumTypes[4]
 }
 
 func (x TransportTiming) Number() protoreflect.EnumNumber {
@@ -252,7 +302,7 @@ func (x TransportTiming) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TransportTiming.Descriptor instead.
 func (TransportTiming) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{3}
+	return file_proto_omb_proto_rawDescGZIP(), []int{4}
 }
 
 type SnippetKind int32
@@ -302,11 +352,11 @@ func (x SnippetKind) String() string {
 }
 
 func (SnippetKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[4].Descriptor()
+	return file_proto_omb_proto_enumTypes[5].Descriptor()
 }
 
 func (SnippetKind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[4]
+	return &file_proto_omb_proto_enumTypes[5]
 }
 
 func (x SnippetKind) Number() protoreflect.EnumNumber {
@@ -315,7 +365,7 @@ func (x SnippetKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SnippetKind.Descriptor instead.
 func (SnippetKind) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{4}
+	return file_proto_omb_proto_rawDescGZIP(), []int{5}
 }
 
 type Title int32
@@ -391,11 +441,11 @@ func (x Title) String() string {
 }
 
 func (Title) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[5].Descriptor()
+	return file_proto_omb_proto_enumTypes[6].Descriptor()
 }
 
 func (Title) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[5]
+	return &file_proto_omb_proto_enumTypes[6]
 }
 
 func (x Title) Number() protoreflect.EnumNumber {
@@ -404,7 +454,7 @@ func (x Title) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Title.Descriptor instead.
 func (Title) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{5}
+	return file_proto_omb_proto_rawDescGZIP(), []int{6}
 }
 
 // 回放 JSONL 文件的 schema 版本（logHeader.schema_version）。历史文件 = 1；
@@ -439,11 +489,11 @@ func (x ReplaySchemaVersion) String() string {
 }
 
 func (ReplaySchemaVersion) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[6].Descriptor()
+	return file_proto_omb_proto_enumTypes[7].Descriptor()
 }
 
 func (ReplaySchemaVersion) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[6]
+	return &file_proto_omb_proto_enumTypes[7]
 }
 
 func (x ReplaySchemaVersion) Number() protoreflect.EnumNumber {
@@ -452,7 +502,7 @@ func (x ReplaySchemaVersion) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplaySchemaVersion.Descriptor instead.
 func (ReplaySchemaVersion) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{6}
+	return file_proto_omb_proto_rawDescGZIP(), []int{7}
 }
 
 // 回放记录的 "type" 盘上字符串（枚举值名去掉 REPLAY_ 前缀后小写下划线即盘上
@@ -502,11 +552,11 @@ func (x ReplayRecordType) String() string {
 }
 
 func (ReplayRecordType) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[7].Descriptor()
+	return file_proto_omb_proto_enumTypes[8].Descriptor()
 }
 
 func (ReplayRecordType) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[7]
+	return &file_proto_omb_proto_enumTypes[8]
 }
 
 func (x ReplayRecordType) Number() protoreflect.EnumNumber {
@@ -515,7 +565,7 @@ func (x ReplayRecordType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplayRecordType.Descriptor instead.
 func (ReplayRecordType) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{7}
+	return file_proto_omb_proto_rawDescGZIP(), []int{8}
 }
 
 // visual 采样行的形态版本（ReplayVisualFrame.v）。
@@ -555,11 +605,11 @@ func (x ReplayVisualVersion) String() string {
 }
 
 func (ReplayVisualVersion) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[8].Descriptor()
+	return file_proto_omb_proto_enumTypes[9].Descriptor()
 }
 
 func (ReplayVisualVersion) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[8]
+	return &file_proto_omb_proto_enumTypes[9]
 }
 
 func (x ReplayVisualVersion) Number() protoreflect.EnumNumber {
@@ -568,7 +618,7 @@ func (x ReplayVisualVersion) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplayVisualVersion.Descriptor instead.
 func (ReplayVisualVersion) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{8}
+	return file_proto_omb_proto_rawDescGZIP(), []int{9}
 }
 
 type RoomAction_Kind int32
@@ -613,11 +663,11 @@ func (x RoomAction_Kind) String() string {
 }
 
 func (RoomAction_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[9].Descriptor()
+	return file_proto_omb_proto_enumTypes[10].Descriptor()
 }
 
 func (RoomAction_Kind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[9]
+	return &file_proto_omb_proto_enumTypes[10]
 }
 
 func (x RoomAction_Kind) Number() protoreflect.EnumNumber {
@@ -682,11 +732,11 @@ func (x EvControlNotice_Code) String() string {
 }
 
 func (EvControlNotice_Code) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[10].Descriptor()
+	return file_proto_omb_proto_enumTypes[11].Descriptor()
 }
 
 func (EvControlNotice_Code) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[10]
+	return &file_proto_omb_proto_enumTypes[11]
 }
 
 func (x EvControlNotice_Code) Number() protoreflect.EnumNumber {
@@ -734,11 +784,11 @@ func (x EvRoomState_State) String() string {
 }
 
 func (EvRoomState_State) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[11].Descriptor()
+	return file_proto_omb_proto_enumTypes[12].Descriptor()
 }
 
 func (EvRoomState_State) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[11]
+	return &file_proto_omb_proto_enumTypes[12]
 }
 
 func (x EvRoomState_State) Number() protoreflect.EnumNumber {
@@ -780,11 +830,11 @@ func (x EvAiStream_Kind) String() string {
 }
 
 func (EvAiStream_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[12].Descriptor()
+	return file_proto_omb_proto_enumTypes[13].Descriptor()
 }
 
 func (EvAiStream_Kind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[12]
+	return &file_proto_omb_proto_enumTypes[13]
 }
 
 func (x EvAiStream_Kind) Number() protoreflect.EnumNumber {
@@ -1179,10 +1229,15 @@ func (x *RoomAction) GetKind() RoomAction_Kind {
 	return RoomAction_NONE
 }
 
+// source 恒为服务器可执行的 JavaScript 运行源码（旧字段，兼容旧服务器）。
+// TS 提交：source = 浏览器编译产物 JS，editor_source = TS 原文，language = TS。
+// JS 提交（缺省）：source = editor_source = 编辑器原文，language 缺省或 JS。
 type ScriptSubmit struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ClientScriptId uint32                 `protobuf:"varint,1,opt,name=client_script_id,json=clientScriptId,proto3" json:"client_script_id,omitempty"`
-	Source         string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Source         string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`                                       // 运行源码（服务器执行的 JavaScript）
+	EditorSource   *string                `protobuf:"bytes,3,opt,name=editor_source,json=editorSource,proto3,oneof" json:"editor_source,omitempty"` // 编辑器原文（TS 提交时 = TS 源码；JS 缺省 = source）
+	Language       *ScriptLanguage        `protobuf:"varint,4,opt,name=language,proto3,enum=omb.v1.ScriptLanguage,oneof" json:"language,omitempty"` // 编辑语言（缺省 = JS）
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1229,6 +1284,20 @@ func (x *ScriptSubmit) GetSource() string {
 		return x.Source
 	}
 	return ""
+}
+
+func (x *ScriptSubmit) GetEditorSource() string {
+	if x != nil && x.EditorSource != nil {
+		return *x.EditorSource
+	}
+	return ""
+}
+
+func (x *ScriptSubmit) GetLanguage() ScriptLanguage {
+	if x != nil && x.Language != nil {
+		return *x.Language
+	}
+	return ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED
 }
 
 // 房间作用域脚本版本回退：把某玩家自己的历史版本设为当前版本。
@@ -3563,11 +3632,12 @@ func (x *EvScriptResult) GetVersionId() uint32 {
 // 单个脚本版本记录（房间作用域，玩家自己的版本链；bounded history）。
 type EvScriptVersion struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                  // 版本 id（房间内按玩家单调递增；0 保留）
-	ScriptRev     uint32                 `protobuf:"varint,2,opt,name=script_rev,json=scriptRev,proto3" json:"script_rev,omitempty"`   // 该版本装载后的 runtime rev（回显用）
-	Origin        ScriptOrigin           `protobuf:"varint,3,opt,name=origin,proto3,enum=omb.v1.ScriptOrigin" json:"origin,omitempty"` // 写入来源（手动/AI/回退）
-	WallMs        uint64                 `protobuf:"varint,4,opt,name=wall_ms,json=wallMs,proto3" json:"wall_ms,omitempty"`            // 写入墙钟（Unix 毫秒；展示排序用，非权威时序）
-	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`                           // 完整源码（owner-only：仅版本主人可收）
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                              // 版本 id（房间内按玩家单调递增；0 保留）
+	ScriptRev     uint32                 `protobuf:"varint,2,opt,name=script_rev,json=scriptRev,proto3" json:"script_rev,omitempty"`               // 该版本装载后的 runtime rev（回显用）
+	Origin        ScriptOrigin           `protobuf:"varint,3,opt,name=origin,proto3,enum=omb.v1.ScriptOrigin" json:"origin,omitempty"`             // 写入来源（手动/AI/回退）
+	WallMs        uint64                 `protobuf:"varint,4,opt,name=wall_ms,json=wallMs,proto3" json:"wall_ms,omitempty"`                        // 写入墙钟（Unix 毫秒；展示排序用，非权威时序）
+	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`                                       // 编辑器恢复源码（owner-only：JS 版 = 运行源码；TS 版 = TS 原文；缺省 = 运行源码）
+	Language      *ScriptLanguage        `protobuf:"varint,6,opt,name=language,proto3,enum=omb.v1.ScriptLanguage,oneof" json:"language,omitempty"` // 编辑语言（缺省 = JS；owner-only 恢复编辑器用）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3637,6 +3707,13 @@ func (x *EvScriptVersion) GetSource() string {
 	return ""
 }
 
+func (x *EvScriptVersion) GetLanguage() ScriptLanguage {
+	if x != nil && x.Language != nil {
+		return *x.Language
+	}
+	return ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED
+}
+
 // EvScriptVersions 玩家脚本版本链的 owner-only 定向快照：任一版本写入
 // （手动/AI/回退，成功才记录）后下发，重连/bootstrap 时补发当前链。
 // current_id 指向当前生效版本；历史有界（旧版本自动淘汰，淘汰后不再出现）。
@@ -3697,10 +3774,11 @@ func (x *EvScriptVersions) GetCurrentId() uint32 {
 type EvScriptRollbackResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                           // 拒绝原因（版本不存在/不属于你/编译失败等）
-	VersionId     uint32                 `protobuf:"varint,3,opt,name=version_id,json=versionId,proto3" json:"version_id,omitempty"` // ok 时 = 回退后的当前版本 id；失败时 = 当前版本 id
-	ScriptRev     uint32                 `protobuf:"varint,4,opt,name=script_rev,json=scriptRev,proto3" json:"script_rev,omitempty"` // ok 时 = 回退装载后的 runtime rev（失败保旧 = 旧 rev）
-	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`                         // ok 时 = 回退后的完整源码（owner-only；失败为空）
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                                         // 拒绝原因（版本不存在/不属于你/编译失败等）
+	VersionId     uint32                 `protobuf:"varint,3,opt,name=version_id,json=versionId,proto3" json:"version_id,omitempty"`               // ok 时 = 回退后的当前版本 id；失败时 = 当前版本 id
+	ScriptRev     uint32                 `protobuf:"varint,4,opt,name=script_rev,json=scriptRev,proto3" json:"script_rev,omitempty"`               // ok 时 = 回退装载后的 runtime rev（失败保旧 = 旧 rev）
+	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`                                       // ok 时 = 回退后编辑器恢复源码（owner-only；失败为空）
+	Language      *ScriptLanguage        `protobuf:"varint,6,opt,name=language,proto3,enum=omb.v1.ScriptLanguage,oneof" json:"language,omitempty"` // ok 时 = 编辑语言（缺省 = JS；owner-only）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3768,6 +3846,13 @@ func (x *EvScriptRollbackResult) GetSource() string {
 		return x.Source
 	}
 	return ""
+}
+
+func (x *EvScriptRollbackResult) GetLanguage() ScriptLanguage {
+	if x != nil && x.Language != nil {
+		return *x.Language
+	}
+	return ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED
 }
 
 type SnippetSourceView struct {
@@ -5384,10 +5469,14 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\aRESTART\x10\x03\x12\n" +
 	"\n" +
 	"\x06WARMUP\x10\x04\x12\r\n" +
-	"\tSOLO_BOTS\x10\x05\"P\n" +
+	"\tSOLO_BOTS\x10\x05\"\xd2\x01\n" +
 	"\fScriptSubmit\x12(\n" +
 	"\x10client_script_id\x18\x01 \x01(\rR\x0eclientScriptId\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\"/\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12(\n" +
+	"\reditor_source\x18\x03 \x01(\tH\x00R\feditorSource\x88\x01\x01\x127\n" +
+	"\blanguage\x18\x04 \x01(\x0e2\x16.omb.v1.ScriptLanguageH\x01R\blanguage\x88\x01\x01B\x10\n" +
+	"\x0e_editor_sourceB\v\n" +
+	"\t_language\"/\n" +
 	"\x0eScriptRollback\x12\x1d\n" +
 	"\n" +
 	"version_id\x18\x01 \x01(\rR\tversionId\"\x83\x01\n" +
@@ -5585,18 +5674,20 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\n" +
 	"version_id\x18\x06 \x01(\rH\x01R\tversionId\x88\x01\x01B\t\n" +
 	"\a_originB\r\n" +
-	"\v_version_id\"\x9f\x01\n" +
+	"\v_version_id\"\xe5\x01\n" +
 	"\x0fEvScriptVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1d\n" +
 	"\n" +
 	"script_rev\x18\x02 \x01(\rR\tscriptRev\x12,\n" +
 	"\x06origin\x18\x03 \x01(\x0e2\x14.omb.v1.ScriptOriginR\x06origin\x12\x17\n" +
 	"\awall_ms\x18\x04 \x01(\x04R\x06wallMs\x12\x16\n" +
-	"\x06source\x18\x05 \x01(\tR\x06source\"f\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\x127\n" +
+	"\blanguage\x18\x06 \x01(\x0e2\x16.omb.v1.ScriptLanguageH\x00R\blanguage\x88\x01\x01B\v\n" +
+	"\t_language\"f\n" +
 	"\x10EvScriptVersions\x123\n" +
 	"\bversions\x18\x01 \x03(\v2\x17.omb.v1.EvScriptVersionR\bversions\x12\x1d\n" +
 	"\n" +
-	"current_id\x18\x02 \x01(\rR\tcurrentId\"\x94\x01\n" +
+	"current_id\x18\x02 \x01(\rR\tcurrentId\"\xda\x01\n" +
 	"\x16EvScriptRollbackResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
@@ -5604,7 +5695,9 @@ const file_proto_omb_proto_rawDesc = "" +
 	"version_id\x18\x03 \x01(\rR\tversionId\x12\x1d\n" +
 	"\n" +
 	"script_rev\x18\x04 \x01(\rR\tscriptRev\x12\x16\n" +
-	"\x06source\x18\x05 \x01(\tR\x06source\"\xa8\x01\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\x127\n" +
+	"\blanguage\x18\x06 \x01(\x0e2\x16.omb.v1.ScriptLanguageH\x00R\blanguage\x88\x01\x01B\v\n" +
+	"\t_language\"\xa8\x01\n" +
 	"\x11SnippetSourceView\x12'\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x13.omb.v1.SnippetKindR\x04kind\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
@@ -5765,7 +5858,11 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x19SCRIPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rORIGIN_MANUAL\x10\x01\x12\r\n" +
 	"\tORIGIN_AI\x10\x02\x12\x13\n" +
-	"\x0fORIGIN_ROLLBACK\x10\x03*\xf0\x01\n" +
+	"\x0fORIGIN_ROLLBACK\x10\x03*a\n" +
+	"\x0eScriptLanguage\x12\x1f\n" +
+	"\x1bSCRIPT_LANGUAGE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12SCRIPT_LANGUAGE_JS\x10\x01\x12\x16\n" +
+	"\x12SCRIPT_LANGUAGE_TS\x10\x02*\xf0\x01\n" +
 	"\x0fTransportTiming\x12\x0e\n" +
 	"\n" +
 	"FRAME_PING\x10\x00\x12\x0e\n" +
@@ -5840,178 +5937,182 @@ func file_proto_omb_proto_rawDescGZIP() []byte {
 	return file_proto_omb_proto_rawDescData
 }
 
-var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
+var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 14)
 var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
 var file_proto_omb_proto_goTypes = []any{
 	(Phase)(0),                     // 0: omb.v1.Phase
 	(ControlSource)(0),             // 1: omb.v1.ControlSource
 	(ScriptOrigin)(0),              // 2: omb.v1.ScriptOrigin
-	(TransportTiming)(0),           // 3: omb.v1.TransportTiming
-	(SnippetKind)(0),               // 4: omb.v1.SnippetKind
-	(Title)(0),                     // 5: omb.v1.Title
-	(ReplaySchemaVersion)(0),       // 6: omb.v1.ReplaySchemaVersion
-	(ReplayRecordType)(0),          // 7: omb.v1.ReplayRecordType
-	(ReplayVisualVersion)(0),       // 8: omb.v1.ReplayVisualVersion
-	(RoomAction_Kind)(0),           // 9: omb.v1.RoomAction.Kind
-	(EvControlNotice_Code)(0),      // 10: omb.v1.EvControlNotice.Code
-	(EvRoomState_State)(0),         // 11: omb.v1.EvRoomState.State
-	(EvAiStream_Kind)(0),           // 12: omb.v1.EvAiStream.Kind
-	(*Vec2)(nil),                   // 13: omb.v1.Vec2
-	(*ClientInput)(nil),            // 14: omb.v1.ClientInput
-	(*JoinRoom)(nil),               // 15: omb.v1.JoinRoom
-	(*SpectateRoom)(nil),           // 16: omb.v1.SpectateRoom
-	(*LeaveRoom)(nil),              // 17: omb.v1.LeaveRoom
-	(*AssistToggle)(nil),           // 18: omb.v1.AssistToggle
-	(*RoomAction)(nil),             // 19: omb.v1.RoomAction
-	(*ScriptSubmit)(nil),           // 20: omb.v1.ScriptSubmit
-	(*ScriptRollback)(nil),         // 21: omb.v1.ScriptRollback
-	(*SnippetSetting)(nil),         // 22: omb.v1.SnippetSetting
-	(*SnippetConfig)(nil),          // 23: omb.v1.SnippetConfig
-	(*AiPrompt)(nil),               // 24: omb.v1.AiPrompt
-	(*Say)(nil),                    // 25: omb.v1.Say
-	(*ResyncRequest)(nil),          // 26: omb.v1.ResyncRequest
-	(*ClientMsg)(nil),              // 27: omb.v1.ClientMsg
-	(*EntityBase)(nil),             // 28: omb.v1.EntityBase
-	(*RobotState)(nil),             // 29: omb.v1.RobotState
-	(*ProjectileState)(nil),        // 30: omb.v1.ProjectileState
-	(*CoreState)(nil),              // 31: omb.v1.CoreState
-	(*UplinkState)(nil),            // 32: omb.v1.UplinkState
-	(*HealthPackState)(nil),        // 33: omb.v1.HealthPackState
-	(*SelfState)(nil),              // 34: omb.v1.SelfState
-	(*SnapshotDelta)(nil),          // 35: omb.v1.SnapshotDelta
-	(*EvKill)(nil),                 // 36: omb.v1.EvKill
-	(*EvCorePickup)(nil),           // 37: omb.v1.EvCorePickup
-	(*EvUplinkHack)(nil),           // 38: omb.v1.EvUplinkHack
-	(*EvPhaseChange)(nil),          // 39: omb.v1.EvPhaseChange
-	(*EvRespawn)(nil),              // 40: omb.v1.EvRespawn
-	(*EvHeal)(nil),                 // 41: omb.v1.EvHeal
-	(*EvSay)(nil),                  // 42: omb.v1.EvSay
-	(*EvHit)(nil),                  // 43: omb.v1.EvHit
-	(*EvShot)(nil),                 // 44: omb.v1.EvShot
-	(*EvProjectileImpact)(nil),     // 45: omb.v1.EvProjectileImpact
-	(*EvMatchStart)(nil),           // 46: omb.v1.EvMatchStart
-	(*EvWallHit)(nil),              // 47: omb.v1.EvWallHit
-	(*EvScriptError)(nil),          // 48: omb.v1.EvScriptError
-	(*EvMatchEnd)(nil),             // 49: omb.v1.EvMatchEnd
-	(*ScoreRow)(nil),               // 50: omb.v1.ScoreRow
-	(*EvScoreboard)(nil),           // 51: omb.v1.EvScoreboard
-	(*EvScriptResult)(nil),         // 52: omb.v1.EvScriptResult
-	(*EvScriptVersion)(nil),        // 53: omb.v1.EvScriptVersion
-	(*EvScriptVersions)(nil),       // 54: omb.v1.EvScriptVersions
-	(*EvScriptRollbackResult)(nil), // 55: omb.v1.EvScriptRollbackResult
-	(*SnippetSourceView)(nil),      // 56: omb.v1.SnippetSourceView
-	(*EvSnippetResult)(nil),        // 57: omb.v1.EvSnippetResult
-	(*EvMapBootstrap)(nil),         // 58: omb.v1.EvMapBootstrap
-	(*SimTuning)(nil),              // 59: omb.v1.SimTuning
-	(*EvControlNotice)(nil),        // 60: omb.v1.EvControlNotice
-	(*EvAiUsage)(nil),              // 61: omb.v1.EvAiUsage
-	(*EvRoomState)(nil),            // 62: omb.v1.EvRoomState
-	(*EvAiQuota)(nil),              // 63: omb.v1.EvAiQuota
-	(*EvAiStream)(nil),             // 64: omb.v1.EvAiStream
-	(*ServerEvent)(nil),            // 65: omb.v1.ServerEvent
-	(*EvScriptLog)(nil),            // 66: omb.v1.EvScriptLog
-	(*EvSnippetUsage)(nil),         // 67: omb.v1.EvSnippetUsage
-	(*ServerMsg)(nil),              // 68: omb.v1.ServerMsg
-	(*ReplayVisualFrame)(nil),      // 69: omb.v1.ReplayVisualFrame
-	(*ReplayVisualRobot)(nil),      // 70: omb.v1.ReplayVisualRobot
-	(*ReplayVisualProjectile)(nil), // 71: omb.v1.ReplayVisualProjectile
-	(*timestamppb.Timestamp)(nil),  // 72: google.protobuf.Timestamp
+	(ScriptLanguage)(0),            // 3: omb.v1.ScriptLanguage
+	(TransportTiming)(0),           // 4: omb.v1.TransportTiming
+	(SnippetKind)(0),               // 5: omb.v1.SnippetKind
+	(Title)(0),                     // 6: omb.v1.Title
+	(ReplaySchemaVersion)(0),       // 7: omb.v1.ReplaySchemaVersion
+	(ReplayRecordType)(0),          // 8: omb.v1.ReplayRecordType
+	(ReplayVisualVersion)(0),       // 9: omb.v1.ReplayVisualVersion
+	(RoomAction_Kind)(0),           // 10: omb.v1.RoomAction.Kind
+	(EvControlNotice_Code)(0),      // 11: omb.v1.EvControlNotice.Code
+	(EvRoomState_State)(0),         // 12: omb.v1.EvRoomState.State
+	(EvAiStream_Kind)(0),           // 13: omb.v1.EvAiStream.Kind
+	(*Vec2)(nil),                   // 14: omb.v1.Vec2
+	(*ClientInput)(nil),            // 15: omb.v1.ClientInput
+	(*JoinRoom)(nil),               // 16: omb.v1.JoinRoom
+	(*SpectateRoom)(nil),           // 17: omb.v1.SpectateRoom
+	(*LeaveRoom)(nil),              // 18: omb.v1.LeaveRoom
+	(*AssistToggle)(nil),           // 19: omb.v1.AssistToggle
+	(*RoomAction)(nil),             // 20: omb.v1.RoomAction
+	(*ScriptSubmit)(nil),           // 21: omb.v1.ScriptSubmit
+	(*ScriptRollback)(nil),         // 22: omb.v1.ScriptRollback
+	(*SnippetSetting)(nil),         // 23: omb.v1.SnippetSetting
+	(*SnippetConfig)(nil),          // 24: omb.v1.SnippetConfig
+	(*AiPrompt)(nil),               // 25: omb.v1.AiPrompt
+	(*Say)(nil),                    // 26: omb.v1.Say
+	(*ResyncRequest)(nil),          // 27: omb.v1.ResyncRequest
+	(*ClientMsg)(nil),              // 28: omb.v1.ClientMsg
+	(*EntityBase)(nil),             // 29: omb.v1.EntityBase
+	(*RobotState)(nil),             // 30: omb.v1.RobotState
+	(*ProjectileState)(nil),        // 31: omb.v1.ProjectileState
+	(*CoreState)(nil),              // 32: omb.v1.CoreState
+	(*UplinkState)(nil),            // 33: omb.v1.UplinkState
+	(*HealthPackState)(nil),        // 34: omb.v1.HealthPackState
+	(*SelfState)(nil),              // 35: omb.v1.SelfState
+	(*SnapshotDelta)(nil),          // 36: omb.v1.SnapshotDelta
+	(*EvKill)(nil),                 // 37: omb.v1.EvKill
+	(*EvCorePickup)(nil),           // 38: omb.v1.EvCorePickup
+	(*EvUplinkHack)(nil),           // 39: omb.v1.EvUplinkHack
+	(*EvPhaseChange)(nil),          // 40: omb.v1.EvPhaseChange
+	(*EvRespawn)(nil),              // 41: omb.v1.EvRespawn
+	(*EvHeal)(nil),                 // 42: omb.v1.EvHeal
+	(*EvSay)(nil),                  // 43: omb.v1.EvSay
+	(*EvHit)(nil),                  // 44: omb.v1.EvHit
+	(*EvShot)(nil),                 // 45: omb.v1.EvShot
+	(*EvProjectileImpact)(nil),     // 46: omb.v1.EvProjectileImpact
+	(*EvMatchStart)(nil),           // 47: omb.v1.EvMatchStart
+	(*EvWallHit)(nil),              // 48: omb.v1.EvWallHit
+	(*EvScriptError)(nil),          // 49: omb.v1.EvScriptError
+	(*EvMatchEnd)(nil),             // 50: omb.v1.EvMatchEnd
+	(*ScoreRow)(nil),               // 51: omb.v1.ScoreRow
+	(*EvScoreboard)(nil),           // 52: omb.v1.EvScoreboard
+	(*EvScriptResult)(nil),         // 53: omb.v1.EvScriptResult
+	(*EvScriptVersion)(nil),        // 54: omb.v1.EvScriptVersion
+	(*EvScriptVersions)(nil),       // 55: omb.v1.EvScriptVersions
+	(*EvScriptRollbackResult)(nil), // 56: omb.v1.EvScriptRollbackResult
+	(*SnippetSourceView)(nil),      // 57: omb.v1.SnippetSourceView
+	(*EvSnippetResult)(nil),        // 58: omb.v1.EvSnippetResult
+	(*EvMapBootstrap)(nil),         // 59: omb.v1.EvMapBootstrap
+	(*SimTuning)(nil),              // 60: omb.v1.SimTuning
+	(*EvControlNotice)(nil),        // 61: omb.v1.EvControlNotice
+	(*EvAiUsage)(nil),              // 62: omb.v1.EvAiUsage
+	(*EvRoomState)(nil),            // 63: omb.v1.EvRoomState
+	(*EvAiQuota)(nil),              // 64: omb.v1.EvAiQuota
+	(*EvAiStream)(nil),             // 65: omb.v1.EvAiStream
+	(*ServerEvent)(nil),            // 66: omb.v1.ServerEvent
+	(*EvScriptLog)(nil),            // 67: omb.v1.EvScriptLog
+	(*EvSnippetUsage)(nil),         // 68: omb.v1.EvSnippetUsage
+	(*ServerMsg)(nil),              // 69: omb.v1.ServerMsg
+	(*ReplayVisualFrame)(nil),      // 70: omb.v1.ReplayVisualFrame
+	(*ReplayVisualRobot)(nil),      // 71: omb.v1.ReplayVisualRobot
+	(*ReplayVisualProjectile)(nil), // 72: omb.v1.ReplayVisualProjectile
+	(*timestamppb.Timestamp)(nil),  // 73: google.protobuf.Timestamp
 }
 var file_proto_omb_proto_depIdxs = []int32{
-	9,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
-	4,  // 1: omb.v1.SnippetSetting.kind:type_name -> omb.v1.SnippetKind
-	22, // 2: omb.v1.SnippetConfig.snippets:type_name -> omb.v1.SnippetSetting
-	14, // 3: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
-	14, // 4: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
-	15, // 5: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
-	17, // 6: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
-	19, // 7: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
-	20, // 8: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
-	24, // 9: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
-	18, // 10: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
-	26, // 11: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
-	25, // 12: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
-	16, // 13: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
-	23, // 14: omb.v1.ClientMsg.snippet_config:type_name -> omb.v1.SnippetConfig
-	21, // 15: omb.v1.ClientMsg.script_rollback:type_name -> omb.v1.ScriptRollback
-	13, // 16: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
-	28, // 17: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
-	28, // 18: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
-	28, // 19: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
-	28, // 20: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
-	28, // 21: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
-	1,  // 22: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
-	1,  // 23: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
-	1,  // 24: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
-	1,  // 25: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
-	0,  // 26: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
-	29, // 27: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
-	30, // 28: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
-	31, // 29: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
-	32, // 30: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
-	34, // 31: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
-	33, // 32: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
-	13, // 33: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
-	0,  // 34: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
-	0,  // 35: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
-	13, // 36: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
-	13, // 37: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
-	13, // 38: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
-	13, // 39: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
-	50, // 40: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
-	5,  // 41: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
-	50, // 42: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
-	2,  // 43: omb.v1.EvScriptResult.origin:type_name -> omb.v1.ScriptOrigin
-	2,  // 44: omb.v1.EvScriptVersion.origin:type_name -> omb.v1.ScriptOrigin
-	53, // 45: omb.v1.EvScriptVersions.versions:type_name -> omb.v1.EvScriptVersion
-	4,  // 46: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
-	22, // 47: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
-	56, // 48: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
-	59, // 49: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
-	10, // 50: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
-	11, // 51: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
-	12, // 52: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
-	72, // 53: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
-	36, // 54: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
-	37, // 55: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
-	38, // 56: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
-	39, // 57: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
-	40, // 58: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
-	42, // 59: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
-	43, // 60: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
-	49, // 61: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
-	62, // 62: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
-	63, // 63: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
-	52, // 64: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
-	46, // 65: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
-	47, // 66: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
-	48, // 67: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
-	58, // 68: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
-	61, // 69: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
-	44, // 70: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
-	45, // 71: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
-	51, // 72: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
-	66, // 73: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
-	41, // 74: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
-	67, // 75: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
-	57, // 76: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
-	64, // 77: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
-	60, // 78: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
-	54, // 79: omb.v1.ServerEvent.script_versions:type_name -> omb.v1.EvScriptVersions
-	55, // 80: omb.v1.ServerEvent.script_rollback_result:type_name -> omb.v1.EvScriptRollbackResult
-	35, // 81: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
-	65, // 82: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
-	8,  // 83: omb.v1.ReplayVisualFrame.v:type_name -> omb.v1.ReplayVisualVersion
-	0,  // 84: omb.v1.ReplayVisualFrame.phase:type_name -> omb.v1.Phase
-	70, // 85: omb.v1.ReplayVisualFrame.robots:type_name -> omb.v1.ReplayVisualRobot
-	71, // 86: omb.v1.ReplayVisualFrame.projectiles:type_name -> omb.v1.ReplayVisualProjectile
-	13, // 87: omb.v1.ReplayVisualRobot.pos:type_name -> omb.v1.Vec2
-	13, // 88: omb.v1.ReplayVisualProjectile.pos:type_name -> omb.v1.Vec2
-	89, // [89:89] is the sub-list for method output_type
-	89, // [89:89] is the sub-list for method input_type
-	89, // [89:89] is the sub-list for extension type_name
-	89, // [89:89] is the sub-list for extension extendee
-	0,  // [0:89] is the sub-list for field type_name
+	10, // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
+	3,  // 1: omb.v1.ScriptSubmit.language:type_name -> omb.v1.ScriptLanguage
+	5,  // 2: omb.v1.SnippetSetting.kind:type_name -> omb.v1.SnippetKind
+	23, // 3: omb.v1.SnippetConfig.snippets:type_name -> omb.v1.SnippetSetting
+	15, // 4: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
+	15, // 5: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
+	16, // 6: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
+	18, // 7: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
+	20, // 8: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
+	21, // 9: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
+	25, // 10: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
+	19, // 11: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
+	27, // 12: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
+	26, // 13: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
+	17, // 14: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
+	24, // 15: omb.v1.ClientMsg.snippet_config:type_name -> omb.v1.SnippetConfig
+	22, // 16: omb.v1.ClientMsg.script_rollback:type_name -> omb.v1.ScriptRollback
+	14, // 17: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
+	29, // 18: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
+	29, // 19: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
+	29, // 20: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
+	29, // 21: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
+	29, // 22: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
+	1,  // 23: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
+	1,  // 24: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
+	1,  // 25: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
+	1,  // 26: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
+	0,  // 27: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
+	30, // 28: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
+	31, // 29: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
+	32, // 30: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
+	33, // 31: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
+	35, // 32: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
+	34, // 33: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
+	14, // 34: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
+	0,  // 35: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
+	0,  // 36: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
+	14, // 37: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
+	14, // 38: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
+	14, // 39: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
+	14, // 40: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
+	51, // 41: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
+	6,  // 42: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
+	51, // 43: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
+	2,  // 44: omb.v1.EvScriptResult.origin:type_name -> omb.v1.ScriptOrigin
+	2,  // 45: omb.v1.EvScriptVersion.origin:type_name -> omb.v1.ScriptOrigin
+	3,  // 46: omb.v1.EvScriptVersion.language:type_name -> omb.v1.ScriptLanguage
+	54, // 47: omb.v1.EvScriptVersions.versions:type_name -> omb.v1.EvScriptVersion
+	3,  // 48: omb.v1.EvScriptRollbackResult.language:type_name -> omb.v1.ScriptLanguage
+	5,  // 49: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
+	23, // 50: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
+	57, // 51: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
+	60, // 52: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
+	11, // 53: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
+	12, // 54: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
+	13, // 55: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
+	73, // 56: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
+	37, // 57: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
+	38, // 58: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
+	39, // 59: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
+	40, // 60: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
+	41, // 61: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
+	43, // 62: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
+	44, // 63: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
+	50, // 64: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
+	63, // 65: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
+	64, // 66: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
+	53, // 67: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
+	47, // 68: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
+	48, // 69: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
+	49, // 70: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
+	59, // 71: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
+	62, // 72: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
+	45, // 73: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
+	46, // 74: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
+	52, // 75: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
+	67, // 76: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
+	42, // 77: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
+	68, // 78: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
+	58, // 79: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
+	65, // 80: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
+	61, // 81: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
+	55, // 82: omb.v1.ServerEvent.script_versions:type_name -> omb.v1.EvScriptVersions
+	56, // 83: omb.v1.ServerEvent.script_rollback_result:type_name -> omb.v1.EvScriptRollbackResult
+	36, // 84: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
+	66, // 85: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
+	9,  // 86: omb.v1.ReplayVisualFrame.v:type_name -> omb.v1.ReplayVisualVersion
+	0,  // 87: omb.v1.ReplayVisualFrame.phase:type_name -> omb.v1.Phase
+	71, // 88: omb.v1.ReplayVisualFrame.robots:type_name -> omb.v1.ReplayVisualRobot
+	72, // 89: omb.v1.ReplayVisualFrame.projectiles:type_name -> omb.v1.ReplayVisualProjectile
+	14, // 90: omb.v1.ReplayVisualRobot.pos:type_name -> omb.v1.Vec2
+	14, // 91: omb.v1.ReplayVisualProjectile.pos:type_name -> omb.v1.Vec2
+	92, // [92:92] is the sub-list for method output_type
+	92, // [92:92] is the sub-list for method input_type
+	92, // [92:92] is the sub-list for extension type_name
+	92, // [92:92] is the sub-list for extension extendee
+	0,  // [0:92] is the sub-list for field type_name
 }
 
 func init() { file_proto_omb_proto_init() }
@@ -6019,6 +6120,7 @@ func file_proto_omb_proto_init() {
 	if File_proto_omb_proto != nil {
 		return
 	}
+	file_proto_omb_proto_msgTypes[7].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[14].OneofWrappers = []any{
 		(*ClientMsg_Input)(nil),
 		(*ClientMsg_WarmupInput)(nil),
@@ -6036,6 +6138,8 @@ func file_proto_omb_proto_init() {
 	}
 	file_proto_omb_proto_msgTypes[21].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[39].OneofWrappers = []any{}
+	file_proto_omb_proto_msgTypes[40].OneofWrappers = []any{}
+	file_proto_omb_proto_msgTypes[42].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[52].OneofWrappers = []any{
 		(*ServerEvent_Kill)(nil),
 		(*ServerEvent_CorePickup)(nil),
@@ -6074,7 +6178,7 @@ func file_proto_omb_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_omb_proto_rawDesc), len(file_proto_omb_proto_rawDesc)),
-			NumEnums:      13,
+			NumEnums:      14,
 			NumMessages:   59,
 			NumExtensions: 0,
 			NumServices:   0,

@@ -29,6 +29,13 @@ enum ScriptOrigin {
   ORIGIN_ROLLBACK = 3;           // 玩家版本回退
 }
 
+// 脚本编辑语言（版本链/回退的编辑器恢复语义；服务器 runtime 恒为 JavaScript）。
+enum ScriptLanguage {
+  SCRIPT_LANGUAGE_UNSPECIFIED = 0; // 兼容缺省：按 SCRIPT_LANGUAGE_JS 处理
+  SCRIPT_LANGUAGE_JS = 1;         // JavaScript：editor_source 即运行源码
+  SCRIPT_LANGUAGE_TS = 2;         // TypeScript：editor_source 为 TS 原文，运行源码为浏览器编译后的 JS
+}
+
 // WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
 // TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
 // 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
@@ -76,7 +83,15 @@ message RoomAction {
   enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; SOLO_BOTS = 5; }
   Kind kind = 1;
 }
-message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
+// source 恒为服务器可执行的 JavaScript 运行源码（旧字段，兼容旧服务器）。
+// TS 提交：source = 浏览器编译产物 JS，editor_source = TS 原文，language = TS。
+// JS 提交（缺省）：source = editor_source = 编辑器原文，language 缺省或 JS。
+message ScriptSubmit {
+  uint32 client_script_id = 1;
+  string source = 2;         // 运行源码（服务器执行的 JavaScript）
+  optional string editor_source = 3; // 编辑器原文（TS 提交时 = TS 源码；JS 缺省 = source）
+  optional ScriptLanguage language = 4; // 编辑语言（缺省 = JS）
+}
 
 // 房间作用域脚本版本回退：把某玩家自己的历史版本设为当前版本。
 // 只能回退自己的版本；观战/他人 → 拒绝（版本链 owner-only）。
@@ -279,7 +294,8 @@ message EvScriptVersion {
   uint32 script_rev = 2;  // 该版本装载后的 runtime rev（回显用）
   ScriptOrigin origin = 3;// 写入来源（手动/AI/回退）
   uint64 wall_ms = 4;     // 写入墙钟（Unix 毫秒；展示排序用，非权威时序）
-  string source = 5;      // 完整源码（owner-only：仅版本主人可收）
+  string source = 5;      // 编辑器恢复源码（owner-only：JS 版 = 运行源码；TS 版 = TS 原文；缺省 = 运行源码）
+  optional ScriptLanguage language = 6; // 编辑语言（缺省 = JS；owner-only 恢复编辑器用）
 }
 
 // EvScriptVersions 玩家脚本版本链的 owner-only 定向快照：任一版本写入
@@ -297,7 +313,8 @@ message EvScriptRollbackResult {
   string error = 2;      // 拒绝原因（版本不存在/不属于你/编译失败等）
   uint32 version_id = 3; // ok 时 = 回退后的当前版本 id；失败时 = 当前版本 id
   uint32 script_rev = 4; // ok 时 = 回退装载后的 runtime rev（失败保旧 = 旧 rev）
-  string source = 5;     // ok 时 = 回退后的完整源码（owner-only；失败为空）
+  string source = 5;     // ok 时 = 回退后编辑器恢复源码（owner-only；失败为空）
+  optional ScriptLanguage language = 6; // ok 时 = 编辑语言（缺省 = JS；owner-only）
 }
 
 message SnippetSourceView { // 单条官方 Snippet 的可查看源码（当教材）

@@ -58,6 +58,10 @@ func TestScriptVersionMessagesRoundTrip(t *testing.T) {
 		ombv1.ScriptOrigin_ORIGIN_AI != 2 || ombv1.ScriptOrigin_ORIGIN_ROLLBACK != 3 {
 		t.Fatal("ScriptOrigin enum values drifted from omb.proto")
 	}
+	if ombv1.ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED != 0 || ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS != 1 ||
+		ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS != 2 {
+		t.Fatal("ScriptLanguage enum values drifted from omb.proto")
+	}
 	msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 		Kind: &ombv1.ServerEvent_ScriptVersions{ScriptVersions: &ombv1.EvScriptVersions{
 			Versions: []*ombv1.EvScriptVersion{
@@ -96,7 +100,7 @@ func TestScriptVersionMessagesRoundTrip(t *testing.T) {
 		t.Fatalf("rollback round-trip mismatch: %+v", backUp.GetScriptRollback())
 	}
 
-	res := &ombv1.EvScriptRollbackResult{Ok: true, VersionId: 7, ScriptRev: 9, Source: "rolled"}
+	res := &ombv1.EvScriptRollbackResult{Ok: true, VersionId: 7, ScriptRev: 9, Source: "rolled", Language: langPtr(ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS)}
 	rb, err := proto.Marshal(res)
 	if err != nil {
 		t.Fatal(err)
@@ -108,4 +112,22 @@ func TestScriptVersionMessagesRoundTrip(t *testing.T) {
 	if !backRes.Ok || backRes.VersionId != 7 || backRes.Source != "rolled" {
 		t.Fatalf("rollback result round-trip mismatch: %+v", backRes)
 	}
+	if backRes.GetLanguage() != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS {
+		t.Fatalf("rollback result language round-trip mismatch: %v", backRes.GetLanguage())
+	}
+	// 旧客户端/旧服务器兼容：language/editor_source 缺省可探测（nil → JS 兼容语义）。
+	legacySubmit := &ombv1.ScriptSubmit{ClientScriptId: 5, Source: "js"}
+	lb, err := proto.Marshal(legacySubmit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backLegacy := &ombv1.ScriptSubmit{}
+	if err := proto.Unmarshal(lb, backLegacy); err != nil {
+		t.Fatal(err)
+	}
+	if backLegacy.GetEditorSource() != "" || backLegacy.GetLanguage() != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_UNSPECIFIED {
+		t.Fatalf("legacy submit drifted: %+v", backLegacy)
+	}
 }
+
+func langPtr(l ombv1.ScriptLanguage) *ombv1.ScriptLanguage { return &l }
