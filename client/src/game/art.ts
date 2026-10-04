@@ -12,8 +12,7 @@ const FONT_11 = `11px ${mono}`
 const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
-/** Uplink 悬浮投影：米数（lift*UPLINK_LIFT）与阴影贴地缩放（0.48 - lift*0.12）
- *  三处共享（D15/C-21），阴影必须严格贴地，改一处即改三处。 */
+/** @deprecated 仅兼容旧调用方；Uplink 绘制不再使用悬浮偏移。 */
 export const UPLINK_LIFT = 0.38
 const sources = {
   robot: new URL('../assets/robot.svg', import.meta.url).href,
@@ -229,23 +228,72 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.restore()
 }
 
-export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0, lift = 0): void {
+function drawMainUplink(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, ready: boolean, progress: number): void {
+  // Armored command relay: a centered chassis, directional crown and twin energy banks.
+  // All hardware stays fixed; progress only fills the four paired cells from bottom to top.
+  ctx.beginPath(); ctx.moveTo(x - size * 0.42, y - size * 0.7)
+  ctx.lineTo(x + size * 0.42, y - size * 0.7); ctx.lineTo(x + size * 0.7, y - size * 0.42)
+  ctx.lineTo(x + size * 0.7, y + size * 0.42); ctx.lineTo(x + size * 0.42, y + size * 0.7)
+  ctx.lineTo(x - size * 0.42, y + size * 0.7); ctx.lineTo(x - size * 0.7, y + size * 0.42)
+  ctx.lineTo(x - size * 0.7, y - size * 0.42); ctx.closePath()
+  ctx.fillStyle = '#101e28'; ctx.fill(); ctx.strokeStyle = '#73939e'; ctx.lineWidth = 1; ctx.stroke()
+  ctx.fillStyle = ink.panel; ctx.fillRect(x - size * 0.58, y - size * 0.4, size * 1.16, size * 0.8)
+  ctx.strokeStyle = ink.line; ctx.strokeRect(x - size * 0.58, y - size * 0.4, size * 1.16, size * 0.8)
+
+  ctx.strokeStyle = '#b6cdd2'; ctx.lineWidth = Math.max(1, size * 0.04); ctx.beginPath()
+  for (const side of [-1, 1]) {
+    ctx.moveTo(x + side * size * 0.22, y - size * 0.7)
+    ctx.lineTo(x + side * size * 0.42, y - size * 0.7); ctx.lineTo(x + side * size * 0.7, y - size * 0.42)
+    ctx.moveTo(x + side * size * 0.7, y + size * 0.42)
+    ctx.lineTo(x + side * size * 0.42, y + size * 0.7); ctx.lineTo(x + side * size * 0.22, y + size * 0.7)
+    ctx.moveTo(x + side * size * 0.28, y - size * 0.7)
+    ctx.lineTo(x + side * size * 0.28, y - size * 0.94); ctx.lineTo(x + side * size * 0.44, y - size * 0.94)
+  }
+  ctx.moveTo(x, y - size * 0.7); ctx.lineTo(x, y - size * 1.12); ctx.stroke()
+  ctx.fillStyle = ready ? ink.lime : ink.dim
+  ctx.fillRect(x - size * 0.12, y - size * 1.12, size * 0.24, size * 0.06)
+  for (const side of [-1, 1]) ctx.fillRect(x + side * size * 0.4 - size * 0.04, y - size * 0.98, size * 0.08, size * 0.08)
+
+  ctx.beginPath(); ctx.moveTo(x, y - size * 0.34); ctx.lineTo(x + size * 0.3, y)
+  ctx.lineTo(x, y + size * 0.34); ctx.lineTo(x - size * 0.3, y); ctx.closePath()
+  ctx.fillStyle = '#2c4650'; ctx.fill(); ctx.strokeStyle = ink.text; ctx.lineWidth = 1; ctx.stroke()
+  ctx.strokeStyle = '#7aa1a7'; ctx.beginPath()
+  ctx.moveTo(x, y - size * 0.24); ctx.lineTo(x, y + size * 0.24)
+  ctx.moveTo(x - size * 0.2, y); ctx.lineTo(x + size * 0.2, y); ctx.stroke()
+  ctx.fillStyle = ink.floor; ctx.fillRect(x - size * 0.1, y - size * 0.12, size * 0.2, size * 0.24)
+  ctx.strokeStyle = '#b6cdd2'; ctx.strokeRect(x - size * 0.1, y - size * 0.12, size * 0.2, size * 0.24)
+  ctx.fillStyle = ready ? ink.lime : ink.dim; ctx.fillRect(x - size * 0.04, y - size * 0.04, size * 0.08, size * 0.08)
+
+  for (const side of [-1, 1]) {
+    const bx = x + side * size * 0.49 - size * 0.06
+    ctx.strokeStyle = '#486768'; ctx.strokeRect(bx - size * 0.03, y - size * 0.36, size * 0.18, size * 0.72)
+    for (let i = 0; i < 4; i++) {
+      const by = y + size * (0.22 - i * 0.17)
+      ctx.fillStyle = '#486768'; ctx.fillRect(bx, by, size * 0.12, size * 0.1)
+      const filled = Math.min(1, Math.max(0, progress * 4 - i))
+      if (filled > 0) { ctx.fillStyle = ink.cyan; ctx.fillRect(bx, by, size * 0.12 * filled, size * 0.1) }
+    }
+  }
+}
+
+export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0, _lift = 0): void {
+  // Keep the legacy argument for callers; neither hardware nor its base floats.
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, (main ? 2.1 : 1.7) * cam.scale)
   if (!visible(cam, x, y)) return
   ctx.save(); ctx.globalAlpha = ready || progress > 0 ? 1 : 0.55
-  if (lift > 0) {
-    const shadowY = y + lift * UPLINK_LIFT * cam.scale
-    ctx.fillStyle = '#02070c99'; ctx.beginPath(); ctx.ellipse(x, shadowY + size * 0.35, size * (0.48 - lift * 0.12), size * 0.16, 0, 0, tau); ctx.fill()
-    ctx.strokeStyle = `${ink.cyan}55`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
+  if (main) drawMainUplink(ctx, x, y, size, ready, progress)
+  else {
+    circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
+    sprite(ctx, 'uplink', x, y, size)
   }
-  circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
-  sprite(ctx, 'uplink', x, y, size)
   if (progress > 0) {
-    circle(ctx, x, y, size * 0.9); ctx.strokeStyle = '#49616e'; ctx.lineWidth = 5; ctx.stroke()
-    ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
-    const a = -tau / 4 + Math.min(1, progress) * tau
-    ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
-    ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    if (!main) {
+      circle(ctx, x, y, size * 0.9); ctx.strokeStyle = '#49616e'; ctx.lineWidth = 5; ctx.stroke()
+      ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
+      const a = -tau / 4 + Math.min(1, progress) * tau
+      ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
+      ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    }
     ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
     ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
   }
