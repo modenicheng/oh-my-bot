@@ -3,19 +3,23 @@
 //
 // 所有权约定（客户端连接健壮性）：
 // - 一个 WsTransport 只 owns 一个 socket；重连由上层（RoomSession）新建 transport 驱动。
-// - connect 超时 8s；open 后每 2s 发 ping，8s 内无任何有效入帧视为断线（liveness）。
+// - 心跳/存活时序取自生成协议 TransportTiming（审计 X-5 单一权威源：
+//   protocol/proto/omb.proto 定义，与 server/internal/netws/timing_test.go 互钉）。
 // - 断开统一收敛为 onClose(reason) 单次回调；open 后的 error 交给 onclose 收口，不重复上报。
 // - close() 幂等：掐断 CONNECTING/OPEN、清空全部定时器、摘除旧 socket 回调、取消未决 connect。
 // - send 精确发送视图字节（按 byteOffset/length 切片），不发送底层共享 buffer 的多余内容。
 
 import type { Transport, TransportStats } from './transport'
+import { TransportTiming } from './gen/proto/omb_pb'
 
-const CONNECT_TIMEOUT_MS = 8000
-const PING_INTERVAL_MS = 2000
-const LIVENESS_TIMEOUT_MS = 8000
-const LIVENESS_CHECK_MS = 1000
-const FRAME_PING = 0x00
-const FRAME_PONG = 0x01
+// 时序常量全部取自生成枚举 TransportTiming（单一权威源，见文件头注释）；
+// 本文件不再手写任何心跳/帧字节字面量（漂移由 golden.test.ts 拦截）。
+const CONNECT_TIMEOUT_MS = TransportTiming.CONNECT_TIMEOUT_MS
+const PING_INTERVAL_MS = TransportTiming.PING_INTERVAL_MS
+const LIVENESS_TIMEOUT_MS = TransportTiming.LIVENESS_TIMEOUT_MS
+const LIVENESS_CHECK_MS = TransportTiming.LIVENESS_CHECK_MS
+const FRAME_PING = TransportTiming.FRAME_PING
+const FRAME_PONG = TransportTiming.FRAME_PONG
 
 export class WsTransport implements Transport {
   private ws?: WebSocket

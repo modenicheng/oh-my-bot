@@ -1,12 +1,24 @@
 // 帧编解码辅助：protobuf 生成类型 + Transport 二进制帧的胶水。
-// 帧协议（ADR-0012，与 server/internal/netws/handler.go 的 frame* 常量一致；
-// 字节值由两侧测试互钉：packages/protocol/test/golden.test.ts ↔ netws/handler_test.go）：
+// 帧协议（ADR-0012）：字节值权威源为生成枚举 TransportTiming
+// （protocol/proto/omb.proto；Go 侧 server/internal/netws/handler.go 同源取值，
+// 由两侧测试互钉：packages/protocol/test/golden.test.ts ↔ netws/timing_test.go）：
 //   0x00 ping / 0x01 pong / 0x02 上行 ClientMsg / 0x03 下行 ServerMsg
 import { toBinary, fromBinary } from '@bufbuild/protobuf'
-import { ClientMsgSchema, ServerMsgSchema, EvControlNotice, EvControlNotice_Code, type ClientMsg, type ServerMsg } from './gen/proto/omb_pb'
+import {
+  ClientMsgSchema,
+  ServerMsgSchema,
+  EvControlNotice,
+  EvControlNotice_Code,
+  TransportTiming,
+  type ClientMsg,
+  type ServerMsg,
+} from './gen/proto/omb_pb'
 
 export const frame = {
-  ping: 0x00, pong: 0x01, up: 0x02, down: 0x03,
+  ping: TransportTiming.FRAME_PING,
+  pong: TransportTiming.FRAME_PONG,
+  up: TransportTiming.FRAME_UP,
+  down: TransportTiming.FRAME_DOWN,
 } as const
 
 // 字符串协议（过渡期兼容，正解为结构化 control_notice 事件，见下）：进房被拒时

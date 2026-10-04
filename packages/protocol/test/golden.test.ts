@@ -1,22 +1,76 @@
 import { describe, expect, it } from 'vitest'
 import { toBinary, fromBinary, create } from '@bufbuild/protobuf'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   ClientMsgSchema, ClientInputSchema, SnapshotDeltaSchema,
-  ServerMsgSchema, ServerEventSchema, EvSaySchema, SimTuningSchema, EvControlNoticeSchema, EvControlNotice_Code,
-  EvMapBootstrapSchema,
+  ServerMsgSchema, ServerEventSchema, EvSaySchema,
+  SimTuningSchema, EvControlNoticeSchema, EvControlNotice_Code,
+  EvMapBootstrapSchema, TransportTiming,
   type ClientMsg, type SnapshotDelta, type EvControlNotice,
 } from '../src/gen/proto/omb_pb'
 import { encodeClient, decodeServer, frame, JOIN_FAILED_PREFIX, joinFailedReason, controlNotice, joinRejection, dedupeControlNoticeSay } from '../src/messages'
+
+// 回放/契约测试运行于 vitest（Node）环境；node:fs/node:url 仅用于读取权威源文本。
+// （同 client/src/replay/test/replay.test.ts 的既有做法。）
 
 // 跨语言契约黄金字节：Go 侧（server/internal/protocol/protocol_test.go）断言同一 hex。
 // ClientMsg{input:{seq:42, move_x:500, move_y:-500, fire:true, aim:1.5}}
 export const GOLDEN = '0a1b082a10f403188cfcffffffffffffff01200129000000000000f83f'
 
 describe('frame + protobuf round-trip', () => {
-  // 帧字节互钉：与 server/internal/netws/handler_test.go 的 TestFrameBytesPinned 断言同一组值。
-  // ADR-0012 首字节帧协议，任一侧改动都会在此失败。
+  // 帧字节互钉：与 server/internal/netws 的 TestFrameBytesPinned / TestTransportTimingPinned
+  // 断言同一组值。ADR-0012 首字节帧协议，任一侧改动都会在此失败。
   it('帧字节与 Go netws 常量互钉（ADR-0012）', () => {
     expect(frame).toEqual({ ping: 0x00, pong: 0x01, up: 0x02, down: 0x03 })
+  })
+
+  // 心跳/时序参数漂移对拍（审计 X-5）：单一权威源为生成枚举 TransportTiming
+  // （protocol/proto/omb.proto；Go 侧 server/internal/netws/timing_test.go 四向互钉）。
+  // 与 Go 侧 TestTransportTimingPinned 断言同一组数值；任一侧改动都会双侧失败。
+  it('心跳/时序常量与权威源和 Go 侧互钉（X-5）', () => {
+    expect({
+      framePing: TransportTiming.FRAME_PING,
+      framePong: TransportTiming.FRAME_PONG,
+      frameUp: TransportTiming.FRAME_UP,
+      frameDown: TransportTiming.FRAME_DOWN,
+      connectTimeoutMs: TransportTiming.CONNECT_TIMEOUT_MS,
+      pingIntervalMs: TransportTiming.PING_INTERVAL_MS,
+      livenessTimeoutMs: TransportTiming.LIVENESS_TIMEOUT_MS,
+      livenessCheckMs: TransportTiming.LIVENESS_CHECK_MS,
+      serverReadTimeoutMs: TransportTiming.SERVER_READ_TIMEOUT_MS,
+      serverWriteTimeoutMs: TransportTiming.SERVER_WRITE_TIMEOUT_MS,
+    }).toEqual({
+      framePing: 0x00,
+      framePong: 0x01,
+      frameUp: 0x02,
+      frameDown: 0x03,
+      connectTimeoutMs: 8000,
+      pingIntervalMs: 2000,
+      livenessTimeoutMs: 8000,
+      livenessCheckMs: 1000,
+      serverReadTimeoutMs: 10000,
+      serverWriteTimeoutMs: 2000,
+    })
+  })
+
+  // 生成代码与权威源 .proto 文本互拍：改 proto 忘跑 buf generate 时在此失败。
+  it('TransportTiming 生成代码与 omb.proto 权威源同步（X-5）', () => {
+    const protoPath = fileURLToPath(new URL('../../../protocol/proto/omb.proto', import.meta.url))
+    const protoSrc = readFileSync(protoPath, 'utf8')
+    const body = protoSrc.slice(
+      protoSrc.indexOf('enum TransportTiming'),
+      // 枚举体到配对右花括号（本仓库枚举值单行风格，无嵌套花括号）。
+      protoSrc.indexOf('}', protoSrc.indexOf('{', protoSrc.indexOf('enum TransportTiming'))),
+    )
+    const specs: Array<[keyof typeof TransportTiming, number]> = [
+      ['FRAME_PING', 0x00], ['FRAME_PONG', 0x01], ['FRAME_UP', 0x02], ['FRAME_DOWN', 0x03],
+      ['CONNECT_TIMEOUT_MS', 8000], ['PING_INTERVAL_MS', 2000], ['LIVENESS_TIMEOUT_MS', 8000],
+      ['LIVENESS_CHECK_MS', 1000], ['SERVER_READ_TIMEOUT_MS', 10000], ['SERVER_WRITE_TIMEOUT_MS', 2000],
+    ]
+    for (const [name, val] of specs) {
+      expect(body).toContain(`${name} = ${val};`)
+    }
   })
 
   // join failed 前缀字符串协议：与 server/cmd/omb/main.go 的 joinFailedPrefix 常量

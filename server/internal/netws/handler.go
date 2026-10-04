@@ -31,11 +31,18 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+// 帧字节与心跳/写超时从生成协议 ombv1.TransportTiming 取值（审计 X-5：单一权威源，
+// protocol/proto/omb.proto 定义，两侧测试互钉）。读超时同理；运行时数值与重构前逐位相同。
 const (
-	framePing byte = 0x00
-	framePong byte = 0x01
-	frameUp   byte = 0x02
-	frameDown byte = 0x03
+	framePing byte = byte(ombv1.TransportTiming_FRAME_PING)
+	framePong byte = byte(ombv1.TransportTiming_FRAME_PONG)
+	frameUp   byte = byte(ombv1.TransportTiming_FRAME_UP)
+	frameDown byte = byte(ombv1.TransportTiming_FRAME_DOWN)
+
+	// 心跳与写超时（毫秒 → Duration，逐位对应生成枚举值）。
+	pingInterval      = time.Duration(ombv1.TransportTiming_PING_INTERVAL_MS) * time.Millisecond
+	writeTimeout      = time.Duration(ombv1.TransportTiming_SERVER_WRITE_TIMEOUT_MS) * time.Millisecond
+	serverReadTimeout = time.Duration(ombv1.TransportTiming_SERVER_READ_TIMEOUT_MS) * time.Millisecond
 
 	lossyQueueLen     = 4    // 丢帧通道小缓冲：只保留最新几帧
 	scriptLogQueueLen = 32   // Console 独立低优先队列：满时只丢日志
@@ -128,7 +135,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		go func() {
 			for {
 				// A half-open connection must eventually unregister and release held input.
-				readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				readCtx, cancel := context.WithTimeout(ctx, serverReadTimeout)
 				_, data, err := c.Read(readCtx)
 				cancel()
 				if err != nil {
@@ -153,11 +160,11 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 			}
 		}()
 
-		pingTicker := time.NewTicker(2 * time.Second)
+		pingTicker := time.NewTicker(pingInterval)
 		defer pingTicker.Stop()
 
 		write := func(b []byte) error {
-			wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 			defer cancel()
 			return c.Write(wctx, websocket.MessageBinary, b)
 		}

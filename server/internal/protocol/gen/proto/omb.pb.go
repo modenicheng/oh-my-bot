@@ -124,6 +124,84 @@ func (ControlSource) EnumDescriptor() ([]byte, []int) {
 	return file_proto_omb_proto_rawDescGZIP(), []int{1}
 }
 
+// WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
+// TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
+// 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
+// 且测试会解析本文件与生成代码对拍，防止改这里忘跑 buf generate。改值须同步评估两侧语义。
+// allow_alias 仅为放行当前恰好相等的独立常量（8000 连接超时/存活阈值、2000 ping 间隔/写超时）；
+// 数值间无语义绑定，后续可各自独立修改（改后别名自然消失）。
+type TransportTiming int32
+
+const (
+	// ADR-0012 首字节帧类型（0x00-0x03 不可变更，旧客户端/服务器互操作依赖）。
+	TransportTiming_FRAME_PING TransportTiming = 0 // ping 帧首字节 0x00（任一方向；载荷 8B 时间戳）
+	TransportTiming_FRAME_PONG TransportTiming = 1 // pong 帧首字节 0x01（收到 ping 的一方回显载荷）
+	TransportTiming_FRAME_UP   TransportTiming = 2 // 上行 ClientMsg 帧首字节 0x02
+	TransportTiming_FRAME_DOWN TransportTiming = 3 // 下行 ServerMsg 帧首字节 0x03
+	// 连接与心跳时序（毫秒）。
+	TransportTiming_CONNECT_TIMEOUT_MS      TransportTiming = 8000  // 客户端 WS 连接建立超时
+	TransportTiming_PING_INTERVAL_MS        TransportTiming = 2000  // 双侧心跳 ping 间隔
+	TransportTiming_LIVENESS_TIMEOUT_MS     TransportTiming = 8000  // 客户端无任何有效入帧判定断线的阈值
+	TransportTiming_LIVENESS_CHECK_MS       TransportTiming = 1000  // 客户端存活检查轮询周期
+	TransportTiming_SERVER_READ_TIMEOUT_MS  TransportTiming = 10000 // 服务器单次上行读超时（半开连接回收）
+	TransportTiming_SERVER_WRITE_TIMEOUT_MS TransportTiming = 2000  // 服务器单帧下行写超时
+)
+
+// Enum value maps for TransportTiming.
+var (
+	TransportTiming_name = map[int32]string{
+		0:    "FRAME_PING",
+		1:    "FRAME_PONG",
+		2:    "FRAME_UP",
+		3:    "FRAME_DOWN",
+		8000: "CONNECT_TIMEOUT_MS",
+		2000: "PING_INTERVAL_MS",
+		// Duplicate value: 8000: "LIVENESS_TIMEOUT_MS",
+		1000:  "LIVENESS_CHECK_MS",
+		10000: "SERVER_READ_TIMEOUT_MS",
+		// Duplicate value: 2000: "SERVER_WRITE_TIMEOUT_MS",
+	}
+	TransportTiming_value = map[string]int32{
+		"FRAME_PING":              0,
+		"FRAME_PONG":              1,
+		"FRAME_UP":                2,
+		"FRAME_DOWN":              3,
+		"CONNECT_TIMEOUT_MS":      8000,
+		"PING_INTERVAL_MS":        2000,
+		"LIVENESS_TIMEOUT_MS":     8000,
+		"LIVENESS_CHECK_MS":       1000,
+		"SERVER_READ_TIMEOUT_MS":  10000,
+		"SERVER_WRITE_TIMEOUT_MS": 2000,
+	}
+)
+
+func (x TransportTiming) Enum() *TransportTiming {
+	p := new(TransportTiming)
+	*p = x
+	return p
+}
+
+func (x TransportTiming) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TransportTiming) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_omb_proto_enumTypes[2].Descriptor()
+}
+
+func (TransportTiming) Type() protoreflect.EnumType {
+	return &file_proto_omb_proto_enumTypes[2]
+}
+
+func (x TransportTiming) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TransportTiming.Descriptor instead.
+func (TransportTiming) EnumDescriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{2}
+}
+
 type SnippetKind int32
 
 const (
@@ -171,11 +249,11 @@ func (x SnippetKind) String() string {
 }
 
 func (SnippetKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[2].Descriptor()
+	return file_proto_omb_proto_enumTypes[3].Descriptor()
 }
 
 func (SnippetKind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[2]
+	return &file_proto_omb_proto_enumTypes[3]
 }
 
 func (x SnippetKind) Number() protoreflect.EnumNumber {
@@ -184,7 +262,7 @@ func (x SnippetKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SnippetKind.Descriptor instead.
 func (SnippetKind) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{2}
+	return file_proto_omb_proto_rawDescGZIP(), []int{3}
 }
 
 type Title int32
@@ -260,11 +338,11 @@ func (x Title) String() string {
 }
 
 func (Title) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[3].Descriptor()
+	return file_proto_omb_proto_enumTypes[4].Descriptor()
 }
 
 func (Title) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[3]
+	return &file_proto_omb_proto_enumTypes[4]
 }
 
 func (x Title) Number() protoreflect.EnumNumber {
@@ -273,7 +351,7 @@ func (x Title) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Title.Descriptor instead.
 func (Title) EnumDescriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{3}
+	return file_proto_omb_proto_rawDescGZIP(), []int{4}
 }
 
 type RoomAction_Kind int32
@@ -318,11 +396,11 @@ func (x RoomAction_Kind) String() string {
 }
 
 func (RoomAction_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[4].Descriptor()
+	return file_proto_omb_proto_enumTypes[5].Descriptor()
 }
 
 func (RoomAction_Kind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[4]
+	return &file_proto_omb_proto_enumTypes[5]
 }
 
 func (x RoomAction_Kind) Number() protoreflect.EnumNumber {
@@ -384,11 +462,11 @@ func (x EvControlNotice_Code) String() string {
 }
 
 func (EvControlNotice_Code) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[5].Descriptor()
+	return file_proto_omb_proto_enumTypes[6].Descriptor()
 }
 
 func (EvControlNotice_Code) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[5]
+	return &file_proto_omb_proto_enumTypes[6]
 }
 
 func (x EvControlNotice_Code) Number() protoreflect.EnumNumber {
@@ -436,11 +514,11 @@ func (x EvRoomState_State) String() string {
 }
 
 func (EvRoomState_State) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[6].Descriptor()
+	return file_proto_omb_proto_enumTypes[7].Descriptor()
 }
 
 func (EvRoomState_State) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[6]
+	return &file_proto_omb_proto_enumTypes[7]
 }
 
 func (x EvRoomState_State) Number() protoreflect.EnumNumber {
@@ -482,11 +560,11 @@ func (x EvAiStream_Kind) String() string {
 }
 
 func (EvAiStream_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_omb_proto_enumTypes[7].Descriptor()
+	return file_proto_omb_proto_enumTypes[8].Descriptor()
 }
 
 func (EvAiStream_Kind) Type() protoreflect.EnumType {
-	return &file_proto_omb_proto_enumTypes[7]
+	return &file_proto_omb_proto_enumTypes[8]
 }
 
 func (x EvAiStream_Kind) Number() protoreflect.EnumNumber {
@@ -4853,7 +4931,21 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\bCS_HUMAN\x10\x01\x12\r\n" +
 	"\tCS_SCRIPT\x10\x02\x12\x0e\n" +
 	"\n" +
-	"CS_SNIPPET\x10\x03*\xc1\x01\n" +
+	"CS_SNIPPET\x10\x03*\xf0\x01\n" +
+	"\x0fTransportTiming\x12\x0e\n" +
+	"\n" +
+	"FRAME_PING\x10\x00\x12\x0e\n" +
+	"\n" +
+	"FRAME_PONG\x10\x01\x12\f\n" +
+	"\bFRAME_UP\x10\x02\x12\x0e\n" +
+	"\n" +
+	"FRAME_DOWN\x10\x03\x12\x17\n" +
+	"\x12CONNECT_TIMEOUT_MS\x10\xc0>\x12\x15\n" +
+	"\x10PING_INTERVAL_MS\x10\xd0\x0f\x12\x18\n" +
+	"\x13LIVENESS_TIMEOUT_MS\x10\xc0>\x12\x16\n" +
+	"\x11LIVENESS_CHECK_MS\x10\xe8\a\x12\x1b\n" +
+	"\x16SERVER_READ_TIMEOUT_MS\x10\x90N\x12\x1c\n" +
+	"\x17SERVER_WRITE_TIMEOUT_MS\x10\xd0\x0f\x1a\x02\x10\x01*\xc1\x01\n" +
 	"\vSnippetKind\x12\x17\n" +
 	"\x13SNIPPET_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SNIPPET_AUTO_AIM\x10\x01\x12\x1c\n" +
@@ -4899,149 +4991,150 @@ func file_proto_omb_proto_rawDescGZIP() []byte {
 	return file_proto_omb_proto_rawDescData
 }
 
-var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
 var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_proto_omb_proto_goTypes = []any{
 	(Phase)(0),                    // 0: omb.v1.Phase
 	(ControlSource)(0),            // 1: omb.v1.ControlSource
-	(SnippetKind)(0),              // 2: omb.v1.SnippetKind
-	(Title)(0),                    // 3: omb.v1.Title
-	(RoomAction_Kind)(0),          // 4: omb.v1.RoomAction.Kind
-	(EvControlNotice_Code)(0),     // 5: omb.v1.EvControlNotice.Code
-	(EvRoomState_State)(0),        // 6: omb.v1.EvRoomState.State
-	(EvAiStream_Kind)(0),          // 7: omb.v1.EvAiStream.Kind
-	(*Vec2)(nil),                  // 8: omb.v1.Vec2
-	(*ClientInput)(nil),           // 9: omb.v1.ClientInput
-	(*JoinRoom)(nil),              // 10: omb.v1.JoinRoom
-	(*SpectateRoom)(nil),          // 11: omb.v1.SpectateRoom
-	(*LeaveRoom)(nil),             // 12: omb.v1.LeaveRoom
-	(*AssistToggle)(nil),          // 13: omb.v1.AssistToggle
-	(*RoomAction)(nil),            // 14: omb.v1.RoomAction
-	(*ScriptSubmit)(nil),          // 15: omb.v1.ScriptSubmit
-	(*SnippetSetting)(nil),        // 16: omb.v1.SnippetSetting
-	(*SnippetConfig)(nil),         // 17: omb.v1.SnippetConfig
-	(*AiPrompt)(nil),              // 18: omb.v1.AiPrompt
-	(*Say)(nil),                   // 19: omb.v1.Say
-	(*ResyncRequest)(nil),         // 20: omb.v1.ResyncRequest
-	(*ClientMsg)(nil),             // 21: omb.v1.ClientMsg
-	(*EntityBase)(nil),            // 22: omb.v1.EntityBase
-	(*RobotState)(nil),            // 23: omb.v1.RobotState
-	(*ProjectileState)(nil),       // 24: omb.v1.ProjectileState
-	(*CoreState)(nil),             // 25: omb.v1.CoreState
-	(*UplinkState)(nil),           // 26: omb.v1.UplinkState
-	(*HealthPackState)(nil),       // 27: omb.v1.HealthPackState
-	(*SelfState)(nil),             // 28: omb.v1.SelfState
-	(*SnapshotDelta)(nil),         // 29: omb.v1.SnapshotDelta
-	(*EvKill)(nil),                // 30: omb.v1.EvKill
-	(*EvCorePickup)(nil),          // 31: omb.v1.EvCorePickup
-	(*EvUplinkHack)(nil),          // 32: omb.v1.EvUplinkHack
-	(*EvPhaseChange)(nil),         // 33: omb.v1.EvPhaseChange
-	(*EvRespawn)(nil),             // 34: omb.v1.EvRespawn
-	(*EvHeal)(nil),                // 35: omb.v1.EvHeal
-	(*EvSay)(nil),                 // 36: omb.v1.EvSay
-	(*EvHit)(nil),                 // 37: omb.v1.EvHit
-	(*EvShot)(nil),                // 38: omb.v1.EvShot
-	(*EvProjectileImpact)(nil),    // 39: omb.v1.EvProjectileImpact
-	(*EvMatchStart)(nil),          // 40: omb.v1.EvMatchStart
-	(*EvWallHit)(nil),             // 41: omb.v1.EvWallHit
-	(*EvScriptError)(nil),         // 42: omb.v1.EvScriptError
-	(*EvMatchEnd)(nil),            // 43: omb.v1.EvMatchEnd
-	(*ScoreRow)(nil),              // 44: omb.v1.ScoreRow
-	(*EvScoreboard)(nil),          // 45: omb.v1.EvScoreboard
-	(*EvScriptResult)(nil),        // 46: omb.v1.EvScriptResult
-	(*SnippetSourceView)(nil),     // 47: omb.v1.SnippetSourceView
-	(*EvSnippetResult)(nil),       // 48: omb.v1.EvSnippetResult
-	(*EvMapBootstrap)(nil),        // 49: omb.v1.EvMapBootstrap
-	(*SimTuning)(nil),             // 50: omb.v1.SimTuning
-	(*EvControlNotice)(nil),       // 51: omb.v1.EvControlNotice
-	(*EvAiUsage)(nil),             // 52: omb.v1.EvAiUsage
-	(*EvRoomState)(nil),           // 53: omb.v1.EvRoomState
-	(*EvAiQuota)(nil),             // 54: omb.v1.EvAiQuota
-	(*EvAiStream)(nil),            // 55: omb.v1.EvAiStream
-	(*ServerEvent)(nil),           // 56: omb.v1.ServerEvent
-	(*EvScriptLog)(nil),           // 57: omb.v1.EvScriptLog
-	(*EvSnippetUsage)(nil),        // 58: omb.v1.EvSnippetUsage
-	(*ServerMsg)(nil),             // 59: omb.v1.ServerMsg
-	(*timestamppb.Timestamp)(nil), // 60: google.protobuf.Timestamp
+	(TransportTiming)(0),          // 2: omb.v1.TransportTiming
+	(SnippetKind)(0),              // 3: omb.v1.SnippetKind
+	(Title)(0),                    // 4: omb.v1.Title
+	(RoomAction_Kind)(0),          // 5: omb.v1.RoomAction.Kind
+	(EvControlNotice_Code)(0),     // 6: omb.v1.EvControlNotice.Code
+	(EvRoomState_State)(0),        // 7: omb.v1.EvRoomState.State
+	(EvAiStream_Kind)(0),          // 8: omb.v1.EvAiStream.Kind
+	(*Vec2)(nil),                  // 9: omb.v1.Vec2
+	(*ClientInput)(nil),           // 10: omb.v1.ClientInput
+	(*JoinRoom)(nil),              // 11: omb.v1.JoinRoom
+	(*SpectateRoom)(nil),          // 12: omb.v1.SpectateRoom
+	(*LeaveRoom)(nil),             // 13: omb.v1.LeaveRoom
+	(*AssistToggle)(nil),          // 14: omb.v1.AssistToggle
+	(*RoomAction)(nil),            // 15: omb.v1.RoomAction
+	(*ScriptSubmit)(nil),          // 16: omb.v1.ScriptSubmit
+	(*SnippetSetting)(nil),        // 17: omb.v1.SnippetSetting
+	(*SnippetConfig)(nil),         // 18: omb.v1.SnippetConfig
+	(*AiPrompt)(nil),              // 19: omb.v1.AiPrompt
+	(*Say)(nil),                   // 20: omb.v1.Say
+	(*ResyncRequest)(nil),         // 21: omb.v1.ResyncRequest
+	(*ClientMsg)(nil),             // 22: omb.v1.ClientMsg
+	(*EntityBase)(nil),            // 23: omb.v1.EntityBase
+	(*RobotState)(nil),            // 24: omb.v1.RobotState
+	(*ProjectileState)(nil),       // 25: omb.v1.ProjectileState
+	(*CoreState)(nil),             // 26: omb.v1.CoreState
+	(*UplinkState)(nil),           // 27: omb.v1.UplinkState
+	(*HealthPackState)(nil),       // 28: omb.v1.HealthPackState
+	(*SelfState)(nil),             // 29: omb.v1.SelfState
+	(*SnapshotDelta)(nil),         // 30: omb.v1.SnapshotDelta
+	(*EvKill)(nil),                // 31: omb.v1.EvKill
+	(*EvCorePickup)(nil),          // 32: omb.v1.EvCorePickup
+	(*EvUplinkHack)(nil),          // 33: omb.v1.EvUplinkHack
+	(*EvPhaseChange)(nil),         // 34: omb.v1.EvPhaseChange
+	(*EvRespawn)(nil),             // 35: omb.v1.EvRespawn
+	(*EvHeal)(nil),                // 36: omb.v1.EvHeal
+	(*EvSay)(nil),                 // 37: omb.v1.EvSay
+	(*EvHit)(nil),                 // 38: omb.v1.EvHit
+	(*EvShot)(nil),                // 39: omb.v1.EvShot
+	(*EvProjectileImpact)(nil),    // 40: omb.v1.EvProjectileImpact
+	(*EvMatchStart)(nil),          // 41: omb.v1.EvMatchStart
+	(*EvWallHit)(nil),             // 42: omb.v1.EvWallHit
+	(*EvScriptError)(nil),         // 43: omb.v1.EvScriptError
+	(*EvMatchEnd)(nil),            // 44: omb.v1.EvMatchEnd
+	(*ScoreRow)(nil),              // 45: omb.v1.ScoreRow
+	(*EvScoreboard)(nil),          // 46: omb.v1.EvScoreboard
+	(*EvScriptResult)(nil),        // 47: omb.v1.EvScriptResult
+	(*SnippetSourceView)(nil),     // 48: omb.v1.SnippetSourceView
+	(*EvSnippetResult)(nil),       // 49: omb.v1.EvSnippetResult
+	(*EvMapBootstrap)(nil),        // 50: omb.v1.EvMapBootstrap
+	(*SimTuning)(nil),             // 51: omb.v1.SimTuning
+	(*EvControlNotice)(nil),       // 52: omb.v1.EvControlNotice
+	(*EvAiUsage)(nil),             // 53: omb.v1.EvAiUsage
+	(*EvRoomState)(nil),           // 54: omb.v1.EvRoomState
+	(*EvAiQuota)(nil),             // 55: omb.v1.EvAiQuota
+	(*EvAiStream)(nil),            // 56: omb.v1.EvAiStream
+	(*ServerEvent)(nil),           // 57: omb.v1.ServerEvent
+	(*EvScriptLog)(nil),           // 58: omb.v1.EvScriptLog
+	(*EvSnippetUsage)(nil),        // 59: omb.v1.EvSnippetUsage
+	(*ServerMsg)(nil),             // 60: omb.v1.ServerMsg
+	(*timestamppb.Timestamp)(nil), // 61: google.protobuf.Timestamp
 }
 var file_proto_omb_proto_depIdxs = []int32{
-	4,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
-	2,  // 1: omb.v1.SnippetSetting.kind:type_name -> omb.v1.SnippetKind
-	16, // 2: omb.v1.SnippetConfig.snippets:type_name -> omb.v1.SnippetSetting
-	9,  // 3: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
-	9,  // 4: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
-	10, // 5: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
-	12, // 6: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
-	14, // 7: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
-	15, // 8: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
-	18, // 9: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
-	13, // 10: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
-	20, // 11: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
-	19, // 12: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
-	11, // 13: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
-	17, // 14: omb.v1.ClientMsg.snippet_config:type_name -> omb.v1.SnippetConfig
-	8,  // 15: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
-	22, // 16: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
-	22, // 17: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
-	22, // 18: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
-	22, // 19: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
-	22, // 20: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
+	5,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
+	3,  // 1: omb.v1.SnippetSetting.kind:type_name -> omb.v1.SnippetKind
+	17, // 2: omb.v1.SnippetConfig.snippets:type_name -> omb.v1.SnippetSetting
+	10, // 3: omb.v1.ClientMsg.input:type_name -> omb.v1.ClientInput
+	10, // 4: omb.v1.ClientMsg.warmup_input:type_name -> omb.v1.ClientInput
+	11, // 5: omb.v1.ClientMsg.join:type_name -> omb.v1.JoinRoom
+	13, // 6: omb.v1.ClientMsg.leave:type_name -> omb.v1.LeaveRoom
+	15, // 7: omb.v1.ClientMsg.room_action:type_name -> omb.v1.RoomAction
+	16, // 8: omb.v1.ClientMsg.script_submit:type_name -> omb.v1.ScriptSubmit
+	19, // 9: omb.v1.ClientMsg.ai_prompt:type_name -> omb.v1.AiPrompt
+	14, // 10: omb.v1.ClientMsg.assist_toggle:type_name -> omb.v1.AssistToggle
+	21, // 11: omb.v1.ClientMsg.resync_request:type_name -> omb.v1.ResyncRequest
+	20, // 12: omb.v1.ClientMsg.say:type_name -> omb.v1.Say
+	12, // 13: omb.v1.ClientMsg.spectate:type_name -> omb.v1.SpectateRoom
+	18, // 14: omb.v1.ClientMsg.snippet_config:type_name -> omb.v1.SnippetConfig
+	9,  // 15: omb.v1.EntityBase.pos:type_name -> omb.v1.Vec2
+	23, // 16: omb.v1.RobotState.base:type_name -> omb.v1.EntityBase
+	23, // 17: omb.v1.ProjectileState.base:type_name -> omb.v1.EntityBase
+	23, // 18: omb.v1.CoreState.base:type_name -> omb.v1.EntityBase
+	23, // 19: omb.v1.UplinkState.base:type_name -> omb.v1.EntityBase
+	23, // 20: omb.v1.HealthPackState.base:type_name -> omb.v1.EntityBase
 	1,  // 21: omb.v1.SelfState.move_src:type_name -> omb.v1.ControlSource
 	1,  // 22: omb.v1.SelfState.turret_src:type_name -> omb.v1.ControlSource
 	1,  // 23: omb.v1.SelfState.fire_src:type_name -> omb.v1.ControlSource
 	1,  // 24: omb.v1.SelfState.ability_src:type_name -> omb.v1.ControlSource
 	0,  // 25: omb.v1.SnapshotDelta.phase:type_name -> omb.v1.Phase
-	23, // 26: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
-	24, // 27: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
-	25, // 28: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
-	26, // 29: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
-	28, // 30: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
-	27, // 31: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
-	8,  // 32: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
+	24, // 26: omb.v1.SnapshotDelta.robots:type_name -> omb.v1.RobotState
+	25, // 27: omb.v1.SnapshotDelta.projectiles:type_name -> omb.v1.ProjectileState
+	26, // 28: omb.v1.SnapshotDelta.cores:type_name -> omb.v1.CoreState
+	27, // 29: omb.v1.SnapshotDelta.uplinks:type_name -> omb.v1.UplinkState
+	29, // 30: omb.v1.SnapshotDelta.self:type_name -> omb.v1.SelfState
+	28, // 31: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
+	9,  // 32: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
 	0,  // 33: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
 	0,  // 34: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
-	8,  // 35: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
-	8,  // 36: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
-	8,  // 37: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
-	8,  // 38: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
-	44, // 39: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
-	3,  // 40: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
-	44, // 41: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
-	2,  // 42: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
-	16, // 43: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
-	47, // 44: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
-	50, // 45: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
-	5,  // 46: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
-	6,  // 47: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
-	7,  // 48: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
-	60, // 49: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
-	30, // 50: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
-	31, // 51: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
-	32, // 52: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
-	33, // 53: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
-	34, // 54: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
-	36, // 55: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
-	37, // 56: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
-	43, // 57: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
-	53, // 58: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
-	54, // 59: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
-	46, // 60: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
-	40, // 61: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
-	41, // 62: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
-	42, // 63: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
-	49, // 64: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
-	52, // 65: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
-	38, // 66: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
-	39, // 67: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
-	45, // 68: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
-	57, // 69: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
-	35, // 70: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
-	58, // 71: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
-	48, // 72: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
-	55, // 73: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
-	51, // 74: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
-	29, // 75: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
-	56, // 76: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
+	9,  // 35: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
+	9,  // 36: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
+	9,  // 37: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
+	9,  // 38: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
+	45, // 39: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
+	4,  // 40: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
+	45, // 41: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
+	3,  // 42: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
+	17, // 43: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
+	48, // 44: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
+	51, // 45: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
+	6,  // 46: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
+	7,  // 47: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
+	8,  // 48: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
+	61, // 49: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
+	31, // 50: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
+	32, // 51: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
+	33, // 52: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
+	34, // 53: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
+	35, // 54: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
+	37, // 55: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
+	38, // 56: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
+	44, // 57: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
+	54, // 58: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
+	55, // 59: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
+	47, // 60: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
+	41, // 61: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
+	42, // 62: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
+	43, // 63: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
+	50, // 64: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
+	53, // 65: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
+	39, // 66: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
+	40, // 67: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
+	46, // 68: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
+	58, // 69: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
+	36, // 70: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
+	59, // 71: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
+	49, // 72: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
+	56, // 73: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
+	52, // 74: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
+	30, // 75: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
+	57, // 76: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
 	77, // [77:77] is the sub-list for method output_type
 	77, // [77:77] is the sub-list for method input_type
 	77, // [77:77] is the sub-list for extension type_name
@@ -5105,7 +5198,7 @@ func file_proto_omb_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_omb_proto_rawDesc), len(file_proto_omb_proto_rawDesc)),
-			NumEnums:      8,
+			NumEnums:      9,
 			NumMessages:   52,
 			NumExtensions: 0,
 			NumServices:   0,

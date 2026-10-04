@@ -21,6 +21,28 @@ enum Phase { PHASE_UNSPECIFIED = 0; OUTER_RING = 1; CORE_OPEN = 2; }
 // 控制轴来源（ADR-0009 分轴仲裁）
 enum ControlSource { CS_UNSPECIFIED = 0; CS_HUMAN = 1; CS_SCRIPT = 2; CS_SNIPPET = 3; }
 
+// WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
+// TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
+// 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
+// 且测试会解析本文件与生成代码对拍，防止改这里忘跑 buf generate。改值须同步评估两侧语义。
+// allow_alias 仅为放行当前恰好相等的独立常量（8000 连接超时/存活阈值、2000 ping 间隔/写超时）；
+// 数值间无语义绑定，后续可各自独立修改（改后别名自然消失）。
+enum TransportTiming {
+  option allow_alias = true;
+  // ADR-0012 首字节帧类型（0x00-0x03 不可变更，旧客户端/服务器互操作依赖）。
+  FRAME_PING = 0;  // ping 帧首字节 0x00（任一方向；载荷 8B 时间戳）
+  FRAME_PONG = 1;  // pong 帧首字节 0x01（收到 ping 的一方回显载荷）
+  FRAME_UP = 2;    // 上行 ClientMsg 帧首字节 0x02
+  FRAME_DOWN = 3;  // 下行 ServerMsg 帧首字节 0x03
+  // 连接与心跳时序（毫秒）。
+  CONNECT_TIMEOUT_MS = 8000;      // 客户端 WS 连接建立超时
+  PING_INTERVAL_MS = 2000;        // 双侧心跳 ping 间隔
+  LIVENESS_TIMEOUT_MS = 8000;     // 客户端无任何有效入帧判定断线的阈值
+  LIVENESS_CHECK_MS = 1000;       // 客户端存活检查轮询周期
+  SERVER_READ_TIMEOUT_MS = 10000; // 服务器单次上行读超时（半开连接回收）
+  SERVER_WRITE_TIMEOUT_MS = 2000; // 服务器单帧下行写超时
+}
+
 // ============ 上行（0x02 帧） ============
 
 message ClientInput {
