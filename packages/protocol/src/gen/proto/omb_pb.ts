@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file proto/omb.proto.
  */
 export const file_proto_omb: GenFile = /*@__PURE__*/
-  fileDesc("Cg9wcm90by9vbWIucHJvdG8SBm9tYi52MSIcCgRWZWMyEgkKAXgYASABKAESCQoBeRgCIAEoASKYAQoLQ2xpZW50SW5wdXQSCwoDc2VxGAEgASgNEg4KBm1vdmVfeBgCIAEoBRIOCgZtb3ZlX3kYAyABKAUSDAoEZmlyZRgEIAEoCBILCgNhaW0YBSABKAESDAoEZGFzaBgGIAEoCBIOCgZzaGllbGQYByABKAgSEAoIaW50ZXJhY3QYCCABKAgSEQoJYXhpc19tYXNrGAkgASgNIjoKCEpvaW5Sb29tEhEKCXJvb21fY29kZRgBIAEoCRIMCgRuaWNrGAIgASgJEg0KBWNvbG9yGAMgASgJIiEKDFNwZWN0YXRlUm9vbRIRCglyb29tX2NvZGUYASABKAkiCwoJTGVhdmVSb29tIg4KDEFzc2lzdFRvZ2dsZSKDAQoKUm9vbUFjdGlvbhIlCgRraW5kGAEgASgOMhcub21iLnYxLlJvb21BY3Rpb24uS2luZCJOCgRLaW5kEggKBE5PTkUQABIJCgVTVEFSVBABEgkKBUFCT1JUEAISCwoHUkVTVEFSVBADEgoKBldBUk1VUBAEEg0KCVNPTE9fQk9UUxAFIjgKDFNjcmlwdFN1Ym1pdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEg4KBnNvdXJjZRgCIAEoCSJoCg5TbmlwcGV0U2V0dGluZxIhCgRraW5kGAEgASgOMhMub21iLnYxLlNuaXBwZXRLaW5kEg8KB2VuYWJsZWQYAiABKAgSCgoCcDEYAyABKAESCgoCcDIYBCABKAESCgoCczEYBSABKAkiOQoNU25pcHBldENvbmZpZxIoCghzbmlwcGV0cxgBIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZyIYCghBaVByb21wdBIMCgR0ZXh0GAEgASgJIhMKA1NheRIMCgR0ZXh0GAEgASgJIg8KDVJlc3luY1JlcXVlc3QihwQKCUNsaWVudE1zZxIkCgVpbnB1dBgBIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEisKDHdhcm11cF9pbnB1dBgCIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEiAKBGpvaW4YAyABKAsyEC5vbWIudjEuSm9pblJvb21IABIiCgVsZWF2ZRgEIAEoCzIRLm9tYi52MS5MZWF2ZVJvb21IABIpCgtyb29tX2FjdGlvbhgFIAEoCzISLm9tYi52MS5Sb29tQWN0aW9uSAASLQoNc2NyaXB0X3N1Ym1pdBgGIAEoCzIULm9tYi52MS5TY3JpcHRTdWJtaXRIABIlCglhaV9wcm9tcHQYByABKAsyEC5vbWIudjEuQWlQcm9tcHRIABItCg1hc3Npc3RfdG9nZ2xlGAggASgLMhQub21iLnYxLkFzc2lzdFRvZ2dsZUgAEi8KDnJlc3luY19yZXF1ZXN0GAkgASgLMhUub21iLnYxLlJlc3luY1JlcXVlc3RIABIaCgNzYXkYCiABKAsyCy5vbWIudjEuU2F5SAASKAoIc3BlY3RhdGUYCyABKAsyFC5vbWIudjEuU3BlY3RhdGVSb29tSAASLwoOc25pcHBldF9jb25maWcYDCABKAsyFS5vbWIudjEuU25pcHBldENvbmZpZ0gAQgkKB3BheWxvYWQiRAoKRW50aXR5QmFzZRIKCgJpZBgBIAEoDRIZCgNwb3MYAiABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAMgASgCIs8BCgpSb2JvdFN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRIOCgZocF94MTAYAiABKBESEgoKZW5lcmd5X3gxMBgDIAEoERIRCglzaGllbGRfb24YBCABKAgSDwoHZGFzaGluZxgFIAEoCBIMCgRkZWFkGAYgASgIEhQKDHJlc3Bhd25faW5fcxgHIAEoDRIMCgRuaWNrGAggASgJEg0KBWNvbG9yGAkgASgJEhYKCmlzX3BhcnRuZXIYCiABKAhCAhgBIlQKD1Byb2plY3RpbGVTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USEAoIb3duZXJfaWQYAiABKA0SDQoFY29sb3IYAyABKAkiPAoJQ29yZVN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRINCgV2YWx1ZRgCIAEoESJ/CgtVcGxpbmtTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USDQoFcmVhZHkYAiABKAgSEgoKaGFja2luZ19pZBgDIAEoDRIUCgxwcm9ncmVzc194MTAYBCABKBESFQoNbXlfY29vbGRvd25fcxgFIAEoDSJcCg9IZWFsdGhQYWNrU3RhdGUSIAoEYmFzZRgBIAEoCzISLm9tYi52MS5FbnRpdHlCYXNlEhEKCWF2YWlsYWJsZRgCIAEoCBIUCgxyZXNwYXduX2luX3MYAyABKA0i3QMKCVNlbGZTdGF0ZRIQCghyb2JvdF9pZBgBIAEoDRInCghtb3ZlX3NyYxgCIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlEikKCnR1cnJldF9zcmMYAyABKA4yFS5vbWIudjEuQ29udHJvbFNvdXJjZRIWCg5haV9yb3VuZHNfbGVmdBgEIAEoDRIYChBhaV90b2tlbnNfbGVmdF9rGAUgASgNEhYKCWFzc2lzdF9vbhgGIAEoCEgAiAEBEhwKD2Rhc2hfcmVhZHlfdGljaxgHIAEoDUgBiAEBEhwKD2ZpcmVfcmVhZHlfdGljaxgIIAEoDUgCiAEBEiwKCGZpcmVfc3JjGAkgASgOMhUub21iLnYxLkNvbnRyb2xTb3VyY2VIA4gBARIvCgthYmlsaXR5X3NyYxgKIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlSASIAQESHQoQbWFudWFsX2F4ZXNfbWFzaxgLIAEoDUgFiAEBQgwKCl9hc3Npc3Rfb25CEgoQX2Rhc2hfcmVhZHlfdGlja0ISChBfZmlyZV9yZWFkeV90aWNrQgsKCV9maXJlX3NyY0IOCgxfYWJpbGl0eV9zcmNCEwoRX21hbnVhbF9heGVzX21hc2sirAMKDVNuYXBzaG90RGVsdGESDAoEdGljaxgBIAEoDRIPCgdhY2tfc2VxGAIgASgNEhwKBXBoYXNlGAMgASgOMg0ub21iLnYxLlBoYXNlEhMKC3RpbWVfbGVmdF9zGAQgASgNEgwKBGZ1bGwYBSABKAgSEQoJYmFzZV90aWNrGAYgASgNEiIKBnJvYm90cxgHIAMoCzISLm9tYi52MS5Sb2JvdFN0YXRlEhIKCnJvYm90X2dvbmUYCCADKA0SLAoLcHJvamVjdGlsZXMYCSADKAsyFy5vbWIudjEuUHJvamVjdGlsZVN0YXRlEhcKD3Byb2plY3RpbGVfZ29uZRgKIAMoDRIgCgVjb3JlcxgLIAMoCzIRLm9tYi52MS5Db3JlU3RhdGUSEQoJY29yZV9nb25lGAwgAygNEiQKB3VwbGlua3MYDSADKAsyEy5vbWIudjEuVXBsaW5rU3RhdGUSHwoEc2VsZhgOIAEoCzIRLm9tYi52MS5TZWxmU3RhdGUSLQoMaGVhbHRoX3BhY2tzGA8gAygLMhcub21iLnYxLkhlYWx0aFBhY2tTdGF0ZSJ7CgZFdktpbGwSDgoGa2lsbGVyGAEgASgNEg4KBnZpY3RpbRgCIAEoDRISCgZhc3Npc3QYAyABKA1CAhgBEhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzISDwoHYXNzaXN0cxgFIAMoDRISCgpraWxsX3N0ZWFsGAYgASgIIjoKDEV2Q29yZVBpY2t1cBIKCgJieRgBIAEoDRIPCgdjb3JlX2lkGAIgASgNEg0KBXZhbHVlGAMgASgRIjwKDEV2VXBsaW5rSGFjaxIKCgJieRgBIAEoDRIRCgl1cGxpbmtfaWQYAiABKA0SDQoFdmFsdWUYAyABKBEiRwoNRXZQaGFzZUNoYW5nZRIbCgRmcm9tGAEgASgOMg0ub21iLnYxLlBoYXNlEhkKAnRvGAIgASgOMg0ub21iLnYxLlBoYXNlIioKCUV2UmVzcGF3bhINCgVyb2JvdBgBIAEoDRIOCgZzZWN0b3IYAiABKA0iTAoGRXZIZWFsEgoKAmJ5GAEgASgNEgoKAmlkGAIgASgNEhAKCGhlYWxfeDEwGAMgASgREhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzIiJAoFRXZTYXkSDQoFcm9ib3QYASABKA0SDAoEdGV4dBgCIAEoCSIuCgVFdkhpdBIMCgRmcm9tGAEgASgNEgoKAnRvGAIgASgNEgsKA2RtZxgDIAEoESJlCgZFdlNob3QSEgoKcHJvamVjdGlsZRgBIAEoDRINCgVvd25lchgCIAEoDRIYCgJhdBgDIAEoCzIMLm9tYi52MS5WZWMyEg8KB2hlYWRpbmcYBCABKAISDQoFY29sb3IYBSABKAkilgEKEkV2UHJvamVjdGlsZUltcGFjdBISCgpwcm9qZWN0aWxlGAEgASgNEg0KBW93bmVyGAIgASgNEg4KBnRhcmdldBgDIAEoDRIYCgJhdBgEIAEoCzIMLm9tYi52MS5WZWMyEg4KBnNoaWVsZBgFIAEoCBIUCgxpbnZ1bG5lcmFibGUYBiABKAgSDQoFY29sb3IYByABKAkiMQoMRXZNYXRjaFN0YXJ0EhAKCG1hcF9zZWVkGAEgASgEEg8KB3BsYXllcnMYAiABKA0iRAoJRXZXYWxsSGl0Eg0KBXJvYm90GAEgASgNEhgKAmF0GAIgASgLMgwub21iLnYxLlZlYzISDgoGaW1wYWN0GAMgASgCIkEKDUV2U2NyaXB0RXJyb3ISDQoFcm9ib3QYASABKA0SDQoFZXJyb3IYAiABKAkSEgoKc2NyaXB0X3JldhgDIAEoDSIuCgpFdk1hdGNoRW5kEiAKBnNjb3JlcxgBIAMoCzIQLm9tYi52MS5TY29yZVJvdyJHCghTY29yZVJvdxINCgVyb2JvdBgBIAEoDRINCgVzY29yZRgCIAEoERIdCgZ0aXRsZXMYAyADKA4yDS5vbWIudjEuVGl0bGUiPAoMRXZTY29yZWJvYXJkEh4KBHJvd3MYASADKAsyEC5vbWIudjEuU2NvcmVSb3cSDAoEdGljaxgCIAEoDSJZCg5FdlNjcmlwdFJlc3VsdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJEhIKCnNjcmlwdF9yZXYYBCABKA0ifQoRU25pcHBldFNvdXJjZVZpZXcSIQoEa2luZBgBIAEoDjITLm9tYi52MS5TbmlwcGV0S2luZBINCgV0aXRsZRgCIAEoCRIOCgZzb3VyY2UYAyABKAkSEgoKZGVmYXVsdF9wMRgEIAEoARISCgpkZWZhdWx0X3MxGAUgASgJIpUBCg9FdlNuaXBwZXRSZXN1bHQSCgoCb2sYASABKAgSDQoFZXJyb3IYAiABKAkSJwoHYXBwbGllZBgDIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZxISCgpzY3JpcHRfcmV2GAQgASgNEioKB3NvdXJjZXMYBSADKAsyGS5vbWIudjEuU25pcHBldFNvdXJjZVZpZXciTwoORXZNYXBCb290c3RyYXASEAoIbWFwX2pzb24YASABKAkSEAoIbWFwX2hhc2gYAiABKAkSGQoRZ2VuZXJhdG9yX3ZlcnNpb24YAyABKA0iXQoJRXZBaVVzYWdlEg0KBXJvYm90GAEgASgNEhQKDHJvdW5kc19kZWx0YRgCIAEoDRIUCgx0b2tlbnNfZGVsdGEYAyABKA0SFQoNZ2xvYmFsX2xlZnRfaxgEIAEoDSKzAQoLRXZSb29tU3RhdGUSKAoFc3RhdGUYASABKA4yGS5vbWIudjEuRXZSb29tU3RhdGUuU3RhdGUSFQoNcm9ib3RzX29ubGluZRgCIAEoDRIRCglob3N0X25pY2sYAyABKAkSEQoJc29sb19ib3RzGAQgASgNIj0KBVN0YXRlEgoKBlJfSURMRRAAEgwKCFJfV0FSTVVQEAESDQoJUl9SVU5OSU5HEAISCwoHUl9FTkRFRBADIlUKCUV2QWlRdW90YRITCgtyb3VuZHNfbGVmdBgBIAEoDRIVCg10b2tlbnNfdXNlZF9rGAIgASgNEhwKFGdsb2JhbF90b2tlbnNfbGVmdF9rGAMgASgNImUKCkV2QWlTdHJlYW0SDQoFZGVsdGEYASABKAkSJQoEa2luZBgCIAEoDjIXLm9tYi52MS5FdkFpU3RyZWFtLktpbmQiIQoES2luZBIKCgZBTlNXRVIQABINCglSRUFTT05JTkcQASK8CAoLU2VydmVyRXZlbnQSDAoEdGljaxgBIAEoDRIoCgR3YWxsGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIeCgRraWxsGAogASgLMg4ub21iLnYxLkV2S2lsbEgAEisKC2NvcmVfcGlja3VwGAsgASgLMhQub21iLnYxLkV2Q29yZVBpY2t1cEgAEisKC3VwbGlua19oYWNrGAwgASgLMhQub21iLnYxLkV2VXBsaW5rSGFja0gAEi0KDHBoYXNlX2NoYW5nZRgNIAEoCzIVLm9tYi52MS5FdlBoYXNlQ2hhbmdlSAASJAoHcmVzcGF3bhgOIAEoCzIRLm9tYi52MS5FdlJlc3Bhd25IABIcCgNzYXkYDyABKAsyDS5vbWIudjEuRXZTYXlIABIcCgNoaXQYECABKAsyDS5vbWIudjEuRXZIaXRIABInCgltYXRjaF9lbmQYESABKAsyEi5vbWIudjEuRXZNYXRjaEVuZEgAEikKCnJvb21fc3RhdGUYEiABKAsyEy5vbWIudjEuRXZSb29tU3RhdGVIABIlCghhaV9xdW90YRgTIAEoCzIRLm9tYi52MS5FdkFpUXVvdGFIABIvCg1zY3JpcHRfcmVzdWx0GBQgASgLMhYub21iLnYxLkV2U2NyaXB0UmVzdWx0SAASKwoLbWF0Y2hfc3RhcnQYFSABKAsyFC5vbWIudjEuRXZNYXRjaFN0YXJ0SAASJQoId2FsbF9oaXQYFiABKAsyES5vbWIudjEuRXZXYWxsSGl0SAASLQoMc2NyaXB0X2Vycm9yGBcgASgLMhUub21iLnYxLkV2U2NyaXB0RXJyb3JIABIvCg1tYXBfYm9vdHN0cmFwGBggASgLMhYub21iLnYxLkV2TWFwQm9vdHN0cmFwSAASJQoIYWlfdXNhZ2UYGSABKAsyES5vbWIudjEuRXZBaVVzYWdlSAASHgoEc2hvdBgaIAEoCzIOLm9tYi52MS5FdlNob3RIABI3ChFwcm9qZWN0aWxlX2ltcGFjdBgbIAEoCzIaLm9tYi52MS5FdlByb2plY3RpbGVJbXBhY3RIABIqCgpzY29yZWJvYXJkGBwgASgLMhQub21iLnYxLkV2U2NvcmVib2FyZEgAEikKCnNjcmlwdF9sb2cYHSABKAsyEy5vbWIudjEuRXZTY3JpcHRMb2dIABIeCgRoZWFsGB4gASgLMg4ub21iLnYxLkV2SGVhbEgAEi8KDXNuaXBwZXRfdXNhZ2UYHyABKAsyFi5vbWIudjEuRXZTbmlwcGV0VXNhZ2VIABIxCg5zbmlwcGV0X3Jlc3VsdBggIAEoCzIXLm9tYi52MS5FdlNuaXBwZXRSZXN1bHRIABInCglhaV9zdHJlYW0YISABKAsyEi5vbWIudjEuRXZBaVN0cmVhbUgAQgYKBGtpbmQicQoLRXZTY3JpcHRMb2cSEAoIcm9ib3RfaWQYASABKA0SEgoKc2NyaXB0X3JldhgCIAEoDRIMCgR0aWNrGAMgASgNEg0KBWxldmVsGAQgASgJEgwKBHRleHQYBSABKAkSEQoJdHJ1bmNhdGVkGAYgASgIIi0KDkV2U25pcHBldFVzYWdlEg0KBXJvYm90GAEgASgNEgwKBGF4ZXMYAiABKA0iZwoJU2VydmVyTXNnEikKCHNuYXBzaG90GAEgASgLMhUub21iLnYxLlNuYXBzaG90RGVsdGFIABIkCgVldmVudBgCIAEoCzITLm9tYi52MS5TZXJ2ZXJFdmVudEgAQgkKB3BheWxvYWQqPQoFUGhhc2USFQoRUEhBU0VfVU5TUEVDSUZJRUQQABIOCgpPVVRFUl9SSU5HEAESDQoJQ09SRV9PUEVOEAIqUAoNQ29udHJvbFNvdXJjZRISCg5DU19VTlNQRUNJRklFRBAAEgwKCENTX0hVTUFOEAESDQoJQ1NfU0NSSVBUEAISDgoKQ1NfU05JUFBFVBADKsEBCgtTbmlwcGV0S2luZBIXChNTTklQUEVUX1VOU1BFQ0lGSUVEEAASFAoQU05JUFBFVF9BVVRPX0FJTRABEhwKGFNOSVBQRVRfRU1FUkdFTkNZX1NISUVMRBAEEhgKFFNOSVBQRVRfREFOR0VSX0FWT0lEEAUSEgoOU05JUFBFVF9QQVRST0wQBhIXChNTTklQUEVUX0dMT0JBTF9DT1JFEAcSHgoaU05JUFBFVF9MT1dfSFBfSEVBTFRIX1BBQ0sQCCqAAgoFVGl0bGUSFQoRVElUTEVfVU5TUEVDSUZJRUQQABIPCgtXQVJfTUFDSElORRABEg0KCVNDQVZFTkdFUhACEhAKDFNJR05BTF9USElFRhADEgoKBlJVTk5FUhAEEg0KCVdBTExfSEVBRBAFEgwKCFNVUlZJVk9SEAYSDgoKUEVBQ0VNQUtFUhAHEgwKCEFJX0lESU9UEAgSCwoHQkFSUkFHRRAJEhQKDEJFU1RfUEFSVE5FUhAKGgIIARIOCgpBSV9SRUdVTEFSEAsSDgoKT0xEX1NDSE9PTBAMEggKBENOTUIQDRIOCgpLSUxMX1NURUFMEA4SCgoGSEVBTEVSEA9CRVpDZ2l0aHViLmNvbS9tb2RlbmljaGVuZy9vaC1teS1ib3Qvc2VydmVyL2ludGVybmFsL3Byb3RvY29sL2dlbjtvbWJ2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("Cg9wcm90by9vbWIucHJvdG8SBm9tYi52MSIcCgRWZWMyEgkKAXgYASABKAESCQoBeRgCIAEoASKYAQoLQ2xpZW50SW5wdXQSCwoDc2VxGAEgASgNEg4KBm1vdmVfeBgCIAEoBRIOCgZtb3ZlX3kYAyABKAUSDAoEZmlyZRgEIAEoCBILCgNhaW0YBSABKAESDAoEZGFzaBgGIAEoCBIOCgZzaGllbGQYByABKAgSEAoIaW50ZXJhY3QYCCABKAgSEQoJYXhpc19tYXNrGAkgASgNIjoKCEpvaW5Sb29tEhEKCXJvb21fY29kZRgBIAEoCRIMCgRuaWNrGAIgASgJEg0KBWNvbG9yGAMgASgJIiEKDFNwZWN0YXRlUm9vbRIRCglyb29tX2NvZGUYASABKAkiCwoJTGVhdmVSb29tIg4KDEFzc2lzdFRvZ2dsZSKDAQoKUm9vbUFjdGlvbhIlCgRraW5kGAEgASgOMhcub21iLnYxLlJvb21BY3Rpb24uS2luZCJOCgRLaW5kEggKBE5PTkUQABIJCgVTVEFSVBABEgkKBUFCT1JUEAISCwoHUkVTVEFSVBADEgoKBldBUk1VUBAEEg0KCVNPTE9fQk9UUxAFIjgKDFNjcmlwdFN1Ym1pdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEg4KBnNvdXJjZRgCIAEoCSJoCg5TbmlwcGV0U2V0dGluZxIhCgRraW5kGAEgASgOMhMub21iLnYxLlNuaXBwZXRLaW5kEg8KB2VuYWJsZWQYAiABKAgSCgoCcDEYAyABKAESCgoCcDIYBCABKAESCgoCczEYBSABKAkiOQoNU25pcHBldENvbmZpZxIoCghzbmlwcGV0cxgBIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZyIYCghBaVByb21wdBIMCgR0ZXh0GAEgASgJIhMKA1NheRIMCgR0ZXh0GAEgASgJIg8KDVJlc3luY1JlcXVlc3QihwQKCUNsaWVudE1zZxIkCgVpbnB1dBgBIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEisKDHdhcm11cF9pbnB1dBgCIAEoCzITLm9tYi52MS5DbGllbnRJbnB1dEgAEiAKBGpvaW4YAyABKAsyEC5vbWIudjEuSm9pblJvb21IABIiCgVsZWF2ZRgEIAEoCzIRLm9tYi52MS5MZWF2ZVJvb21IABIpCgtyb29tX2FjdGlvbhgFIAEoCzISLm9tYi52MS5Sb29tQWN0aW9uSAASLQoNc2NyaXB0X3N1Ym1pdBgGIAEoCzIULm9tYi52MS5TY3JpcHRTdWJtaXRIABIlCglhaV9wcm9tcHQYByABKAsyEC5vbWIudjEuQWlQcm9tcHRIABItCg1hc3Npc3RfdG9nZ2xlGAggASgLMhQub21iLnYxLkFzc2lzdFRvZ2dsZUgAEi8KDnJlc3luY19yZXF1ZXN0GAkgASgLMhUub21iLnYxLlJlc3luY1JlcXVlc3RIABIaCgNzYXkYCiABKAsyCy5vbWIudjEuU2F5SAASKAoIc3BlY3RhdGUYCyABKAsyFC5vbWIudjEuU3BlY3RhdGVSb29tSAASLwoOc25pcHBldF9jb25maWcYDCABKAsyFS5vbWIudjEuU25pcHBldENvbmZpZ0gAQgkKB3BheWxvYWQiRAoKRW50aXR5QmFzZRIKCgJpZBgBIAEoDRIZCgNwb3MYAiABKAsyDC5vbWIudjEuVmVjMhIPCgdoZWFkaW5nGAMgASgCIs8BCgpSb2JvdFN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRIOCgZocF94MTAYAiABKBESEgoKZW5lcmd5X3gxMBgDIAEoERIRCglzaGllbGRfb24YBCABKAgSDwoHZGFzaGluZxgFIAEoCBIMCgRkZWFkGAYgASgIEhQKDHJlc3Bhd25faW5fcxgHIAEoDRIMCgRuaWNrGAggASgJEg0KBWNvbG9yGAkgASgJEhYKCmlzX3BhcnRuZXIYCiABKAhCAhgBIlQKD1Byb2plY3RpbGVTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USEAoIb3duZXJfaWQYAiABKA0SDQoFY29sb3IYAyABKAkiPAoJQ29yZVN0YXRlEiAKBGJhc2UYASABKAsyEi5vbWIudjEuRW50aXR5QmFzZRINCgV2YWx1ZRgCIAEoESJ/CgtVcGxpbmtTdGF0ZRIgCgRiYXNlGAEgASgLMhIub21iLnYxLkVudGl0eUJhc2USDQoFcmVhZHkYAiABKAgSEgoKaGFja2luZ19pZBgDIAEoDRIUCgxwcm9ncmVzc194MTAYBCABKBESFQoNbXlfY29vbGRvd25fcxgFIAEoDSJcCg9IZWFsdGhQYWNrU3RhdGUSIAoEYmFzZRgBIAEoCzISLm9tYi52MS5FbnRpdHlCYXNlEhEKCWF2YWlsYWJsZRgCIAEoCBIUCgxyZXNwYXduX2luX3MYAyABKA0i3QMKCVNlbGZTdGF0ZRIQCghyb2JvdF9pZBgBIAEoDRInCghtb3ZlX3NyYxgCIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlEikKCnR1cnJldF9zcmMYAyABKA4yFS5vbWIudjEuQ29udHJvbFNvdXJjZRIWCg5haV9yb3VuZHNfbGVmdBgEIAEoDRIYChBhaV90b2tlbnNfbGVmdF9rGAUgASgNEhYKCWFzc2lzdF9vbhgGIAEoCEgAiAEBEhwKD2Rhc2hfcmVhZHlfdGljaxgHIAEoDUgBiAEBEhwKD2ZpcmVfcmVhZHlfdGljaxgIIAEoDUgCiAEBEiwKCGZpcmVfc3JjGAkgASgOMhUub21iLnYxLkNvbnRyb2xTb3VyY2VIA4gBARIvCgthYmlsaXR5X3NyYxgKIAEoDjIVLm9tYi52MS5Db250cm9sU291cmNlSASIAQESHQoQbWFudWFsX2F4ZXNfbWFzaxgLIAEoDUgFiAEBQgwKCl9hc3Npc3Rfb25CEgoQX2Rhc2hfcmVhZHlfdGlja0ISChBfZmlyZV9yZWFkeV90aWNrQgsKCV9maXJlX3NyY0IOCgxfYWJpbGl0eV9zcmNCEwoRX21hbnVhbF9heGVzX21hc2sirAMKDVNuYXBzaG90RGVsdGESDAoEdGljaxgBIAEoDRIPCgdhY2tfc2VxGAIgASgNEhwKBXBoYXNlGAMgASgOMg0ub21iLnYxLlBoYXNlEhMKC3RpbWVfbGVmdF9zGAQgASgNEgwKBGZ1bGwYBSABKAgSEQoJYmFzZV90aWNrGAYgASgNEiIKBnJvYm90cxgHIAMoCzISLm9tYi52MS5Sb2JvdFN0YXRlEhIKCnJvYm90X2dvbmUYCCADKA0SLAoLcHJvamVjdGlsZXMYCSADKAsyFy5vbWIudjEuUHJvamVjdGlsZVN0YXRlEhcKD3Byb2plY3RpbGVfZ29uZRgKIAMoDRIgCgVjb3JlcxgLIAMoCzIRLm9tYi52MS5Db3JlU3RhdGUSEQoJY29yZV9nb25lGAwgAygNEiQKB3VwbGlua3MYDSADKAsyEy5vbWIudjEuVXBsaW5rU3RhdGUSHwoEc2VsZhgOIAEoCzIRLm9tYi52MS5TZWxmU3RhdGUSLQoMaGVhbHRoX3BhY2tzGA8gAygLMhcub21iLnYxLkhlYWx0aFBhY2tTdGF0ZSJ7CgZFdktpbGwSDgoGa2lsbGVyGAEgASgNEg4KBnZpY3RpbRgCIAEoDRISCgZhc3Npc3QYAyABKA1CAhgBEhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzISDwoHYXNzaXN0cxgFIAMoDRISCgpraWxsX3N0ZWFsGAYgASgIIjoKDEV2Q29yZVBpY2t1cBIKCgJieRgBIAEoDRIPCgdjb3JlX2lkGAIgASgNEg0KBXZhbHVlGAMgASgRIjwKDEV2VXBsaW5rSGFjaxIKCgJieRgBIAEoDRIRCgl1cGxpbmtfaWQYAiABKA0SDQoFdmFsdWUYAyABKBEiRwoNRXZQaGFzZUNoYW5nZRIbCgRmcm9tGAEgASgOMg0ub21iLnYxLlBoYXNlEhkKAnRvGAIgASgOMg0ub21iLnYxLlBoYXNlIioKCUV2UmVzcGF3bhINCgVyb2JvdBgBIAEoDRIOCgZzZWN0b3IYAiABKA0iTAoGRXZIZWFsEgoKAmJ5GAEgASgNEgoKAmlkGAIgASgNEhAKCGhlYWxfeDEwGAMgASgREhgKAmF0GAQgASgLMgwub21iLnYxLlZlYzIiJAoFRXZTYXkSDQoFcm9ib3QYASABKA0SDAoEdGV4dBgCIAEoCSIuCgVFdkhpdBIMCgRmcm9tGAEgASgNEgoKAnRvGAIgASgNEgsKA2RtZxgDIAEoESJlCgZFdlNob3QSEgoKcHJvamVjdGlsZRgBIAEoDRINCgVvd25lchgCIAEoDRIYCgJhdBgDIAEoCzIMLm9tYi52MS5WZWMyEg8KB2hlYWRpbmcYBCABKAISDQoFY29sb3IYBSABKAkilgEKEkV2UHJvamVjdGlsZUltcGFjdBISCgpwcm9qZWN0aWxlGAEgASgNEg0KBW93bmVyGAIgASgNEg4KBnRhcmdldBgDIAEoDRIYCgJhdBgEIAEoCzIMLm9tYi52MS5WZWMyEg4KBnNoaWVsZBgFIAEoCBIUCgxpbnZ1bG5lcmFibGUYBiABKAgSDQoFY29sb3IYByABKAkiMQoMRXZNYXRjaFN0YXJ0EhAKCG1hcF9zZWVkGAEgASgEEg8KB3BsYXllcnMYAiABKA0iRAoJRXZXYWxsSGl0Eg0KBXJvYm90GAEgASgNEhgKAmF0GAIgASgLMgwub21iLnYxLlZlYzISDgoGaW1wYWN0GAMgASgCIkEKDUV2U2NyaXB0RXJyb3ISDQoFcm9ib3QYASABKA0SDQoFZXJyb3IYAiABKAkSEgoKc2NyaXB0X3JldhgDIAEoDSIuCgpFdk1hdGNoRW5kEiAKBnNjb3JlcxgBIAMoCzIQLm9tYi52MS5TY29yZVJvdyJHCghTY29yZVJvdxINCgVyb2JvdBgBIAEoDRINCgVzY29yZRgCIAEoERIdCgZ0aXRsZXMYAyADKA4yDS5vbWIudjEuVGl0bGUiPAoMRXZTY29yZWJvYXJkEh4KBHJvd3MYASADKAsyEC5vbWIudjEuU2NvcmVSb3cSDAoEdGljaxgCIAEoDSJZCg5FdlNjcmlwdFJlc3VsdBIYChBjbGllbnRfc2NyaXB0X2lkGAEgASgNEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJEhIKCnNjcmlwdF9yZXYYBCABKA0ifQoRU25pcHBldFNvdXJjZVZpZXcSIQoEa2luZBgBIAEoDjITLm9tYi52MS5TbmlwcGV0S2luZBINCgV0aXRsZRgCIAEoCRIOCgZzb3VyY2UYAyABKAkSEgoKZGVmYXVsdF9wMRgEIAEoARISCgpkZWZhdWx0X3MxGAUgASgJIpUBCg9FdlNuaXBwZXRSZXN1bHQSCgoCb2sYASABKAgSDQoFZXJyb3IYAiABKAkSJwoHYXBwbGllZBgDIAMoCzIWLm9tYi52MS5TbmlwcGV0U2V0dGluZxISCgpzY3JpcHRfcmV2GAQgASgNEioKB3NvdXJjZXMYBSADKAsyGS5vbWIudjEuU25pcHBldFNvdXJjZVZpZXcicgoORXZNYXBCb290c3RyYXASEAoIbWFwX2pzb24YASABKAkSEAoIbWFwX2hhc2gYAiABKAkSGQoRZ2VuZXJhdG9yX3ZlcnNpb24YAyABKA0SIQoGdHVuaW5nGAQgASgLMhEub21iLnYxLlNpbVR1bmluZyKwAQoJU2ltVHVuaW5nEhEKCXRpY2tfcmF0ZRgBIAEoDRISCgptYXhfaHBfeDEwGAIgASgREhYKDm1heF9lbmVyZ3lfeDEwGAMgASgREhEKCWZpcmVfY29zdBgEIAEoARIbChNoYWNrX2R1cmF0aW9uX3RpY2tzGAUgASgNEh0KFWludnVsbl9kdXJhdGlvbl90aWNrcxgGIAEoDRIVCg12aXNpb25fcmFkaXVzGAcgASgBIooCCg9FdkNvbnRyb2xOb3RpY2USKgoEY29kZRgBIAEoDjIcLm9tYi52MS5FdkNvbnRyb2xOb3RpY2UuQ29kZRIMCgR0ZXh0GAIgASgJIrwBCgRDb2RlEhIKDkNOX1VOU1BFQ0lGSUVEEAASEgoOQ05fSk9JTl9GQUlMRUQQARIZChVDTl9SRUFET05MWV9TUEVDVEFUT1IQAhIYChRDTl9BSV9SRVFVRVNUX0ZBSUxFRBAKEhIKDkNOX0FJX0RJU0FCTEVEEAsSGAoUQ05fQUlfQ09NUElMRV9GQUlMRUQQDBIWChJDTl9BSV9TVEFMRV9TQ1JJUFQQDRIRCg1DTl9BSV9FWFBMQUlOEA4iXQoJRXZBaVVzYWdlEg0KBXJvYm90GAEgASgNEhQKDHJvdW5kc19kZWx0YRgCIAEoDRIUCgx0b2tlbnNfZGVsdGEYAyABKA0SFQoNZ2xvYmFsX2xlZnRfaxgEIAEoDSKzAQoLRXZSb29tU3RhdGUSKAoFc3RhdGUYASABKA4yGS5vbWIudjEuRXZSb29tU3RhdGUuU3RhdGUSFQoNcm9ib3RzX29ubGluZRgCIAEoDRIRCglob3N0X25pY2sYAyABKAkSEQoJc29sb19ib3RzGAQgASgNIj0KBVN0YXRlEgoKBlJfSURMRRAAEgwKCFJfV0FSTVVQEAESDQoJUl9SVU5OSU5HEAISCwoHUl9FTkRFRBADIlUKCUV2QWlRdW90YRITCgtyb3VuZHNfbGVmdBgBIAEoDRIVCg10b2tlbnNfdXNlZF9rGAIgASgNEhwKFGdsb2JhbF90b2tlbnNfbGVmdF9rGAMgASgNImUKCkV2QWlTdHJlYW0SDQoFZGVsdGEYASABKAkSJQoEa2luZBgCIAEoDjIXLm9tYi52MS5FdkFpU3RyZWFtLktpbmQiIQoES2luZBIKCgZBTlNXRVIQABINCglSRUFTT05JTkcQASLvCAoLU2VydmVyRXZlbnQSDAoEdGljaxgBIAEoDRIoCgR3YWxsGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIeCgRraWxsGAogASgLMg4ub21iLnYxLkV2S2lsbEgAEisKC2NvcmVfcGlja3VwGAsgASgLMhQub21iLnYxLkV2Q29yZVBpY2t1cEgAEisKC3VwbGlua19oYWNrGAwgASgLMhQub21iLnYxLkV2VXBsaW5rSGFja0gAEi0KDHBoYXNlX2NoYW5nZRgNIAEoCzIVLm9tYi52MS5FdlBoYXNlQ2hhbmdlSAASJAoHcmVzcGF3bhgOIAEoCzIRLm9tYi52MS5FdlJlc3Bhd25IABIcCgNzYXkYDyABKAsyDS5vbWIudjEuRXZTYXlIABIcCgNoaXQYECABKAsyDS5vbWIudjEuRXZIaXRIABInCgltYXRjaF9lbmQYESABKAsyEi5vbWIudjEuRXZNYXRjaEVuZEgAEikKCnJvb21fc3RhdGUYEiABKAsyEy5vbWIudjEuRXZSb29tU3RhdGVIABIlCghhaV9xdW90YRgTIAEoCzIRLm9tYi52MS5FdkFpUXVvdGFIABIvCg1zY3JpcHRfcmVzdWx0GBQgASgLMhYub21iLnYxLkV2U2NyaXB0UmVzdWx0SAASKwoLbWF0Y2hfc3RhcnQYFSABKAsyFC5vbWIudjEuRXZNYXRjaFN0YXJ0SAASJQoId2FsbF9oaXQYFiABKAsyES5vbWIudjEuRXZXYWxsSGl0SAASLQoMc2NyaXB0X2Vycm9yGBcgASgLMhUub21iLnYxLkV2U2NyaXB0RXJyb3JIABIvCg1tYXBfYm9vdHN0cmFwGBggASgLMhYub21iLnYxLkV2TWFwQm9vdHN0cmFwSAASJQoIYWlfdXNhZ2UYGSABKAsyES5vbWIudjEuRXZBaVVzYWdlSAASHgoEc2hvdBgaIAEoCzIOLm9tYi52MS5FdlNob3RIABI3ChFwcm9qZWN0aWxlX2ltcGFjdBgbIAEoCzIaLm9tYi52MS5FdlByb2plY3RpbGVJbXBhY3RIABIqCgpzY29yZWJvYXJkGBwgASgLMhQub21iLnYxLkV2U2NvcmVib2FyZEgAEikKCnNjcmlwdF9sb2cYHSABKAsyEy5vbWIudjEuRXZTY3JpcHRMb2dIABIeCgRoZWFsGB4gASgLMg4ub21iLnYxLkV2SGVhbEgAEi8KDXNuaXBwZXRfdXNhZ2UYHyABKAsyFi5vbWIudjEuRXZTbmlwcGV0VXNhZ2VIABIxCg5zbmlwcGV0X3Jlc3VsdBggIAEoCzIXLm9tYi52MS5FdlNuaXBwZXRSZXN1bHRIABInCglhaV9zdHJlYW0YISABKAsyEi5vbWIudjEuRXZBaVN0cmVhbUgAEjEKDmNvbnRyb2xfbm90aWNlGCIgASgLMhcub21iLnYxLkV2Q29udHJvbE5vdGljZUgAQgYKBGtpbmQicQoLRXZTY3JpcHRMb2cSEAoIcm9ib3RfaWQYASABKA0SEgoKc2NyaXB0X3JldhgCIAEoDRIMCgR0aWNrGAMgASgNEg0KBWxldmVsGAQgASgJEgwKBHRleHQYBSABKAkSEQoJdHJ1bmNhdGVkGAYgASgIIi0KDkV2U25pcHBldFVzYWdlEg0KBXJvYm90GAEgASgNEgwKBGF4ZXMYAiABKA0iZwoJU2VydmVyTXNnEikKCHNuYXBzaG90GAEgASgLMhUub21iLnYxLlNuYXBzaG90RGVsdGFIABIkCgVldmVudBgCIAEoCzITLm9tYi52MS5TZXJ2ZXJFdmVudEgAQgkKB3BheWxvYWQqPQoFUGhhc2USFQoRUEhBU0VfVU5TUEVDSUZJRUQQABIOCgpPVVRFUl9SSU5HEAESDQoJQ09SRV9PUEVOEAIqUAoNQ29udHJvbFNvdXJjZRISCg5DU19VTlNQRUNJRklFRBAAEgwKCENTX0hVTUFOEAESDQoJQ1NfU0NSSVBUEAISDgoKQ1NfU05JUFBFVBADKsEBCgtTbmlwcGV0S2luZBIXChNTTklQUEVUX1VOU1BFQ0lGSUVEEAASFAoQU05JUFBFVF9BVVRPX0FJTRABEhwKGFNOSVBQRVRfRU1FUkdFTkNZX1NISUVMRBAEEhgKFFNOSVBQRVRfREFOR0VSX0FWT0lEEAUSEgoOU05JUFBFVF9QQVRST0wQBhIXChNTTklQUEVUX0dMT0JBTF9DT1JFEAcSHgoaU05JUFBFVF9MT1dfSFBfSEVBTFRIX1BBQ0sQCCqAAgoFVGl0bGUSFQoRVElUTEVfVU5TUEVDSUZJRUQQABIPCgtXQVJfTUFDSElORRABEg0KCVNDQVZFTkdFUhACEhAKDFNJR05BTF9USElFRhADEgoKBlJVTk5FUhAEEg0KCVdBTExfSEVBRBAFEgwKCFNVUlZJVk9SEAYSDgoKUEVBQ0VNQUtFUhAHEgwKCEFJX0lESU9UEAgSCwoHQkFSUkFHRRAJEhQKDEJFU1RfUEFSVE5FUhAKGgIIARIOCgpBSV9SRUdVTEFSEAsSDgoKT0xEX1NDSE9PTBAMEggKBENOTUIQDRIOCgpLSUxMX1NURUFMEA4SCgoGSEVBTEVSEA9CRVpDZ2l0aHViLmNvbS9tb2RlbmljaGVuZy9vaC1teS1ib3Qvc2VydmVyL2ludGVybmFsL3Byb3RvY29sL2dlbjtvbWJ2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message omb.v1.Vec2
@@ -1478,6 +1478,13 @@ export type EvMapBootstrap = Message<"omb.v1.EvMapBootstrap"> & {
    * @generated from field: uint32 generator_version = 3;
    */
   generatorVersion: number;
+
+  /**
+   * 客户端可见对局数值（审计 X-3；缺失 = 旧服务器，客户端用本地兜底）
+   *
+   * @generated from field: omb.v1.SimTuning tuning = 4;
+   */
+  tuning?: SimTuning | undefined;
 };
 
 /**
@@ -1486,6 +1493,171 @@ export type EvMapBootstrap = Message<"omb.v1.EvMapBootstrap"> & {
  */
 export const EvMapBootstrapSchema: GenMessage<EvMapBootstrap> = /*@__PURE__*/
   messageDesc(file_proto_omb, 41);
+
+/**
+ * SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
+ * owner，经 EvMapBootstrap 一次性可靠下发。只放客户端实际消费的漂移高危集
+ * （审计 D3/D5），不倾倒内部专用常量；不落 Match Event Log，回放不消费
+ * （回放积分走事件流 EvMatchEnd.scores，旧录像用客户端兜底值）。
+ * 定点约定与线上一致：hp/energy ×10；时长一律 tick（60Hz），客户端按 tick_rate 换算。
+ *
+ * @generated from message omb.v1.SimTuning
+ */
+export type SimTuning = Message<"omb.v1.SimTuning"> & {
+  /**
+   * 服务器固定 tick 频率（HUD 冷却换算分母）
+   *
+   * @generated from field: uint32 tick_rate = 1;
+   */
+  tickRate: number;
+
+  /**
+   * HP 条分母（×10）
+   *
+   * @generated from field: sint32 max_hp_x10 = 2;
+   */
+  maxHpX10: number;
+
+  /**
+   * 能量条分母（×10）
+   *
+   * @generated from field: sint32 max_energy_x10 = 3;
+   */
+  maxEnergyX10: number;
+
+  /**
+   * 开火能量门槛（技能卡「EN n」显示）
+   *
+   * @generated from field: double fire_cost = 4;
+   */
+  fireCost: number;
+
+  /**
+   * Uplink 引导总时长；progress_x10 满值 = ticks×10/tick_rate
+   *
+   * @generated from field: uint32 hack_duration_ticks = 5;
+   */
+  hackDurationTicks: number;
+
+  /**
+   * 重生无敌时长（客户端无敌闪烁窗口）
+   *
+   * @generated from field: uint32 invuln_duration_ticks = 6;
+   */
+  invulnDurationTicks: number;
+
+  /**
+   * 视野/战争雾半径（米）
+   *
+   * @generated from field: double vision_radius = 7;
+   */
+  visionRadius: number;
+};
+
+/**
+ * Describes the message omb.v1.SimTuning.
+ * Use `create(SimTuningSchema)` to create a new message.
+ */
+export const SimTuningSchema: GenMessage<SimTuning> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 42);
+
+/**
+ * EvControlNotice（审计 X-4）：结构化控制通知，取代 "join failed:" / "AI …"
+ * 前缀字符串协议。过渡期服务器对每条 notice 同时下发 robot=0 的 EvSay 旧形态
+ * （旧客户端按前缀解析；新客户端按 code 分流并对重复 say 去重）。
+ * 不落 Match Event Log：join 拒绝发生在对局外，AI 回执是定向消息。
+ *
+ * @generated from message omb.v1.EvControlNotice
+ */
+export type EvControlNotice = Message<"omb.v1.EvControlNotice"> & {
+  /**
+   * @generated from field: omb.v1.EvControlNotice.Code code = 1;
+   */
+  code: EvControlNotice_Code;
+
+  /**
+   * 人类可读文案（过渡期与旧 say 同文）；UI 以 code 分流，text 仅展示
+   *
+   * @generated from field: string text = 2;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message omb.v1.EvControlNotice.
+ * Use `create(EvControlNoticeSchema)` to create a new message.
+ */
+export const EvControlNoticeSchema: GenMessage<EvControlNotice> = /*@__PURE__*/
+  messageDesc(file_proto_omb, 43);
+
+/**
+ * @generated from enum omb.v1.EvControlNotice.Code
+ */
+export enum EvControlNotice_Code {
+  /**
+   * @generated from enum value: CN_UNSPECIFIED = 0;
+   */
+  CN_UNSPECIFIED = 0,
+
+  /**
+   * ---- join/spectate 拒绝（终态：客户端停止重试并展示原因） ----
+   *
+   * 进房/观战被拒（房间满/码无效/身份冲突等，text = 服务器原因）
+   *
+   * @generated from enum value: CN_JOIN_FAILED = 1;
+   */
+  CN_JOIN_FAILED = 1,
+
+  /**
+   * 观战连接试图执行玩家操作（只读契约）
+   *
+   * @generated from enum value: CN_READONLY_SPECTATOR = 2;
+   */
+  CN_READONLY_SPECTATOR = 2,
+
+  /**
+   * ---- AI 改码状态（定向，仅 owner 可见；错误类终结面板 pending） ----
+   *
+   * 请求失败/配额拒绝
+   *
+   * @generated from enum value: CN_AI_REQUEST_FAILED = 10;
+   */
+  CN_AI_REQUEST_FAILED = 10,
+
+  /**
+   * 服务器未启用 AI
+   *
+   * @generated from enum value: CN_AI_DISABLED = 11;
+   */
+  CN_AI_DISABLED = 11,
+
+  /**
+   * 生成脚本编译失败（旧脚本继续运行）
+   *
+   * @generated from enum value: CN_AI_COMPILE_FAILED = 12;
+   */
+  CN_AI_COMPILE_FAILED = 12,
+
+  /**
+   * 脚本已被手动更新，AI 结果丢弃
+   *
+   * @generated from enum value: CN_AI_STALE_SCRIPT = 13;
+   */
+  CN_AI_STALE_SCRIPT = 13,
+
+  /**
+   * 改动说明（info，非错误）
+   *
+   * @generated from enum value: CN_AI_EXPLAIN = 14;
+   */
+  CN_AI_EXPLAIN = 14,
+}
+
+/**
+ * Describes the enum omb.v1.EvControlNotice.Code.
+ */
+export const EvControlNotice_CodeSchema: GenEnum<EvControlNotice_Code> = /*@__PURE__*/
+  enumDesc(file_proto_omb, 43, 0);
 
 /**
  * AI 配额事实（每次扣减/护栏触顶）
@@ -1523,7 +1695,7 @@ export type EvAiUsage = Message<"omb.v1.EvAiUsage"> & {
  * Use `create(EvAiUsageSchema)` to create a new message.
  */
 export const EvAiUsageSchema: GenMessage<EvAiUsage> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 42);
+  messageDesc(file_proto_omb, 44);
 
 /**
  * 房间生命周期广播（含 Session 榜）
@@ -1559,7 +1731,7 @@ export type EvRoomState = Message<"omb.v1.EvRoomState"> & {
  * Use `create(EvRoomStateSchema)` to create a new message.
  */
 export const EvRoomStateSchema: GenMessage<EvRoomState> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 43);
+  messageDesc(file_proto_omb, 45);
 
 /**
  * @generated from enum omb.v1.EvRoomState.State
@@ -1590,7 +1762,7 @@ export enum EvRoomState_State {
  * Describes the enum omb.v1.EvRoomState.State.
  */
 export const EvRoomState_StateSchema: GenEnum<EvRoomState_State> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 43, 0);
+  enumDesc(file_proto_omb, 45, 0);
 
 /**
  * @generated from message omb.v1.EvAiQuota
@@ -1619,7 +1791,7 @@ export type EvAiQuota = Message<"omb.v1.EvAiQuota"> & {
  * Use `create(EvAiQuotaSchema)` to create a new message.
  */
 export const EvAiQuotaSchema: GenMessage<EvAiQuota> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 44);
+  messageDesc(file_proto_omb, 46);
 
 /**
  * AI provider 的实时增量：服务端解析上游 SSE 后立即定向推入玩家 WS。
@@ -1644,7 +1816,7 @@ export type EvAiStream = Message<"omb.v1.EvAiStream"> & {
  * Use `create(EvAiStreamSchema)` to create a new message.
  */
 export const EvAiStreamSchema: GenMessage<EvAiStream> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 45);
+  messageDesc(file_proto_omb, 47);
 
 /**
  * @generated from enum omb.v1.EvAiStream.Kind
@@ -1665,7 +1837,7 @@ export enum EvAiStream_Kind {
  * Describes the enum omb.v1.EvAiStream.Kind.
  */
 export const EvAiStream_KindSchema: GenEnum<EvAiStream_Kind> = /*@__PURE__*/
-  enumDesc(file_proto_omb, 45, 0);
+  enumDesc(file_proto_omb, 47, 0);
 
 /**
  * @generated from message omb.v1.ServerEvent
@@ -1840,6 +2012,14 @@ export type ServerEvent = Message<"omb.v1.ServerEvent"> & {
      */
     value: EvAiStream;
     case: "aiStream";
+  } | {
+    /**
+     * 结构化控制通知（审计 X-4；不落事件日志）
+     *
+     * @generated from field: omb.v1.EvControlNotice control_notice = 34;
+     */
+    value: EvControlNotice;
+    case: "controlNotice";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1848,7 +2028,7 @@ export type ServerEvent = Message<"omb.v1.ServerEvent"> & {
  * Use `create(ServerEventSchema)` to create a new message.
  */
 export const ServerEventSchema: GenMessage<ServerEvent> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 46);
+  messageDesc(file_proto_omb, 48);
 
 /**
  * @generated from message omb.v1.EvScriptLog
@@ -1890,7 +2070,7 @@ export type EvScriptLog = Message<"omb.v1.EvScriptLog"> & {
  * Use `create(EvScriptLogSchema)` to create a new message.
  */
 export const EvScriptLogSchema: GenMessage<EvScriptLog> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 47);
+  messageDesc(file_proto_omb, 49);
 
 /**
  * 古法编程（OLD_SCHOOL）埋点：真实 snippet 控制活动
@@ -1916,7 +2096,7 @@ export type EvSnippetUsage = Message<"omb.v1.EvSnippetUsage"> & {
  * Use `create(EvSnippetUsageSchema)` to create a new message.
  */
 export const EvSnippetUsageSchema: GenMessage<EvSnippetUsage> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 48);
+  messageDesc(file_proto_omb, 50);
 
 /**
  * @generated from message omb.v1.ServerMsg
@@ -1945,7 +2125,7 @@ export type ServerMsg = Message<"omb.v1.ServerMsg"> & {
  * Use `create(ServerMsgSchema)` to create a new message.
  */
 export const ServerMsgSchema: GenMessage<ServerMsg> = /*@__PURE__*/
-  messageDesc(file_proto_omb, 49);
+  messageDesc(file_proto_omb, 51);
 
 /**
  * @generated from enum omb.v1.Phase

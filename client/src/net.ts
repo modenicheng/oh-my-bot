@@ -3,7 +3,7 @@
 // 心跳与存活检测完全下沉到 WsTransport；本层负责握手超时、重试节奏与状态上报。
 // 断线后以相同 room/nick/color 自动重进；close() 后会话不可复用（重新 joinRoom）。
 import { WsTransport, decodeServer, encodeClient,
-         JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinFailedReason,
+         JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinRejection,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
 
@@ -171,10 +171,11 @@ export class RoomSession {
       return // 畸形帧丢弃
     }
     if (!msg) return
-    const failReason = joinFailedReason(msg)
-    if (failReason !== undefined) {
+    // X-4：结构化 join 拒绝通知优先；旧服务器回退解析 "join failed:" 前缀 say
+    const rejection = joinRejection(msg)
+    if (rejection !== undefined) {
       // 进房被拒（房间满/码无效等）：终结会话，原因交上层展示
-      this.terminalFail(gen, failReason, msg)
+      this.terminalFail(gen, rejection.reason, msg)
       return
     }
     if (this.state !== 'online' && isJoinAck(msg)) this.confirmOnline()

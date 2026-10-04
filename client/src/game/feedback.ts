@@ -1,7 +1,8 @@
 import type { ClientInput, ServerEvent, SnapshotDelta } from '@omb/protocol'
 import { audio, type SoundCue } from '../audio'
 import type { Camera } from './camera'
-import { HACK_MAX_X10, type MapDefParsed, type MapUplink, type MapVec2 } from './mapdef'
+import { type MapDefParsed, type MapUplink, type MapVec2 } from './mapdef'
+import { hackMaxX10 } from './tuning'
 import type { WorldState } from './world'
 
 const tau = Math.PI * 2
@@ -165,7 +166,7 @@ export class GameFeedback {
     }
     this.near = id
     const u = world.uplinks.get(id)
-    audio.setUplink(!id ? 'off' : u?.hackingId === world.self?.robotId ? 'hacking' : 'near', (u?.progressX10 ?? 0) / HACK_MAX_X10)
+    audio.setUplink(!id ? 'off' : u?.hackingId === world.self?.robotId ? 'hacking' : 'near', (u?.progressX10 ?? 0) / hackMaxX10(world.tuning))
   }
 
   event(ev: ServerEvent, world: WorldState, map: MapDefParsed, active: boolean): void {

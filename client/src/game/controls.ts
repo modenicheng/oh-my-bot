@@ -3,10 +3,11 @@
 import { create } from '@bufbuild/protobuf'
 import {
   AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema,
-  type ServerMsg, type EvMatchEnd,
+  type ServerMsg, type EvMatchEnd, type SimTuning,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { parseMapDef, type MapDefParsed } from './mapdef'
+import { resolveTuning } from './tuning'
 import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldState } from './world'
 import { Camera } from './camera'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
@@ -120,7 +121,7 @@ export class GameController {
   }
 
   /** 收到 mapBootstrap：解析地图，进入游戏态 */
-  onMapBootstrap(mapJson: string): boolean {
+  onMapBootstrap(mapJson: string, tuning?: SimTuning): boolean {
     try {
       this.map = parseMapDef(mapJson)
     } catch (err) {
@@ -141,6 +142,8 @@ export class GameController {
     this.feedback.reset()
     this.input.assistOn = this.assistPreference
     this.world = emptyWorld()
+    // X-3：服务器权威对局数值；缺失（旧服务器）resolveTuning 回退兜底
+    this.world.tuning = resolveTuning(tuning)
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
     this.hud.setAssist(false)
     this.setupCanvas()

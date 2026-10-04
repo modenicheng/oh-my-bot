@@ -450,7 +450,23 @@ func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(m.mapDef)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
-	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer)}}}}})
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer), Tuning: simTuning()}}}}})
+}
+
+// simTuning 下发客户端可见的对局数值（审计 X-3）：仅漂移高危集（HUD/渲染/
+// 音效消费的 D3/D5 常量），内部专用常量不在此堆入。值与 server sim 常量同源，
+// 由 glue 的 SimTuning golden 测试与客户端 FALLBACK_TUNING_HEX 互钉：服务器改
+// 常量而不动此函数（或反之）两侧测试即刻失败。
+func simTuning() *ombv1.SimTuning {
+	return &ombv1.SimTuning{
+		TickRate:            uint32(sim.TickRate),
+		MaxHpX10:            sim.ToX10(sim.MaxHP),
+		MaxEnergyX10:        sim.ToX10(sim.MaxEnergy),
+		FireCost:            sim.FireCost,
+		HackDurationTicks:   sim.HackDuration,
+		InvulnDurationTicks: sim.InvulnDuration,
+		VisionRadius:        sim.VisionRadius,
+	}
 }
 
 // bootstrapSpectatorLocked attaches a read-only observer to this match.

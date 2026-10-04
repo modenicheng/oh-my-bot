@@ -383,6 +383,37 @@ func say(text string) *ombv1.ServerMsg {
 // RoomSession treats it as a terminal join failure and stops retrying.
 func SystemSay(text string) *ombv1.ServerMsg { return say(text) }
 
+// controlNoticeMsg 是结构化控制通知（审计 X-4）的下行帧：join 拒绝 / AI 状态
+// 等控制面文案的机器可读形态。过渡期与旧客户端兼容：sendNotice 先发本事件、
+// 紧随同文 robot=0 SystemSay（旧客户端按前缀解析）；新客户端消费 notice 后对
+// 成对 say 去重（packages/protocol dedupeControlNoticeSay，顺序由两侧测试互钉）。
+// 不落 Match Event Log：这些通知不属于对局事件流。
+func controlNoticeMsg(code ombv1.EvControlNotice_Code, text string) *ombv1.ServerMsg {
+	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_ControlNotice{ControlNotice: &ombv1.EvControlNotice{Code: code, Text: text}},
+	}}}
+}
+
+// ControlNotice 导出结构化控制通知构造（cmd/omb 上行路由在 glue 之外，无 Session
+// 可用，需自行控制发送顺序：notice 在前、兼容 say 在后）。
+func ControlNotice(code ombv1.EvControlNotice_Code, text string) *ombv1.ServerMsg {
+	return controlNoticeMsg(code, text)
+}
+
+// sendNotice 定向成对下发：notice 在前、兼容 say 在后（固定顺序，客户端去重依赖）。
+// AI 类通知由 aiNotice 包装（say 带原有 AI 前缀文案，兼容旧面板分流）。
+func sendNotice(s *Session, code ombv1.EvControlNotice_Code, text string) {
+	s.SendReliable(controlNoticeMsg(code, text))
+	s.SendReliable(SystemSay(text))
+}
+
+// aiNotice 保持过渡期双形态文案一致：notice.text 与兼容 say 同文
+// （旧客户端靠前缀分流，新客户端靠 code）。join 拒绝的双形态在 cmd/omb
+// （sendJoinFailedReliable），不在此重复。
+func aiNotice(s *Session, code ombv1.EvControlNotice_Code, text string) {
+	sendNotice(s, code, text)
+}
+
 type launcherAdapter struct{ rc *RoomConn }
 
 func (la *launcherAdapter) Launch(seed uint64, ids []uint64) room.MatchHandle {

@@ -1,6 +1,6 @@
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, encodeClient,
-         EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type SnippetSetting } from '@omb/protocol'
+         EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type EvControlNotice, type SnippetSetting } from '@omb/protocol'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
@@ -791,9 +791,14 @@ export class Workbench {
     this.aiPanel.acceptQuota({ roundsLeft, tokensLeftK })
   }
 
-  /** robot=0 定向说明：AI 面板 pending 时优先消费，否则返回 false 走系统通道。 */
+  /** robot=0 定向说明（旧服务器回退）：AI 面板 pending 时优先消费，否则返回 false 走系统通道。 */
   consumeAiDirectedSay(text: string): boolean {
     return this.aiPanel.acceptDirectedSay(text)
+  }
+
+  /** X-4：结构化控制通知（新服务器路径）。返回 false = 非 AI 类，交上层继续分流。 */
+  consumeControlNotice(notice: EvControlNotice): boolean {
+    return this.aiPanel.acceptControlNotice(notice)
   }
 
   private renderToolPanels(): void {

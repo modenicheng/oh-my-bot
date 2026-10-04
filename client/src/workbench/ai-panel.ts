@@ -1,6 +1,6 @@
-import type { EvAiQuota, EvAiUsage } from '@omb/protocol'
+import type { EvAiQuota, EvAiUsage, EvControlNotice } from '@omb/protocol'
 import {
-  aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
+  aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay, isAiDirectedNotice, isAiNoticeError,
   type AiFeedItem, type AiQuotaState,
 } from './ai-assist'
 import { escapeHtml } from '../lib/escape'
@@ -195,6 +195,18 @@ export class AiPanelView {
   acceptDirectedSay(text: string): boolean {
     if (!isAiDirectedSay(text, this.pending)) return false
     const isError = text.startsWith('AI 请求失败：') || text.startsWith('AI 生成脚本编译失败') || text.startsWith('AI 改码未生效') || text.startsWith('AI 未启用')
+    this.pushNotice(isError, text)
+    return true
+  }
+
+  /** X-4：结构化控制通知（新服务器路径）。错误类终结 pending；explain 为 info。 */
+  acceptControlNotice(notice: EvControlNotice): boolean {
+    if (!isAiDirectedNotice(notice)) return false
+    this.pushNotice(isAiNoticeError(notice), notice.text)
+    return true
+  }
+
+  private pushNotice(isError: boolean, text: string): void {
     const turn = this.currentTurn()
     if (turn) {
       turn.notices.push({ id: this.nextNoticeId++, kind: isError ? 'error' : 'info', text })
@@ -205,7 +217,6 @@ export class AiPanelView {
       this.activeTurnId = undefined
     }
     this.render()
-    return true
   }
 
   acceptStream(channel: AiStreamChannel, delta: string): void {

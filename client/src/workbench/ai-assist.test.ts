@@ -2,9 +2,14 @@
 // 说明的消费判定（仅 pending 期间且带 AI 前缀）、配额文案与热更提示分支。
 // pending 状态机的完整 DOM 行为属浏览器验收范围，此处不引入真实 DOM 环境。
 import { describe, expect, it } from 'vitest'
+import { create } from '@bufbuild/protobuf'
+import { EvControlNoticeSchema, EvControlNotice_Code } from '@omb/protocol'
 import {
   AI_SCRIPT_RESULT_ID, aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
+  isAiDirectedNotice, isAiNoticeError,
 } from './ai-assist'
+
+const notice = (code: EvControlNotice_Code, text: string) => create(EvControlNoticeSchema, { code, text })
 
 describe('appendAiStreamText', () => {
   it('按增量顺序完整合并且空增量不改变内容', () => {
@@ -48,6 +53,33 @@ describe('isAiDirectedSay', () => {
 
   it('非 AI 前缀即使 pending 也不消费', () => {
     expect(isAiDirectedSay('join failed: room full', true)).toBe(false)
+  })
+})
+
+// X-4：结构化通知分流（新服务器路径；code 集与 server ai_bridge 的下发点一一对应）
+describe('isAiDirectedNotice / isAiNoticeError (X-4)', () => {
+  it('五类 AI code 归属面板，join/未知 code 不归属', () => {
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_REQUEST_FAILED, 'x'))).toBe(true)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_DISABLED, 'x'))).toBe(true)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_COMPILE_FAILED, 'x'))).toBe(true)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_STALE_SCRIPT, 'x'))).toBe(true)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_EXPLAIN, 'x'))).toBe(true)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_JOIN_FAILED, 'x'))).toBe(false)
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_UNSPECIFIED, 'x'))).toBe(false)
+  })
+
+  it('错误类 code 终结 pending；EXPLAIN 为 info', () => {
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_REQUEST_FAILED, 'x'))).toBe(true)
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_DISABLED, 'x'))).toBe(true)
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_COMPILE_FAILED, 'x'))).toBe(true)
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_STALE_SCRIPT, 'x'))).toBe(true)
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_EXPLAIN, 'x'))).toBe(false)
+  })
+
+  it('文案不再参与分流（旧前缀路径仅旧服务器回退）', () => {
+    // 新路径即使服务器改措辞也不影响分流：code 是唯一依据
+    expect(isAiDirectedNotice(notice(EvControlNotice_Code.CN_AI_EXPLAIN, '任意新文案'))).toBe(true)
+    expect(isAiNoticeError(notice(EvControlNotice_Code.CN_AI_REQUEST_FAILED, '任意新文案'))).toBe(true)
   })
 })
 

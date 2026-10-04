@@ -254,6 +254,43 @@ message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务�
   string map_json = 1;         // MapDef 序列化（与 mapgen.Generate 同源）
   string map_hash = 2;        // 一致性校验
   uint32 generator_version = 3;
+  SimTuning tuning = 4;        // 客户端可见对局数值（审计 X-3；缺失 = 旧服务器，客户端用本地兜底）
+}
+
+// SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
+// owner，经 EvMapBootstrap 一次性可靠下发。只放客户端实际消费的漂移高危集
+// （审计 D3/D5），不倾倒内部专用常量；不落 Match Event Log，回放不消费
+// （回放积分走事件流 EvMatchEnd.scores，旧录像用客户端兜底值）。
+// 定点约定与线上一致：hp/energy ×10；时长一律 tick（60Hz），客户端按 tick_rate 换算。
+message SimTuning {
+  uint32 tick_rate = 1;              // 服务器固定 tick 频率（HUD 冷却换算分母）
+  sint32 max_hp_x10 = 2;             // HP 条分母（×10）
+  sint32 max_energy_x10 = 3;         // 能量条分母（×10）
+  double fire_cost = 4;              // 开火能量门槛（技能卡「EN n」显示）
+  uint32 hack_duration_ticks = 5;    // Uplink 引导总时长；progress_x10 满值 = ticks×10/tick_rate
+  uint32 invuln_duration_ticks = 6;  // 重生无敌时长（客户端无敌闪烁窗口）
+  double vision_radius = 7;          // 视野/战争雾半径（米）
+}
+
+// EvControlNotice（审计 X-4）：结构化控制通知，取代 "join failed:" / "AI …"
+// 前缀字符串协议。过渡期服务器对每条 notice 同时下发 robot=0 的 EvSay 旧形态
+// （旧客户端按前缀解析；新客户端按 code 分流并对重复 say 去重）。
+// 不落 Match Event Log：join 拒绝发生在对局外，AI 回执是定向消息。
+message EvControlNotice {
+  enum Code {
+    CN_UNSPECIFIED = 0;
+    // ---- join/spectate 拒绝（终态：客户端停止重试并展示原因） ----
+    CN_JOIN_FAILED = 1;        // 进房/观战被拒（房间满/码无效/身份冲突等，text = 服务器原因）
+    CN_READONLY_SPECTATOR = 2; // 观战连接试图执行玩家操作（只读契约）
+    // ---- AI 改码状态（定向，仅 owner 可见；错误类终结面板 pending） ----
+    CN_AI_REQUEST_FAILED = 10;  // 请求失败/配额拒绝
+    CN_AI_DISABLED = 11;        // 服务器未启用 AI
+    CN_AI_COMPILE_FAILED = 12;  // 生成脚本编译失败（旧脚本继续运行）
+    CN_AI_STALE_SCRIPT = 13;    // 脚本已被手动更新，AI 结果丢弃
+    CN_AI_EXPLAIN = 14;         // 改动说明（info，非错误）
+  }
+  Code code = 1;
+  string text = 2; // 人类可读文案（过渡期与旧 say 同文）；UI 以 code 分流，text 仅展示
 }
 
 message EvAiUsage { // AI 配额事实（每次扣减/护栏触顶）
@@ -316,6 +353,7 @@ message ServerEvent {
     EvSnippetUsage snippet_usage = 31; // OLD_SCHOOL 埋点：某轴最终采用 CS_SNIPPET（0.5s 节流/robot）
     EvSnippetResult snippet_result = 32; // SnippetConfig 定向回执（不落事件日志，仅 owner 下发）
     EvAiStream ai_stream = 33; // AI 上游 SSE 文本增量（仅 owner，下发即展示，不落事件日志）
+    EvControlNotice control_notice = 34; // 结构化控制通知（审计 X-4；不落事件日志）
   }
 }
 

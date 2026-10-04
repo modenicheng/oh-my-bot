@@ -2,7 +2,8 @@
 // say 气泡事件、结算覆盖层。令牌严格走 client/STYLE.md：radius 0、1px #1f2733
 // 描边、荧光只用于状态高亮。技能卡是状态显示（含键帽），不是可点击按钮。
 import type { WorldState, RobotEnt } from './world'
-import { HACK_MAX_X10, type MapDefParsed, type MapUplink } from './mapdef'
+import { type MapDefParsed, type MapUplink } from './mapdef'
+import { hackMaxX10 } from './tuning'
 import { phaseName } from './render'
 import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
@@ -12,11 +13,6 @@ import { requireEl, setText, fmtClock } from '../ui/dom'
 import { clamp01 } from '../lib/math'
 import './hud.css'
 
-const MAX_HP = 1000   // hp_x10（×10）
-const MAX_EN = 1000   // energy_x10（×10）
-const TICK_HZ = 60    // 服务器固定 60Hz 绝对 tick
-const FIRE_COST_EN = 5   // server sim.FireCost
-const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
 const INNER_MS = 4200
 const AIM_HINT_MS = 4000 // 瞄准 guard 提示节流间隔
@@ -120,10 +116,11 @@ export class Hud {
     this.aimCapable = aimCapable
 
     // 常态机体用低饱和绿，能量用青色；数值与颜色共同标识状态。
+    const tuning = world.tuning
     this.leftPanel.classList.toggle('dead', !!self?.dead)
     if (self) {
-      const hp = clamp01(self.hpX10 / MAX_HP)
-      const en = clamp01(self.energyX10 / MAX_EN)
+      const hp = clamp01(self.hpX10 / tuning.maxHpX10)
+      const en = clamp01(self.energyX10 / tuning.maxEnergyX10)
       // scaleX 走合成器路径（app.css transition 同步为 transform），width 每帧触发 layout。
       if (hp !== this.lastHp) { this.lastHp = hp; this.hpFill.style.transform = `scaleX(${hp})` }
       if (en !== this.lastEn) { this.lastEn = en; this.enFill.style.transform = `scaleX(${en})` }
@@ -262,13 +259,14 @@ export class Hud {
       return
     }
     const dead = self.dead
+    const tuning = world.tuning
     const en = self.energyX10 / 10
-    const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick)
+    const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick, tuning.tickRate)
 
-    // 开火：无 CD 概念外的能量门槛（5/发）；间隔 250ms 仅在射击后瞬时可见
+    // 开火：无 CD 概念外的能量门槛（服务器 fire_cost，X-3）；间隔 250ms 仅在射击后瞬时可见
     if (dead) this.setCard(this.skills.fire, 'off', '阵亡')
     else if (self.shieldOn) this.setCard(this.skills.fire, 'off', '护盾中')
-    else if (en < FIRE_COST_EN) this.setCard(this.skills.fire, 'off', `EN ${FIRE_COST_EN}`)
+    else if (en < tuning.fireCost) this.setCard(this.skills.fire, 'off', `EN ${tuning.fireCost}`)
     else if (fireCd === undefined) this.setCard(this.skills.fire, 'ready', '—')
     else if (fireCd > 0) this.setCard(this.skills.fire, 'cooling', `${fireCd.toFixed(1)}s`)
     else this.setCard(this.skills.fire, 'ready', '—')
@@ -300,21 +298,23 @@ export class Hud {
       return
     }
     const ent = world.uplinks.get(nearest.id)
+    const hackMax = hackMaxX10(world.tuning)
+    const hackSeconds = Math.round(world.tuning.hackDurationTicks / world.tuning.tickRate)
     let pct = 0
     let text: string
     if (ent && world.self !== undefined && ent.hackingId === selfId) {
-      pct = progressPct(ent.progressX10)
+      pct = progressPct(ent.progressX10, hackMax)
       text = `黑入 ${pct}%`
       this.setCard(card, 'active', `${pct}%`)
     } else if (ent && ent.myCooldownS > 0) {
       text = `冷却 ${Math.ceil(ent.myCooldownS)}秒`
       this.setCard(card, 'cooling', `${Math.ceil(ent.myCooldownS)}s`)
     } else if (ent && ent.hackingId !== 0) {
-      pct = progressPct(ent.progressX10)
+      pct = progressPct(ent.progressX10, hackMax)
       text = '他人正在黑入'
       this.setCard(card, 'off', '占用中')
     } else {
-      text = `按住 E/F · ${Math.round(HACK_TICKS / TICK_HZ)}秒`
+      text = `按住 E/F · ${hackSeconds}秒`
       this.setCard(card, 'ready', '按住')
     }
     if (this.uplinkPanel.hidden) this.uplinkPanel.hidden = false
@@ -387,13 +387,13 @@ export class Hud {
 // ---- helpers ---------------------------------------------------------------
 
 /** 绝对 tick → 剩余秒（一位小数由调用方格式化）；字段缺失返回 undefined（未知）。 */
-function cdSeconds(readyTick: number | undefined, nowTick: number): number | undefined {
+function cdSeconds(readyTick: number | undefined, nowTick: number, tickRate: number): number | undefined {
   if (readyTick === undefined) return undefined
-  return Math.max(0, (readyTick - nowTick) / TICK_HZ)
+  return Math.max(0, (readyTick - nowTick) / tickRate)
 }
 
-function progressPct(progressX10: number): number {
-  const v = Math.round((progressX10 / HACK_MAX_X10) * 100)
+function progressPct(progressX10: number, hackMax: number): number {
+  const v = Math.round((progressX10 / hackMax) * 100)
   return v < 0 ? 0 : v > 100 ? 100 : v
 }
 

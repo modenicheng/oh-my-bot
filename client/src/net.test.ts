@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { toBinary, fromBinary, create } from '@bufbuild/protobuf'
 import { RoomSession, type JoinOptions, type SessionState } from './net'
 import { frame, ServerMsgSchema, ServerEventSchema, EvSaySchema, EvRoomStateSchema, ClientMsgSchema,
-  ClientInputSchema, ResyncRequestSchema, LeaveRoomSchema, encodeClient, type ServerMsg } from '@omb/protocol'
+  ClientInputSchema, ResyncRequestSchema, LeaveRoomSchema, encodeClient, EvControlNoticeSchema, EvControlNotice_Code,
+  type ServerMsg } from '@omb/protocol'
 
 const CONNECTING = 0
 const OPEN = 1
@@ -80,6 +81,15 @@ function sayFrame(text: string): number[] {
   return down(create(ServerMsgSchema, {
     payload: { case: 'event', value: create(ServerEventSchema, {
       kind: { case: 'say', value: create(EvSaySchema, { robot: 0, text }) },
+    }) },
+  }))
+}
+
+/** X-4：结构化控制通知帧。 */
+function controlNoticeFrame(code: EvControlNotice_Code, text: string): number[] {
+  return down(create(ServerMsgSchema, {
+    payload: { case: 'event', value: create(ServerEventSchema, {
+      kind: { case: 'controlNotice', value: create(EvControlNoticeSchema, { code, text }) },
     }) },
   }))
 }
@@ -345,7 +355,7 @@ describe('RoomSession', () => {
     s.close()
   })
 
-  it('join failed 终结：透传 onMessage + onDisconnect，不再重试', async () => {
+  it('join failed 终结（旧服务器前缀 say 回退）：透传 onMessage + onDisconnect，不再重试', async () => {
     const s = await start()
     const ws = FakeWebSocket.instances[0]!
     ws.open()
@@ -357,6 +367,56 @@ describe('RoomSession', () => {
     expect(s.state).toBe('disconnected')
     await vi.advanceTimersByTimeAsync(60_000)
     expect(FakeWebSocket.instances).toHaveLength(1) // 无重拨
+    s.close()
+  })
+
+  it('结构化 CN_JOIN_FAILED 通知同样终结（X-4 新路径）', async () => {
+    const s = await start()
+    const ws = FakeWebSocket.instances[0]!
+    ws.open()
+    await flush()
+    ws.message(controlNoticeFrame(EvControlNotice_Code.CN_JOIN_FAILED, 'room full'))
+    expect(disconnects).toEqual(['进房失败：room full'])
+    expect(s.state).toBe('disconnected')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(1) // 无重拨
+    s.close()
+  })
+
+  it('结构化通知 + 兼容 say 成对到达：say 在终结后到达不重拨', async () => {
+    const s = await start()
+    const ws = FakeWebSocket.instances[0]!
+    ws.open()
+    await flush()
+    ws.message(controlNoticeFrame(EvControlNotice_Code.CN_JOIN_FAILED, 'room full'))
+    ws.message(sayFrame('join failed: room full')) // 成对兼容副本：会话已终结，静默丢弃
+    expect(disconnects).toEqual(['进房失败：room full'])
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    s.close()
+  })
+
+  it('CN_READONLY_SPECTATOR 同样终结（观战只读契约拒绝）', async () => {
+    const s = await start()
+    const ws = FakeWebSocket.instances[0]!
+    ws.open()
+    await flush()
+    ws.message(controlNoticeFrame(EvControlNotice_Code.CN_READONLY_SPECTATOR, 'readonly spectator connection'))
+    expect(disconnects[0]).toContain('readonly spectator connection')
+    expect(s.state).toBe('disconnected')
+    s.close()
+  })
+
+  it('AI 类结构化通知不终结会话（非 join 拒绝）', async () => {
+    const s = await start()
+    const ws = FakeWebSocket.instances[0]!
+    ws.open()
+    await flush()
+    ws.message(roomStateFrame()) // 先 ack 上线
+    expect(s.state).toBe('online')
+    ws.message(controlNoticeFrame(EvControlNotice_Code.CN_AI_EXPLAIN, 'AI 改动说明：x'))
+    expect(s.state).toBe('online')
+    expect(disconnects).toEqual([])
     s.close()
   })
 

@@ -3,6 +3,7 @@ import { RoomSession, type SessionState } from './net'
 import { SpectatorCamera } from './replay/spectator'
 import { artReady } from './game/art'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
+import { resolveTuning } from './game/tuning'
 import { Renderer, phaseName, type SayBubble } from './game/render'
 import { Scoreboard, type ScoreDisplay, scoreRow } from './game/scoreboard'
 import { bgm } from './music/bgm'
@@ -153,6 +154,7 @@ export class LiveSpectator {
         const sameMap = source === this.mapSource
         this.mapSource = source
         this.map = map
+        this.world.tuning = resolveTuning(kind.value.tuning)
         if (!sameMap) this.camera.fit()
         this.resetMatchDisplay()
         this.resize()

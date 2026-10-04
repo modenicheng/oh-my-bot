@@ -36,9 +36,9 @@ import (
 // version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
 var version = "dev"
 
-// joinFailedPrefix 是进房被拒的字符串协议前缀（短期约定，非 wire 字段）：
-// 服务器以 robot=0 的 EvSay 下发 "join failed: <原因>"，客户端 RoomSession
-// （packages/protocol joinFailedReason）据此终止重试并展示原因。
+// joinFailedPrefix 是进房被拒的兼容字符串协议前缀（过渡期，X-4）：新服务器
+// 双形态下发——先 EvControlNotice{code=CN_JOIN_FAILED}，再 robot=0 EvSay
+// "join failed: <原因>"（旧客户端据此终止重试并展示原因）。
 // TS 侧前缀常量由 packages/protocol/test/golden.test.ts 互钉。
 const joinFailedPrefix = "join failed:"
 
@@ -420,6 +420,8 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
 			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig:
+			// X-4：结构化 notice 在前、兼容 join-failed say 在后（旧客户端前缀解析）。
+			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "readonly spectator connection"))
 			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
 			return
 		}
@@ -487,7 +489,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
 		hub.Unregister(sess)
-		sendReliable(glue.SystemSay(joinFailedPrefix + " " + err.Error()))
+		sendJoinFailedReliable(sendReliable, err.Error())
 		return
 	}
 	if old := *sessOut; old != nil {
@@ -495,6 +497,14 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	*sessOut = sess
 	rc.BroadcastRoomState()
+}
+
+// sendJoinFailedReliable 双形态下发 join 拒绝（X-4）：结构化 controlNotice 在前、
+// 兼容 "join failed:" 前缀 say 在后。顺序与 glue.sendJoinFailed 一致，由
+// cmd/omb 测试与客户端 dedupeControlNoticeSay 互钉。
+func sendJoinFailedReliable(send func(*ombv1.ServerMsg), reason string) {
+	send(glue.ControlNotice(ombv1.EvControlNotice_CN_JOIN_FAILED, reason))
+	send(glue.SystemSay(joinFailedPrefix + " " + reason))
 }
 
 // handleSpectate attaches a read-only live observer. Reuses the established
@@ -510,7 +520,7 @@ func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendL
 	hub.Register(sess)
 	if err := rc.BindSpectator(sess); err != nil {
 		hub.Unregister(sess)
-		sendReliable(glue.SystemSay(joinFailedPrefix + " " + err.Error()))
+		sendJoinFailedReliable(sendReliable, err.Error())
 		return
 	}
 	if old := *sessOut; old != nil {

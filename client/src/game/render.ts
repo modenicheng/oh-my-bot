@@ -5,9 +5,8 @@ import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
 import { ink, mono, UPLINK_LIFT, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
-import { HACK_MAX_X10 } from './mapdef'
+import { hackMaxX10 } from './tuning'
 const ROBOT_R = 0.6
-const DEFAULT_VISION_RADIUS = 20
 const VISION_FEATHER = 3.5
 
 const VISION_RAYS = 512
@@ -80,7 +79,7 @@ export class Renderer {
     drawArena(ctx, map, cam, world.phase)
     for (const def of map.uplinks) {
       const st = world.uplinks.get(def.id)
-      const progress = st?.progressX10 ? st.progressX10 / HACK_MAX_X10 : 0
+      const progress = st?.progressX10 ? st.progressX10 / hackMaxX10(world.tuning) : 0
       const lift = extras.feedback?.uplinkLift(progress) ?? 0
       drawUplink(ctx, cam, def.pos.x, def.pos.y - lift * UPLINK_LIFT, def.main,
         world.phase >= def.activePhase && (st?.ready ?? true), progress, lift)
@@ -133,7 +132,7 @@ export class Renderer {
     const ctx = this.ctx
     const x = cam.toPxX(self.x)
     const y = cam.toPxY(self.y)
-    const radius = DEFAULT_VISION_RADIUS * cam.scale
+    const radius = world.tuning.visionRadius * cam.scale
     const feather = Math.min(VISION_FEATHER * cam.scale, radius * 0.28)
     const clearRadius = Math.max(0, radius - feather)
 

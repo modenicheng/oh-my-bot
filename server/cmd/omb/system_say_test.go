@@ -28,7 +28,8 @@ func TestSystemSayWireContract(t *testing.T) {
 	}
 }
 
-// 上行拒绝路径仍输出同构消息（原三处内联构造的回归闸）。
+// 上行拒绝路径仍输出同构消息（原三处内联构造的回归闸）。X-4：结构化
+// notice 先到，兼容 join-failed say 紧随，两者文本同源。
 func TestUpstreamRejectionsUseSystemSay(t *testing.T) {
 	h := glue.NewHub()
 	var session *glue.Session
@@ -45,12 +46,16 @@ func TestUpstreamRejectionsUseSystemSay(t *testing.T) {
 	} {
 		received = nil
 		handleUpstream(h, cmd, send, send, &session)
-		if len(received) != 1 {
-			t.Fatalf("command %T: got %d messages, want 1", cmd.Payload, len(received))
+		if len(received) != 2 {
+			t.Fatalf("command %T: got %d messages, want 2", cmd.Payload, len(received))
 		}
-		ev := received[0].GetEvent()
-		if ev == nil || ev.GetSay() == nil || ev.GetSay().GetRobot() != 0 || !strings.HasPrefix(ev.GetSay().GetText(), "join failed:") {
-			t.Fatalf("command %T rejection is not a robot-0 system Say: %+v", cmd.Payload, received[0])
+		notice := received[0].GetEvent().GetControlNotice()
+		if notice == nil || notice.GetCode() != ombv1.EvControlNotice_CN_READONLY_SPECTATOR {
+			t.Fatalf("command %T: first message is not a readonly-spectator notice: %+v", cmd.Payload, received[0])
+		}
+		say := received[1].GetEvent().GetSay()
+		if say == nil || say.GetRobot() != 0 || !strings.HasPrefix(say.GetText(), "join failed:") {
+			t.Fatalf("command %T: second message is not a robot-0 join-failed Say: %+v", cmd.Payload, received[1])
 		}
 	}
 }
