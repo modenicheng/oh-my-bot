@@ -1,5 +1,5 @@
 import { create } from '@bufbuild/protobuf'
-import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, ScriptRollbackSchema, encodeClient,
+import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, ScriptRollbackSchema, ScriptLanguage, ScriptSubmitSchema, encodeClient,
          EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type EvControlNotice, type EvScriptVersions, type EvScriptRollbackResult, type SnippetSetting } from '@omb/protocol'
 import { ensureEditorModule } from './editor-loader'
 import { ManualView } from '../manual/manual'
@@ -7,11 +7,11 @@ import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
 import { DEFAULT_CONSOLE_HEIGHT, ScriptConsoleView } from './script-console'
-import { draftKeyFor, isBotLanguage, languagePrefKey, type BotLanguage } from './ts-submit'
+import { draftKeyFor, isBotLanguage, languagePrefKey, scriptSubmitPayload, type BotLanguage } from './ts-submit'
 import { SnippetPanelView } from './snippet-panel'
 import { AiPanelView } from './ai-panel'
 import { AI_SCRIPT_RESULT_ID } from './ai-assist'
-import { applyScriptVersions, currentVersion, emptyScriptVersionState, planEditorSync, shouldAutoFillEditor, type ScriptVersionState } from './script-versions'
+import { applyScriptVersions, currentVersion, emptyScriptVersionState, normalizeScriptLanguage, planEditorSync, shouldAutoFillEditor, type LoadedScript, type ScriptVersionState } from './script-versions'
 import { ScriptVersionDrawer } from './script-version-drawer'
 import { el as domEl } from '../ui/dom'
 import './workbench.css'
@@ -90,12 +90,12 @@ export class Workbench {
   private identity = { roomCode: '', nick: '' }
   private nextScriptId = 0
   private compiling = false
-  private pending?: { id: number; source: string; timer: ReturnType<typeof setTimeout> }
-  private loaded?: { source: string; revision: number }
+  private pending?: { id: number; source: string; language: BotLanguage; timer: ReturnType<typeof setTimeout> }
+  private loaded?: LoadedScript
   /** 服务器权威脚本版本链（AI 直填 + 回退视图基准；快照整体替换）。 */
   private scriptVersions: ScriptVersionState = emptyScriptVersionState()
-  /** AI 直填覆盖前的未提交手改（一键找回；提交/切换语言/身份清理）。 */
-  private stashedDraft?: string
+  /** 服务器直填/回退覆盖前的未提交手改（源码 + 语言；一键找回，恢复时切回其语言）。 */
+  private stashedDraft?: LoadedScript
   private versionDrawer?: ScriptVersionDrawer
   /** 辅助脚本具备瞄准能力（玩家脚本含 aimAt / 已应用自瞄 Snippet）；变更
    * 时回调通知 GameController 重算瞄准 guard。 */
@@ -220,7 +220,7 @@ export class Workbench {
       root: this.aiPane,
       send: text => this.sendAiPrompt(text),
       availability: () => ({ online: this.online, inMatch: this.inMatch }),
-      editorDirty: () => !this.loaded || this.loaded.source !== this.source,
+      editorDirty: () => !this.loaded || this.loaded.language !== this.language || this.loaded.source !== this.source,
       activateAssist: () => this.deps.activateAssist(),
     })
     for (const button of this.languageButtons) {
@@ -342,6 +342,7 @@ export class Workbench {
   close(): void {
     this.panels.clear()
     this.manual.close()
+    this.versionDrawer?.close()
     this.renderLayout()
     this.deps.onLayout()
     this.focusCanvas()
@@ -510,6 +511,7 @@ export class Workbench {
     this.assistOn = false
     this.stashedDraft = undefined
     this.scriptVersions = emptyScriptVersionState()
+    this.versionDrawer?.close()
     this.versionDrawer?.render(this.scriptVersions)
     this.resetMatch()
     this.updateAssistAim()
@@ -524,6 +526,7 @@ export class Workbench {
       this.assistOn = false
       this.stashedDraft = undefined
       this.scriptVersions = emptyScriptVersionState()
+      this.versionDrawer?.close()
       this.versionDrawer?.render(this.scriptVersions)
       this.updateAssistAim()
     }
@@ -550,7 +553,20 @@ export class Workbench {
 
   private loadDraft(): string | undefined {
     if (!this.draftKey) return undefined
-    try { return localStorage.getItem(this.draftKey) ?? undefined } catch { return undefined }
+    return this.readDraft(this.draftKey)
+  }
+
+  /** 读指定草稿键（不切换活动键；跨语言直填前探目标语言胜桶用）。 */
+  private readDraft(key: string): string | undefined {
+    if (!key) return undefined
+    try { return localStorage.getItem(key) ?? undefined } catch { return undefined }
+  }
+
+  /** 指定语言的草稿键（保持现有身份，只换语言段；JS 沿用旧两元组键）。
+   * 未进房（无身份）时返回空——无跨语言胜桶可探。 */
+  private draftKeyForLanguage(language: BotLanguage): string {
+    if (!this.identity.roomCode && !this.identity.nick) return ''
+    return draftKeyFor(this.identity.roomCode, this.identity.nick, language)
   }
 
   private loadLanguagePref(prefKey: string): BotLanguage {
@@ -565,10 +581,10 @@ export class Workbench {
     try { localStorage.setItem(this.prefKey, this.language) } catch { /* 语言偏好不可存时不阻断 */ }
   }
 
-  /** 切换语言：标题/按钮/诊断提示同步，编辑器模型与草稿键跟随；不改内容。 */
+  /** 切换语言：标题/按钮/诊断提示同步，编辑器模型与草稿键跟随；不改内容。
+   * stash 带语言槽位，手动切语言不清 stash（找回时切回其语言）。 */
   setLanguage(language: BotLanguage): void {
     if (language === this.language) return
-    this.stashedDraft = undefined
     this.applyLanguage(language, true)
     const nextKey = this.languageKeyFor()
     if (this.draftKey) {
@@ -581,6 +597,7 @@ export class Workbench {
     } else {
       this.draftKey = nextKey
     }
+    this.versionDrawer?.render(this.scriptVersions)
     this.renderButtons()
   }
 
@@ -683,12 +700,13 @@ export class Workbench {
     this.assistButton.textContent = `辅助 ${this.assistOn ? 'ON' : 'OFF'}`
     this.assistButton.setAttribute('aria-pressed', String(this.assistOn))
     this.assistButton.title = !this.online ? '连接恢复后可切换' : !this.inMatch ? '进入热身或正式对局后可切换（战场画布获焦时 Space / 小键盘 Enter）' : '战场画布获焦时按 Space 或小键盘 Enter 切换'
-    this.editorPane.dataset.dirty = String(!this.loaded || this.loaded.source !== this.source)
+    this.editorPane.dataset.dirty = String(!this.loaded || this.loaded.language !== this.language || this.loaded.source !== this.source)
   }
 
   submit(): void {
     if (!this.editor || !this.online || !this.inMatch || this.pending || this.compiling) return
     const id = this.nextScriptId = (this.nextScriptId + 1) >>> 0
+    const editorSource = this.editor.getValue()
     if (this.language === 'ts') {
       this.compiling = true
       this.renderButtons()
@@ -701,7 +719,7 @@ export class Workbench {
           this.renderButtons()
           return
         }
-        this.sendScript(id, outcome.js)
+        this.sendScript(id, scriptSubmitPayload('ts', editorSource, outcome.js), editorSource)
       }).catch(error => {
         this.compiling = false
         this.scriptConsole.appendClient('error', `TypeScript 编译失败，未提交：${error instanceof Error ? error.message : String(error)}`)
@@ -709,18 +727,31 @@ export class Workbench {
       })
       return
     }
-    this.sendScript(id, this.editor.getValue())
+    this.sendScript(id, scriptSubmitPayload('js', editorSource), editorSource)
   }
 
-  /** 编码后的整帧超过 32 KiB 会断开连接，不能只计算字符数。 */
-  private sendScript(id: number, source: string): void {
-    const frame = encodeClient(create(ClientMsgSchema, { payload: { case: 'scriptSubmit', value: { clientScriptId: id, source } } }))
+  /** 编码后的整帧超过 32 KiB 会断开连接，不能只计算字符数。
+   * payload 由 scriptSubmitPayload 纯函数组装（source/editorSource/language 成对）。 */
+  private sendScript(
+    id: number,
+    payload: ReturnType<typeof scriptSubmitPayload>,
+    editorSource: string,
+  ): void {
+    if ('error' in payload) {
+      this.scriptConsole.appendClient('error', `TypeScript 编译失败，未提交：${payload.error}`)
+      this.renderButtons()
+      return
+    }
+    const frame = encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'scriptSubmit', value: create(ScriptSubmitSchema, { ...payload, clientScriptId: id }) },
+    }))
     if (frame.byteLength > 32768) {
       this.scriptConsole.appendClient('error', '脚本过大：提交消息不能超过 32 KiB，请精简后重试。')
       this.renderButtons()
       return
     }
-    this.pending = { id, source, timer: setTimeout(() => {
+    const language: BotLanguage = payload.language === ScriptLanguage.TS ? 'ts' : 'js'
+    this.pending = { id, source: editorSource, language, timer: setTimeout(() => {
       this.clearPending()
       this.scriptConsole.appendClient('warn', '未收到服务器回执，结果未知；检查连接后可重新提交。')
       this.renderButtons()
@@ -752,10 +783,10 @@ export class Workbench {
       return
     }
     if (!this.pending || result.clientScriptId !== this.pending.id) return
-    const source = this.pending.source
+    const { source, language } = this.pending
     this.clearPending()
     if (result.ok) {
-      this.loaded = { source, revision: result.scriptRev }
+      this.loaded = { source, language }
       this.stashedDraft = undefined // 提交成功：草稿已入库，stash 失效
       this.scriptConsole.appendClient('info', `服务器已加载脚本 r${result.scriptRev}。开启辅助后运行；手操仍可逐轴接管。`)
     } else {
@@ -766,7 +797,8 @@ export class Workbench {
   }
 
   /** EvScriptVersions：服务器权威版本链快照（整体替换）。首次携带 AI 新版本时
-   * 直填编辑器（脏草稿先 stash），回退/手动版本不自动覆盖（编辑器已是其源码）。 */
+   * 直填编辑器（跨语言时先保当前语言草稿再切模型，目标语言胜桶脏草稿先
+   * stash），回退/手动版本不自动覆盖（编辑器已是其源码）。AI 版本恒 JS。 */
   acceptScriptVersions(snapshot: EvScriptVersions): void {
     const previousCurrent = currentVersion(this.scriptVersions)?.id ?? 0
     this.scriptVersions = applyScriptVersions(this.scriptVersions, snapshot)
@@ -774,11 +806,12 @@ export class Workbench {
     const current = currentVersion(this.scriptVersions)
     // 仅「新出现的 AI 当前版本」直填（手动/回退/重连补发不覆盖，见纯函数注释）。
     if (current && shouldAutoFillEditor(previousCurrent, current)) {
-      this.fillEditorFromServer(current.source, current.scriptRev, `AI 已改码并装载 r${current.scriptRev}，编辑器已同步为 AI 版本。`)
+      this.fillEditorFromServer(current.source, current.language, `AI 已改码并装载 r${current.scriptRev}，编辑器已同步为 AI 版本（JS）。`)
     }
   }
 
-  /** EvScriptRollbackResult：成功回退直填编辑器；失败提示保旧。 */
+  /** EvScriptRollbackResult：成功回退直填编辑器（携带语言，切对应模型）；
+   * 失败提示保旧。 */
   acceptScriptRollbackResult(result: EvScriptRollbackResult): void {
     this.versionDrawer?.acceptResult(result)
     if (!result.ok) {
@@ -786,18 +819,39 @@ export class Workbench {
       return
     }
     if (result.source) {
-      this.fillEditorFromServer(result.source, result.scriptRev, `已回退到 v${result.versionId} 并装载 r${result.scriptRev}，编辑器已同步。`)
+      const language = normalizeScriptLanguage(result.language)
+      this.fillEditorFromServer(result.source, language, `已回退到 v${result.versionId} 并装载 r${result.scriptRev}，编辑器已同步${language === 'ts' ? '（TypeScript）' : ''}。`)
     }
     this.updateAssistAim()
   }
 
-  /** 服务器权威源码写入编辑器：脏草稿先 stash（可从版本抽屉找回）。 */
-  private fillEditorFromServer(source: string, revision: number, message: string): void {
-    const plan = planEditorSync(this.loaded?.source, this.source, source)
+  /** 服务器权威源码写入编辑器（目标语言版本）：
+   * - 同语言：直接以当前编辑器内容比较，脏草稿先 stash（带语言）；
+   * - 跨语言：先保当前语言草稿（setLanguage 内 flush+pref），切目标模型/
+   *   草稿键，再以目标语言草稿槽为比较基准（无胜桶 = 干净；基线仅在与
+   *   目标语言一致时可比较），胜桶脏草稿先 stash 后覆盖。
+   * 手改永不丢失：stash 可从版本浮层找回并切回其语言。 */
+  private fillEditorFromServer(source: string, language: BotLanguage, message: string): void {
+    if (language !== this.language) {
+      const targetDraft = this.readDraft(this.draftKeyForLanguage(language))
+      this.setLanguage(language) // 内部先 flush 旧语言草稿 + 存偏好，再切模型/键
+      const baseline = this.loaded?.language === language ? this.loaded : undefined
+      const plan = planEditorSync(baseline, { source: targetDraft ?? '', language }, { source, language })
+      if (plan.kind === 'ignore') return
+      if (plan.stashed !== undefined) this.stashedDraft = plan.stashed
+      this.applyServerFill(plan, message)
+      return
+    }
+    const plan = planEditorSync(this.loaded, { source: this.source, language: this.language }, { source, language })
     if (plan.kind === 'ignore') return
     if (plan.stashed !== undefined) this.stashedDraft = plan.stashed
+    this.applyServerFill(plan, message)
+  }
+
+  /** 应用直填结果：建立新基线（源码 + 语言）并同步编辑器/草稿盘。 */
+  private applyServerFill(plan: { kind: 'fill'; source: string; language: BotLanguage }, message: string): void {
     this.source = plan.source
-    this.loaded = { source: plan.source, revision }
+    this.loaded = { source: plan.source, language: plan.language }
     this.editor?.setValue(plan.source)
     this.flushDraft()
     this.scriptConsole.appendClient('info', message)
@@ -805,12 +859,16 @@ export class Workbench {
     this.renderButtons()
   }
 
-  /** 找回未提交手改（AI 直填覆盖前）：放回编辑器但不提交（不覆盖版本链）。 */
+  /** 找回未提交手改（直填/回退覆盖前）：放回编辑器并切回其语言；
+   * 不提交（不覆盖版本链）。 */
   private restoreStashedDraft(): boolean {
     if (this.stashedDraft === undefined) return false
-    this.source = this.stashedDraft
+    const stash = this.stashedDraft
     this.stashedDraft = undefined
+    if (stash.language !== this.language) this.setLanguage(stash.language)
+    this.source = stash.source
     this.editor?.setValue(this.source)
+    this.flushDraft()
     this.versionDrawer?.render(this.scriptVersions)
     this.renderButtons()
     return true
@@ -906,5 +964,11 @@ export class Workbench {
   private clearPending(): void {
     if (this.pending) clearTimeout(this.pending.timer)
     this.pending = undefined
+  }
+
+  /** 页面级销毁：摘除版本浮层 body portal 与全局监听（main.ts 卸载时调用）。 */
+  dispose(): void {
+    this.flushDraft()
+    this.versionDrawer?.dispose()
   }
 }

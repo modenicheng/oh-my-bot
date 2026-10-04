@@ -1,11 +1,15 @@
-// 脚本版本链纯逻辑（TODO：AI 代码直接填入编辑器 + 版本回退）。
+// 脚本版本链纯逻辑（AI 代码直填 + 版本回退）。
 //
 // 服务器是版本链唯一 owner：EvScriptVersions 全量快照（升序 + current_id）
 // 到达即整体替换本地视图；本地不预测、不合并——重连/接管后由 bootstrap
 // 补发对齐。Editor sync 决策（planEditorSync）集中在这里，供 workbench
 // 与 Vitest 共用，DOM 行为留在视图层。
+//
+// 版本带编辑语言（BotLanguage）：服务器只在非 JS 时携带 language（旧服务
+// 器/AI 版本缺省 = JS）；TS 版本的 source 是 TS 原文，恢复时切回 TS 模型。
 
-import { ScriptOrigin, type EvScriptVersions } from '@omb/protocol'
+import { ScriptLanguage, ScriptOrigin, type EvScriptVersions } from '@omb/protocol'
+import type { BotLanguage } from './ts-submit'
 
 export interface ScriptVersionView {
   id: number
@@ -13,6 +17,8 @@ export interface ScriptVersionView {
   origin: ScriptOrigin
   wallMs: number
   source: string
+  /** 编辑器恢复语言（缺省/未知 → JS；AI 版本恒 JS）。 */
+  language: BotLanguage
 }
 
 export interface ScriptVersionState {
@@ -25,11 +31,29 @@ export function emptyScriptVersionState(): ScriptVersionState {
   return { versions: [], currentId: 0 }
 }
 
+/** 协议语言 → 编辑器语言：缺省 / UNSPECIFIED / 未知枚举值一律按 JS
+ * （旧服务器与 AI 版本兼容——服务器只在非 JS 时携带 language）。 */
+export function normalizeScriptLanguage(language: ScriptLanguage | undefined): BotLanguage {
+  return language === ScriptLanguage.TS ? 'ts' : 'js'
+}
+
+/** 版本行语言短标签（战术终端风格）。 */
+export function languageLabel(language: BotLanguage): string {
+  return language === 'ts' ? 'TS' : 'JS'
+}
+
 /** 服务器快照 → 本地视图（整体替换；防御性拷贝，不信任引用复用）。 */
 export function applyScriptVersions(state: ScriptVersionState, snapshot: EvScriptVersions): ScriptVersionState {
   return {
     currentId: snapshot.currentId,
-    versions: snapshot.versions.map(v => ({ id: v.id, scriptRev: v.scriptRev, origin: v.origin, wallMs: Number(v.wallMs), source: v.source })),
+    versions: snapshot.versions.map(v => ({
+      id: v.id,
+      scriptRev: v.scriptRev,
+      origin: v.origin,
+      wallMs: Number(v.wallMs),
+      source: v.source,
+      language: normalizeScriptLanguage(v.language),
+    })),
   }
 }
 
@@ -38,24 +62,39 @@ export function currentVersion(state: ScriptVersionState): ScriptVersionView | u
   return state.versions.find(v => v.id === state.currentId)
 }
 
+/** 已装载基线（上次成功提交 / 回退 / 直填的编辑器源码 + 语言）。 */
+export interface LoadedScript {
+  source: string
+  language: BotLanguage
+}
+
 /**
  * 编辑器同步决策：服务器权威版本写入成功后，是否用其源码覆盖编辑器草稿。
  *
  * 规则：
  * - source 为空（不应发生）→ 忽略，保编辑器现状；
- * - 编辑器草稿干净（与上次已装载源码一致，或尚无已装载态）→ 覆盖填充；
- * - 草稿脏（有未提交手改）→ 先 stash（保存到未暂存草稿槽，见 stashDraft），
+ * - 编辑器草稿干净 → 覆盖填充。干净 = 与已装载基线源码一致**且语言一致**
+ *   （跨语言草稿与基线不可比，一律视为脏）；无基线时空编辑器视为干净；
+ * - 草稿脏（有未提交手改）→ 先 stash（源码 + 语言，恢复时切回其语言），
  *   再覆盖填充。手改永不丢失：可从「未提交改动」一键找回编辑器。
+ * 填充语言 = 目标版本语言（可能与编辑器当前语言不同，视图层负责切模型）。
  */
 export type EditorSyncPlan =
-  | { kind: 'fill'; source: string; stashed?: string }
+  | { kind: 'fill'; source: string; language: BotLanguage; stashed?: LoadedScript }
   | { kind: 'ignore' }
 
-export function planEditorSync(loadedSource: string | undefined, editorSource: string, incoming: string): EditorSyncPlan {
-  if (!incoming) return { kind: 'ignore' }
-  const dirty = loadedSource === undefined ? editorSource !== '' : loadedSource !== editorSource
-  if (!dirty) return { kind: 'fill', source: incoming }
-  return { kind: 'fill', source: incoming, stashed: editorSource }
+export function planEditorSync(loaded: LoadedScript | undefined, editor: LoadedScript, incoming: LoadedScript): EditorSyncPlan {
+  if (!incoming.source) return { kind: 'ignore' }
+  const clean = loaded === undefined
+    ? editor.source === ''
+    : loaded.language === editor.language && loaded.source === editor.source
+  if (clean) return { kind: 'fill', source: incoming.source, language: incoming.language }
+  return {
+    kind: 'fill',
+    source: incoming.source,
+    language: incoming.language,
+    stashed: { source: editor.source, language: editor.language },
+  }
 }
 
 /** 版本来源文案（战术终端风格短标签）。 */

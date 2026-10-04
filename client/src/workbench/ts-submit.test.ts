@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ScriptLanguage } from '@omb/protocol'
 import { INITIAL_SOURCE, INITIAL_SOURCE_TS } from './workbench'
 import {
   cleanEmittedJs,
@@ -6,9 +7,11 @@ import {
   flattenTsMessage,
   formatTsErrors,
   isBotLanguage,
+  languageToProto,
   lineStarts,
   offsetToLineColumn,
   pickEmitJs,
+  scriptSubmitPayload,
 } from './ts-submit'
 
 describe('default editor templates', () => {
@@ -158,5 +161,35 @@ describe('flattenTsMessage', () => {
   it('joins chained message text with spaces', () => {
     expect(flattenTsMessage({ messageText: 'outer', next: [{ messageText: 'inner' }] })).toBe('outer inner')
     expect(flattenTsMessage('plain')).toBe('plain')
+  })
+})
+
+describe('languageToProto / scriptSubmitPayload', () => {
+  it('maps editor language to the protocol enum', () => {
+    expect(languageToProto('js')).toBe(ScriptLanguage.JS)
+    expect(languageToProto('ts')).toBe(ScriptLanguage.TS)
+  })
+
+  it('JS submit: source = editorSource = 编辑器原文，language = JS', () => {
+    const payload = scriptSubmitPayload('js', 'function tick() {}')
+    expect(payload).toEqual({ clientScriptId: 0, source: 'function tick() {}', editorSource: 'function tick() {}', language: ScriptLanguage.JS })
+  })
+
+  it('TS submit: source = 编译产物 JS，editorSource = TS 原文，language = TS', () => {
+    const payload = scriptSubmitPayload('ts', 'const n: number = 1', 'const n = 1;')
+    expect(payload).toEqual({ clientScriptId: 0, source: 'const n = 1;', editorSource: 'const n: number = 1', language: ScriptLanguage.TS })
+  })
+
+  it('TS submit without compiled JS is refused (no frame leaves the browser)', () => {
+    expect(scriptSubmitPayload('ts', 'const n: number = 1', undefined)).toEqual({ error: expect.any(String) })
+    expect(scriptSubmitPayload('ts', 'const n: number = 1', '')).toEqual({ error: expect.any(String) })
+  })
+
+  it('payload pairs runtime JS with the editor source the server stores for restore', () => {
+    // 服务器版本链用 editorSource+language 恢复编辑器；两条通道不可互换。
+    const ts = scriptSubmitPayload('ts', INITIAL_SOURCE_TS, 'function tick(bot) {\n}\n')
+    if (!('error' in ts)) expect(ts.source).not.toBe(ts.editorSource)
+    const js = scriptSubmitPayload('js', INITIAL_SOURCE)
+    if (!('error' in js)) expect(js.source).toBe(js.editorSource)
   })
 })
