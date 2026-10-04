@@ -1,6 +1,7 @@
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, SnippetConfigSchema, AiPromptSchema, encodeClient,
          EvAiStream_Kind, type EvScriptLog, type EvScriptResult, type EvSnippetResult, type EvAiQuota, type EvAiUsage, type EvAiStream, type EvControlNotice, type SnippetSetting } from '@omb/protocol'
+import { ensureEditorModule } from './editor-loader'
 import { ManualView } from '../manual/manual'
 import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
@@ -585,7 +586,9 @@ export class Workbench {
     loading.hidden = false
     loading.textContent = '正在加载编辑器…'
     try {
-      const { createBotEditor } = await import('./editor')
+      // 预取与首开共用同一 import promise；预取已在途时此 await 立即完成，
+      // 仅剩 Monaco 建编辑器的同步成本。失败在此重试（loader 不缓存拒绝）。
+      const { createBotEditor } = await ensureEditorModule()
       this.editor = createBotEditor(this.el('workbench-code'), this.source, {
         onChange: source => {
           this.source = source

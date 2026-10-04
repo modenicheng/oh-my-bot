@@ -11,6 +11,7 @@ import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
+import { preloadEditorModule } from './workbench/editor-loader'
 import { battleKeyAction } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
@@ -477,6 +478,9 @@ export function start(): void {
   audio.unlock()
   audio.installUI()
   restoreInitialRoute()
+  // 编辑器预取：启动手势后立刻在幕后加载 Monaco，游戏连接/首帧不被等待
+  // （fire-and-forget，拒绝转告警）。玩家展开编辑器时若已就绪则零延迟。
+  preloadEditorModule()
 }
 
 function restoreInitialRoute(): void {

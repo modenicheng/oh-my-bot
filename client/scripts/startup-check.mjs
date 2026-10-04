@@ -124,6 +124,52 @@ try {
   await page.screenshot({ path: resolve(shots, 'erosion-late.png') })
   await entered(page)
   await page.close()
+
+  // Editor chunk preload: the Monaco/editor module must not be requested
+  // before the trusted start gesture, must be requested by the gesture
+  // without blocking the startup transition, and a workbench open before
+  // the preload completes must await the same in-flight fetch (pending
+  // state, no failure, no duplicate editor network request).
+  const editorRequests = []
+  let releasePreload
+  const preloadHeld = new Promise(resolve => { releasePreload = resolve })
+  const preload = await open()
+  await preload.route('**/assets/editor-*.js', async route => {
+    editorRequests.push(route.request().url())
+    // Hold the editor chunk so "open before preload finishes" is exercised.
+    await preloadHeld
+    await route.continue()
+  })
+  await preload.goto('http://127.0.0.1:18425', { waitUntil: 'domcontentloaded' })
+  assert.equal(editorRequests.length, 0, 'editor module is not fetched before the start gesture')
+  await ready(preload)
+  assert.equal(editorRequests.length, 0, 'reaching ready state still does not fetch the editor module')
+  await preload.keyboard.press('Enter')
+  await assertEventually(() => editorRequests.length > 0)
+  // 预取 chunk 被扣住不放：侵蚀入场动画照常完成，说明预加载不阻塞启动转场。
+  await entered(preload)
+  // Reach the game view like players do: join the test room, then open the
+  // workbench editor while the preload chunk is still held in flight.
+  await preload.locator('#in-room').fill('PREL')
+  await preload.locator('#in-nick').fill('preload-test')
+  await preload.locator('#btn-join').click()
+  await preload.locator('#view-room').waitFor({ state: 'visible', timeout: 10000 })
+  // Mock 服务器 join 只回 roomState；游戏视图由 mapBootstrap 触发（真实服
+  // 务器同样如此），下发后 enterGame 进战斗视图。
+  event('PREL', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
+  await preload.locator('#view-game').waitFor({ state: 'visible', timeout: 10000 })
+  assert.equal(editorRequests.length, 1, 'game entry does not add editor fetches')
+  await preload.locator('#btn-game-editor').click()
+  // 打开先于预取完成：命中同一条在途 promise，展示既有的加载中状态而不是失败。
+  await preload.locator('#workbench-editor-loading').waitFor({ state: 'visible', timeout: 5000 })
+  assert.equal(editorRequests.length, 1, 'opening before preload completion reuses the single in-flight fetch')
+  releasePreload()
+  await preload.locator('#workbench-code .monaco-editor').waitFor({ state: 'visible', timeout: 20000 })
+  assert.equal(editorRequests.length, 1, 'exactly one editor chunk request across preload and open')
+  assert.equal(await preload.evaluate(() => document.getElementById('workbench-editor-loading').hidden), true)
+  assert.deepEqual(errors, [])
+  await preload.close()
+
   for (const key of ['Enter', 'Space', 'a']) {
     const p = await open()
     await p.goto('http://127.0.0.1:18425')
