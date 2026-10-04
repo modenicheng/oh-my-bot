@@ -143,7 +143,7 @@ async function prepare(): Promise<void> {
   }, 15000)
   try {
     application = await import('./main')
-    status.textContent = '正在准备字体与机甲素材…'
+    status.textContent = '正在准备字体、音频、机甲素材与脚本编辑器…'
     let timeout: number | undefined
     // 图片与字体已有渲染兜底，网络挂起不永久阻止进入。
     const assetsLoaded = await Promise.race([

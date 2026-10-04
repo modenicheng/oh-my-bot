@@ -22,8 +22,9 @@ describe('editor module loader', () => {
   })
 
   it('preload fires immediately and a later open awaits the same settled promise', async () => {
-    preloadEditorModule()
+    const preload = preloadEditorModule()
     const opened = ensureEditorModule()
+    await expect(preload).resolves.toBeUndefined()
     await expect(opened).resolves.toMatchObject({ createBotEditor: 'stub-editor-module' })
     // 预取完成后打开仍复用同一模块实例，不重新发起加载。
     expect(ensureEditorModule()).toBe(opened)
@@ -34,8 +35,9 @@ describe('editor module loader', () => {
     vi.doMock('./editor', () => {
       throw new Error('chunk fetch failed')
     })
-    preloadEditorModule()
-    // preload 内部把拒绝转成告警；若有 unhandled rejection，vitest 会判本测试失败。
+    const preload = preloadEditorModule()
+    // preload 内部把拒绝转成告警并兑现 Promise；加入开屏 ready 时不会阻断进入。
+    await expect(preload).resolves.toBeUndefined()
     await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('预加载失败'), expect.any(Error)))
     // 失败不缓存：恢复后打开重新发起 import 并成功。
     vi.doMock('./editor', () => ({ createBotEditor: 'recovered-editor-module' }))

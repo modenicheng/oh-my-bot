@@ -125,31 +125,32 @@ try {
   await entered(page)
   await page.close()
 
-  // Editor chunk preload: the Monaco/editor module must not be requested
-  // before the trusted start gesture, must be requested by the gesture
-  // without blocking the startup transition, and a workbench open before
-  // the preload completes must await the same in-flight fetch (pending
-  // state, no failure, no duplicate editor network request).
+  // Editor chunk preload: Monaco starts with the splash resource bundle, not
+  // inside the trusted gesture that enters the app. The splash ready gate waits
+  // for the preload (subject to startup.ts's outer timeout); entering the room
+  // and opening the editor must not create a second module request.
   const editorRequests = []
   let releasePreload
   const preloadHeld = new Promise(resolve => { releasePreload = resolve })
   const preload = await open()
   await preload.route('**/assets/editor-*.js', async route => {
     editorRequests.push(route.request().url())
-    // Hold the editor chunk so "open before preload finishes" is exercised.
     await preloadHeld
     await route.continue()
   })
   await preload.goto('http://127.0.0.1:18425', { waitUntil: 'domcontentloaded' })
-  assert.equal(editorRequests.length, 0, 'editor module is not fetched before the start gesture')
+  await assertEventually(() => editorRequests.length === 1)
+  assert.equal(await preload.locator('#startup').getAttribute('data-state'), 'loading', 'held Monaco preload keeps splash in resource-loading state')
+  await preload.mouse.click(30, 30)
+  assert.equal(await preload.evaluate(() => window.__startupContexts.length), 0, 'loading splash does not consume a gesture')
+  releasePreload()
   await ready(preload)
-  assert.equal(editorRequests.length, 0, 'reaching ready state still does not fetch the editor module')
+  assert.equal(editorRequests.length, 1, 'splash resources issue exactly one editor chunk request')
   await preload.keyboard.press('Enter')
-  await assertEventually(() => editorRequests.length > 0)
-  // 预取 chunk 被扣住不放：侵蚀入场动画照常完成，说明预加载不阻塞启动转场。
   await entered(preload)
-  // Reach the game view like players do: join the test room, then open the
-  // workbench editor while the preload chunk is still held in flight.
+  assert.equal(editorRequests.length, 1, 'trusted start gesture does not trigger Monaco loading')
+
+  // Reach the game view like players do, then open the already-preloaded editor.
   await preload.locator('#in-room').fill('PREL')
   await preload.locator('#in-nick').fill('preload-test')
   await preload.locator('#btn-join').click()
@@ -160,12 +161,8 @@ try {
   await preload.locator('#view-game').waitFor({ state: 'visible', timeout: 10000 })
   assert.equal(editorRequests.length, 1, 'game entry does not add editor fetches')
   await preload.locator('#btn-game-editor').click()
-  // 打开先于预取完成：命中同一条在途 promise，展示既有的加载中状态而不是失败。
-  await preload.locator('#workbench-editor-loading').waitFor({ state: 'visible', timeout: 5000 })
-  assert.equal(editorRequests.length, 1, 'opening before preload completion reuses the single in-flight fetch')
-  releasePreload()
   await preload.locator('#workbench-code .monaco-editor').waitFor({ state: 'visible', timeout: 20000 })
-  assert.equal(editorRequests.length, 1, 'exactly one editor chunk request across preload and open')
+  assert.equal(editorRequests.length, 1, 'opening the editor reuses the splash preload')
   assert.equal(await preload.evaluate(() => document.getElementById('workbench-editor-loading').hidden), true)
   assert.deepEqual(errors, [])
   await preload.close()

@@ -23,7 +23,9 @@ import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
 import { $ } from './ui/dom'
 
-export const ready = Promise.all([artReady, bgm.preload()])
+// 开屏准备期并行加载字体/素材、音频与 Monaco。外层 startup.ts 仍有 8 秒
+// 超时兜底；编辑器预取失败只告警，实际打开时可重试。
+export const ready = Promise.all([artReady, bgm.preload(), preloadEditorModule()])
 
 mountIcons(document)
 
@@ -480,9 +482,6 @@ export function start(): void {
   audio.unlock()
   audio.installUI()
   restoreInitialRoute()
-  // 编辑器预取：启动手势后立刻在幕后加载 Monaco，游戏连接/首帧不被等待
-  // （fire-and-forget，拒绝转告警）。玩家展开编辑器时若已就绪则零延迟。
-  preloadEditorModule()
 }
 
 function restoreInitialRoute(): void {
