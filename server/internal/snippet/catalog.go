@@ -21,7 +21,7 @@ import (
 type Kind int
 
 const (
-	AutoAim         Kind = 1 // 自动瞄准（无参数，纯直瞄）
+	AutoAim Kind = 1 // 自动瞄准（无参数，纯直瞄）
 	// 2/3 已移除：AutoFire 自动开火、AutoPickup 有限半径自动拾取。
 	EmergencyShield Kind = 4 // 紧急护盾（HP 阈值 0..100）
 	DangerAvoid     Kind = 5 // 危险规避（威胁半径 m）
@@ -73,8 +73,8 @@ type Module struct {
 // catalog 是唯一事实源；顺序即组合执行顺序（确定性）。
 var catalog = []Module{
 	{
-		Kind:  AutoAim,
-		Title: "自动瞄准",
+		Kind:    AutoAim,
+		Title:   "自动瞄准",
 		Default: Setting{Kind: AutoAim},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = AutoAim

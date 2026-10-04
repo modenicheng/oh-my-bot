@@ -326,14 +326,6 @@ func (r *GojaRuntime) Tick(frame sim.ScriptFrame) (sim.ScriptCommands, error) {
 	return r.tickLocked(frame, r.cfg.TickTimeout)
 }
 
-// tickWithQuota 池 worker 入口：配额可收紧为帧剩余预算。
-func (r *GojaRuntime) tickWithQuota(frame sim.ScriptFrame, quota time.Duration) (sim.ScriptCommands, error) {
-	if quota <= 0 {
-		return sim.ScriptCommands{}, ErrQuotaExceeded
-	}
-	return r.tickLocked(frame, quota)
-}
-
 // tickBeforeDeadline 串行取得 runtime 后重新计算剩余帧预算。排队或等待
 // Hot Swap 导致截止已过时，任务必须直接 deferred，不能再推进模块状态。
 func (r *GojaRuntime) tickBeforeDeadline(frame sim.ScriptFrame, deadline time.Time) (sim.ScriptCommands, bool, error) {
