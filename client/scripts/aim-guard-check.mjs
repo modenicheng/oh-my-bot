@@ -7,7 +7,7 @@ import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
 import { ServerMsgSchema, ClientMsgSchema } from '../../packages/protocol/src/index.ts'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -16,7 +16,7 @@ const work = mkdtempSync(join(tmpdir(), 'omb-aimguard-'))
 const shots = resolve(process.env.OMB_SHOTS || '../.artifacts/aimguard')
 mkdirSync(shots, { recursive: true })
 const port = Number(process.env.OMB_E2E_PORT || 18429)
-const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', `127.0.0.1:${port}`], { cwd: work, stdio: 'ignore', env: { ...process.env, OMB_WEB_DIR: resolve('../client/dist') } })
+const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', `127.0.0.1:${port}`], { cwd: work, stdio: 'ignore', env: { ...process.env } })
 const base = `http://127.0.0.1:${port}`
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function until(fn, label, timeout = 15000) {
@@ -26,9 +26,13 @@ async function until(fn, label, timeout = 15000) {
 }
 
 // A script that aims at the nearest enemy every tick (like any aimAt script).
-const source = `function tick(bot) {
+const source = `let fireTicks = 0
+function tick(bot) {
   const enemy = bot.nearestEnemy()
-  if (enemy) bot.aimAt(enemy)
+  if (enemy) {
+    bot.aimAt(enemy)
+    if (++fireTicks % 180 < 12) bot.fire()
+  }
 }
 `
 
@@ -39,7 +43,7 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] })
   const page = await ctx.newPage()
   page.setDefaultTimeout(8000)
-  const inputs = []
+  const inputs = [], shotsFired = []
   let latest, selfId
   const robots = new Map()
   page.on('pageerror', e => { throw e })
@@ -66,14 +70,14 @@ try {
       }
       if (msg.payload.case === 'event') {
         const ev = msg.payload.value.kind
-        if (ev.case === 'say') console.log(`[say] ${ev.value.text}`)
+        if (ev.case === 'shot') shotsFired.push(ev.value)
+        if (ev.case === 'scriptError') throw new Error(`script runtime error: ${JSON.stringify(ev.value)}`)
       }
     })
   })
   var self
   // Second player joins FIRST (matches launch with the full roster).
   const e2 = await ctx.newPage()
-  const e2inputs = []
   let e2self
   const e2robots = new Map()
   let e2latest
@@ -102,19 +106,24 @@ try {
   await page.fill('#in-room', 'AIMGRD')
   await page.fill('#in-nick', 'guard-test')
   await page.click('#btn-join')
-  await page.locator('#btn-warmup').waitFor({ state: 'visible', timeout: 15000 }).catch(async () => {
-    // First joiner (enemy) holds host rights — it starts the warmup.
-    await e2.locator('#btn-warmup').waitFor({ state: 'visible', timeout: 5000 })
-    await e2.click('#btn-warmup')
-    return
-  })
-  await page.click('#btn-warmup').catch(() => {})
+  await e2.locator('#btn-warmup').waitFor({ state: 'visible', timeout: 5000 })
+  await e2.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await e2.locator('#view-game').waitFor({ state: 'visible', timeout: 15000 })
   await until(() => latest?.self && e2self, 'both snapshots')
 
-  // Submit the aimAt script (or the auto-aim snippet) through the real UI.
+  // Applying a module must work even after prior manual aim/fire with assist ON.
   const useSnippet = process.env.OMB_GUARD_VARIANT === 'snippet'
+  if (useSnippet) {
+    await page.locator('#game-canvas').focus()
+    await page.keyboard.press('Space')
+    await until(() => self?.assistOn === true, 'assist initially on')
+    await page.mouse.move(400, 300)
+    await page.mouse.down(); await sleep(120); await page.mouse.up()
+    await until(() => (self?.manualAxesMask & 6) === 6, 'manual aim/fire established before Snippet apply')
+  }
+
+  // Submit the aimAt script (or the auto-aim snippet) through the real UI.
   if (!useSnippet) {
     await page.click('#btn-game-manual')
     await page.locator('.workbench-tools [data-panel="editor"]').click()
@@ -127,7 +136,7 @@ try {
     await sleep(400)
     await page.keyboard.press('ControlOrMeta+Enter')
     await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本')), 'script loaded', 20000)
-    await page.keyboard.press('m') // close workbench
+    await page.locator('.workbench-tools [data-panel="editor"]').click()
   } else {
     await page.click('#btn-game-manual')
     await page.locator('.workbench-tools [data-panel="snippets"]').click()
@@ -136,31 +145,24 @@ try {
     await aimRow.locator('.snippet-toggle').click()
     await sleep(200)
     await page.locator('.snippet-apply').click()
-    await sleep(800)
-    await page.keyboard.press('m')
+    await until(() => page.locator('.snippet-status').getAttribute('data-phase').then(s => s === 'ok'), 'snippet applied')
+    await until(() => self?.assistOn === true && self.manualAxesMask === 0, 'Snippet apply releases prior manual axes while keeping assist ON', 5000)
   }
 
   // Focus the battlefield first — battle keys (Space/R) require activeElement === canvas.
-  await page.locator('#game-canvas').click({ position: { x: 640, y: 400 } })
+  await page.locator('#game-canvas').focus()
+  if (!useSnippet) {
+    await page.keyboard.press('Space')
+    await until(() => self?.assistOn === true, 'assist on (authoritative)', 5000)
+  }
 
-  // Turn assist ON (retry: Space in warmup should stick via authoritative echo).
-  await page.keyboard.press(' ')
-  await until(() => self?.assistOn === true, 'assist on (authoritative)', 5000).catch(async () => {
-    console.log(`assist echo not seen yet (assistOn=${self?.assistOn}); pressing Space again`)
-    await page.keyboard.press(' ')
-    await until(() => self?.assistOn === true, 'assist on retry', 5000)
-  })
+  await until(() => page.locator('#skill-aim-cd').textContent().then(text => text === '辅助待机'), 'enabled auto aim without target shows standby, never manual')
+  assert.equal(await page.locator('#skill-aim').getAttribute('data-takeover'), null, 'standby does not pretend a target is being tracked')
 
   // PRE-GUARD: move the mouse BEFORE any enemy exists — with the aim-capable
   // script loaded and assist on, these moves must NOT seize the aim axis at all
   // (the old turret_src-based guard only engaged after the script aimed).
   {
-    const probe = await page.evaluate(() => ({
-      aimCapable: (globalThis).__ombAimCapable,
-      hudMsg: document.querySelector('#hud-msg')?.textContent ?? '',
-    }))
-    console.log(`pre-guard probe: ${JSON.stringify(probe)}`)
-    console.log(`pre-guard debug: assistOn=${self?.assistOn} turretSrc=${self?.turretSrc}`)
     const mark0 = inputs.length
     await page.mouse.move(1100, 250)
     await page.mouse.move(250, 650, { steps: 6 })
@@ -173,7 +175,7 @@ try {
   // Wake the mouse axis with small real moves (canvas focus), then check
   // turret_src: the script aims only when an enemy is visible; alone in the
   // room there is none, so also enable the auto-aim snippet via the panel.
-  await page.locator('#game-canvas').click({ position: { x: 640, y: 400 } })
+  await page.locator('#game-canvas').focus()
   await until(() => self?.turretSrc !== undefined, 'turret src reported')
 
   // Both in warmup; enemy walks toward us until mutually visible.
@@ -186,27 +188,50 @@ try {
     throw new Error('positions missing')
   })
   const dist = () => { const a = myPos(), b = ePos(); return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : Infinity }
-  const t0 = Date.now()
-  let lastDist = Infinity, stuck = 0
-  while (Date.now() - t0 < 30000 && dist() > 15) {
-    const a = myPos(), b = ePos()
-    if (!a || !b) { await sleep(200); continue }
-    const dx = a.x - b.x, dy = a.y - b.y
-    const key = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'd' : 'a') : (dy > 0 ? 's' : 'w')
-    await e2.locator('#game-canvas').click({ position: { x: 640, y: 400 } }).catch(() => {})
-    await e2.keyboard.down(key)
-    if (stuck > 3) { await e2.keyboard.down('Shift'); await sleep(400); await e2.keyboard.up('Shift'); stuck = 0 }
-    await sleep(200)
-    await e2.keyboard.up(key)
-    const d = dist()
-    if (d > lastDist - 0.3) stuck++; else stuck = 0
-    lastDist = d
-  }
+  // Navigate through real cover instead of walking a cardinal key into a wall.
+  const destination = myPos(), retreat = { ...ePos() }
+  await e2.click('#btn-game-editor')
+  const enemyEditor = e2.getByRole('textbox', { name: '机器人脚本编辑器', exact: true })
+  await enemyEditor.waitFor({ timeout: 20000 })
+  await enemyEditor.focus(); await e2.keyboard.press('ControlOrMeta+a')
+  await e2.evaluate(src => navigator.clipboard.writeText(src), `function tick(bot) { bot.navigateTo({x:${destination.x},y:${destination.y}}); }`)
+  await e2.keyboard.press('ControlOrMeta+v'); await sleep(200)
+  await e2.keyboard.press('ControlOrMeta+Enter')
+  await until(() => e2.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本')), 'target navigation script loaded')
+  await e2.click('#workbench-assist')
+  await until(() => dist() < 10 && robots.has(e2self.robotId), 'target reaches unobstructed sight', 45000)
+  await e2.click('#workbench-assist')
+  await until(() => e2self.assistOn === false, 'target stops moving')
+  await page.locator('#game-canvas').focus()
   console.log(`distance: ${dist().toFixed(1)}m turretSrc=${self.turretSrc}`)
 
   // Now the script/snippet sees an enemy and aims → turret_src becomes CS_SCRIPT/CS_SNIPPET.
   await until(() => self.turretSrc === 2 || self.turretSrc === 3, `turret under script (got ${self.turretSrc})`, 8000)
-  console.log(`turret_src=${self.turretSrc} (${self.turretSrc === 3 ? 'CS_SNIPPET' : 'CS_SCRIPT'}) — guard active`)
+  const expectedSource = useSnippet ? 3 : 2
+  assert.equal(self.turretSrc, expectedSource)
+  await until(() => page.locator('#skill-aim').getAttribute('data-takeover').then(v => v === 'script'), 'aim HUD reflects actual script source')
+  assert.equal(await page.locator('#skill-aim-cd').textContent(), '辅助瞄准', 'actual aim output uses the same assist terminology')
+  const a = myPos(), b = ePos()
+  const expectedAim = Math.atan2(b.y - a.y, b.x - a.x)
+  await until(() => Math.abs(Math.atan2(Math.sin(robots.get(selfId).base.heading - expectedAim), Math.cos(robots.get(selfId).base.heading - expectedAim))) < 0.08, 'actual turret points at visible enemy')
+  const fireMark = useSnippet ? shotsFired.length : 0
+  if (useSnippet) {
+    await page.mouse.move(300, 300); await page.mouse.down()
+    await until(() => self.fireSrc === 1 && self.turretSrc === 3, 'manual fire coexists with Snippet aim')
+  }
+  await until(() => shotsFired.slice(fireMark).some(shot => shot.owner === selfId), 'real self projectile is fired')
+  if (useSnippet) {
+    await page.mouse.up()
+    assert.equal(await page.locator('#skill-fire').getAttribute('data-takeover'), null, 'manual fire is not marked as script')
+  } else {
+    await until(() => self.fireSrc === 2, 'editor code controls real firing')
+    await until(() => page.locator('#skill-fire').getAttribute('data-takeover').then(v => v === 'script'), 'editor fire HUD turns amber')
+    await page.mouse.move(300, 300); await page.mouse.down(); await page.mouse.up()
+    await until(() => self.fireSrc === 1 && self.turretSrc === 2, 'LMB seizes only fire from editor script')
+    await page.keyboard.press('Space')
+    await until(() => self.fireSrc === 2 && self.assistOn, 'Space returns fire without turning assist off')
+  }
+  console.log(`real aim/fire verified: source=${expectedSource}`)
 
   // PHASE 1: big mouse moves must NOT produce aim-mask frames.
   const mark1 = inputs.length
@@ -229,6 +254,7 @@ try {
   console.log(`phase 2 (after R): aim-mask frames = ${aimFrames2.length}`)
   assert.ok(aimFrames2.length > 0, 'R did not restore manual aim frames')
   await until(() => self.turretSrc === 1, `turret becomes human after R (got ${self.turretSrc})`, 5000)
+  await until(() => page.locator('#skill-aim-cd').textContent().then(text => text === '手动瞄准'), 'R changes HUD to manual aim')
   console.log('turret_src = CS_HUMAN after R')
 
   // PHASE 3: Space returns the axis to the script; guard re-engages.
@@ -242,11 +268,30 @@ try {
   assert.equal(aimFrames3.length, 0, 'guard did not re-engage after Space')
 
   await page.screenshot({ path: join(shots, 'aim-guard.png') })
-  console.log('AIM GUARD E2E OK')
+
+  // Losing a real target is standby, not a silent switch to human aim.
+  await enemyEditor.focus(); await e2.keyboard.press('ControlOrMeta+a')
+  await e2.evaluate(src => navigator.clipboard.writeText(src), `function tick(bot) { bot.navigateTo({x:${retreat.x},y:${retreat.y}}); }`)
+  await e2.keyboard.press('ControlOrMeta+v'); await sleep(200)
+  await e2.keyboard.press('ControlOrMeta+Enter')
+  await until(() => e2.locator('.script-console-list').textContent().then(t => t.includes('服务器已加载脚本 r2')), 'target retreat script loaded')
+  await e2.click('#workbench-assist')
+  await until(() => dist() > 22 && !robots.has(e2self.robotId) && self.turretSrc === 0, 'target leaves actual sight', 45000)
+  await until(() => page.locator('#skill-aim-cd').textContent().then(text => text === '辅助待机'), 'target loss returns aim HUD to standby')
+  assert.equal(self.assistOn, true, 'target loss does not disable assistance')
+  await page.locator('#game-canvas').focus()
+  await page.mouse.move(300, 300, { steps: 3 })
+  await until(() => page.locator('#hud-msg').textContent().then(text => text.includes('辅助待机')), 'guard hint uses the same standby wording')
+  await page.screenshot({ path: join(shots, useSnippet ? 'snippet-aim-standby.png' : 'editor-aim-standby.png') })
+  await page.keyboard.press('Space')
+  await until(() => self.assistOn === false, 'disable assistance after handoff')
+  await until(() => page.locator('#skill-aim-cd').textContent().then(text => text === '手动瞄准'), 'disabled assistance returns HUD to manual aim')
+  console.log('AIM GUARD E2E OK: standby / assisting / manual / target loss / assist off')
 } catch (err) {
   console.error(String(err))
   process.exitCode = 1
 } finally {
   server.kill()
   await browser?.close()
+  try { rmSync(work, { recursive: true, force: true }) } catch {}
 }

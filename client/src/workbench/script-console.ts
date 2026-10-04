@@ -254,6 +254,7 @@ export class ScriptConsoleView {
   append(entry: ScriptLogEntry): void {
     // 滚动跟随判定必须在写入前读布局（写后再读会强制同步布局）。
     const follow = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 24
+    const scrollTop = this.list.scrollTop
     const droppedBefore = this.buffer.dropped
     const lengthBefore = this.buffer.entries.length
     this.buffer.push(entry)
@@ -297,7 +298,10 @@ export class ScriptConsoleView {
     }
     if (this.emptyEl && this.rows.length) { this.emptyEl.remove(); this.emptyEl = null }
     this.syncFooter()
-    if (this.opened && follow) this.list.scrollTop = this.list.scrollHeight
+    if (this.opened) {
+      const scrollHeight = this.list.scrollHeight // force final layout after evictions/wrapping
+      this.list.scrollTop = follow ? scrollHeight : scrollTop
+    }
   }
 
   appendClient(level: 'info' | 'warn' | 'error', text: string): void {

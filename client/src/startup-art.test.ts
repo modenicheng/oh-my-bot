@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { asciiField, asciiTitle } from './startup-art'
+import { asciiField, asciiTitle, erodeText } from './startup-art'
 
 const lines = (value: string) => value.split(String.fromCharCode(10))
 const silhouette = (value: string) => value.replace(/[^ \n]/g, '#')
 
 describe('startup ASCII artwork', () => {
+  it('erodes actual characters monotonically while preserving whitespace and row widths', () => {
+    const text = asciiTitle(0)
+    expect(erodeText(text, 0)).toBe(text)
+    let previous = text
+    for (const progress of [0.15, 0.3, 0.5, 0.7, 0.9, 1]) {
+      const current = erodeText(text, progress)
+      expect(current.length).toBe(text.length)
+      for (let i = 0; i < text.length; i++) {
+        if (/\s/.test(previous[i]!)) expect(current[i]).toBe(previous[i])
+      }
+      previous = current
+    }
+    expect(previous.trim()).toBe('')
+    expect(erodeText('PRESS TO START', 0.4)).not.toBe('PRESS TO START')
+  })
+
   it('keeps equal row widths and the same title silhouette across frames', () => {
     const first = asciiTitle(0)
     expect(lines(first)).toHaveLength(14)

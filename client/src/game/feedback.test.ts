@@ -350,6 +350,67 @@ describe('confirmed feedback transitions', () => {
   })
 })
 
+describe('combat motion presentation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    vi.stubGlobal('document', { hidden: false })
+  })
+
+  it.each([false, true])('draws a thick irregular low-health edge (reduced=%s) without covering the center', reduced => {
+    vi.stubGlobal('matchMedia', () => ({ matches: reduced }))
+    const f = fixture(), initial = snap(10, 0, true)
+    initial.robots[0]!.hpX10 = 200; f.consume(initial)
+    const cells: number[][] = []
+    const ctx = { globalAlpha: 1, save() {}, restore() {}, strokeRect() {},
+      fillRect(x: number, y: number, w: number, h: number) { cells.push([x, y, w, h, this.globalAlpha]) } }
+    const camera = { cw: 800, ch: 600, scale: 10 }
+    f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+    expect(cells.length).toBeGreaterThan(100)
+    expect(cells.some(([x, y, w, h]) => y! + h! > 18 && y! + h! < 50 && x! > 50 && x! + w! < 750)).toBe(true)
+    expect(new Set(cells.filter(([x, y]) => x! > 50 && x! < 750 && y! < 50).map(([, y]) => y)).size).toBeGreaterThan(3)
+    expect(cells.some(([x, y, w, h]) => x! < 500 && x! + w! > 300 && y! < 400 && y! + h! > 200)).toBe(false)
+    expect(cells.some(([, , , , alpha]) => alpha! >= 0.5)).toBe(true)
+    const healthy = snap(11, 10); f.consume(healthy); cells.length = 0
+    f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+    expect(cells).toHaveLength(0)
+  })
+
+  it('holds the previous health as a delayed white-bar value across continuous hits', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const first = snap(11, 10); first.robots[0]!.hpX10 = 800; f.consume(first)
+    expect(f.feedback.delayedHealth(1, 800)).toBe(100)
+    const second = snap(12, 11); second.robots[0]!.hpX10 = 650; f.consume(second)
+    expect(f.feedback.delayedHealth(1, 650)).toBe(100)
+  })
+
+  it('eases camera out while dashing and restores it afterwards', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const start = f.feedback.cameraZoom(10, false)
+    const dash = f.feedback.cameraZoom(11, true)
+    const deeper = f.feedback.cameraZoom(14, true)
+    const restore = f.feedback.cameraZoom(20, false)
+    expect(start).toBe(1)
+    expect(dash).toBeLessThan(1)
+    expect(deeper).toBeLessThan(dash)
+    expect(restore).toBeGreaterThan(deeper)
+  })
+
+  it('raises hit pitch during a short confirmed impact chain', () => {
+    const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
+    f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } } }), seenAt: 0 })
+    for (let tick = 11; tick <= 13; tick++) {
+      f.feedback.event(create(ServerEventSchema, { tick, kind: { case: 'projectileImpact', value: { projectile: tick, owner: 1, target: 2, at: { x: 42, y: 0 } } } }), f.world, map, true)
+    }
+    const pitches = sound.play.mock.calls.filter(call => call[0] === 'hit').map(call => call[4] ?? 1)
+    expect(pitches).toHaveLength(3)
+    expect(pitches[0]).toBe(1)
+    expect(pitches[1]).toBeCloseTo(1.07)
+    expect(pitches[2]).toBeCloseTo(1.14)
+    expect(pitches[2]!).toBeGreaterThan(pitches[1]!)
+  })
+})
+
 describe('projectile impact presentation', () => {
   beforeEach(() => {
     vi.clearAllMocks()

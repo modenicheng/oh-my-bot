@@ -1,10 +1,9 @@
 /* 静态首屏先于应用模块显示，ASCII 字符是唯一主视觉。 */
 body[data-startup] { overflow: hidden; }
-body[data-startup] > :not(#startup) { visibility: hidden; }
+body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: hidden; }
 #startup {
   position: fixed; inset: 0; z-index: 10000; overflow: hidden; isolation: isolate;
   background: var(--bg); color: var(--fg); font-family: var(--pixel); outline: none;
-  transition: opacity .24s ease;
 }
 #startup[hidden] { display: none; }
 #startup::before {
@@ -13,7 +12,10 @@ body[data-startup] > :not(#startup) { visibility: hidden; }
 }
 #startup::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 16vw #00000065; }
 #startup[data-state="ready"] { cursor: pointer; }
-#startup[data-state="leaving"] { opacity: 0; pointer-events: none; }
+#startup[data-state="eroding"] { background: transparent; }
+#startup[data-state="eroding"]::before, #startup[data-state="eroding"]::after { display: none; }
+.startup-erosion { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#startup[data-state="eroding"] #startup-start { opacity: 1; animation: none; }
 .startup-field {
   position: absolute; inset: 0; margin: 0; pointer-events: none; overflow: hidden; user-select: none;
   color: #406374; opacity: .35; font: 12px/30px 'Fusion Pixel', monospace;
@@ -40,14 +42,13 @@ body[data-startup] > :not(#startup) { visibility: hidden; }
 #startup[data-state="ready"] #startup-start {
   animation: startup-arrive 1.2s cubic-bezier(.16,1,.3,1) both, startup-glow 3.6s ease-in-out 1.2s infinite;
 }
-#startup[data-state="leaving"] #startup-start { opacity: 1; }
 #startup:focus-visible #startup-start { text-decoration: underline; text-underline-offset: 8px; text-decoration-color: #406374; text-decoration-thickness: 1px; }
 .startup-footer { position: absolute; bottom: max(24px, 7%); left: 20px; right: 20px; text-align: center; }
 #startup-status { margin: 0; color: var(--fg-dim); font: 12px/1.8 var(--pixel); }
 #startup-progress { display: block; width: 120px; height: 2px; margin: 14px auto 20px; border: 0; border-radius: 0; accent-color: var(--accent); }
 #startup-progress::-webkit-progress-bar { background: var(--line); }
 #startup-progress::-webkit-progress-value { background: var(--accent); }
-#startup[data-state="ready"] #startup-progress, #startup[data-state="leaving"] #startup-progress { visibility: hidden; }
+#startup[data-state="ready"] #startup-progress, #startup[data-state="eroding"] #startup-progress { visibility: hidden; }
 #startup-help { margin: 0; color: var(--fg-dim); font: 12px/1.8 var(--pixel); }
 #startup-retry { display: inline-block; margin-top: 14px; color: var(--accent); font-size: 12px; }
 #startup-retry[hidden] { display: none; }
@@ -73,7 +74,7 @@ body[data-startup] > :not(#startup) { visibility: hidden; }
   #startup-progress { margin: 4px auto; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #startup { transition: none; }
-  #startup[data-state="ready"] .startup-float, #startup[data-state="ready"] #startup-start { animation: none; }
+  .startup-erosion { display: none; }
+  #startup[data-state="ready"] .startup-float, #startup[data-state="ready"] #startup-start, #startup[data-state="eroding"] #startup-start { animation: none; }
   #startup[data-state="ready"] #startup-start { opacity: 1; }
 }

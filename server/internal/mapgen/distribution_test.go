@@ -98,7 +98,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			}
 		}
 		for k, c := range counts {
-			if c != [3]int{1, 5, 2} {
+			if c != [3]int{1, 6, 2} {
 				t.Fatalf("seed %d wedge %d cover counts %v", seed, k, c)
 			}
 		}
@@ -143,8 +143,10 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 // 与垂直短杠（0.7×2 或 2×0.7），正面积相交约 0.7×0.7。只豁免这对组合
 // 自身的重叠；任何其他独立墙对仍受 2.2m 间距约束。
 func isLPair(other, w sim.Wall) bool {
-	// The fourth stratum owns IDs 25..40, base then stub per wedge.
-	if other.ID < 25 || other.ID > 39 || (other.ID-25)%2 != 0 || w.ID != other.ID+1 {
+	// Gen6 的第三、第四层各有 8 套装配；每套都是连续 base/stub ID。
+	inFirst := other.ID >= 17 && other.ID <= 31 && (other.ID-17)%2 == 0
+	inSecond := other.ID >= 33 && other.ID <= 47 && (other.ID-33)%2 == 0
+	if (!inFirst && !inSecond) || w.ID != other.ID+1 {
 		return false
 	}
 	ow, oh := overlapDims(wallRect(other), wallRect(w))
@@ -197,7 +199,7 @@ func TestPlayableGridIsCircular(t *testing.T) {
 	}
 }
 
-// TestLASsemblySilhouette：Gen4 L 层的形状契约。每楔恰有一个两件套装配：
+// TestLASsemblySilhouette：Gen6 两个 L 层的形状契约。每楔各有一个两件套装配：
 // 4×0.7 基座与垂直 2×0.7 短杠正面积相交 0.7×0.7（并集连通为真实 L 剪影，
 // 而非仅相接/分离）；基座定向遵循 coverXLong 约定（k0/3/4/7 横向，其余
 // 纵向）；同批楔 k 与 k+2 的装配互为精确 90° 旋转像。装配外的任何墙对
@@ -253,8 +255,8 @@ func TestLASsemblySilhouette(t *testing.T) {
 				t.Fatalf("seed %d: wedge %d base orientation %v violates convention", seed, k, baseXLong)
 			}
 		}
-		if assemblies != 8 {
-			t.Fatalf("seed %d: L assemblies = %d, want 8", seed, assemblies)
+		if assemblies != 16 {
+			t.Fatalf("seed %d: L assemblies = %d, want 16", seed, assemblies)
 		}
 	}
 }

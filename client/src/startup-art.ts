@@ -14,6 +14,20 @@ const mask = Array.from({ length: 7 }, (_, row) => [...'OH MY BOT']
   .flatMap(row => [row, row])
 const INK = '#%+=*#'
 
+/** Erased cells never reappear; the original spacing stays intact. */
+export function erodeText(text: string, progress: number, seed = 0): string {
+  const debris = '#*+:.'
+  return Array.from(text, (char, index) => {
+    if (/\s/.test(char) || progress <= 0) return char
+    const hash = Math.imul(index + 1 + seed, 0x45d9f3b) >>> 0
+    const start = (hash % 997) / 997 * 0.58
+    const age = (progress - start) / 0.3
+    if (age <= 0) return char
+    if (age >= 1) return ' '
+    return debris[Math.min(debris.length - 1, Math.floor(age * debris.length))]!
+  }).join('')
+}
+
 export function asciiTitle(frame: number): string {
   return mask.map((row, y) => [...row].map((cell, x) => {
     if (cell === '0') return ' '

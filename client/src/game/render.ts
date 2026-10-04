@@ -79,8 +79,10 @@ export class Renderer {
     drawArena(ctx, map, cam, world.phase)
     for (const def of map.uplinks) {
       const st = world.uplinks.get(def.id)
-      drawUplink(ctx, cam, def.pos.x, def.pos.y, def.main,
-        world.phase >= def.activePhase && (st?.ready ?? true), st?.hackingId ? st.progressX10 / 80 : 0)
+      const progress = st?.progressX10 ? st.progressX10 / 80 : 0
+      const lift = extras.feedback?.uplinkLift(progress) ?? 0
+      drawUplink(ctx, cam, def.pos.x, def.pos.y - lift * 0.38, def.main,
+        world.phase >= def.activePhase && (st?.ready ?? true), progress, lift)
       const selfPos = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
       if (selfPos && world.phase >= def.activePhase && Math.hypot(selfPos.x - def.pos.x, selfPos.y - def.pos.y) <= def.interactR) {
         ctx.save(); ctx.strokeStyle = '#22d3ee66'; ctx.lineWidth = 1; ctx.setLineDash([5, 7])
@@ -100,6 +102,7 @@ export class Renderer {
       const b = p.base
       if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan)
     }
+    extras.feedback?.drawTrails(ctx, cam, world.tick)
     for (const r of world.robots.values()) {
       const b = r.base
       if (!b?.pos) continue
@@ -112,7 +115,8 @@ export class Renderer {
       const heading = self && extras.localAim !== undefined ? extras.localAim : b.heading
       drawRobot(ctx, cam, b.pos.x, b.pos.y, heading, r.color || ink.cyan, self,
         r.shieldOn, r.dashing, (r.invulnUntil ?? 0) > performance.now(), world.tick)
-      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn)
+      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn,
+        extras.feedback?.delayedHealth(b.id, r.hpX10) ?? r.hpX10 / 10)
     }
     // Dim the rendered world itself; HUD feedback and speech stay above the fog.
     this.drawVisionMask(world, map, cam)

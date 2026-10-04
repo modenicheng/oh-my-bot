@@ -380,7 +380,7 @@ async function hudMsgText(page) {
 /** pairwise no-overlap of large HUD regions at current viewport */
 async function assertNoHudOverlap(page, label) {
   const boxes = await page.evaluate(() => {
-    const sels = ['.hud-top', '.hud-left', '.hud-right', '.hud-hint', '#connection-notice', '#hud-msg', '#hud-inner-ring', '.game-tools']
+    const sels = ['.hud-top', '.hud-left', '.hud-right', '#btn-game-help', '.hud-help', '#connection-notice', '#hud-msg', '#hud-inner-ring', '.game-tools']
     const out = []
     for (const s of sels) for (const el of document.querySelectorAll(s)) {
       const r = el.getBoundingClientRect()
@@ -397,6 +397,26 @@ async function assertNoHudOverlap(page, label) {
       assert.fail(`[${label}] HUD overlap: ${a.name} (${Math.round(a.w)}x${Math.round(a.h)}) ∩ ${b.name} (${Math.round(b.w)}x${Math.round(b.h)})`)
   }
   return boxes.length
+}
+
+async function assertHelpAnchor(page, label) {
+  const button = page.locator('#btn-game-help'), panel = page.locator('#hud-help')
+  assert.equal(await panel.isHidden(), true, `${label}: help starts collapsed`)
+  await button.click()
+  assert.equal(await panel.isVisible(), true, `${label}: help opens`)
+  assert.equal(await button.getAttribute('aria-expanded'), 'true')
+  const trigger = await button.boundingBox(), popup = await panel.boundingBox(), stage = await page.locator('#game-stage').boundingBox()
+  assert.ok(trigger.x >= stage.x && trigger.x - stage.x <= 24 && trigger.y - stage.y <= 24, `${label}: ? stays in the upper left`)
+  assert.ok(Math.abs(popup.x - trigger.x) < 1, `${label}: popup aligns with its own trigger`)
+  assert.ok(popup.y >= trigger.y + trigger.height && popup.y - trigger.y - trigger.height <= 12, `${label}: popup opens directly beneath ?`)
+  assert.ok(popup.x + popup.width <= stage.x + stage.width, `${label}: popup fits the battlefield`)
+  await assertNoHudOverlap(page, `${label}-help-open`)
+  await shot(page, `help-${label}.png`)
+  await button.click()
+  assert.equal(await panel.isHidden(), true, `${label}: second click closes help`)
+  await button.click(); await panel.press('Escape')
+  assert.equal(await panel.isHidden(), true, `${label}: Escape closes help`)
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'btn-game-help')
 }
 
 async function skillHudText(page) {
@@ -459,8 +479,8 @@ async function fullPass(browser, fix) {
     await page.keyboard.press(' ')
     await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist OFF after second authoritative delta')
 
-    // --- fine-grained takeover: manual axes shown per-axis; single Space returns them
-    // 开辅助（分支1：开+清接管），接管 move（W）与 fire（LMB），fixture 权威回显 mask。
+    // --- fine-grained takeover: cards reflect authoritative per-axis source; Space returns axes
+    // 开辅助（分支1：开+清接管），接管 move（W）与 fire（LMB），fixture 权威回显来源。
     await page.keyboard.press(' ')
     await until(() => fix.assistToggles >= 3, 'third assistToggle upstream')
     await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist ON before takeover')
@@ -468,23 +488,32 @@ async function fullPass(browser, fix) {
     await sleep(250)
     await page.mouse.down()
     await sleep(250)
-    // fixture 收到带 mask 帧后置权威 mask（模拟服务端 SelfState 回显）
+    // fixture 收到带 mask 帧后置权威来源（模拟服务端 SelfState 回显）
     fix.st.self.manualAxesMask = 0b101 // move|fire
+    fix.st.self.moveSrc = CS_HUMAN
+    fix.st.self.fireSrc = CS_HUMAN
     fix.pushDelta()
-    await until(async () => {
-      const t = ((await page.locator('#hud-assist-hint').textContent()) || '').trim()
-      return /移动/.test(t) && /开火/.test(t) && /Space 交回辅助/.test(t)
-    }, 'HUD must list manual axes (移动/开火) with Space hint')
-    await shot(page, '08-manual-axes-hud.png')
+    await until(async () =>
+      await page.locator('#skill-move-cd').textContent() === '手操' &&
+      await page.locator('#skill-move').getAttribute('data-takeover') === null &&
+      await page.locator('#skill-fire').getAttribute('data-takeover') === null,
+    'manual move/fire axes must not be marked as script-controlled')
+    assert.equal(await page.locator('#hud-assist-hint').count(), 0, 'legacy manual-axis hint is removed')
+    await assertHelpAnchor(page, 'desktop')
+    await page.locator('#game-canvas').focus()
+    await shot(page, '08-axis-source-hud.png')
     // 仍按住 W/LMB 时按一次 Space：轴交回（分支2），辅助保持开，held 不重抢
     await page.keyboard.press(' ')
     await until(() => fix.assistToggles >= 4, 'fourth assistToggle upstream')
     fix.st.self.manualAxesMask = 0
+    fix.st.self.moveSrc = CS_SCRIPT
+    fix.st.self.fireSrc = CS_SCRIPT
     fix.pushDelta()
-    await until(async () => {
-      const t = ((await page.locator('#hud-assist-hint').textContent()) || '').trim()
-      return t === ''
-    }, 'HUD hint must clear after single-Space restore')
+    await until(async () =>
+      await page.locator('#skill-move-cd').textContent() === '脚本' &&
+      await page.locator('#skill-move').getAttribute('data-takeover') === 'script' &&
+      await page.locator('#skill-fire').getAttribute('data-takeover') === 'script',
+    'single-Space restore must mark move/fire as script-controlled')
     await until(async () => /ON/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'assist stays ON after restore')
     const holdMark = lastSeq(fix)
     await sleep(300)
@@ -768,6 +797,8 @@ async function quickPass(browser, fix, viewport, label, shotName) {
   try {
     await joinGame(page, fix, errors)
     await until(() => fix.inputs.length > 0, `input frames (${label})`)
+    await assertHelpAnchor(page, label)
+    await page.locator('#game-canvas').focus()
     const mark = lastSeq(fix)
     await page.keyboard.down('e')
     await sleep(300)
@@ -838,6 +869,20 @@ async function bannerPass(browser, fix, reduced = false) {
     fix.bcast(pickup); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate pickup is silent')
 
+    await fix.step(st => { st.robots[0].hpX10 = 200; st.timeLeftS = 31 })
+    await sleep(300)
+    const borderPixels = await page.locator('#game-canvas').evaluate(canvas => {
+      const ctx = canvas.getContext('2d')
+      const ratio = canvas.width / canvas.getBoundingClientRect().width
+      const y = Math.round(20 * ratio)
+      const pixels = ctx.getImageData(0, y, canvas.width, Math.max(1, Math.round(8 * ratio))).data
+      let red = 0
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 65 && pixels[i] > pixels[i + 1] * 1.4 && pixels[i] > pixels[i + 2] * 1.3) red++
+      return red
+    })
+    assert.ok(borderPixels > 100, 'low-health mosaic is visibly present 20px inside the screen edge')
+    await shot(page, reduced ? '24-low-health-reduced.png' : '23-low-health-mosaic.png')
+
     await fix.step(st => {
       st.robots[0].hpX10 = 700
       st.healthPacks[0] = { ...st.healthPacks[0], available: true, respawnInS: 0 }
@@ -907,7 +952,7 @@ async function bannerPass(browser, fix, reduced = false) {
       const shakes = await page.evaluate(() => window.__cameraShakes)
       const lastShake = shakes[shakes.length - 1]
       assert.ok(Math.hypot(lastShake.x, lastShake.y) < Math.hypot(firstShake.x, firstShake.y), 'camera shake decays across authoritative ticks')
-      await fix.step(() => {})
+      await fix.step(st => { st.timeLeftS = 31 })
       await sleep(80)
       const count = await page.evaluate(() => window.__cameraShakes.length)
       fix.bcast(defeated); await sleep(80)

@@ -75,6 +75,9 @@
 .skill[data-takeover='script'] .skill-cd { color: #fbbf24; }
 .skill[data-state='takeover'] .skill-icon { color: #fbbf24; box-shadow: 0 0 8px #fbbf2440; }
 .skill[data-state='takeover'] .skill-cd { color: #fbbf24; }
+/* 待机仍是辅助模式，但不宣称本 tick 正在瞄准目标。 */
+.skill[data-state='standby'] { border-top-color: #a68b4b; }
+.skill[data-state='standby'] .skill-icon, .skill[data-state='standby'] .skill-cd { color: #d1b46b; }
 
 @keyframes hud-event-in {
   from { transform: translateY(6px); opacity: 0; }

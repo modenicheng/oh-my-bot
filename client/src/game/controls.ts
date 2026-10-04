@@ -2,7 +2,7 @@
 // main.ts 在收到 mapBootstrap 事件时调用 enterGame()，收到房间回到大厅信号时调用 exitGame()。
 import { create } from '@bufbuild/protobuf'
 import {
-  AssistToggleSchema, ClientMsgSchema, SaySchema,
+  AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema,
   type ServerMsg, type EvMatchEnd,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
@@ -141,7 +141,7 @@ export class GameController {
     this.feedback.reset()
     this.input.assistOn = this.assistPreference
     this.world = emptyWorld()
-    this.hud.update(this.world, this.map, this.scores)
+    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
     this.hud.setAssist(false)
     this.setupCanvas()
     if (this.active && this.inputEnabled) this.input.attach(this.canvas, this.cam)
@@ -283,10 +283,10 @@ export class GameController {
     this.inputEnabled = false
   }
 
-  /** AI 面板使用的幂等激活：辅助已开启时不反向关闭。 */
+  /** 显式应用 Snippet / AI 结果时开启辅助并归还手操轴，绝不反向关闭。 */
   activateAssist(): boolean {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return false
-    if (!this.input.assistOn) this.toggleAssist()
+    if (!this.input.assistOn || (this.world.self?.manualAxesMask ?? 0) !== 0) this.toggleAssist()
     return this.input.assistOn
   }
 
@@ -315,15 +315,16 @@ export class GameController {
    * 字段缺失（旧服务器）不启用 guard，保持逐帧鼠标抢占。 */
   private syncAimGuard(): void {
     const self = this.world.self
-    this.input.aimUnderScript = !!self?.assistOn
-      && this.assistAimCapable
+    this.input.aimUnderScript = this.input.assistOn
+      && (this.assistAimCapable || self?.turretSrc === ControlSource.CS_SCRIPT || self?.turretSrc === ControlSource.CS_SNIPPET)
       && !this.input.holdsAim()
   }
 
   /** Space assist 开关：转发给服务器 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return
-    if (this.input.toggleAssist()) {
+    if (this.input.toggleAssist(this.world.self?.manualAxesMask ?? 0)) {
+      this.syncAimGuard()
       audio.play('assist')
       this.send(encodeClient(create(ClientMsgSchema, {
         payload: { case: 'assistToggle', value: create(AssistToggleSchema, {}) },
@@ -407,6 +408,7 @@ export class GameController {
     // 防止重生后残余 held 键第一帧重新抢占。
     if (self?.dead) this.input.resetTakeover()
     const pos = self?.base?.pos
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
@@ -422,7 +424,7 @@ export class GameController {
     this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     this.extras.feedback = this.feedback
     this.renderer.render(this.world, this.map, this.cam, this.extras)
-    this.hud.update(this.world, this.map, this.scores)
+    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }
@@ -435,6 +437,7 @@ export class GameController {
     const pos = self?.base?.pos
     const sx = pos?.x ?? 0
     const sy = pos?.y ?? 0
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
     if (pos) this.cam.follow(pos.x, pos.y)
     const { msg, active } = this.input.sample(sx, sy)
     this.feedback.input(msg, this.world, this.map)

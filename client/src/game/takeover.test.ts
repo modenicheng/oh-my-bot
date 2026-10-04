@@ -25,6 +25,25 @@ describe('fine-grained manual takeover', () => {
   })
   afterEach(() => { input.detach(); vi.unstubAllGlobals() })
 
+  it('keeps assist on when Space returns a seized axis, then switches off when unclaimed', () => {
+    input.toggleAssist()
+    expect(input.assistOn).toBe(true)
+    send(win, 'keydown', { code: 'KeyW' })
+    input.toggleAssist()
+    expect(input.assistOn).toBe(true)
+    expect(input.sample(10, 10).msg.axisMask).toBe(0)
+    input.toggleAssist()
+    expect(input.assistOn).toBe(false)
+  })
+
+  it('returns server-retained axes even after focus loss cleared the local mask', () => {
+    input.assistOn = true
+    input.detach()
+    input.toggleAssist(AXIS_AIM | AXIS_FIRE)
+    expect(input.assistOn).toBe(true)
+    expect(input.sample(10, 10).msg.axisMask).toBe(0)
+  })
+
   it('per-axis takeover is independent; untouched axes stay unmasked', () => {
     send(win, 'keydown', { code: 'KeyW' })
     const { msg } = input.sample(10, 10)

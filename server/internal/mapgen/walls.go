@@ -136,10 +136,11 @@ func overlapDims(a, b rect) (float64, float64) {
 }
 
 // genWalls lays out deterministic grid-sized cover cells. Six single-piece
-// strata stamp one AABB per wedge; the mid-ring stratum at r≈49 near the
-// sector axis stamps a genuine two-piece L silhouette per wedge (4×0.7 base
-// bar plus a perpendicular 2×0.7 stub crossing it near the end with a
-// positive 0.7×0.7 overlap). sim.Wall stays a plain AABB: non-rectangular
+// strata stamp one AABB per wedge; two offset mid-ring strata stamp genuine
+// two-piece L silhouettes per wedge (4×0.7 base plus a perpendicular 2×0.7
+// stub crossing near the end with a positive 0.7×0.7 overlap). The paired
+// L layers make cover denser and less visually regular without sacrificing
+// the eight-wedge fairness contract. sim.Wall stays a plain AABB: non-rectangular
 // silhouettes emerge solely from overlapping AABB unions. The intentional
 // overlap is confined to the two pieces of one assembly; every other pair of
 // walls keeps the ≥2.2m separation.
@@ -155,8 +156,8 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPack
 	cells := []coverCell{
 		{radius: 20, angle: 0, halfLen: 1.0, halfThick: coverThick / 2}, // inner ring: short cover inside the unlocked core
 		{radius: 36, angle: 8, halfLen: 2.0, halfThick: coverThick / 2},
-		{radius: 36, angle: 37, halfLen: 2.0, halfThick: coverThick / 2},
-		{radius: 49, angle: 8, halfLen: 2.0, halfThick: coverThick / 2, lShape: true}, // mid L stratum
+		{radius: 36, angle: 37, halfLen: 2.0, halfThick: coverThick / 2, lShape: true}, // inner-mid L stratum
+		{radius: 49, angle: 8, halfLen: 2.0, halfThick: coverThick / 2, lShape: true},  // outer-mid L stratum
 		{radius: 49, angle: 37, halfLen: 2.0, halfThick: coverThick / 2},
 		{radius: 60, angle: 22.5, halfLen: 2.0, halfThick: coverThick / 2},
 		{radius: 75, angle: 22.5, halfLen: 2.0, halfThick: coverThick / 2},

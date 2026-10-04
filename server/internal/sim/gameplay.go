@@ -3,30 +3,33 @@ package sim
 // Gameplay constants are measured in meters, seconds and game units. All
 // deadlines are ticks; no wall clock or worker can advance gameplay state.
 const (
-	FireInterval      uint32 = TickRate / 4
-	FireCost                 = 5.0
-	ProjectileSpeed          = 30.0
-	EffectiveRange           = 16.0
-	ProjectileRange          = 20.0
-	MaxSpread                = 0.12 // radians at 20m; tuning default, not a damage falloff.
-	ShotDamage               = 12.0
-	EnergyRegen              = 10.0
-	DashCost                 = 20.0
-	DashCooldown      uint32 = 150
-	DashDuration      uint32 = 18
-	DashSpeed                = 16.0
-	ShieldDrain              = 18.0
-	ShieldDamageScale        = 0.35
-	ShieldSpeedScale         = 0.8
-	PulseCost                = 12.0
-	PulseCooldown     uint32 = 120
-	VisionRadius             = 20.0
-	PulseRadius              = 32.0
-	RespawnDelay      uint32 = 180
-	InvulnDuration    uint32 = 240
-	HackDuration      uint32 = 480
-	HackCooldown      uint32 = 1800
-	SayCooldown       uint32 = 180
+	FireInterval       uint32 = TickRate / 4
+	FireCost                  = 5.0
+	ProjectileSpeed           = 30.0
+	EffectiveRange            = 16.0
+	ProjectileRange           = 20.0
+	MaxSpread                 = 0.12 // radians at 20m; tuning default, not a damage falloff.
+	ShotDamage                = 12.0
+	EnergyRegen               = 10.0
+	DashCost                  = 20.0
+	DashCooldown       uint32 = 150
+	DashDuration       uint32 = 18
+	DashSpeed                 = 16.0
+	ShieldDrain               = 18.0
+	ShieldDamageScale         = 0.35
+	ShieldSpeedScale          = 0.8
+	PulseCost                 = 12.0
+	PulseCooldown      uint32 = 120
+	VisionRadius              = 20.0
+	PulseRadius               = 32.0
+	RespawnDelay       uint32 = 180
+	InvulnDuration     uint32 = 240
+	HackDuration       uint32 = 480
+	HackCooldown       uint32 = 1800
+	HackInterruptGrace uint32 = TickRate / 2
+	HackDecayInterval  uint32 = TickRate
+	HackDecayProgress  uint32 = TickRate / 2
+	SayCooldown        uint32 = 180
 )
 
 type ControlState struct {
@@ -75,6 +78,7 @@ type Uplink struct {
 	Def           UplinkDef         `json:"def"`
 	HackingID     uint32            `json:"hacking_id"`
 	ProgressTicks uint32            `json:"progress_ticks"`
+	DecayAt       uint32            `json:"decay_at,omitempty"` // v3+: next retained-progress decay tick while nobody is hacking
 	ReadyAt       map[uint32]uint32 `json:"ready_at"`
 }
 

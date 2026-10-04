@@ -40,7 +40,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 5 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 6 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -203,11 +203,11 @@ func TestTopologyInvariants(t *testing.T) {
 		if mega != 2 {
 			t.Fatalf("seed %d: mega pads = %d, want 2", seed, mega)
 		}
-		// Gen4 has eight complete batches: six single-AABB strata plus one
-		// mid-ring stratum whose wedge cover is a two-piece L assembly
+		// Gen6 has seven complete batches: five single-AABB strata plus two
+		// mid-ring strata whose wedge cover is a two-piece L assembly
 		// (4×0.7 base + perpendicular 2×0.7 stub, positively overlapping).
-		if len(def.Walls) != 64 {
-			t.Fatalf("seed %d: walls = %d, want 64", seed, len(def.Walls))
+		if len(def.Walls) != 72 {
+			t.Fatalf("seed %d: walls = %d, want 72", seed, len(def.Walls))
 		}
 		for i, w := range def.Walls {
 			if w.ID != uint32(i+1) {

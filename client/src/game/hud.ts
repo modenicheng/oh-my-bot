@@ -7,7 +7,7 @@ import { phaseName } from './render'
 import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
-import { axisTakeover } from './axis-src'
+import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
 import './hud.css'
 
 const MAX_HP = 1000   // hp_x10（×10）
@@ -28,7 +28,7 @@ interface SkillCard {
   cd: HTMLElement
 }
 
-type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'takeover'
+type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'takeover' | 'standby'
 
 export class Hud {
   private hpFill: HTMLDivElement
@@ -63,6 +63,7 @@ export class Hud {
   private uplinkPct = -1
   private assistRenderedOn: boolean | undefined
   private takeoverRendered = ''
+  private aimStatusText = AIM_STATUS_TEXT.unavailable
 
   constructor(private root: HTMLElement) {
     this.hpFill = req(root, 'hud-hp-fill')
@@ -109,7 +110,7 @@ export class Hud {
   }
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
-  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard): void {
+  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false): void {
     if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
@@ -159,7 +160,7 @@ export class Hud {
     }
 
     this.updateSkills(world, self)
-    this.updateTakeover(world)
+    this.updateTakeover(world, aimCapable)
     this.updateUplink(world, map, self)
   }
 
@@ -211,7 +212,7 @@ export class Hud {
     const now = performance.now()
     if (this.msgTimer !== undefined && now < this.aimHintUntil) return
     this.aimHintUntil = now + AIM_HINT_MS
-    this.flashMsg('辅助瞄准中 · 按 R 手动瞄准')
+    this.flashMsg(`${this.aimStatusText} · 按 R 手动瞄准`)
   }
 
   clearMsg(): void {
@@ -345,15 +346,18 @@ export class Hud {
   // 输出某轴时对应卡标 data-takeover="script"（琥珀色，见 hud.css）。服务器逐
   // tick 回显仲裁来源，人一按键即抢占，标记随之消失。等值守卫：快照 60Hz 到达
   // 而接管组合极少变化。快照丢失/未初始化时旧标记保留，下一次快照修正。
-  private updateTakeover(world: WorldState): void {
+  private updateTakeover(world: WorldState, aimCapable: boolean): void {
     const t = axisTakeover(world.self)
+    const aim = aimControlStatus(world.self, aimCapable)
+    this.aimStatusText = AIM_STATUS_TEXT[aim]
     const dead = !!world.robots.get(world.self?.robotId ?? -1)?.dead
-    const sig = `${world.self ? 1 : 0}${dead ? 1 : 0}${t.move ? 1 : 0}${t.aim ? 1 : 0}${t.fire ? 1 : 0}${t.ability ? 1 : 0}`
+    const sig = `${world.self ? 1 : 0}${dead ? 1 : 0}${t.move ? 1 : 0}${aim}${t.fire ? 1 : 0}${t.ability ? 1 : 0}`
     if (sig === this.takeoverRendered) return
     this.takeoverRendered = sig
     this.setTakeover(this.skills.fire, t.fire)
     this.setTakeover(this.skills.dash, t.ability)
     this.setTakeover(this.skills.shield, t.ability)
+    this.setTakeover(this.skills.uplink, t.ability)
     if (!world.self) {
       this.setTakeover(this.skills.move, false)
       this.setTakeover(this.skills.aim, false)
@@ -361,16 +365,15 @@ export class Hud {
       this.setCard(this.skills.aim, 'off', '—')
       return
     }
-    // 移动/瞄准卡：轴归脚本 → 琥珀「脚本」；归人/空 → 中性「手操」。
-    // 阵亡时服务器重置控制来源，卡片跟随归为不可用。
+    // 自瞄已启用但本 tick 没有输出时保持待机，不误报手操或正在跟踪。
     this.setTakeover(this.skills.move, t.move)
-    this.setTakeover(this.skills.aim, t.aim)
+    this.setTakeover(this.skills.aim, !dead && aim === 'aiming')
     if (dead) {
       this.setCard(this.skills.move, 'off', '阵亡')
       this.setCard(this.skills.aim, 'off', '阵亡')
     } else {
       this.setCard(this.skills.move, t.move ? 'takeover' : 'ready', t.move ? '脚本' : '手操')
-      this.setCard(this.skills.aim, t.aim ? 'takeover' : 'ready', t.aim ? '脚本' : '手操')
+      this.setCard(this.skills.aim, aim === 'aiming' ? 'takeover' : aim === 'standby' ? 'standby' : 'ready', this.aimStatusText)
     }
   }
 

@@ -11,8 +11,10 @@ export class Camera {
   /** 画布像素尺寸 */
   cw = 0
   ch = 0
-  /** 每米像素数（等比缩放） */
+  /** 每米像素数（等比缩放，含表现层 zoom） */
   scale = 1
+  private baseScale = 1
+  private zoom = 1
   /** 世界钳制范围（地图外接） */
   extent = 100
 
@@ -20,7 +22,14 @@ export class Camera {
     this.cw = canvasW
     this.ch = canvasH
     this.extent = mapExtent
-    this.scale = Math.min(canvasW / VIEW_W, canvasH / VIEW_H)
+    this.baseScale = Math.min(canvasW / VIEW_W, canvasH / VIEW_H)
+    this.scale = this.baseScale * this.zoom
+  }
+
+  /** 表现层缩放；世界/鼠标反算共享同一 scale，避免冲刺时瞄准漂移。 */
+  setZoom(zoom: number): void {
+    this.zoom = clamp(zoom, 0.85, 1.05)
+    this.scale = this.baseScale * this.zoom
   }
 
   /** 跟随目标（含瞬时平滑），钳制到地图范围 */

@@ -180,11 +180,10 @@ export class InputSampler {
     return Math.atan2(this.cam.toWorldY(py) - selfY, this.cam.toWorldX(px) - selfX)
   }
 
-  /** Space：向服务端发 assistToggle（服务端三分支权威裁决），本地镜像先翻转。
-   * 无论裁决结果如何都释放按键并清轴归属：交回脚本后仍按住的键、仍按着的鼠标
-   * 不得靠持续帧/系统 repeat 重新抢占；真实新 keydown/指针事件才可再次接管。 */
-  toggleAssist(): boolean {
-    this.assistOn = !this.assistOn
+  /** Mirror the server's three branches, including axes retained after focus loss. */
+  toggleAssist(serverManualAxes = 0): boolean {
+    const returning = (serverManualAxes | this.stickyAxes | this.releaseAxes) !== 0
+    this.assistOn = !this.assistOn || returning
     this.resetTakeover()
     return true
   }

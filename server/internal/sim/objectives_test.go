@@ -196,15 +196,81 @@ func TestUplinkInterruptionsAndMainActivation(t *testing.T) {
 				s.damage(2, &s.robots[0], 12)
 			}
 			s.Tick()
-			want := uint32(0)
+			want := uint32(120)
 			if kind == "hit" {
 				want = 121
 			}
 			if s.uplinks[0].ProgressTicks != want {
 				t.Fatalf("%s progress %d want %d", kind, s.uplinks[0].ProgressTicks, want)
 			}
+			if kind != "hit" && s.uplinks[0].DecayAt != s.tick+HackInterruptGrace {
+				t.Fatalf("%s decay tick %d want %d", kind, s.uplinks[0].DecayAt, s.tick+HackInterruptGrace)
+			}
 		})
 	}
+	t.Run("retained progress grace decay and resume", func(t *testing.T) {
+		s, _ := uplinkSim(t)
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
+		stepTicks(s, 180)
+		s.robots[0].Position = Vec2{23, 0}
+		s.Tick()
+		if s.uplinks[0].ProgressTicks != 180 || s.uplinks[0].HackingID != 0 {
+			t.Fatalf("interruption did not retain progress: %+v", s.uplinks[0])
+		}
+		stepTicks(s, HackInterruptGrace-1)
+		if s.uplinks[0].ProgressTicks != 180 {
+			t.Fatal("progress decayed during 0.5s grace")
+		}
+		s.Tick()
+		if s.uplinks[0].ProgressTicks != 150 || s.uplinks[0].DecayAt != s.tick+HackDecayInterval {
+			t.Fatalf("first decay wrong at tick %d: %+v", s.tick, s.uplinks[0])
+		}
+		stepTicks(s, HackDecayInterval-1)
+		if s.uplinks[0].ProgressTicks != 150 {
+			t.Fatal("progress decayed before one-second cadence")
+		}
+		s.robots[0].Position = Vec2{20, 0}
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisAbility), Interact: true})
+		s.Tick()
+		if s.uplinks[0].ProgressTicks != 151 || s.uplinks[0].HackingID != 1 || s.uplinks[0].DecayAt != 0 {
+			t.Fatalf("retained progress did not resume: %+v", s.uplinks[0])
+		}
+	})
+
+	t.Run("checkpoint restores retained decay cadence", func(t *testing.T) {
+		s, _ := uplinkSim(t)
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
+		stepTicks(s, 180)
+		s.robots[0].Position = Vec2{23, 0}
+		s.Tick()
+		cp := s.Snapshot()
+		restored, err := RestoreCheckpoint(cp, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stepTicks(restored, HackInterruptGrace)
+		if restored.uplinks[0].ProgressTicks != 150 || restored.uplinks[0].DecayAt != restored.tick+HackDecayInterval {
+			t.Fatalf("restored decay cadence diverged: %+v", restored.uplinks[0])
+		}
+	})
+
+	t.Run("legacy checkpoints still clear immediately", func(t *testing.T) {
+		s, _ := uplinkSim(t)
+		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
+		stepTicks(s, 120)
+		cp := s.Snapshot()
+		cp.SimulationVersion = 2
+		legacy, err := RestoreCheckpoint(cp, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy.robots[0].Position = Vec2{23, 0}
+		legacy.Tick()
+		if legacy.uplinks[0].ProgressTicks != 0 || legacy.uplinks[0].DecayAt != 0 {
+			t.Fatalf("legacy interruption retained progress: %+v", legacy.uplinks[0])
+		}
+	})
+
 	s, sink := uplinkSim(t)
 	if s.UplinkViews()[2].Active {
 		t.Fatal("main active before 4:00")

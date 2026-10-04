@@ -79,21 +79,25 @@
       <div id="game-stage">
       <canvas id="game-canvas" tabindex="0" aria-label="实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，R 夺回手动瞄准，普通 Enter 发言"></canvas>
       <div id="hud">
-        <nav class="game-tools" aria-label="对局操作">
-          <button type="button" id="btn-game-start" hidden><span data-icon="play"></span><span>开始正式对局</span></button>
-          <button type="button" id="btn-game-manual" aria-keyshortcuts="m" aria-controls="workbench-docs" aria-expanded="false"><span data-icon="book"></span><span>文档</span> <kbd>M</kbd></button>
-          <button type="button" id="btn-game-editor" aria-keyshortcuts="c" aria-controls="workbench-editor" aria-expanded="false"><span data-icon="code"></span><span>编辑器</span> <kbd>C</kbd></button>
-          <button type="button" id="btn-game-replay"><span data-icon="replay"></span><span>回放</span></button>
-          <button type="button" id="btn-game-help" aria-controls="hud-help" aria-expanded="false"><span data-icon="help"></span><span>帮助</span></button>
-        </nav>
+        <div class="game-header">
+          <div class="game-help">
+            <button type="button" id="btn-game-help" aria-controls="hud-help" aria-expanded="false" aria-label="操作帮助" title="操作帮助"><span data-icon="help"></span></button>
+            <div class="hud-help" id="hud-help" role="dialog" aria-label="操作帮助" tabindex="-1" hidden>
+              WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · R 夺回瞄准 · M 文档 · C 编辑器 · ENTER 发言
+            </div>
+          </div>
+          <nav class="game-tools" aria-label="对局操作">
+            <button type="button" id="btn-game-start" hidden><span data-icon="play"></span><span>开始正式对局</span></button>
+            <button type="button" id="btn-game-manual" aria-keyshortcuts="m" aria-controls="workbench-docs" aria-expanded="false"><span data-icon="book"></span><span>文档</span> <kbd>M</kbd></button>
+            <button type="button" id="btn-game-editor" aria-keyshortcuts="c" aria-controls="workbench-editor" aria-expanded="false"><span data-icon="code"></span><span>编辑器</span> <kbd>C</kbd></button>
+            <button type="button" id="btn-game-replay"><span data-icon="replay"></span><span>回放</span></button>
+          </nav>
+        </div>
         <div class="hud-top">
           <span class="hud-phase" id="hud-phase">—</span>
           <span class="hud-clock" id="hud-time">0:00</span>
         </div>
         <div class="hud-msg" id="hud-msg"></div>
-        <div class="hud-help" id="hud-help" hidden>
-          WASD 移动 · 鼠标瞄准 · LMB 开火<br>Shift 冲刺 · Q 护盾(按住) · E/F 黑入(按住)<br>SPACE/小键盘 ENTER 辅助 · R 夺回瞄准 · M 文档 · C 编辑器 · ENTER 发言
-        </div>
         <form id="game-chat" hidden aria-label="全场发言">
           <label for="game-chat-input">全场发言 <span>· 与脚本 say 共用 3s 冷却</span></label>
           <input id="game-chat-input" type="text" maxlength="320" autocomplete="off" aria-describedby="game-chat-count" placeholder="说点什么…">

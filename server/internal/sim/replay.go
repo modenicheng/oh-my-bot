@@ -73,7 +73,13 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 			}
 		}
 		for i, uplink := range cp.Uplinks {
-			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil ||
+			invalidDecay := cp.SimulationVersion < 3 && uplink.DecayAt != 0
+			if cp.SimulationVersion >= 3 {
+				invalidDecay = (uplink.HackingID != 0 && uplink.DecayAt != 0) ||
+					(uplink.ProgressTicks == 0 && uplink.DecayAt != 0) ||
+					(uplink.DecayAt != 0 && uplink.DecayAt < cp.Tick)
+			}
+			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil || invalidDecay ||
 				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
 				return nil, fmt.Errorf("sim: invalid checkpoint uplink")
 			}

@@ -110,7 +110,18 @@ try {
   assert.equal(await page.evaluate(() => window.__startupContexts.length), 0)
   await page.waitForTimeout(1300)
   await page.screenshot({ path: resolve(shots, 'desktop.png') })
+  const originalTitle = await page.locator('#startup-ascii').textContent()
   await page.mouse.click(30, 30)
+  assert.equal(await page.locator('#startup').getAttribute('data-state'), 'eroding')
+  await page.waitForTimeout(180)
+  assert.notEqual(await page.locator('#startup-ascii').textContent(), originalTitle, 'the actual title characters erode, not just a decorative ring')
+  assert.equal(await page.locator('#startup').evaluate(el => getComputedStyle(el).opacity), '1', 'root never fades over the character animation')
+  await page.screenshot({ path: resolve(shots, 'erosion-early.png') })
+  await page.waitForTimeout(250)
+  assert.equal(await page.locator('#startup').isVisible(), true, 'whole-screen erosion is not cut off after 300ms')
+  const remaining = await page.locator('#startup-ascii').textContent()
+  assert.ok(remaining.replace(/\s/g, '').length < originalTitle.replace(/\s/g, '').length, 'title loses real character cells')
+  await page.screenshot({ path: resolve(shots, 'erosion-late.png') })
   await entered(page)
   await page.close()
   for (const key of ['Enter', 'Space', 'a']) {
@@ -226,6 +237,10 @@ try {
     assert.equal(await navigation.locator('#view-room').isVisible(), true)
     assert.equal(await navigation.locator('#btn-room-spectator').evaluate(el => el === document.activeElement), true)
   }
+  const leaveCount = commands.filter(command => command.case === 'leave').length
+  await navigation.locator('#btn-leave').click()
+  await navigation.locator('#view-join').waitFor({ state: 'visible' })
+  await assertEventually(() => commands.filter(command => command.case === 'leave').length === leaveCount + 1)
   await navigation.close()
 
   const directLive = await open()
@@ -338,7 +353,7 @@ try {
     ] } } },
   ].map(record => JSON.stringify(record)).join(String.fromCharCode(10))
   await replay.route('**/api/matches', route => route.fulfill({ json: ['SCOR-1'] }))
-  await replay.route('**/api/replay/SCOR-1', route => route.fulfill({ contentType: 'application/x-ndjson', body: replayText }))
+  await replay.route(/\/api\/replay\/SCOR-1(?:\?visual=1)?$/, route => route.fulfill({ contentType: 'application/x-ndjson', body: replayText }))
   await replay.goto('http://127.0.0.1:18425?view=replay-player&replay=SCOR-1')
   await ready(replay)
   await replay.keyboard.press('Enter')

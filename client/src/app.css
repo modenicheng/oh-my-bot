@@ -119,7 +119,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 #hud-uplink-text { font-family: var(--pixel); font-size: 12px; color: var(--fg); white-space: nowrap; }
 .hud-uplink-bar { width: 120px; height: 8px; background: #263441; position: relative; }
 #hud-uplink-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; transform-origin: left; transform: scaleX(0); background: var(--accent); }
-.hud-skills { display: flex; gap: 8px; }
+.hud-axes, .hud-skills { display: flex; gap: 8px; justify-content: flex-end; }
+.hud-axes .skill { width: 86px; }
 .skill { width: 74px; padding: 8px 2px 6px; background: #0a121ce8; border: 1px solid var(--line);
          border-top: 2px solid #406374; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .skill-icon { color: var(--fg); display: flex; }
@@ -135,13 +136,19 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .skill[data-state="off"] { opacity: .45; }
 .skill[data-state="off"] .skill-cd { color: var(--fg-dim); }
 #hud-assist.off { color: var(--fg-dim); }
-.hud-help { position: absolute; left: 16px; top: 64px; font-size: 11px; color: var(--fg-dim);
-           line-height: 1.8; background: #0a121ce8; padding: 6px 10px; border: 1px solid var(--line); }
+.game-header { position: absolute; top: 16px; left: 20px; right: 20px; pointer-events: none; }
+.game-help { position: relative; z-index: 12; width: min(620px, calc(50% - 120px)); pointer-events: none; }
+.hud-help { margin-top: 8px; width: max-content; max-width: 100%;
+           font-size: 11px; color: var(--fg-dim); line-height: 1.8; background: #0a121cf2; padding: 8px 12px;
+           border: 1px solid #416779; border-left: 2px solid var(--accent); box-shadow: 4px 4px 0 #05080c; pointer-events: auto; }
+.hud-help:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .hud-help[hidden] { display: none; }
-.game-tools { position: absolute; top: 16px; right: 20px; display: flex; gap: 6px; pointer-events: auto; }
-.game-tools button { border: 0; border-bottom: 1px solid #416779; color: var(--fg); background: #0a121ce8;
+.game-tools { position: absolute; top: 0; right: 0; display: flex; gap: 6px; pointer-events: auto; }
+.game-tools button, #btn-game-help { border: 0; border-bottom: 1px solid #416779; color: var(--fg); background: #0a121ce8;
                      padding: 7px 12px; cursor: pointer; font: 12px var(--mono); }
-.game-tools button:hover { color: var(--accent); background: #1c3340; }
+.game-tools button:hover, #btn-game-help:hover { color: var(--accent); background: #1c3340; }
+#btn-game-help { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 8px; pointer-events: auto; }
+#btn-game-help[aria-expanded="true"] { color: var(--accent); border-bottom-color: var(--accent); background: #122733; }
 #btn-game-start { color: var(--accent); }
 /* Esc 选项：本地输入覆盖层，不遮蔽服务器继续运行的语义。 */
 .game-options { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center;
@@ -375,9 +382,10 @@ button .pixel-icon + span { margin-left: 7px; }
   #manual-status { white-space: normal; }
   #manual-content { padding: 20px 16px 60px; }
   /* 窄屏：时钟与工具栏分行，技能卡组收窄换行，键位说明折叠进「帮助」按钮 */
-  .hud-top { top: 16px; left: 12px; transform: none; gap: 4px; }
+  .hud-top { top: 16px; left: 60px; transform: none; gap: 4px; }
   .hud-clock { font-size: 32px; padding: 2px 10px; }
-  .game-tools { top: 66px; left: 12px; right: 12px; flex-wrap: wrap; }
+  .game-header { left: 12px; right: 12px; display: grid; gap: 16px; }
+  .game-tools { position: static; flex-wrap: wrap; }
   .hud-msg { top: 168px; max-width: calc(100vw - 24px); }
   .hud-left { width: min(280px, 46vw); left: 12px; bottom: 12px; padding: 10px 12px; }
   .hud-bar { height: 10px; margin-bottom: 8px; }
@@ -387,7 +395,9 @@ button .pixel-icon + span { margin-left: 7px; }
   #hud-uplink { padding: 4px 10px; gap: 8px; }
   #hud-uplink-text { font-size: 11px; }
   .hud-uplink-bar { width: 90px; }
-  .hud-skills { flex-wrap: wrap; justify-content: flex-end; }
+  .hud-axes, .hud-skills { flex-wrap: wrap; justify-content: flex-end; }
+  .hud-axes .skill { width: 60px; }
+  .game-help { width: 100%; }
   .skill { width: 60px; padding: 6px 2px 5px; }
   .skill-key { font-size: 10px; }
   .skill-cd { font-size: 12px; }

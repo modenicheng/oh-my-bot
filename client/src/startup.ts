@@ -1,4 +1,4 @@
-import { asciiField, asciiTitle } from './startup-art'
+import { asciiField, asciiTitle, erodeText } from './startup-art'
 import { initAppVersion } from './version'
 
 const root = document.getElementById('startup')!
@@ -7,6 +7,7 @@ const retry = document.getElementById('startup-retry')!
 const progress = document.getElementById('startup-progress') as HTMLProgressElement
 const title = document.getElementById('startup-ascii')!
 const field = document.getElementById('startup-field')!
+const startPrompt = document.getElementById('startup-start')!
 const background = ['app', 'audio-settings', 'connection-notice'].map(id => document.getElementById(id)!)
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 let application: typeof import('./main') | undefined
@@ -15,11 +16,67 @@ let animation: number | undefined
 let ready = false
 let starting = false
 
+const EROSION_MS = 900
+
 function paint(): void {
   title.textContent = asciiTitle(frame)
   field.textContent = asciiField(frame++, Math.ceil(innerWidth / 18), Math.ceil(innerHeight / 30))
 }
 function stopAnimation(): void { window.clearInterval(animation); animation = undefined }
+function erodeScreen(): void {
+  const canvas = document.createElement('canvas')
+  canvas.className = 'startup-erosion'
+  canvas.setAttribute('aria-hidden', 'true')
+  const width = root.clientWidth, height = root.clientHeight
+  canvas.width = width; canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) { enter(); return }
+  const rect = startPrompt.getBoundingClientRect()
+  const ox = rect.left + rect.width / 2, oy = rect.top + rect.height / 2
+  const farthest = Math.hypot(Math.max(ox, width - ox), Math.max(oy, height - oy))
+  const cell = 24
+  const tiles: { x: number; y: number; at: number; glyph: string }[] = []
+  for (let y = 0; y < height; y += cell) {
+    for (let x = 0; x < width; x += cell) {
+      const hash = Math.imul((x / cell + 1) * 73 + (y / cell + 1) * 193, 0x45d9f3b) >>> 0
+      const distance = Math.hypot(x + cell / 2 - ox, y + cell / 2 - oy) / farthest
+      tiles.push({ x, y, at: 0.15 + distance * 0.52 + (hash % 101) / 101 * 0.17, glyph: '01[]{}+*#'[hash % 9]! })
+    }
+  }
+  const texts = [title, field, startPrompt, status,
+    root.querySelector<HTMLElement>('.startup-tagline')!, document.getElementById('startup-help')!]
+    .map((element, seed) => ({ element, text: element.textContent ?? '', seed: seed * 173 }))
+  const backdrop = getComputedStyle(root).backgroundColor
+  ctx.fillStyle = backdrop; ctx.fillRect(0, 0, width, height)
+  root.prepend(canvas)
+  root.dataset.state = 'eroding'
+  // Reveal the app through erased tiles, but keep input locked until completion.
+  document.body.dataset.startup = 'eroding'
+  const began = performance.now()
+  function dissolve(now: number): void {
+    if (motion.matches) { canvas.remove(); enter(); return }
+    const progress = Math.min(1, (now - began) / EROSION_MS)
+    ctx!.clearRect(0, 0, width, height)
+    ctx!.font = "14px 'Fusion Pixel', monospace"
+    ctx!.textAlign = 'center'; ctx!.textBaseline = 'middle'
+    for (const tile of tiles) {
+      const age = progress - tile.at
+      if (age < 0) {
+        ctx!.fillStyle = backdrop; ctx!.fillRect(tile.x, tile.y, cell, cell)
+      } else if (age < 0.12) {
+        const size = Math.max(2, Math.round((1 - age / 0.12) * cell / 4) * 4)
+        ctx!.fillStyle = backdrop
+        ctx!.fillRect(tile.x + (cell - size) / 2, tile.y + (cell - size) / 2, size, size)
+        ctx!.fillStyle = '#a5e6ef'
+        ctx!.fillText(tile.glyph, tile.x + cell / 2, tile.y + cell / 2)
+      }
+    }
+    for (const item of texts) item.element.textContent = erodeText(item.text, progress, item.seed)
+    if (progress < 1) window.requestAnimationFrame(dissolve)
+    else { canvas.remove(); enter() }
+  }
+  window.requestAnimationFrame(dissolve)
+}
 function syncAnimation(): void {
   stopAnimation()
   if (root.hidden || starting || document.hidden) return
@@ -68,8 +125,8 @@ function activate(event: MouseEvent | KeyboardEvent): void {
   try {
     application.start() // AudioContext 必须在本次真实用户手势中同步解锁。
     stopAnimation()
-    root.dataset.state = 'leaving'
-    window.setTimeout(enter, motion.matches ? 0 : 240)
+    if (motion.matches) enter()
+    else erodeScreen()
   } catch (error) {
     console.error('Startup failed', error)
     starting = false

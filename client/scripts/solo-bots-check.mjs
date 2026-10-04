@@ -71,7 +71,7 @@ try {
   await page.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await until(() => tick > 90 && self, 'warmup simulation')
-  assert.equal(map.generator_ver, 5)
+  assert.equal(map.generator_ver, 6)
   assert.equal(map.core_rules.period_ticks, 1200)
   assert.equal(map.health_packs.length, 4, 'generated map contains four public health-pack locations')
   assert.ok(map.health_packs.every(pack => Number.isFinite(pack.pos.X) && Number.isFinite(pack.pos.Y)), 'health-pack coordinates are finite')

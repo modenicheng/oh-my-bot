@@ -94,15 +94,15 @@ function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
 }
 
 /** 在总线上搭建一个发声链并调度起止；返回节点表供停止后断开清理。 */
-function buildNote(n: Note, bus: Bus, gain: number, pan: number): { src: AudioScheduledSourceNode; nodes: AudioNode[] } {
+function buildNote(n: Note, bus: Bus, gain: number, pan: number, pitch = 1): { src: AudioScheduledSourceNode; nodes: AudioNode[] } {
   const { ctx } = bus, t0 = ctx.currentTime + (n.at ?? 0)
   const nodes: AudioNode[] = []
   let src: AudioScheduledSourceNode
   if (n.t) {
     const osc = ctx.createOscillator()
     osc.type = n.t
-    osc.frequency.setValueAtTime(n.f, t0)
-    if (n.to) osc.frequency.exponentialRampToValueAtTime(Math.max(n.to, 1), t0 + n.d)
+    osc.frequency.setValueAtTime(n.f * pitch, t0)
+    if (n.to) osc.frequency.exponentialRampToValueAtTime(Math.max(n.to * pitch, 1), t0 + n.d)
     src = osc
   } else {
     const buf = ctx.createBufferSource()
@@ -166,7 +166,7 @@ class AudioEngine {
   get muted(): boolean { return this.mute }
   get volume(): number { return this.vol }
 
-  play(cue: SoundCue, gain = 1, pan = 0, priority = PRIORITY_CUES.has(cue)): void {
+  play(cue: SoundCue, gain = 1, pan = 0, priority = PRIORITY_CUES.has(cue), pitch = 1): void {
     if (this.mute || document.hidden || gain <= 0.01) return
     if (!this.ctx || this.ctx.state !== 'running') return
     const now = performance.now()
@@ -174,6 +174,7 @@ class AudioEngine {
     const rateKey = `${cue}:${priority}`
     if (now - (this.lastAt.get(rateKey) ?? -1e9) < (cue === 'hover' ? 90 : 45)) return
     const notes = CUE[cue], limit = priority ? MAX_VOICES : AMBIENT_VOICES
+    pitch = Math.max(0.75, Math.min(1.5, pitch))
     if (this.voices.size + notes.length > limit) {
       if (!priority) return
       const required = this.voices.size + notes.length - limit
@@ -184,7 +185,7 @@ class AudioEngine {
     this.lastAt.set(rateKey, now)
     const bus: Bus = { ctx: this.ctx, out: this.master!, noise: this.noise }
     for (const n of notes) {
-      const { src, nodes } = buildNote(n, bus, gain, pan)
+      const { src, nodes } = buildNote(n, bus, gain, pan, pitch)
       this.noise = bus.noise
       const clean = () => { this.voices.delete(voice); for (const nd of nodes) nd.disconnect(); src.disconnect() }
       const voice = { priority, stop: () => { src.onended = null; src.stop(); clean() } }

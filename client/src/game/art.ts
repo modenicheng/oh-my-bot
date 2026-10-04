@@ -227,10 +227,15 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.restore()
 }
 
-export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0): void {
+export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0, lift = 0): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, (main ? 2.1 : 1.7) * cam.scale)
   if (!visible(cam, x, y)) return
   ctx.save(); ctx.globalAlpha = ready || progress > 0 ? 1 : 0.55
+  if (lift > 0) {
+    const shadowY = y + lift * 0.38 * cam.scale
+    ctx.fillStyle = '#02070c99'; ctx.beginPath(); ctx.ellipse(x, shadowY + size * 0.35, size * (0.48 - lift * 0.12), size * 0.16, 0, 0, tau); ctx.fill()
+    ctx.strokeStyle = '#22d3ee55'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
+  }
   circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
   sprite(ctx, 'uplink', x, y, size)
   if (progress > 0) {
@@ -270,13 +275,16 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.fillStyle = ink.text; ctx.fillRect(-3, -1, 4, 2); ctx.restore()
 }
 
-export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false): void {
+export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false, delayedHp = hp): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
   const clearance = shield ? r * 1.65 + 9 : r
   const w = Math.max(24, r * 2.5), by = y - clearance - 12
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
-  ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * Math.min(1, Math.max(0, hp / 100)), 3)
+  const actualRatio = Math.min(1, Math.max(0, hp / 100))
+  const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / 100))
+  if (delayedRatio > actualRatio) { ctx.fillStyle = '#f4fbff'; ctx.fillRect(x - w / 2, by, w * delayedRatio, 3) }
+  ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
   ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()

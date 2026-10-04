@@ -17,8 +17,9 @@ import (
 
 // SimulationVersion distinguishes deterministic gameplay semantics in saved
 // states. Version 0 predates robot contact impulses; version 2 adds tick-scoped
-// script intent, held Dash, and swept circle pickup contact.
-const SimulationVersion = 2
+// script intent, held Dash, and swept circle pickup contact. Version 3 retains
+// interrupted uplink progress briefly, then decays it at a deterministic cadence.
+const SimulationVersion = 3
 
 const (
 	TickRate                   = 60

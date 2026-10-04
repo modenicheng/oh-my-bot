@@ -6,17 +6,28 @@ import type { WorldState } from './world'
 
 const tau = Math.PI * 2
 const CAMERA_SHAKE_TICKS = 16
+const UPLINK_SLAM_TICKS = 12
+const DAMAGE_HOLD_MS = 420
+const DAMAGE_FADE_MS = 620
+const TRAIL_TICKS = 15
+const LOW_HEALTH_X10 = 250
 const CAMERA_SHAKE_DIRECTIONS = [[1, 1], [-1, 1], [-1, -1], [1, -1]] as const
 const white = '#f4fbff', cyan = '#22d3ee', green = '#b9d985', red = '#ff756d'
 export type FeedbackKind = 'status' | 'kill' | 'uplink'
-type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'dash' | 'death'
+type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'splash' | 'dash' | 'death'
 interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: number; color: string; seed: number; heading: number }
+interface HealthVisual { actualX10: number; delayedX10: number; holdUntil: number; updatedAt: number }
+interface DamagePopup { robot: number; pos: MapVec2; amountX10: number; at: number; seed: number }
+interface TrailPoint { pos: MapVec2; tick: number; color: string }
 
 /** Transient presentation follows confirmed events/state transitions; resyncs establish a quiet baseline. */
 export class GameFeedback {
   private effects: Effect[] = []
   private seen = new Set<string>()
-  private robots = new Map<number, { shield: boolean; dash: boolean; dead: boolean }>()
+  private robots = new Map<number, { shield: boolean; dash: boolean; dead: boolean; hpX10: number }>()
+  private health = new Map<number, HealthVisual>()
+  private damage: DamagePopup[] = []
+  private trails = new Map<number, TrailPoint[]>()
   private cores = new Set<number>()
   private hackers = new Map<number, number>()
   private completed = new Map<number, number>()
@@ -31,6 +42,11 @@ export class GameFeedback {
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
   private shake: { tick: number; seed: number } | undefined
+  private slam: { tick: number; seed: number } | undefined
+  private selfLow = false
+  private lowHitAt = -Infinity
+  private dashZoom = { value: 1, tick: 0 }
+  private hitChain = { at: -Infinity, count: 0 }
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
   constructor(
@@ -40,15 +56,16 @@ export class GameFeedback {
   ) {}
 
   reset(): void {
-    this.effects = []; this.seen.clear(); this.robots.clear(); this.cores.clear()
+    this.effects = []; this.seen.clear(); this.robots.clear(); this.health.clear(); this.damage = []; this.trails.clear(); this.cores.clear()
     this.hackers.clear(); this.completed.clear(); this.near = 0; this.baseline = false; this.lastDenied = -Infinity
     this.quietThroughTick = -1; this.phase = undefined; this.innerOpened = false
     this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
-    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined
+    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined; this.slam = undefined
+    this.selfLow = false; this.lowHitAt = -Infinity; this.dashZoom = { value: 1, tick: 0 }; this.hitChain = { at: -Infinity, count: 0 }
     audio.stopGame()
   }
 
-  pause(): void { this.effects = []; this.near = 0; this.baseline = false; this.shake = undefined; audio.stopGame() }
+  pause(): void { this.effects = []; this.damage = []; this.trails.clear(); this.near = 0; this.baseline = false; this.shake = undefined; this.slam = undefined; audio.stopGame() }
 
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
     const transitions = this.baseline && !snap.full && active && !document.hidden
@@ -60,15 +77,43 @@ export class GameFeedback {
     }
     this.phase = world.phase
     this.countdown(world, transitions)
+    const now = performance.now()
     for (const [id, r] of world.robots) {
       const prev = this.robots.get(id), pos = r.base?.pos
+      let visual = this.health.get(id)
+      if (!visual || !transitions || !prev) {
+        visual = { actualX10: r.hpX10, delayedX10: r.hpX10, holdUntil: now, updatedAt: now }
+      } else if (r.hpX10 < prev.hpX10) {
+        visual.delayedX10 = Math.max(this.delayedHpAt(visual, now), prev.hpX10)
+        visual.actualX10 = r.hpX10
+        visual.holdUntil = now + DAMAGE_HOLD_MS
+        visual.updatedAt = now
+        if (pos) {
+          if (this.damage.length >= 48) this.damage.shift()
+          this.damage.push({ robot: id, pos: { x: pos.x, y: pos.y }, amountX10: prev.hpX10 - r.hpX10, at: now, seed: id * 31 + snap.tick })
+        }
+        if (id === selfId && r.hpX10 <= LOW_HEALTH_X10) this.lowHitAt = now
+      } else if (r.hpX10 > prev.hpX10) {
+        visual.actualX10 = r.hpX10; visual.delayedX10 = r.hpX10; visual.holdUntil = now; visual.updatedAt = now
+      } else {
+        visual.actualX10 = r.hpX10
+      }
+      this.health.set(id, visual)
       if (transitions && prev && pos) {
         if (r.dashing && !prev.dash) { this.add('dash', pos, cyan, id, 320, r.base?.heading); this.sound('dash', pos, world, 1, id === selfId) }
         if (r.shieldOn !== prev.shield) this.sound(r.shieldOn ? 'shieldOn' : 'shieldOff', pos, world, 1, id === selfId)
       }
-      this.robots.set(id, { shield: r.shieldOn, dash: r.dashing, dead: r.dead })
+      if (transitions && r.dashing && pos) {
+        const trail = this.trails.get(id) ?? []
+        const last = trail[trail.length - 1]
+        if (!last || last.tick !== snap.tick) trail.push({ pos: { x: pos.x, y: pos.y }, tick: snap.tick, color: r.color || cyan })
+        while (trail.length && trail[0]!.tick < snap.tick - TRAIL_TICKS) trail.shift()
+        this.trails.set(id, trail)
+      } else if (!transitions) this.trails.delete(id)
+      this.robots.set(id, { shield: r.shieldOn, dash: r.dashing, dead: r.dead, hpX10: r.hpX10 })
     }
-    for (const id of this.robots.keys()) if (!world.robots.has(id)) this.robots.delete(id)
+    this.selfLow = !!selfId && !!world.robots.get(selfId) && !world.robots.get(selfId)!.dead && world.robots.get(selfId)!.hpX10 <= LOW_HEALTH_X10
+    for (const id of this.robots.keys()) if (!world.robots.has(id)) { this.robots.delete(id); this.health.delete(id); this.trails.delete(id) }
     for (const [id, core] of world.cores) {
       if (transitions && !this.cores.has(id) && core.base?.pos) {
         this.add('spawn', core.base.pos, cyan, id, 850)
@@ -135,7 +180,11 @@ export class GameFeedback {
         if (!k.value.at || !this.visibleImpact(k.value.at, world, map, k.value.projectile)) break
         if (k.value.at) {
           this.add('impact', k.value.at, k.value.shield || k.value.invulnerable ? white : k.value.target ? red : k.value.color || world.projectiles.get(k.value.projectile)?.color || world.robots.get(k.value.owner)?.color || cyan, k.value.projectile, 330)
-          this.sound(k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit', k.value.at, world, 1, k.value.target === selfId)
+          const cue = k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit'
+          const now = performance.now()
+          this.hitChain.count = now - this.hitChain.at <= 520 ? Math.min(6, this.hitChain.count + 1) : 1
+          this.hitChain.at = now
+          this.sound(cue, k.value.at, world, 1, k.value.target === selfId, cue === 'hit' ? 1 + (this.hitChain.count - 1) * 0.07 : 1)
         }
         if (k.value.target === selfId && !k.value.invulnerable) this.message(k.value.shield ? '护盾吸收命中' : '机体受击')
         break
@@ -169,10 +218,11 @@ export class GameFeedback {
       }
       case 'uplinkHack': {
         const p = map.uplinks.find(u => u.id === k.value.uplinkId)?.pos
-        if (p) this.add('uplink', p, green, k.value.uplinkId, 1000)
+        if (p) { this.add('uplink', p, green, k.value.uplinkId, 1000); this.add('splash', p, cyan, k.value.uplinkId + ev.tick, 520) }
         if (k.value.by === selfId) {
           audio.play('uplinkSuccess')
           this.completed.set(k.value.uplinkId, ev.tick)
+          this.slam = { tick: ev.tick, seed: ev.tick + k.value.uplinkId * 17 }
           this.message(`黑入完成 · +${k.value.value} 分 · 本桩冷却 30s`, 'uplink')
         } else {
           if (p) this.sound('uplinkSuccess', p, world)
@@ -186,7 +236,7 @@ export class GameFeedback {
         this.message(`${this.nickOf(k.value.killer, world)} 击毁 ${this.nickOf(k.value.victim, world)}`, 'kill')
         break
       case 'respawn':
-        if (k.value.robot === selfId) { this.shake = undefined; audio.play('respawn'); this.message('机体已重生') }
+        if (k.value.robot === selfId) { this.shake = undefined; this.lowHitAt = -Infinity; audio.play('respawn'); this.message('机体已重生') }
         break
       case 'matchStart': audio.play('matchStart'); break
       case 'matchEnd': audio.stopGame(); audio.play('matchEnd'); break
@@ -227,13 +277,70 @@ export class GameFeedback {
   }
 
   cameraShake(tick: number): { x: number; y: number } {
+    if (this.reduced.matches) return { x: 0, y: 0 }
+    let x = 0, y = 0
     const shake = this.shake
-    if (!shake || this.reduced.matches) return { x: 0, y: 0 }
-    const age = Math.max(0, tick - shake.tick)
-    if (age >= CAMERA_SHAKE_TICKS) { this.shake = undefined; return { x: 0, y: 0 } }
-    const decay = 1 - age / CAMERA_SHAKE_TICKS
-    const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(shake.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
-    return { x: Math.round(direction[0] * 8 * decay), y: Math.round(direction[1] * 6 * decay) }
+    if (shake) {
+      const age = Math.max(0, tick - shake.tick)
+      if (age >= CAMERA_SHAKE_TICKS) this.shake = undefined
+      else {
+        const decay = 1 - age / CAMERA_SHAKE_TICKS
+        const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(shake.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
+        x += Math.round(direction[0] * 8 * decay); y += Math.round(direction[1] * 6 * decay)
+      }
+    }
+    const slam = this.slam
+    if (slam) {
+      const age = Math.max(0, tick - slam.tick)
+      if (age >= UPLINK_SLAM_TICKS) this.slam = undefined
+      else {
+        const fall = age < 4 ? -8 + age * 4.5 : 10 * (1 - (age - 4) / (UPLINK_SLAM_TICKS - 4))
+        const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(slam.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
+        x += Math.round(direction[0] * 2 * (1 - age / UPLINK_SLAM_TICKS))
+        y += Math.round(fall)
+      }
+    }
+    return { x, y }
+  }
+
+  cameraZoom(tick: number, dashing: boolean): number {
+    if (this.reduced.matches) return 1
+    const elapsed = Math.max(1, Math.min(6, tick - this.dashZoom.tick || 1))
+    const target = dashing ? 0.92 : 1
+    const blend = 1 - Math.pow(dashing ? 0.64 : 0.78, elapsed)
+    this.dashZoom.value += (target - this.dashZoom.value) * blend
+    this.dashZoom.tick = tick
+    return this.dashZoom.value
+  }
+
+  uplinkLift(progress: number): number {
+    if (this.reduced.matches || progress <= 0) return 0
+    return Math.min(1, progress)
+  }
+
+  delayedHealth(robot: number, actualX10: number): number {
+    const visual = this.health.get(robot)
+    if (!visual) return actualX10 / 10
+    const delayed = this.delayedHpAt(visual, performance.now())
+    visual.delayedX10 = delayed
+    return Math.max(actualX10, delayed) / 10
+  }
+
+  drawTrails(ctx: CanvasRenderingContext2D, cam: Camera, tick: number): void {
+    if (this.reduced.matches) return
+    ctx.save()
+    for (const trail of this.trails.values()) {
+      for (let i = 0; i < trail.length; i++) {
+        const point = trail[i]!, age = Math.max(0, tick - point.tick)
+        if (age > TRAIL_TICKS) continue
+        const x = cam.toPxX(point.pos.x), y = cam.toPxY(point.pos.y)
+        const alpha = (1 - age / TRAIL_TICKS) * (i + 1) / trail.length * 0.42
+        const size = Math.max(4, cam.scale * 0.42 * (1 - age / (TRAIL_TICKS * 1.4)))
+        ctx.globalAlpha = alpha; ctx.strokeStyle = point.color; ctx.lineWidth = 1
+        ctx.strokeRect(Math.round(x - size), Math.round(y - size), Math.round(size * 2), Math.round(size * 2))
+      }
+    }
+    ctx.restore()
   }
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
@@ -245,6 +352,12 @@ export class GameFeedback {
       if (now - e.at < e.duration) this.effects[kept++] = e
     }
     this.effects.length = kept
+    let damageKept = 0
+    for (let i = 0; i < this.damage.length; i++) {
+      const popup = this.damage[i]!
+      if (now - popup.at < 850) this.damage[damageKept++] = popup
+    }
+    this.damage.length = damageKept
     ctx.save()
     for (const e of this.effects) {
       const x = cam.toPxX(e.pos.x), y = cam.toPxY(e.pos.y)
@@ -264,6 +377,16 @@ export class GameFeedback {
           const px = Math.round(x + Math.cos(a) * d), py = Math.round(y + Math.sin(a) * d)
           ctx.fillRect(px - 2, py - 2, 4, 4)
         }
+      } else if (e.kind === 'splash') {
+        const count = this.reduced.matches ? 4 : 10
+        ctx.globalAlpha = (1 - t) * 0.85; ctx.fillStyle = cyan
+        for (let i = 0; i < count; i++) {
+          const a = -Math.PI * 0.92 + i / Math.max(1, count - 1) * Math.PI * 0.84
+          const d = (0.35 + motion * (0.7 + i % 3 * 0.16)) * cam.scale
+          const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d + motion * motion * cam.scale * 0.5
+          ctx.fillRect(Math.round(px) - 2, Math.round(py) - 2, 4, 4)
+        }
+        ctx.strokeStyle = '#a5e6ef'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y + 3, motion * cam.scale * 1.5, motion * cam.scale * 0.42, 0, 0, tau); ctx.stroke()
       } else {
         const radius = (e.kind === 'uplink' ? 1.5 : 0.4) * cam.scale + motion * cam.scale * 1.4
         ctx.beginPath(); ctx.arc(x, y, radius, 0, tau); ctx.stroke()
@@ -275,7 +398,52 @@ export class GameFeedback {
         }
       }
     }
+    ctx.globalAlpha = 1
+    ctx.font = '14px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    for (const popup of this.damage) {
+      const t = Math.min(1, (now - popup.at) / 850)
+      const drift = this.reduced.matches ? 0 : (10 + (popup.seed % 5)) * t
+      const x = cam.toPxX(popup.pos.x) + ((popup.seed % 7) - 3)
+      const y = cam.toPxY(popup.pos.y) - 20 - drift
+      const text = `-${(popup.amountX10 / 10).toFixed(popup.amountX10 % 10 ? 1 : 0)}`
+      ctx.globalAlpha = t < 0.7 ? 1 : (1 - t) / 0.3
+      ctx.fillStyle = '#071019'; ctx.fillText(text, x + 1, y + 1)
+      ctx.fillStyle = red; ctx.fillText(text, x, y)
+    }
+    if (this.selfLow) {
+      const flash = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
+      const pulse = this.reduced.matches ? 0.64 : 0.64 + Math.sin(now / 650) * 0.06
+      const alpha = Math.min(0.9, pulse + flash * 0.24)
+      const cell = 8, layers = Math.min(5, Math.floor(Math.min(cam.cw, cam.ch) / (cell * 5)))
+      ctx.fillStyle = red
+      // Spatial noise stays stable between frames: irregular damage, not strobing static.
+      for (let side = 0; side < 4; side++) {
+        const length = side < 2 ? cam.cw : cam.ch
+        for (let row = 0; row < layers; row++) {
+          for (let along = 0; along < length; along += cell) {
+            let hash = Math.imul((along / cell + 1) ^ ((row + 1) * 193) ^ ((side + 1) * 941), 0x45d9f3b)
+            hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b) >>> 0
+            const random = (hash % 997) / 997
+            if (row > 0 && random > 1 - row * 0.19) continue
+            const size = Math.min(cell, length - along)
+            const depth = row * cell
+            ctx.globalAlpha = alpha * (0.8 + (hash % 17) / 85) * (1 - row * 0.13)
+            if (side === 0) ctx.fillRect(along, depth, size, cell)
+            else if (side === 1) ctx.fillRect(along, cam.ch - depth - cell, size, cell)
+            else if (side === 2) ctx.fillRect(depth, along, cell, size)
+            else ctx.fillRect(cam.cw - depth - cell, along, cell, size)
+          }
+        }
+      }
+    }
     ctx.restore()
+  }
+
+  private delayedHpAt(visual: HealthVisual, now: number): number {
+    if (now <= visual.holdUntil) return visual.delayedX10
+    const elapsed = now - visual.holdUntil
+    if (elapsed >= DAMAGE_FADE_MS) return visual.actualX10
+    return visual.actualX10 + (visual.delayedX10 - visual.actualX10) * (1 - elapsed / DAMAGE_FADE_MS)
   }
 
   private add(kind: EffectKind, pos: MapVec2, color: string, seed: number, duration: number, heading = 0): void {
@@ -348,13 +516,14 @@ export class GameFeedback {
     if (warning || tick) this.onCountdown?.(seconds)
   }
 
-  private sound(cue: SoundCue, pos: MapVec2, world: WorldState, intensity = 1, priority = false): void {
+  private sound(cue: SoundCue, pos: MapVec2, world: WorldState, intensity = 1, priority = false, pitch = 1): void {
     const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
     if (!self) return
     const distance = Math.hypot(pos.x - self.x, pos.y - self.y)
     if (distance > 24) return
     const gain = intensity * Math.max(0, 1 - distance / 24), pan = Math.max(-0.8, Math.min(0.8, (pos.x - self.x) / 20))
-    if (priority || cue === 'corePickup' || cue === 'uplinkSuccess') audio.play(cue, gain, pan, priority)
+    if (pitch !== 1) audio.play(cue, gain, pan, priority, pitch)
+    else if (priority || cue === 'corePickup' || cue === 'uplinkSuccess') audio.play(cue, gain, pan, priority)
     else audio.play(cue, gain, pan)
   }
 }

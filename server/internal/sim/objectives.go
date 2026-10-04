@@ -192,25 +192,38 @@ func (s *Sim) stepUplinks() {
 			}
 		}
 		if !s.uplinkActive(u) {
-			u.HackingID, u.ProgressTicks = 0, 0
+			u.HackingID, u.ProgressTicks, u.DecayAt = 0, 0, 0
 			continue
 		}
 		if u.HackingID != 0 {
 			idx, ok := s.index[u.HackingID]
 			if !ok || !s.canHack(&s.robots[idx], u) || busy[u.HackingID] {
-				u.HackingID, u.ProgressTicks = 0, 0
+				u.HackingID = 0
+				if s.simulationVersion < 3 {
+					u.ProgressTicks, u.DecayAt = 0, 0
+				} else if u.ProgressTicks > 0 {
+					u.DecayAt = s.tick + HackInterruptGrace
+				}
 			}
 		}
 		if u.HackingID == 0 {
 			for j := range s.robots {
 				r := &s.robots[j]
 				if !busy[r.ID] && s.canHack(r, u) {
-					u.HackingID = r.ID
+					u.HackingID, u.DecayAt = r.ID, 0
 					break
 				}
 			}
 		}
 		if u.HackingID == 0 {
+			if s.simulationVersion >= 3 && u.ProgressTicks > 0 && u.DecayAt != 0 && s.tick >= u.DecayAt {
+				if u.ProgressTicks <= HackDecayProgress {
+					u.ProgressTicks, u.DecayAt = 0, 0
+				} else {
+					u.ProgressTicks -= HackDecayProgress
+					u.DecayAt += HackDecayInterval
+				}
+			}
 			continue
 		}
 		busy[u.HackingID] = true
@@ -222,7 +235,7 @@ func (s *Sim) stepUplinks() {
 			}
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_UplinkHack{UplinkHack: &ombv1.EvUplinkHack{By: u.HackingID, UplinkId: u.Def.ID, Value: value}}})
 			u.ReadyAt[u.HackingID] = s.tick + HackCooldown
-			u.HackingID, u.ProgressTicks = 0, 0
+			u.HackingID, u.ProgressTicks, u.DecayAt = 0, 0, 0
 		}
 	}
 }
