@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-10-05)
+
+
+### Features
+
+* **client:** batch kills into a bounded tactical feed ([707f3ed](https://github.com/modenicheng/oh-my-bot/commit/707f3ed))
+* **client:** finish the high-density live and replay scoreboard redesign ([0833144](https://github.com/modenicheng/oh-my-bot/commit/0833144))
+* **client:** redesign death and settlement UI with accessible title evidence ([1425d10](https://github.com/modenicheng/oh-my-bot/commit/1425d10))
+* **testing:** support local 64-player rooms with up to 63 solo bots ([2e5e74f](https://github.com/modenicheng/oh-my-bot/commit/2e5e74f))
+
+### Bug Fixes
+
+* **client:** clear replay title nodes when seeking away from settlement ([6308e76](https://github.com/modenicheng/oh-my-bot/commit/6308e76))
+* **client:** float scoreboard title evidence, keep tags horizontal, and remove nested scrollbars ([97f7bbe](https://github.com/modenicheng/oh-my-bot/commit/97f7bbe))
+* **client:** keep Console count slots stable as counts grow ([8cb6f54](https://github.com/modenicheng/oh-my-bot/commit/8cb6f54))
+* **client:** persist authoritative invulnerability state and reduce 64-player render work ([91182f2](https://github.com/modenicheng/oh-my-bot/commit/91182f2))
+* **protocol:** raise script submission frame limit to 64 KiB ([502419e](https://github.com/modenicheng/oh-my-bot/commit/502419e))
+
+
 ## [1.0.0-beta.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-alpha.3...v1.0.0-beta.1) (2026-10-04)
 
 
