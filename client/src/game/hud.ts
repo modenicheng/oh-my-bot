@@ -5,7 +5,7 @@ import type { WorldState, RobotEnt } from './world'
 import { type MapDefParsed, type MapUplink } from './mapdef'
 import { hackMaxX10 } from './tuning'
 import { phaseName } from './render'
-import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
+import { type Scoreboard, type ScoreDisplay, ScoreRowRenderer } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
 import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
@@ -63,6 +63,7 @@ export class Hud {
   private lastHpDelay = -1
   private lastEn = -1
   private lastRows: ScoreDisplay[] = NO_ROWS
+  private readonly scoreRenderer = new ScoreRowRenderer()
   private uplinkPct = -1
   private assistRenderedOn: boolean | undefined
   private takeoverRendered = ''
@@ -163,7 +164,7 @@ export class Hud {
     const rows = scores?.display(world.robots, selfId) ?? NO_ROWS
     if (rows !== this.lastRows) {
       this.lastRows = rows
-      this.scoreRows.replaceChildren(...rows.map(row => scoreRow(row)))
+      this.scoreRenderer.update(this.scoreRows, rows)
       if (!rows.length) {
         const empty = document.createElement('div')
         empty.className = 'score-waiting'

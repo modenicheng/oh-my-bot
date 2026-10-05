@@ -1,10 +1,23 @@
 import { Title } from '@omb/protocol'
 import type { RobotEnt } from './world'
+import { icon } from '../icons'
 import './scoreboard.css'
 
 export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
 export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number }
-export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; replayEvidence?: ReplayTitleEvidence }
+export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; respawnInS?: number; replayEvidence?: ReplayTitleEvidence }
+
+export type ScoreRowOptions = { titles?: boolean; ended?: boolean }
+
+export function scoreState(row: Pick<ScoreDisplay, 'self' | 'dead' | 'status' | 'respawnInS'>, ended = false): string {
+  if (ended) return row.self ? '自己' : ''
+  if (row.status === 'unknown') return row.self ? '自己' : ''
+  if (row.dead || row.status === 'dead') {
+    const seconds = row.respawnInS
+    return `${row.self ? '自己 · ' : ''}阵亡 · ${Number.isFinite(seconds) && (seconds ?? 0) > 0 ? `${seconds!.toFixed(1)}s 后重生` : '等待重生同步'}`
+  }
+  return row.self ? '自己 · 存活' : '存活'
+}
 
 export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
@@ -49,6 +62,8 @@ export class Scoreboard {
       const rows = rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
         nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
         dead: !!robots.get(row.robot)?.dead,
+        status: robots.has(row.robot) ? (robots.get(row.robot)!.dead ? 'dead' : 'alive') : 'unknown',
+        respawnInS: robots.get(row.robot)?.respawnInS,
       }))
       this.displayKey = key
       this.displayCache = rows
@@ -58,6 +73,8 @@ export class Scoreboard {
     return rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
       nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
       dead: !!robots.get(row.robot)?.dead,
+      status: robots.has(row.robot) ? (robots.get(row.robot)!.dead ? 'dead' : 'alive') : 'unknown',
+      respawnInS: robots.get(row.robot)?.respawnInS,
     }))
   }
 }
@@ -145,25 +162,80 @@ function text(className: string, value: string): HTMLSpanElement {
   const span = document.createElement('span'); span.className = className; span.textContent = value; return span
 }
 
-export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titles = false): HTMLElement {
-  const element = document.createElement(tag)
-  element.className = 'score-row'
-  element.dataset.robot = String(row.robot)
+function setClassState(element: HTMLElement, row: ScoreDisplay, ended: boolean): void {
   element.classList.toggle('score-self', row.self)
   element.classList.toggle('score-first', row.rank === 1)
-  element.append(text('score-rank', String(row.rank)), text('score-name', row.nick), text('score-value', String(row.score)))
-  const state = [row.self ? '自己' : '', row.dead ? '重生中' : ''].filter(Boolean).join(' · ')
-  if (state) element.append(text('score-state', state))
-  if (titles) {
-    const badges = document.createElement('div'); badges.className = 'score-titles'
+  element.classList.toggle('score-second', row.rank === 2)
+  element.classList.toggle('score-third', row.rank === 3)
+  element.classList.toggle('score-dead', row.dead)
+  element.classList.toggle('score-alive', !row.dead)
+  element.dataset.rank = String(row.rank)
+  element.dataset.status = row.status ?? (row.dead ? 'dead' : 'alive')
+  if (ended) element.dataset.status = 'final'
+}
+
+function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRowOptions): void {
+  setClassState(element, row, !!options.ended)
+  const rank = element.querySelector<HTMLElement>('.score-rank')!
+  rank.replaceChildren()
+  if (row.rank === 1) rank.append(icon('crown'))
+  rank.append(text('score-rank-number', String(row.rank)))
+  const name = element.querySelector<HTMLElement>('.score-name')!
+  name.textContent = row.nick
+  const value = element.querySelector<HTMLElement>('.score-value')!
+  value.textContent = String(row.score)
+  const state = element.querySelector<HTMLElement>('.score-state')!
+  const stateText = scoreState(row, !!options.ended)
+  state.textContent = stateText
+  state.hidden = !stateText
+  if (options.titles) {
+    const badges = element.querySelector<HTMLElement>('.score-titles')!
+    badges.replaceChildren()
     for (const title of row.titles ?? []) {
       const badge = titleBadge(title, row.score, row.replayEvidence)
       if (badge) badges.append(badge)
     }
     if (!badges.childElementCount) badges.append(text('score-no-title', '暂无称号'))
-    element.append(badges)
   }
+}
+
+export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titlesOrOptions: boolean | ScoreRowOptions = false): HTMLElement {
+  const options: ScoreRowOptions = typeof titlesOrOptions === 'boolean' ? { titles: titlesOrOptions } : titlesOrOptions
+  const element = document.createElement(tag)
+  element.className = 'score-row'
+  element.dataset.robot = String(row.robot)
+  const rank = text('score-rank', '')
+  const name = text('score-name', '')
+  const value = text('score-value', '')
+  const state = text('score-state', '')
+  const badges = document.createElement('div'); badges.className = 'score-titles'
+  element.append(rank, name, value, state)
+  if (options.titles) element.append(badges)
+  fillScoreRow(element, row, options)
   return element
+}
+
+/** Keyed DOM renderer: updates row contents in place and moves existing nodes when rank changes. */
+export class ScoreRowRenderer {
+  private readonly rows = new Map<number, HTMLElement>()
+  private renderedOptions = ''
+  update(parent: HTMLElement, values: readonly ScoreDisplay[], options: ScoreRowOptions = {}): void {
+    const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
+    if (key !== this.renderedOptions) { this.renderedOptions = key; for (const row of this.rows.values()) row.remove(); this.rows.clear() }
+    const fragment = document.createDocumentFragment()
+    for (const value of values) {
+        let element = this.rows.get(value.robot)
+      if (!element || element.tagName.toLowerCase() !== (parent.tagName.toLowerCase() === 'ol' ? 'li' : 'div')) {
+        element = scoreRow(value, parent.tagName.toLowerCase() === 'ol' ? 'li' : 'div', options)
+        this.rows.set(value.robot, element)
+      } else fillScoreRow(element, value, options)
+      fragment.append(element)
+    }
+    parent.replaceChildren(fragment)
+    for (const id of this.rows.keys()) if (!values.some(row => row.robot === id)) this.rows.delete(id)
+  }
+  get nodeCount(): number { return this.rows.size }
+  clear(): void { this.rows.clear(); this.renderedOptions = '' }
 }
 
 export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], names: ReadonlyMap<number, string>, onBack?: () => void, self = -1): void {
