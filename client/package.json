@@ -18,7 +18,8 @@
     "test:manual-live": "tsx scripts/manual-live-check.mjs",
     "capture:manual": "tsx scripts/capture-manual-assets.mjs",
     "test:live-spectator": "tsx scripts/live-spectator-check.mjs",
-    "test:versions": "tsx scripts/version-overlay-check.mjs"
+    "test:versions": "tsx scripts/version-overlay-check.mjs",
+    "test:console-count": "tsx scripts/console-count-check.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",
@@ -28,6 +29,7 @@
     "monaco-editor": "^0.57.0"
   },
   "devDependencies": {
+    "happy-dom": "^17.6.3",
     "playwright": "^1.63.0",
     "tsx": "^4.23.15",
     "typescript": "^5.8.0",

@@ -95,6 +95,11 @@ func (a Action) String() string {
 // MaxPlayers is the hard seat limit per game_design_v0.3 §2 (1–64 robots).
 const MaxPlayers = 64
 
+// MaxSoloBots fills every non-human seat while always reserving at least one
+// seat for the room host. Launch assembly still caps the final roster at
+// MaxPlayers when more humans are seated.
+const MaxSoloBots = MaxPlayers - 1
+
 // MatchHandle is the running-side handle of a launched match. The room only
 // ever needs to abort it; lifecycle completion is driven externally by the
 // caller reporting AddMatchResult and moving the room to Ended.
@@ -225,6 +230,17 @@ func (r *Room) SoloBots() uint32 {
 	return r.soloBots
 }
 
+// SetSoloBots configures the next launch without requiring a host command. It
+// is used only for explicit server defaults (for example a local stress room).
+func (r *Room) SetSoloBots(count uint32) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if count > MaxSoloBots {
+		count = MaxSoloBots
+	}
+	r.soloBots = count
+}
+
 // MemberCount returns the number of seated players.
 func (r *Room) MemberCount() int {
 	r.mu.Lock()
@@ -331,7 +347,7 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 			return fmt.Errorf("%w: SoloBots from %s", ErrIllegalTransit, r.state)
 		}
 		if r.soloBots == 0 {
-			r.soloBots = 3
+			r.soloBots = MaxSoloBots
 		} else {
 			r.soloBots = 0
 		}

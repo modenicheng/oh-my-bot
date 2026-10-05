@@ -12,7 +12,9 @@ import { FALLBACK_TUNING, invulnWindowMs } from './tuning'
 export interface RobotEnt extends RobotState {
   /** 本地渲染帧时间戳（无敌闪烁等动画用） */
   seenAt: number
-  /** 无敌显示截止（ms）：优先使用权威 invuln_s；旧服务器缺失时以 dead→alive 近似。 */
+  /** 权威无敌状态：由 optional invuln_s 明确更新，缺少实体 delta 时持续保留。 */
+  invulnerable?: boolean
+  /** 仅旧服务器缺失 invuln_s 时的 dead→alive 展示回退。 */
   invulnUntil?: number
 }
 export interface ProjEnt extends ProjectileState { seenAt: number }
@@ -80,8 +82,10 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     const prev = world.robots.get(id)
     // 新服务器每帧状态携带 optional invuln_s，full/resync 也能恢复显示；
     // 字段存在且为 0 时立即关闭。只有旧服务器缺失字段时才走 dead→alive 兜底。
-    const invulnUntil = r.invulnS !== undefined
-      ? r.invulnS > 0 ? now + r.invulnS * 1000 + 250 : undefined
+    const hasAuthoritativeInvuln = r.invulnS !== undefined
+    const invulnerable = hasAuthoritativeInvuln ? (r.invulnS ?? 0) > 0 : (prev?.invulnerable ?? false)
+    const invulnUntil = hasAuthoritativeInvuln
+      ? undefined
       : prev?.dead && !r.dead ? now + invulnMs : prev?.invulnUntil
     // delta 帧不带 nick/color（full 才带），保留旧 meta
     const nick = r.nick || prev?.nick || ''
@@ -91,6 +95,7 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     ent.nick = nick
     ent.color = color
     ent.seenAt = now
+    ent.invulnerable = invulnerable
     ent.invulnUntil = invulnUntil
     world.robots.set(id, ent)
   }

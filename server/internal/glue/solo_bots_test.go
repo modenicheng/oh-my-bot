@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"github.com/modenicheng/oh-my-bot/server/internal/room"
 	"github.com/modenicheng/oh-my-bot/server/internal/script"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -20,7 +21,7 @@ func TestSoloBotIdentityCapacity(t *testing.T) {
 			players[pid] = SessionInfo{PlayerID: pid, Nick: "human"}
 		}
 		addSoloBots(players, 100)
-		want := min(64, humans+3)
+		want := min(room.MaxPlayers, humans+room.MaxSoloBots)
 		if len(players) != want {
 			t.Fatalf("%d humans: got %d total, want %d", humans, len(players), want)
 		}
@@ -43,10 +44,49 @@ func TestSoloBotIdentityCapacity(t *testing.T) {
 		}
 	}
 	a, b := map[uint64]SessionInfo{}, map[uint64]SessionInfo{}
-	addSoloBots(a, 3)
-	addSoloBots(b, 3)
+	addSoloBots(a, room.MaxSoloBots)
+	addSoloBots(b, room.MaxSoloBots)
 	if !reflect.DeepEqual(a, b) {
 		t.Fatal("synthetic identities are not stable")
+	}
+}
+
+func TestSoloBotFullRosterCapacity(t *testing.T) {
+	players := map[uint64]SessionInfo{1: {PlayerID: 1, Nick: "host"}}
+	addSoloBots(players, room.MaxSoloBots)
+	if len(players) != room.MaxPlayers {
+		t.Fatalf("full roster = %d, want %d", len(players), room.MaxPlayers)
+	}
+	bots := 0
+	seen := map[uint32]bool{}
+	for pid, info := range players {
+		rid := stableRobotID(pid)
+		if rid == 0 || seen[rid] {
+			t.Fatalf("invalid full-roster robot ID %d", rid)
+		}
+		seen[rid] = true
+		if info.Bot {
+			bots++
+		}
+	}
+	if bots != room.MaxSoloBots {
+		t.Fatalf("bots = %d, want %d", bots, room.MaxSoloBots)
+	}
+}
+
+func TestHubDefaultSoloBots(t *testing.T) {
+	h := NewHub()
+	h.SetDefaultSoloBots(999)
+	first := h.EnsureRoom("FULLBOT")
+	if got := first.Room.SoloBots(); got != room.MaxSoloBots {
+		t.Fatalf("default solo bots = %d, want %d", got, room.MaxSoloBots)
+	}
+	h.SetDefaultSoloBots(0)
+	if got := h.EnsureRoom("FULLBOT").Room.SoloBots(); got != room.MaxSoloBots {
+		t.Fatalf("existing room changed to %d", got)
+	}
+	if got := h.EnsureRoom("EMPTYBOT").Room.SoloBots(); got != 0 {
+		t.Fatalf("new zero-default room = %d", got)
 	}
 }
 
@@ -205,12 +245,12 @@ func TestSoloBotsHostToggleAndReconnect(t *testing.T) {
 		t.Fatal("guest changed bot config")
 	}
 	host.HostCommand(ombv1.RoomAction_SOLO_BOTS)
-	if rc.Room.SoloBots() != 3 {
+	if rc.Room.SoloBots() != room.MaxSoloBots {
 		t.Fatal("protobuf action not routed to room")
 	}
 	broadcast := false
 	for _, sent := range log.take() {
-		if rs := sent.msg.GetEvent().GetRoomState(); rs != nil && rs.SoloBots == 3 && rs.RobotsOnline == 2 {
+		if rs := sent.msg.GetEvent().GetRoomState(); rs != nil && rs.SoloBots == room.MaxSoloBots && rs.RobotsOnline == 2 {
 			broadcast = true
 		}
 	}
@@ -219,7 +259,7 @@ func TestSoloBotsHostToggleAndReconnect(t *testing.T) {
 	}
 	replacement, _ := bindLogged(t, h, rc, "host")
 	host.HostCommand(ombv1.RoomAction_SOLO_BOTS)
-	if rc.Room.SoloBots() != 3 {
+	if rc.Room.SoloBots() != room.MaxSoloBots {
 		t.Fatal("stale session changed bot config")
 	}
 	replacement.HostCommand(ombv1.RoomAction_SOLO_BOTS)

@@ -39,7 +39,7 @@ tags: [脚本, API]
 
 ## 提交契约速记
 
-按 TS 写，产出必须是合法 JS：`import type` 和 `export default` 会被剥掉；类型注解、`type` / `interface` / `enum` 声明、泛型会被**整份拒收**，旧脚本继续跑。整条消息不超过 32 KiB。完整说明见[写第一个 Bot](../code/bot-scripting.md)。
+按 TS 写，产出必须是合法 JS：`import type` 和 `export default` 会被剥掉；类型注解、`type` / `interface` / `enum` 声明、泛型会被**整份拒收**，旧脚本继续跑。整条消息不超过 64 KiB。完整说明见[写第一个 Bot](../code/bot-scripting.md)。
 
 ## 示例库
 

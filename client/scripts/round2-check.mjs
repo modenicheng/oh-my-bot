@@ -343,7 +343,7 @@ try {
   const beforeOversize = submissions.length
   await replaceSource(`// ${'超'.repeat(11000)}\nfunction tick() {}`)
   await page.click('#workbench-submit')
-  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('32 KiB')), 'UTF-8 message size guard')
+  await until(() => page.locator('.script-console-list').textContent().then(t => t.includes('64 KiB') && /整帧 \d+ 字节/.test(t)), 'UTF-8 message size guard with actual byte count')
   assert.equal(submissions.length, beforeOversize, 'oversized source never reaches websocket')
   assert.equal(await page.locator('#workbench-submit').isEnabled(), true, 'oversize rejection keeps connection usable')
   await replaceSource(validSource)

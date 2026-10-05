@@ -23,6 +23,7 @@ const paths = {
   energy: 'M8 1h4v2h-2v2H8v2h5v2h-2v2H9v2H7v2H4v-2h2v-2h2V9H3V7h2V5h1V3h2Z',
   skull: 'M4 1h8v2h2v8h-2v4h-2v-2H9v2H7v-2H6v2H4v-4H2V3h2Zm0 4v3h3V5Zm5 0v3h3V5ZM7 9v2h2V9Z',
   trophy: 'M4 1h8v2h3v6h-3v2H9v2h3v2H4v-2h3v-2H4V9H1V3h3Zm-1 4v2h2V5Zm8 0v2h2V5Z',
+  crown: 'M1 3h3v3h2V4h4v2h2V3h3v8H1Zm2 6h10v2H3Zm2 4h6v2H5Z',
   chevron: 'M5 2h2v2h2v2h2v4H9v2H7v2H5v-4h2V6H5Z',
   // 技能卡组与音频面板：全部整数轴对齐矩形
   fire: 'M7 0h2v4H7ZM7 12h2v4H7ZM0 7h4v2H0ZM12 7h4v2h-4ZM5 5h6v6H5Z',

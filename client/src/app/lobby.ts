@@ -115,14 +115,14 @@ export class Lobby {
   refresh(): void {
     const { state, hostNick, robotsOnline } = this
     const stateName = ['空闲', '热身中', '对局中', '已结束'][state] ?? `状态${state}`
-    $('room-state').textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (this.soloBots ? ' · 下次开场最多 3 个测试 Bot' : '')
+    $('room-state').textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (this.soloBots ? ` · 自动 Bot 上限 ${this.soloBots}（开场补满至 64）` : '')
     const isHost = hostNick !== '' && hostNick === this.deps.selfNick()
     const idleLike = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP
     $('btn-game-start').hidden = !(isHost && state === EvRoomState_State.R_WARMUP)
     this.startButton.hidden = !(isHost && idleLike && !this.deps.inGame())
     this.warmupButton.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_ENDED) && !this.deps.inGame())
     this.botsButton.hidden = !(isHost && (idleLike || state === EvRoomState_State.R_ENDED) && !this.deps.inGame())
-    $('solo-bots-label').textContent = this.soloBots ? '关闭测试 Bot（下次开场）' : '添加 3 个测试 Bot'
+    $('solo-bots-label').textContent = this.soloBots ? '关闭自动 Bot（下次开场）' : '自动补满至 64 台'
     this.botsButton.setAttribute('aria-pressed', String(this.soloBots > 0))
     const notice = $('room-notice')
     notice.hidden = !(this.startButton.hidden && this.warmupButton.hidden && this.botsButton.hidden)

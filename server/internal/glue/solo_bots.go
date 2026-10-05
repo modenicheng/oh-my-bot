@@ -10,15 +10,15 @@ import (
 // Synthetic identities live only in the match, never in RoomConn.identities or
 // sessions. Keep the existing 64-robot cap when humans fill the room.
 func addSoloBots(players map[uint64]SessionInfo, count uint32) {
-	if count > 3 {
-		count = 3
+	if count > room.MaxSoloBots {
+		count = room.MaxSoloBots
 	}
 	used := make(map[uint32]bool, len(players))
 	for pid := range players {
 		used[stableRobotID(pid)] = true
 	}
 	candidate := uint64(0xffff_ffff_ffff_f000)
-	colors := [...]string{"#a3e635", "#fbbf24", "#f472b6"}
+	colors := [...]string{"#a3e635", "#fbbf24", "#f472b6", "#22d3ee", "#a78bfa", "#34d399", "#f97316", "#ff5c5c"}
 	for i := uint32(0); i < count && len(players) < room.MaxPlayers; {
 		pid := candidate
 		candidate++
@@ -26,7 +26,7 @@ func addSoloBots(players map[uint64]SessionInfo, count uint32) {
 		if _, exists := players[pid]; exists || rid == 0 || used[rid] {
 			continue
 		}
-		players[pid] = SessionInfo{PlayerID: pid, Nick: fmt.Sprintf("TEST-BOT-%d", i+1), Color: colors[i], Bot: true}
+		players[pid] = SessionInfo{PlayerID: pid, Nick: fmt.Sprintf("TEST-BOT-%d", i+1), Color: colors[int(i)%len(colors)], Bot: true}
 		used[rid] = true
 		i++
 	}
@@ -73,7 +73,7 @@ function tick(bot) {
   }
 
   // Interact only when stopped at an available Uplink; picking up Cores is
-  // automatic. Rotate objective preference so all three bots do not pile up.
+  // automatic. Rotate objective preference so the full bot roster does not pile up.
   const uplinks = scan.uplinks.filter(u => (u.ready || u.holder === botID) && reachable(u) && !(cooldowns[u.id] > now)).sort((a,b) => dist(a)-dist(b));
   const cores = scan.cores.filter(reachable).sort((a,b) => dist(a)-dist(b));
   const uplink = uplinks[0];

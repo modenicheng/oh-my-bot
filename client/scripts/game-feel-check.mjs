@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { killFeedFloodPass } from './kill-feed-check.mjs'
 import { sleep, until, startStaticServer, gen2MapJson, FixtureServer, frame } from './harness.mjs'
 // game-feel-check.mjs — focused browser regression for ongoing game-feel UI.
 //
@@ -956,12 +957,13 @@ async function bannerPass(browser, fix, reduced = false) {
 
     const kill = fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } })
     fix.bcast(kill)
-    await until(async () => /击毁/.test(await hudMsgText(page)), 'kill banner')
-    assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'kill')
+    await until(async () => /击毁/.test(await page.locator('.kill-feed').textContent()), 'kill communications rail')
+    assert.notEqual(await page.locator('#hud-msg').getAttribute('data-kind'), 'kill')
+    assert.equal(await page.locator('.kill-feed').getAttribute('aria-live'), 'off')
     assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'remote defeat never shakes the local camera')
-    await sleep(230) // measure the final frame after the stepped banner entrance
-    const banner = await page.locator('#hud-msg').boundingBox(), hp = await page.locator('#hud-left').boundingBox()
-    assert.ok(banner.y + banner.height <= hp.y - 8 && Math.abs(banner.x - hp.x) < 2, 'kill banner anchored above HP/EN')
+    await sleep(120) // one micro-batch animation, not one animation per kill
+    const banner = await page.locator('.kill-feed').boundingBox(), hp = await page.locator('#hud-left').boundingBox()
+    assert.ok(banner.y + banner.height <= hp.y - 8 && Math.abs(banner.x - hp.x) < 2, 'communications rail anchored above HP/EN')
     await shot(page, reduced ? '13-kill-reduced.png' : '11-kill-banner.png')
     sound = await audioStarted(page)
     fix.bcast(kill); await sleep(70)
@@ -998,6 +1000,7 @@ async function bannerPass(browser, fix, reduced = false) {
     await sleep(100)
     assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'successful hacking never moves the camera')
     await shot(page, reduced ? '14-uplink-reduced.png' : '12-uplink-banner.png')
+    await killFeedFloodPass(page, fix, { reduced, shots: SHOTS })
 
     await page.locator('#game-canvas').focus()
     await page.keyboard.press('c')
@@ -1055,7 +1058,7 @@ async function bannerPass(browser, fix, reduced = false) {
     await page.locator('#workbench-close').click()
     await fix.step(st => { st.timeLeftS = 1 })
     fix.bcast(fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } }))
-    await until(async () => /击毁/.test(await hudMsgText(page)), 'narrow kill banner')
+    await until(async () => /击毁/.test(await page.locator('.kill-feed').textContent()), 'narrow kill rail')
     await assertNoHudOverlap(page, 'narrow-event-banner')
     if (!reduced) await shot(page, '19-kill-narrow.png')
     assert.deepEqual(errors, [], 'event and countdown pass has no page errors')

@@ -166,7 +166,7 @@ obs.tick         // 快照对应的帧号
 - **入口二选一**：顶层 `function tick(bot) {}`，或者 `const bot = { tick(bot) {} }` 对象，后面可以另起一行 `export default bot`。
 - **有限的 import / export**：服务器会剥掉单行 `import type ...`、无绑定的 `import '模块名'`、单行 `export default ...`，以及声明前的 `export`。它不加载依赖，也不做完整模块解析。别用普通绑定导入，也别写 `export default { tick(bot) {} }`，那一整行会被删掉。
 - **JS 模式不接受 TS 语法**：类型注解、`type` / `interface` / `enum`、`as const`、`Array<number>` 都会整份拒收。要写 TS 就切到 TS 模式。
-- **消息大小上限 32 KiB**。这是编码后的整条消息，包含 UTF-8 源码和协议开销，不只是字符数。超限会在本地拦下。
+- **消息大小上限 64 KiB（65536 字节）**。这是编码后的整条消息，包含 UTF-8 源码和协议开销，不只是字符数。TS 模式下编译后的 JS 和 TS 原文同帧发送、都计入。超限会在本地拦下并显示实际字节数。
 
 拒收或加载失败时，旧脚本继续跑。
 

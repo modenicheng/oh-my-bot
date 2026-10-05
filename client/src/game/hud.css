@@ -1,9 +1,27 @@
+/* Death is a status card, not a blocking modal; the battlefield stays visible. */
+.hud-death { position: absolute; top: 24%; left: 50%; transform: translateX(-50%); z-index: 4;
+  width: min(420px, calc(100% - 28px)); padding: 20px 24px; background: #10141af5; border: 1px solid var(--line);
+  border-left: 3px solid var(--danger); pointer-events: none; }
+.hud-death h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font: 24px/1.25 var(--pixel); color: var(--danger); }
+.hud-death .pixel-icon { width: 24px; height: 24px; flex: none; }
+.death-countdown { display: block; font: 28px/1.3 var(--pixel); color: var(--fg); font-variant-numeric: tabular-nums; }
+.death-score { display: block; margin-top: 12px; color: var(--accent); font: 14px/1.5 var(--pixel); }
+.hud-death p { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--fg-dim); font: 12px/1.7 Inter, system-ui, sans-serif; }
+.death-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 560px), (max-height: 520px) {
+  .hud-death { top: 92px; padding: 14px 16px; }
+  .hud-death h2 { font-size: 20px; margin-bottom: 8px; }
+  .death-countdown { font-size: 24px; }
+  .hud-death p { margin-top: 8px; padding-top: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .hud-death, .hud-death * { animation: none !important; transition: none !important; } }
+
 /* Event panels share the HP/EN anchor; the opening gate belongs to the game stage. */
-#hud-left > #hud-msg {
+#hud-left > .hud-comms > #hud-msg {
   --event-color: #8b98a9;
-  position: absolute;
-  inset: auto auto calc(100% + 12px) -2px;
-  width: calc(100% + 2px);
+  position: relative;
+  inset: auto;
+  width: 100%;
   max-width: none;
   display: flex;
   align-items: center;
@@ -24,7 +42,7 @@
   transition: none;
 }
 
-#hud-left > #hud-msg::after {
+#hud-left > .hud-comms > #hud-msg::after {
   content: '';
   position: absolute;
   inset: 0 8px auto 0;
@@ -32,11 +50,11 @@
   background: #36505f;
 }
 
-#hud-left > #hud-msg[data-kind='kill'] { --event-color: #ff5c5c; }
-#hud-left > #hud-msg[data-kind='uplink'] { --event-color: #b9d985; }
-#hud-left > #hud-msg > .pixel-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--event-color); }
-#hud-left > #hud-msg .hud-event-text { min-width: 0; overflow-wrap: anywhere; }
-#hud-left > #hud-msg.show { opacity: 1; visibility: visible; animation: hud-event-in 160ms steps(3, end); }
+#hud-left > .hud-comms > #hud-msg[data-kind='uplink'] { --event-color: #b9d985; }
+#hud-left > .hud-comms > #hud-msg > .pixel-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--event-color); }
+#hud-left > .hud-comms > #hud-msg .hud-event-text { min-width: 0; overflow-wrap: anywhere; }
+#hud-left > .hud-comms > #hud-msg:not(.show) { display: none; }
+#hud-left > .hud-comms > #hud-msg.show { opacity: 1; visibility: visible; animation: hud-event-in 160ms steps(3, end); }
 
 #hud-inner-ring {
   position: absolute;
@@ -100,13 +118,13 @@
 }
 
 @container (max-width: 540px) {
-  #hud-left > #hud-msg { gap: 6px; padding: 10px 8px; font-size: 12px; }
-  #hud-left > #hud-msg > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
+  #hud-left > .hud-comms > #hud-msg { gap: 6px; padding: 10px 8px; font-size: 12px; }
+  #hud-left > .hud-comms > #hud-msg > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
   #hud-inner-ring { gap: 10px; padding: 16px; }
   #hud-inner-ring strong { font-size: 24px; }
   #hud-inner-ring > .pixel-icon { width: 24px; height: 24px; flex-basis: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #hud-left > #hud-msg.show, #hud-inner-ring.show, #hud-time.countdown-pulse { animation: none; transition: none; }
+  #hud-left > .hud-comms > #hud-msg.show, #hud-inner-ring.show, #hud-time.countdown-pulse { animation: none; transition: none; }
 }

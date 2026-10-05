@@ -6,7 +6,7 @@ import { artReady } from './game/art'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
 import { resolveTuning } from './game/tuning'
 import { Renderer, phaseName, type SayBubble } from './game/render'
-import { Scoreboard, type ScoreDisplay, scoreRow } from './game/scoreboard'
+import { Scoreboard, type ScoreDisplay, ScoreRowRenderer } from './game/scoreboard'
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
 import { el as domEl, fmtClock, setText } from './ui/dom'
@@ -41,6 +41,7 @@ export class LiveSpectator {
   private scores = new Scoreboard()
   private lastRows: ScoreDisplay[] | null = null
   private lastEnded = false
+  private readonly scoreRenderer = new ScoreRowRenderer()
   /** 脏标记：快照/事件/相机变化才整帧重绘，空闲观战不再永动重绘。 */
   private dirty = true
   private disposeControls: (() => void) | null = null
@@ -201,7 +202,7 @@ export class LiveSpectator {
     this.lastRows = rows
     this.lastEnded = this.scores.ended
     const list = this.el('live-scores')
-    list.replaceChildren(...rows.map(row => scoreRow(row, 'li', this.scores.ended)))
+    this.scoreRenderer.update(list, rows, { titles: this.scores.ended, ended: this.scores.ended })
     list.hidden = rows.length === 0
     list.setAttribute('aria-label', this.scores.ended ? '最终积分与称号' : '实时积分榜')
   }
@@ -219,6 +220,7 @@ export class LiveSpectator {
     this.roster = ''
     this.follow.replaceChildren(new Option('自由视角', ''))
     this.follow.disabled = true
+    this.scoreRenderer.clear()
     this.el('live-scores').replaceChildren()
     this.el('live-scores').hidden = true
     this.updateMatchState()
@@ -255,7 +257,7 @@ export class LiveSpectator {
     if (!this.map || this.disposed) return
     bgm.phase('live', this.world.phase)
     if (this.dpr !== (window.devicePixelRatio || 1)) { this.resize(); return }
-    this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
+    this.camera.updateFollow(this.world.robots.get(this.camera.followId ?? 0)?.base?.pos)
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
     setText(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)

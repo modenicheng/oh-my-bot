@@ -3,6 +3,7 @@ package netws
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,6 +137,59 @@ func TestScriptLogFloodDoesNotDisconnectOrBlockReliable(t *testing.T) {
 	}
 	if notices != 1 {
 		t.Fatalf("want one bounded drop notice, got %d", notices)
+	}
+}
+
+// TestReadLimitAllows64KiBScriptSubmit 钉住读上限：默认 32768 装不下 TS 提交帧
+// （编译 JS + TS 原文同帧可达 ~53 KiB），会被 coder/websocket 以
+// StatusMessageTooBig 默默断连。上限与客户端预检同源 TransportTiming。
+func TestReadLimitAllows64KiBScriptSubmit(t *testing.T) {
+	var got atomic.Int32
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
+		return func(up *ombv1.ClientMsg) {
+			if sub := up.GetScriptSubmit(); sub != nil {
+				got.Add(int32(len(sub.GetSource())))
+			}
+		}
+	})
+	s := newTestServer(h)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL(s), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.CloseNow() })
+
+	// 用真实 protobuf 组装 ~53 KB 的 TS 提交帧（与 oracle.ts 实测同量级），
+	// 覆盖旧默认 32768 读上限会断连的区间。
+	js := "function tick(bot) {} // " + strings.Repeat("a", 25484)
+	ts := "function tick(bot: BotContext) {} // " + strings.Repeat("b", 27364)
+	sub := &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_ScriptSubmit{ScriptSubmit: &ombv1.ScriptSubmit{
+		Source: js, EditorSource: &ts,
+		Language: ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS.Enum(),
+	}}}
+	body, err := proto.Marshal(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := append([]byte{frameUp}, body...)
+	if len(frame) <= 32768 || len(frame) > int(maxFrameBytes) {
+		t.Fatalf("test frame %d bytes must be in (32768, %d]", len(frame), maxFrameBytes)
+	}
+	if err := c.Write(ctx, websocket.MessageBinary, frame); err != nil {
+		t.Fatal(err)
+	}
+
+	// 连接必须存活且 onUp 必须收到（旧默认上限会直接断连）。
+	deadline := time.Now().Add(3 * time.Second)
+	for got.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := got.Load(); n != int32(len(js)) {
+		t.Fatalf("server received %d source bytes, want %d (read limit regression?)", n, len(js))
 	}
 }
 

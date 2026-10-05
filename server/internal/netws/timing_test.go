@@ -37,6 +37,9 @@ func TestTransportTimingPinned(t *testing.T) {
 	if framePing != 0x00 || framePong != 0x01 || frameUp != 0x02 || frameDown != 0x03 {
 		t.Error("frame bytes drifted")
 	}
+	if maxFrameBytes != 65536 {
+		t.Errorf("maxFrameBytes = %d, want 65536", maxFrameBytes)
+	}
 
 	// 2+3. 生成代码与权威源 .proto 文本互拍：解析每个枚举值的完整名与数值，
 	// 任一侧缺失或漂移即失败。
@@ -64,6 +67,7 @@ func TestTransportTimingPinned(t *testing.T) {
 		{"LIVENESS_CHECK_MS", 1000},
 		{"SERVER_READ_TIMEOUT_MS", 10000},
 		{"SERVER_WRITE_TIMEOUT_MS", 2000},
+		{"MAX_FRAME_BYTES", 65536},
 	}
 
 	// TransportTiming 枚举体（首个 { 到配对 }），避免匹配其他枚举的同名值。

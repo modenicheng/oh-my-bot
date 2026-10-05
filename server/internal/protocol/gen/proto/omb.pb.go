@@ -227,7 +227,7 @@ func (ScriptLanguage) EnumDescriptor() ([]byte, []int) {
 	return file_proto_omb_proto_rawDescGZIP(), []int{3}
 }
 
-// WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
+// WS 传输参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
 // TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
 // 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
 // 且测试会解析本文件与生成代码对拍，防止改这里忘跑 buf generate。改值须同步评估两侧语义。
@@ -248,6 +248,11 @@ const (
 	TransportTiming_LIVENESS_CHECK_MS       TransportTiming = 1000  // 客户端存活检查轮询周期
 	TransportTiming_SERVER_READ_TIMEOUT_MS  TransportTiming = 10000 // 服务器单次上行读超时（半开连接回收）
 	TransportTiming_SERVER_WRITE_TIMEOUT_MS TransportTiming = 2000  // 服务器单帧下行写超时
+	// 单条 WebSocket 消息（编码后的整帧，含首字节 + protobuf 体）大小上限。
+	// TS 提交同时携带编译 JS 与 TS 原文，源码 27 KiB 时整帧可达 ~53 KiB，
+	// 旧隐式 32 KiB（coder/websocket 默认读上限）会拦下合法提交。
+	// 客户端提交前预检与服务器读上限共用此值；聊天/输入等小消息不受影响。
+	TransportTiming_MAX_FRAME_BYTES TransportTiming = 65536 // 单帧字节上限（64 KiB）：客户端预检 + 服务器 SetReadLimit
 )
 
 // Enum value maps for TransportTiming.
@@ -263,6 +268,7 @@ var (
 		1000:  "LIVENESS_CHECK_MS",
 		10000: "SERVER_READ_TIMEOUT_MS",
 		// Duplicate value: 2000: "SERVER_WRITE_TIMEOUT_MS",
+		65536: "MAX_FRAME_BYTES",
 	}
 	TransportTiming_value = map[string]int32{
 		"FRAME_PING":              0,
@@ -275,6 +281,7 @@ var (
 		"LIVENESS_CHECK_MS":       1000,
 		"SERVER_READ_TIMEOUT_MS":  10000,
 		"SERVER_WRITE_TIMEOUT_MS": 2000,
+		"MAX_FRAME_BYTES":         65536,
 	}
 )
 
@@ -5872,7 +5879,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x0eScriptLanguage\x12\x1f\n" +
 	"\x1bSCRIPT_LANGUAGE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12SCRIPT_LANGUAGE_JS\x10\x01\x12\x16\n" +
-	"\x12SCRIPT_LANGUAGE_TS\x10\x02*\xf0\x01\n" +
+	"\x12SCRIPT_LANGUAGE_TS\x10\x02*\x87\x02\n" +
 	"\x0fTransportTiming\x12\x0e\n" +
 	"\n" +
 	"FRAME_PING\x10\x00\x12\x0e\n" +
@@ -5886,7 +5893,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x13LIVENESS_TIMEOUT_MS\x10\xc0>\x12\x16\n" +
 	"\x11LIVENESS_CHECK_MS\x10\xe8\a\x12\x1b\n" +
 	"\x16SERVER_READ_TIMEOUT_MS\x10\x90N\x12\x1c\n" +
-	"\x17SERVER_WRITE_TIMEOUT_MS\x10\xd0\x0f\x1a\x02\x10\x01*\xc1\x01\n" +
+	"\x17SERVER_WRITE_TIMEOUT_MS\x10\xd0\x0f\x12\x15\n" +
+	"\x0fMAX_FRAME_BYTES\x10\x80\x80\x04\x1a\x02\x10\x01*\xc1\x01\n" +
 	"\vSnippetKind\x12\x17\n" +
 	"\x13SNIPPET_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SNIPPET_AUTO_AIM\x10\x01\x12\x1c\n" +

@@ -7,7 +7,7 @@ import { mountIcons } from '../icons'
 import type { RouteExtra, WorkbenchPanel } from '../route'
 import type { BotEditor } from './editor'
 import { DEFAULT_CONSOLE_HEIGHT, ScriptConsoleView } from './script-console'
-import { draftKeyFor, isBotLanguage, languagePrefKey, scriptSubmitPayload, type BotLanguage } from './ts-submit'
+import { draftKeyFor, isBotLanguage, languagePrefKey, oversizeScriptMessage, scriptFrameTooLarge, scriptSubmitPayload, type BotLanguage } from './ts-submit'
 import { SnippetPanelView } from './snippet-panel'
 import { AiPanelView } from './ai-panel'
 import { AI_SCRIPT_RESULT_ID } from './ai-assist'
@@ -730,8 +730,9 @@ export class Workbench {
     this.sendScript(id, scriptSubmitPayload('js', editorSource), editorSource)
   }
 
-  /** 编码后的整帧超过 32 KiB 会断开连接，不能只计算字符数。
-   * payload 由 scriptSubmitPayload 纯函数组装（source/editorSource/language 成对）。 */
+  /** 编码后的整帧超过单帧上限会断开连接，不能只计算字符数。
+   * payload 由 scriptSubmitPayload 纯函数组装（source/editorSource/language 成对）。
+   * TS 提交同帧携带编译 JS 与 TS 原文，帧大小 ≈ 两者字节数之和。 */
   private sendScript(
     id: number,
     payload: ReturnType<typeof scriptSubmitPayload>,
@@ -745,8 +746,9 @@ export class Workbench {
     const frame = encodeClient(create(ClientMsgSchema, {
       payload: { case: 'scriptSubmit', value: create(ScriptSubmitSchema, { ...payload, clientScriptId: id }) },
     }))
-    if (frame.byteLength > 32768) {
-      this.scriptConsole.appendClient('error', '脚本过大：提交消息不能超过 32 KiB，请精简后重试。')
+    if (scriptFrameTooLarge(frame.byteLength)) {
+      const oversized: BotLanguage = payload.language === ScriptLanguage.TS ? 'ts' : 'js'
+      this.scriptConsole.appendClient('error', oversizeScriptMessage(frame.byteLength, oversized))
       this.renderButtons()
       return
     }
@@ -911,7 +913,7 @@ export class Workbench {
     const frame = encodeClient(create(ClientMsgSchema, {
       payload: { case: 'snippetConfig', value: create(SnippetConfigSchema, { snippets: settings }) },
     }))
-    if (frame.byteLength > 32768) return false
+    if (scriptFrameTooLarge(frame.byteLength)) return false
     return this.deps.send(frame)
   }
 

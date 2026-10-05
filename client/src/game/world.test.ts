@@ -33,6 +33,49 @@ describe('snapshot continuity', () => {
   })
 })
 
+describe('invulnerability snapshot continuity', () => {
+  const robots = (tick: number, baseTick: number, full: boolean, entries: Array<{ id: number; invulnS?: number; x?: number }>) => create(SnapshotDeltaSchema, {
+    tick, baseTick, full, phase: 1, timeLeftS: 480,
+    robots: entries.map(({ id, invulnS, x = id }) => create(RobotStateSchema, {
+      base: create(EntityBaseSchema, { id, pos: { x, y: 0 } }), hpX10: 1000, invulnS,
+    })),
+  })
+
+  it('keeps a stationary self invulnerable when subsequent deltas omit robots', () => {
+    const world = emptyWorld()
+    applySnapshot(world, robots(1, 0, true, [{ id: 1, invulnS: 3 }]))
+    applySnapshot(world, robots(2, 1, false, []))
+    expect(world.robots.get(1)?.invulnerable).toBe(true)
+  })
+
+  it('keeps a stationary enemy invulnerable when other robots move', () => {
+    const world = emptyWorld()
+    applySnapshot(world, robots(1, 0, true, [{ id: 1, invulnS: 0 }, { id: 2, invulnS: 3 }]))
+    applySnapshot(world, robots(2, 1, false, [{ id: 1, invulnS: 0, x: 4 }]))
+    expect(world.robots.get(2)?.invulnerable).toBe(true)
+  })
+
+  it('marks a moving enemy invulnerable and retains it through an omitted delta', () => {
+    const world = emptyWorld()
+    applySnapshot(world, robots(1, 0, true, [{ id: 2, invulnS: 0 }]))
+    applySnapshot(world, robots(2, 1, false, [{ id: 2, invulnS: 3, x: 5 }]))
+    expect(world.robots.get(2)?.invulnerable).toBe(true)
+    applySnapshot(world, robots(3, 2, false, []))
+    expect(world.robots.get(2)?.invulnerable).toBe(true)
+  })
+
+  it('restores on full resync and clears immediately on explicit zero', () => {
+    const world = emptyWorld()
+    applySnapshot(world, robots(1, 0, true, [{ id: 1, invulnS: 3 }, { id: 2, invulnS: 3 }]))
+    applySnapshot(world, robots(2, 1, false, [{ id: 1, invulnS: 0 }]))
+    expect(world.robots.get(1)?.invulnerable).toBe(false)
+    expect(world.robots.get(2)?.invulnerable).toBe(true)
+    applySnapshot(world, robots(3, 0, true, [{ id: 1, invulnS: 0 }, { id: 2, invulnS: 2 }]))
+    expect(world.robots.get(1)?.invulnerable).toBe(false)
+    expect(world.robots.get(2)?.invulnerable).toBe(true)
+  })
+})
+
 describe('projectile color continuity', () => {
   it('uses projectile color without a visible owner and after robotGone', () => {
     const world = emptyWorld()

@@ -18,7 +18,8 @@ type Hub struct {
 	nextID uint64
 
 	// aiNew 每房间派生 AIService（从同一 ServerConfig 构造；nil = 禁用）。
-	aiNew func() *AIService
+	aiNew           func() *AIService
+	defaultSoloBots uint32
 }
 
 // maxSpectators caps the read-only audience per room. Spectators are pure
@@ -32,6 +33,18 @@ func NewHub() *Hub {
 // SetAIService 注入 AI 服务工厂（main 启动时调用；nil 或返回 nil = 禁用）。
 // 每房间一个 AIService：配额是房间/局作用域，跨房间不相干扰。
 func (h *Hub) SetAIService(newSvc func() *AIService) { h.aiNew = newSvc }
+
+// SetDefaultSoloBots configures newly-created rooms for an explicit local or
+// test deployment. Production keeps the zero default unless configured.
+func (h *Hub) SetDefaultSoloBots(count uint32) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if count > room.MaxSoloBots {
+		count = room.MaxSoloBots
+	}
+	h.defaultSoloBots = count
+}
+
 func (h *Hub) EnsureRoom(code string) *RoomConn {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -39,6 +52,7 @@ func (h *Hub) EnsureRoom(code string) *RoomConn {
 		return rc
 	}
 	rc := newRoomConn(code)
+	rc.Room.SetSoloBots(h.defaultSoloBots)
 	if h.aiNew != nil {
 		rc.ai = h.aiNew()
 	}

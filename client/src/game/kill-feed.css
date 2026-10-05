@@ -1,0 +1,15 @@
+/* One communications rail, with a dedicated status lane unaffected by kill traffic. */
+.hud-comms { position: absolute; inset: auto auto calc(100% + 12px) -2px; width: calc(100% + 2px); display: grid; gap: 6px; pointer-events: none; }
+.kill-feed { --feed-row: 26px; min-width: 0; border-left: 2px solid #36505f; background: #10141ae8; }
+.kill-feed[hidden] { display: none; }
+.kill-feed-heading { padding: 5px 9px; border-bottom: 1px solid var(--line); color: var(--fg-dim); font: 10px/1.4 var(--mono, monospace); letter-spacing: .08em; }
+.kill-feed-lines { position: relative; height: calc(6 * var(--feed-row)); overflow: hidden; contain: layout paint; margin: 0; padding: 0; list-style: none; }
+.kill-feed-line { position: absolute; inset: 0 0 auto; height: var(--feed-row); padding: 0 9px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg); font: 12px/var(--feed-row) var(--pixel, system-ui, sans-serif); }
+.kill-feed-line[hidden] { display: none; }
+@container (max-width: 540px) {
+  .kill-feed { --feed-row: 36px; }
+  .kill-feed-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; padding-inline: 7px; white-space: normal; overflow-wrap: anywhere; line-height: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kill-feed, .kill-feed * { animation: none !important; transition: none !important; }
+}

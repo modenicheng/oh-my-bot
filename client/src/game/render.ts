@@ -4,7 +4,7 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from './art'
+import { ink, mono, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
 import { appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
 const ROBOT_R = 0.6
@@ -32,8 +32,12 @@ export interface SayBubble {
 }
 export interface RenderExtras { bubbles: SayBubble[]; localAim?: number; feedback?: GameFeedback }
 
+/** 每帧热路径计数：供64人夹具验证视口裁剪不会退化为全实体绘制。 */
+export interface RenderFrameStats { robots: number; culledRobots: number; drawnRobots: number; delayedHealthReads: number }
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D
+  readonly lastFrameStats: RenderFrameStats = { robots: 0, culledRobots: 0, drawnRobots: 0, delayedHealthReads: 0 }
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('canvas 2d context unavailable')
@@ -49,6 +53,8 @@ export class Renderer {
   }
   render(world: WorldState, map: MapDefParsed, cam: Camera, extras: RenderExtras): void {
     const ctx = this.ctx
+    const stats = this.lastFrameStats
+    stats.robots = 0; stats.culledRobots = 0; stats.drawnRobots = 0; stats.delayedHealthReads = 0
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.fillStyle = ink.bg; ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
     const dpr = this.canvas.width / Math.max(1, cam.cw)
@@ -84,9 +90,12 @@ export class Renderer {
       if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan)
     }
     extras.feedback?.drawTrails(ctx, cam, world.tick)
+    const now = performance.now()
     for (const r of world.robots.values()) {
+      stats.robots++
       const b = r.base
-      if (!b?.pos) continue
+      if (!b?.pos || !visibleWorld(cam, b.pos.x, b.pos.y, 96)) { stats.culledRobots++; continue }
+      stats.drawnRobots++
       if (r.dead) {
         ctx.fillStyle = ink.dim; ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText(`${r.respawnInS}s`, cam.toPxX(b.pos.x), cam.toPxY(b.pos.y))
@@ -94,11 +103,13 @@ export class Renderer {
       }
       const self = b.id === world.self?.robotId
       const heading = self && extras.localAim !== undefined ? extras.localAim : b.heading
-      const invulnerable = (r.invulnUntil ?? 0) > performance.now()
+      const invulnerable = r.invulnerable || (r.invulnUntil ?? 0) > now
       drawRobot(ctx, cam, b.pos.x, b.pos.y, heading, r.color || ink.cyan, self,
         r.shieldOn, r.dashing, invulnerable, world.tick)
-      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable,
-        extras.feedback?.delayedHealth(b.id, r.hpX10) ?? r.hpX10 / 10)
+      const delayedHp = extras.feedback
+        ? (stats.delayedHealthReads++, extras.feedback.delayedHealth(b.id, r.hpX10, now))
+        : r.hpX10 / 10
+      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable, delayedHp)
     }
     // Dim the rendered world itself; HUD feedback and speech stay above the fog.
     this.drawVisionMask(world, map, cam)
@@ -207,7 +218,7 @@ export class Renderer {
       if (age > 4) continue
       const x = cam.toPxX(pos.x)
       const radius = Math.max(6, ROBOT_R * cam.scale)
-      const guarded = r.shieldOn || (r.invulnUntil ?? 0) > now
+      const guarded = r.shieldOn || r.invulnerable || (r.invulnUntil ?? 0) > now
       const anchorY = cam.toPxY(pos.y) - (guarded ? radius * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : radius) - 38
       if (x < -radius || x > cam.cw + radius || anchorY > cam.ch) continue
       ctx.save()

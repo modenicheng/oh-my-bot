@@ -44,6 +44,7 @@ describe('frame + protobuf round-trip', () => {
       livenessCheckMs: TransportTiming.LIVENESS_CHECK_MS,
       serverReadTimeoutMs: TransportTiming.SERVER_READ_TIMEOUT_MS,
       serverWriteTimeoutMs: TransportTiming.SERVER_WRITE_TIMEOUT_MS,
+      maxFrameBytes: TransportTiming.MAX_FRAME_BYTES,
     }).toEqual({
       framePing: 0x00,
       framePong: 0x01,
@@ -55,6 +56,7 @@ describe('frame + protobuf round-trip', () => {
       livenessCheckMs: 1000,
       serverReadTimeoutMs: 10000,
       serverWriteTimeoutMs: 2000,
+      maxFrameBytes: 65536,
     })
   })
 
@@ -71,6 +73,7 @@ describe('frame + protobuf round-trip', () => {
       ['FRAME_PING', 0x00], ['FRAME_PONG', 0x01], ['FRAME_UP', 0x02], ['FRAME_DOWN', 0x03],
       ['CONNECT_TIMEOUT_MS', 8000], ['PING_INTERVAL_MS', 2000], ['LIVENESS_TIMEOUT_MS', 8000],
       ['LIVENESS_CHECK_MS', 1000], ['SERVER_READ_TIMEOUT_MS', 10000], ['SERVER_WRITE_TIMEOUT_MS', 2000],
+      ['MAX_FRAME_BYTES', 65536],
     ]
     for (const [name, val] of specs) {
       expect(body).toContain(`${name} = ${val};`)

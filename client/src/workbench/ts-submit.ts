@@ -2,7 +2,7 @@
 // 草稿键按语言分离、ScriptSubmit payload 组装。不依赖 Monaco 与 DOM，
 // 便于单元测试。
 
-import { ScriptLanguage } from '@omb/protocol'
+import { ScriptLanguage, TransportTiming } from '@omb/protocol'
 
 export type BotLanguage = 'js' | 'ts'
 
@@ -113,6 +113,23 @@ export function pickEmitJs(files: TsEmitFile[]): string | undefined {
 /** 语言 → 协议枚举（ScriptSubmit.language）。 */
 export function languageToProto(language: BotLanguage): ScriptLanguage {
   return language === 'ts' ? ScriptLanguage.TS : ScriptLanguage.JS
+}
+
+/** 单帧字节上限（64 KiB）：生成协议 TransportTiming 单一权威源，
+ * 与服务器 websocket 读上限互钉（golden.test.ts / timing_test.go 对拍）。 */
+export const MAX_FRAME_BYTES = TransportTiming.MAX_FRAME_BYTES
+
+/** 客户端提交前预检：按编码后整帧字节数（非字符数）判定。 */
+export function scriptFrameTooLarge(byteLength: number): boolean {
+  return byteLength > MAX_FRAME_BYTES
+}
+
+/** 超限文案：显示实际字节数、上限与检测阶段；TS 附双源码计入说明。 */
+export function oversizeScriptMessage(frameBytes: number, language: BotLanguage): string {
+  const hint = language === 'ts'
+    ? 'TS 提交同帧携带编译 JS 与 TS 原文，两条源码都计入帧大小；'
+    : ''
+  return `脚本过大：编码后整帧 ${frameBytes} 字节，超过单帧上限 ${MAX_FRAME_BYTES} 字节（64 KiB）。${hint}已在本地预检拦截，未发送到服务器；请精简后重试。`
 }
 
 /**
