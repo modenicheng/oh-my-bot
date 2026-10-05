@@ -323,12 +323,22 @@ message EvScriptRollbackResult {
   optional ScriptLanguage language = 6; // ok 时 = 编辑语言（缺省 = JS；owner-only）
 }
 
-message SnippetSourceView { // 单条官方 Snippet 的可查看源码（当教材）
+message SnippetSourceView { // 单条官方 Snippet 的目录元数据 + 可查看源码（当教材）
   SnippetKind kind = 1;
   string title = 2;
   string source = 3; // 官方模块源码（与服务器组合执行的同一定稿）
   double default_p1 = 4;
   string default_s1 = 5;
+  // 审计 X-2：目录元数据由服务器 catalog 单源下发，客户端不再手抄一份。
+  // param 描述控件形态：NONE=0 无参数 / NUMBER=1 数值范围 / WAYPOINTS=2 路径点。
+  uint32 param = 6;
+  double min = 7;   // NUMBER：下界（含）
+  double max = 8;   // NUMBER：上界（含）
+  double step = 9;  // NUMBER：步进
+  string unit = 10; // NUMBER：单位（"%" / "m"，可为空）
+  string hint = 11; // 展示用说明
+  string key = 12;  // 客户端本地行键（autoAim/shield/...；用于草稿与控件接线）
+  bool default_enabled = 13; // 默认是否启用
 }
 
 message EvSnippetResult { // SnippetConfig 的定向回执（不落事件日志，仅下发）

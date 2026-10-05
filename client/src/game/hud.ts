@@ -96,8 +96,9 @@ export class Hud {
     if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
     this.msgLine.setAttribute('aria-atomic', 'true')
     this.comms.className = 'hud-comms'
-    this.killFeed = new KillFeed(this.comms)
+    // Keep the transient status lane above the bottom-anchored kill feed so hit messages do not move it.
     this.comms.append(this.msgLine)
+    this.killFeed = new KillFeed(this.comms)
     this.leftPanel.append(this.comms)
     this.innerBanner = document.createElement('div')
     this.innerBanner.id = 'hud-inner-ring'

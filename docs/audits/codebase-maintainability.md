@@ -5,7 +5,7 @@
 >
 > **如何追加**：在「追加记录」节添加新条目（日期 + HEAD + 变更范围 + 新发现/复核结论），并同步更新对应发现的「状态」与「位置」。
 > **如何修复**：修完一条就把状态改为 ✅ 并注明轮次，**不要删除条目**（保留追溯）；发现已过时改 ❌ 并写明原因。
-> **行号基准**：Round 7 收尾（HEAD `90d5819`）。旧条目的历史行号仅供追溯；修复前一律按符号名重新定位。
+> **行号基准**：Round 8（HEAD `6f90d52`）。旧条目的历史行号仅供追溯；修复前一律按符号名重新定位。
 >
 > 状态图例：☐ 待修 · 🔵 需产品/设计拍板 · ⚠️ 部分完成 · ✅ 已修 · ❌ 已过时
 > 编号规则：`X-` 跨端 · `S-` 后端 · `C-` 前端；括号内是历史轮次的旧编号，便于对照聊天记录。
@@ -23,6 +23,7 @@
 | R5 | 2026-10-04 | HEAD `3d7cdbd` + 工作树（44M+3??） | 增量审计 12 文件（axis-src/hud/index.html/3 个 check 脚本等）：C-4 三度确认未修；C-20 恶化 2→3 轨；X-10 回退（axis-src 手抄魔法位）；C-16 改善 4→3；新发现 C-28 与 D17 |
 | R6 | 2026-10-04 | `1301cdc` → `71925db` | 六批原子修复：前端基础/玩法、脚手架、后端运行时/sim、跨端契约；34 文件 / 317 测试、typecheck/build、Go 全量通过 |
 | R7 | 2026-10-04 | `71925db` → `90d5819` | 关闭跨端单源、观战控制、接管/雾效/hash、后端去重；完成语言版本链/body portal、Monaco 开屏预取与真实资源加载器；45 文件 / 477 测试及 Go/race 全通过 |
+| R8 | 2026-10-05 | HEAD `6f90d52` + 工作树（X-2 半成品） | repo-steward 全库只读审计：复核 R7 后 88 文件/+3650 行增量（积分榜重设计、kill-feed/shadow/death、64 机填充、墙影、64KiB 帧上限、mapgen Gen7）+ 仓库卫生/文档层；结论：代码增量收敛，C-11 回退、S-6 恶化，新增卫生清理清单（移交 TODO.md 跟踪） |
 
 R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以当前符号而非历史行号定位。
 
@@ -41,16 +42,17 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 | D5 | 客户端可见游戏数值（视野 / 开火 / HP/能量 / hack / 无敌 / tick rate） | `sim` 常量 → `SimTuning` → 客户端 `game/tuning.ts`；回放积分走权威 `EvMatchEnd.scores` | ✅ R7：高漂移集由服务器可靠下发，旧服务器兜底值以黄金字节互钉 |
 | D6 | join/只读观战错误路由 | proto `EvControlNotice.Code` → Go emit / TS 分流；旧 `EvSay` 仅过渡兼容 | ✅ R7：结构化 code 为主路由，新客户端去重兼容 say，前缀不再是契约 |
 | D7 | AI 状态/错误路由 | proto `EvControlNotice.Code` → `ai_bridge.go` / Workbench AI 面板 | ✅ R7：请求失败、禁用、编译失败、stale、说明与回退失败均按枚举分流 |
-| D8 | Snippet 目录元数据 | `server/internal/snippet/catalog.go:23-50` ↔ `client/src/workbench/snippets.ts:30-108` | 人肉对齐（客户端注释自认「漂移由服务端回执兜底」） |
+| D8 | Snippet 目录元数据 | `server/internal/snippet/catalog.go` ↔ `client/src/workbench/snippets.ts:30-108` | 人肉对齐（客户端注释自认「漂移由服务端回执兜底」）；X-2 工作树推进中（R8：结构已加、填充为零） |
 | D9 | WS 帧字节/心跳 | proto 权威常量 → TS `messages.ts`/`ws.ts` 与 Go `netws/handler.go` | ✅ R7：`ceb69bd` 将帧与心跳时序收敛为协议单源，并有双侧黄金/时序测试 |
 | D10 | axis_mask 位常量 | proto 注释 ↔ `sim/contract.go:212-217` ↔ `input.ts:15-18` ↔ `axis-src.ts:30`（魔法位 `& 2`） | ✅ R6：`axis-src.ts` 改用 `AXIS_AIM` 导入，删除魔法位 `& 2` |
-| D11 | 颜色字面量 | `art.ts` ink 调色板（规范处）vs 十余处散写 | ⚠️ R6：`ink.white` 与 HUD amber 切片已收敛；其余颜色/字体旁路仍待处理 |
+| D11 | 颜色字面量 | `art.ts` ink 调色板（规范处）vs 十余处散写 | ⚠️ R8：R6 收敛被回退（`#8cff66`/`#ffb066` ×4、scoreboard amber ×2），服务端 bot 色板扩至 8 色（`solo_bots.go:29`）；其余旁路仍待处理 |
 | D12 | 回放 NDJSON schema / record type / `visual` 紧凑数组版本 | proto `ReplaySchemaVersion` / `ReplayRecordType` / `ReplayVisualVersion` → Go/TS 磁盘适配层 | ✅ R7：`51cec6e` + `06cd7b6` 单源化并测试未知版本/类型与 protojson 输入 |
 | D13 | phaseName / 房态文案 | `render.ts:41-47` vs `replay/index.ts:491-496`；`lobby.ts:117`「空闲」vs `live.ts:235`「等待开场」 | 双实现 + 语义未确认是否刻意 |
 | D14 | 手册文档 vs 服务器 decay 数值 | `docs/manual/{rules,reference,start}` vs `sim/gameplay.go:24-37` | R3 核对**一致** ✅（0.5s 宽限 / 每秒回退 0.5s / 30s 冷却全对） |
 | D15 | Uplink lift 比例 0.38 | `render.ts:84` ↔ `art.ts:235` ↔ `art.ts:236`（0.48/0.12 新增） | ✅ R6：`UPLINK_LIFT` 由 `art.ts` 单点导出并供渲染复用 |
 | D16 | ASCII 字符方言 | `startup-art.ts:15` `'#%+=*#'`、`startup.ts:49` `'01[]{}+*#'`、`startup-art.ts:19` `'#*+:.'` | R3 从 2 套变 3 套（低危，可读性问题） |
 | D17 | HUD 键位摘要 | `index.html:86`（帮助面板）+ `index.html:80`（canvas aria-label）↔ `docs/manual/rules/controls.md` 键位表 | 手抄三处、无对拍（R5 新发现） |
+| D18 | 称号评选规则文案 | `server/internal/stats/titles.go` ↔ `client/src/game/scoreboard.ts:79-96`（TITLE_DETAILS 注释自认 mirror） | 阈值/占比手抄镜像、无漂移测试（R8 新发现） |
 
 ---
 
@@ -59,8 +61,9 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 ### X-1 ✅ Bot Script API 四处平行定义（原 R1-P0.1）— R7 已修
 - **R7 结果**：`62d675b` 以 `packages/bot-api/src/index.ts` 为唯一源，生成 Monaco 补全/声明、AI provider prompt 与 Go runtime 合约；`bot_api_drift_test.go` / `script/bot_api_drift_test.go` 防止方法与常量重新分叉。
 
-### X-2 ☐ Snippet 目录双份（原 R1-P0.2）
+### X-2 ⚠️ Snippet 目录双份（原 R1-P0.2；R8 工作树进行中）
 - proto 已有 `EvSnippetResult.sources` 且 `snippet-panel.ts` 在消费；扩 `SnippetSourceView` 加 `min/max/step/unit/hint` 字段，面板改服务器驱动，`SNIPPET_ROWS` 退化为离线兜底。proto additive，旧客户端安全。
+- **R8 工作树现状（未提交）**：proto 字段 6–13 与 `catalog.go` 的 `ParamKind/Param/Module.Key/Param/DefaultEnabled` 已加，但唯一下发点 `glue/snippets.go` `snippetSourceViews()` **零填充**、catalog 条目零处写新字段、客户端未动——就此合入 wire 恒默认值（`param=0`/`key=""`），D8 现状不变；`catalog.go` 亦未过 gofmt（全库唯一命中，CI 会挂）。
 
 ### X-3 ✅ 游戏数值：协议下发取代客户端复算（原 R1-P0.3 + R2）
 - R7：`dbd7c66` 在 `EvMapBootstrap` 可靠下发 `SimTuning`（tick/HP/能量/开火/hack/无敌/视野），客户端集中经 `game/tuning.ts` 消费；黄金字节与 sim 常量测试锁定，旧服务器仍有兼容兜底。
@@ -93,11 +96,11 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 
 ### 高影响
 - **S-1 ✅ 节奏常量双源**（原 R1-H1，R2 复核行号未变）：`glue/match.go:31-33` 删本地 `tickHz/frameDue/matchTicks`，改引 `sim.TickRate/FrameBudget/MatchTicks`；`match.go:622,:661` 终局判定统一 `m.tick >= sim.MatchTicks`；`scoreboardEveryTicks`（:685）绑 `sim.TickRate`。~10 行，消除「改局长 glue 不知道」。
-- **S-2 ☐ 几何原语 4 包各一份**（原 R1-H2）：segment-AABB ×3（`sim/combat.go:272-289` slab / `snapshot/wallindex.go:155` slab / `nav/nav.go:474-500` Liang-Barsky）；LOS 实质 4 条；point-rect 距离 ×2 逐字符相同（`nav/nav.go:515-519` vs `mapgen/geometry.go:76-86`）；zoneLocked ×3 + view.go:163 内联第 4 份；finite ×5；arena 半径「80−0.6」×2。提案：建 `internal/geom`；**红线：mapgen 刻意零 Sqrt/Hypot 保跨平台确定性（geometry.go:74-77 注释），只合并公式同构部分，配交叉测试**。R2 确认 walls.go 新代码守住了纪律且未加新几何助手。
+- **S-2 ☐ 几何原语 4 包各一份**（原 R1-H2）：segment-AABB ×3（`sim/combat.go:272-289` slab / `snapshot/wallindex.go:155` slab / `nav/nav.go:474-500` Liang-Barsky）；LOS 实质 4 条；point-rect 距离 ×2 逐字符相同（`nav/nav.go:515-519` vs `mapgen/geometry.go:76-86`）；zoneLocked ×3 + view.go:163 内联第 4 份；finite ×5；arena 半径「80−0.6」×2。提案：建 `internal/geom`；**红线：mapgen 刻意零 Sqrt/Hypot 保跨平台确定性（geometry.go:74-77 注释），只合并公式同构部分，配交叉测试**。R2 确认 walls.go 新代码守住了纪律且未加新几何助手。R8：Gen7 增量（generator.go/walls.go）仍守住红线（`math.Sqrt2` 常量合规；geometry.go 本轮零 diff，唯一 Sqrt 仍是 sanction 的 slotDirection 用点）；新增微缩复制——`objectives.go:355` replenishCores 与 `:374` spawnCore 的「锁区外核心」谓词同构，可抽 `coreOutsideLock`。
 - **S-3 ☐ 轴/命令五层逐字段样板**（原 R1-H3）：每个轴在 collector/merge/resolve/clone/arbitrate 五层各一段同构代码，散布 8 处（`sim/control.go:118-232,327-344`、`script/collector.go:52-146`、`script/goruntime.go:417-461`、`glue/solo_bots.go:38-55`）。提案：`sim.Axis` 描述表驱动 + `snippetCollector.guarded(axis, set)` 收敛 6 个 setter。-250~300 行；新增轴从「改 10 处」变「改 1 张表」。
 - **S-4 ⚠️ stats projector 双 switch**（原 R1-H4）：`projector.go:197-293` applyEvent 与 `:462-543` eventKey 必须成对维护，漏改 eventKey 该事件被静默去重丢弃（:161-163）；`titles.go:79-114` awardMax 双胞胎泛型合并。表驱动或 protojson 生成指纹，-120 行。
 - **S-5 ☐ 三个回放驱动循环**（原 R1-H5，R2 复核仍成立）：`sim/replay.go:104-149` / `sim/replay_visual.go:37-79` / `stats/replay.go:37-100` 同一「读→校验→恢复→跳过→逐 tick」骨架；错误文案已分叉（replay.go:113 vs replay_visual.go:46）；stats 的 seq 分配（:56-58,:87-89）镜像 glue `eventSeq`（match.go:225-226）。提案：`sim.ReplayCursor` + 统一 sentinel `ErrReplayMissingStart` + projector 自持序号。-80 行。
-- **S-6 ☐ 每帧 AOI 算两遍**（原 R1-H6）：`match.go` step() 中 `runScripts`（:743-750）与快照循环（:584-591）对同一机器人以相同参数各调一次 `BuildObservation`。提案：step 开头构建 `obsByRobot` 共用。-20 行 + 64 机 60Hz 下省一半 LOS 计算（对 12ms 帧预算实质让利）。
+- **S-6 ☐ 每帧 AOI 算两遍**（原 R1-H6）：`match.go` step() 中 `runScripts`（:743-750）与快照循环（:584-591）对同一机器人以相同参数各调一次 `BuildObservation`。提案：step 开头构建 `obsByRobot` 共用。-20 行 + 64 机 60Hz 下省一半 LOS 计算（对 12ms 帧预算实质让利）。R8 恶化：`2e5e74f` 将 SOLO 默认提到 63 机（`room.go:98,350`），两处调用点未变（match.go 快照循环/runScripts），64→128 次 LOS/tick 成为常态而非理论。
 
 ### 中影响
 - **S-7 ✅ `snapshot.World{...}` 字面量 ×5**（原 R1-H7）：match.go ×4 + ai_bridge.go:121-124 → 加 `WorldOf(wv sim.WorldView)` 转换。-35 行。
@@ -120,6 +123,7 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **S-21 ☐ 测试夹具重复**（原 R1-L7）：script 包 4 套 ScriptFrame 夹具 + `server/tmp/manualcheck` 第 5 套；「写 JSONL 再读回」循环 ×4 → 建 `internal/testutil`。注意：R2 新增的 objectives/mapgen 测试全部复用既有夹具（uplinkSim/stepTicks/recordingSink），零拷贝 ✅。
 - **S-22 ☐ 上行消息路由三处维护**（原 R1-L8）：`main.go:395-474` 观战拒绝列表 + 玩家 switch + glue Session 方法 → glue `UpstreamRouter` 注册表。
 - **S-23 ☐ main.go 职责混合**（原 R1-L9）：GC 调优 + HTTP 路由 + 关停 + 协议路由 → HTTP 路由抽 `serverapi`，GC 移 `ai`。
+- **S-25 ☐ R8 小件杂项**：`mapgen/generator.go:124` `targetAlive = 4 + (participants-1+1)/2` 的 `-1+1` 恒等死算术（读者会误读为 ceiling/偏移意图）；solo bot 数量 clamp 三连（`cmd/omb/main.go:167-181` / `glue/hub.go:37-45` / `room/room.go:234-243`）同一不变量三份平行实现（防御性冗余，收敛属可选）。
 
 ---
 
@@ -127,9 +131,9 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 
 ### 高影响
 - **C-1 ✅ 观战交互三件套逐字复制**（原 R1-H1）：`10ec947` 新增 `replay/spectate-controls.ts`，Live/Replay 共用 wheel、键盘、指针拖拽、按钮接线与 dispose；调用方保留 Space/重绘差异，440 行契约测试冻结行为。
-- **C-2 ⚠️ scripts harness 复用率极低**（原 R1-H3，R3 未加剧、R4/R5 欠账微增但单脚本质量上升）：18 个 .mjs 5,077 行中估计 700-900 行复制粘贴（spawn 服务器 ×9、WS 帧 ×5、Fixture 假服务器 ×2 逐字相同、地图 JSON ×3、静态服务器+MIME ×2、pageerror 样板 ×8、AudioContext Proxy ×2）。建 `scripts/harness.mjs` 分批迁移。-500~800 行，新脚本从「拷 300 行」变「写 30 行断言」。R3：6 个脚本全是就地改断言。R4：aim-guard-check 大幅就地改善（sleep→until 轮询、经真实编辑器 UI 提交 navigateTo、finally 清理）。R5 计数：`data-takeover` 断言 3 文件 7 处（aim-guard :160,:212,:225,:228 / game-feel :498-515 / takeover-live :54 helper）、「编辑器提交脚本」样板 10 份（aim-guard 3 / round2 4 / takeover-live 1 / predictive-shield 1 / game-feel 1）、`until()` 本地副本 11 份；正面样本：game-feel 的 `assertHelpAnchor` 1 份定义 4 处复用、takeover-live 重写为真效果断言（见正面确认）。
-- **C-3 ☐ 渲染器脚手架重复 + 分叉扩大**（原 R1-H5，R2/R3 恶化）：game/render.ts vs replay/render.ts——构造函数逐字相同、`resize()` game 有同尺寸短路 replay 没有（拖窗口清屏抖动）、`ROBOT_R`/`FONT_11` 双份、死亡倒计时块重复、drawBubbles 两版；且 game 路径新增 lift/trails/delayedHealth extras，replay 全没有，**分叉在扩大**。提案：art.ts 加 `createCanvas2d/resizeCanvas2d/drawRespawnCountdown` + 常量归一。等 game-feel 波次合入后动。
-- **C-4 ✅ cameraZoom 双推进真 bug**（原 R2-B1；R3/R4/R5 三轮确认未修）：`feedback.ts:306-314` 有状态指数平滑（无 per-tick 缓存）被 `controls.ts:411`（drawFrame，rAF）与 `controls.ts:440`（sampleAndSend，60Hz interval）各调一次——两行逐字相同，R4 工作树引入（HEAD 零调用点），R5 的 +4 行未触及。同 tick 第二次调用 elapsed 兜底为 1，每 tick 走两步，收敛速度随刷新率变化（144Hz ≈ 204 步/s）；`camera.ts:30-31` setZoom 钳制 [0.85,1.05] 使误差有界但仍在。R5 新增的缓出方向测试（feedback.test.ts:389-397）全用不同 tick，**未覆盖同 tick 双调用**。附带：该行（含 `!!self?.dashing && !self.dead` 谓词）在两条循环间整行复制，是 C-26 双循环共享可变状态的直接实证。修法 ~3 行：tick 未变返回缓存，或只留 drawFrame 一处调用。
+- **C-2 ⚠️ scripts harness 复用率极低**（原 R1-H3，R3 未加剧、R4/R5 欠账微增但单脚本质量上升）：18 个 .mjs 5,077 行中估计 700-900 行复制粘贴（spawn 服务器 ×9、WS 帧 ×5、Fixture 假服务器 ×2 逐字相同、地图 JSON ×3、静态服务器+MIME ×2、pageerror 样板 ×8、AudioContext Proxy ×2）。建 `scripts/harness.mjs` 分批迁移。-500~800 行，新脚本从「拷 300 行」变「写 30 行断言」。R3：6 个脚本全是就地改断言。R4：aim-guard-check 大幅就地改善（sleep→until 轮询、经真实编辑器 UI 提交 navigateTo、finally 清理）。R5 计数：`data-takeover` 断言 3 文件 7 处（aim-guard :160,:212,:225,:228 / game-feel :498-515 / takeover-live :54 helper）、「编辑器提交脚本」样板 10 份（aim-guard 3 / round2 4 / takeover-live 1 / predictive-shield 1 / game-feel 1）、`until()` 本地副本 11 份；正面样本：game-feel 的 `assertHelpAnchor` 1 份定义 4 处复用、takeover-live 重写为真效果断言（见正面确认）。R8：console-count/kill-feed 两脚本消费 FixtureServer，kill-feed-check 作为 pass 函数被 game-feel-check 跨脚本复用（新形态）；残余欠账：freshState/快照 robot 映射仍逐脚本手抄、startup-check 未迁 FixtureServer。
+- **C-3 ⚠️ 渲染器脚手架重复**（原 R1-H5；R8：`6f90d52` 部分关闭）：已收敛——art.ts 新增 `createCanvas2d/resizeCanvas2d/visibleWorld/ROBOT_R` 且 game/replay 双侧消费，replay 获得同尺寸短路（拖窗清屏抖动两处同修）；未收——`FONT_11` 仍 3 份（art.ts 私有未导出 / render.ts 自定义 / replay 内联）、死亡倒计时两版、drawBubbles 两版、game-only extras（trails/delayedHealth/localAim）仍单侧，art.ts 内部 `drawRobot`/`drawVitals` 仍写 `0.6` 字面量而非 ROBOT_R。
+- **C-4 ✅ cameraZoom 双推进真 bug**（原 R2-B1；R3/R4/R5 三轮确认未修）：`feedback.ts:306-314` 有状态指数平滑（无 per-tick 缓存）被 `controls.ts:411`（drawFrame，rAF）与 `controls.ts:440`（sampleAndSend，60Hz interval）各调一次——两行逐字相同，R4 工作树引入（HEAD 零调用点），R5 的 +4 行未触及。同 tick 第二次调用 elapsed 兜底为 1，每 tick 走两步，收敛速度随刷新率变化（144Hz ≈ 204 步/s）；`camera.ts:30-31` setZoom 钳制 [0.85,1.05] 使误差有界但仍在。R5 新增的缓出方向测试（feedback.test.ts:389-397）全用不同 tick，**未覆盖同 tick 双调用**。附带：该行（含 `!!self?.dashing && !self.dead` 谓词）在两条循环间整行复制，是 C-26 双循环共享可变状态的直接实证。修法 ~3 行：tick 未变返回缓存，或只留 drawFrame 一处调用。R8 复核：修复保持；R5 指出的「同 tick 双调用无测试」缺口已由 feedback.test.ts 新用例补上（draw/sample 同 tick 各调一次 + 两实例双推对照）。
 - **C-5 ✅ Go 大写 Vec2/num 解析三份**（原 R1-H4）：`mapdef.ts:39-52` / `replay/model.ts:309-316` / `replay/index.ts:478-489`（+health-check.mjs 内联第 4 份）→ `lib/gojson.ts`。-40 行。
 
 ### 中影响
@@ -146,7 +150,8 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
   - 伤害阴影 `'#071019'`（feedback.ts:409）vs ink.bg 近似色；
   - 字体旁路 ×2：`feedback.ts:402` `'14px ui-monospace'` 绕过 `art.ts:9` mono；`startup.ts:60` 重写 Fusion Pixel 串（startup 不能 import art.ts 属合理，但应提本地 const 或 tokens 文件）。
   - 提案：ink 补 `white/glow`，CSS 用 var(--amber)，伤害飘字接 art.mono。
-- **C-12 ☐ phaseName / 房态文案双份**（原 R1-H2 + M7）：phaseName 合并入 `@omb/protocol`（枚举名映射属协议知识）；`roomStateName(state, ctx?)` 参数化「空闲/等待开场」差异。
+  - **R8 回退（首次出现「修复中被回退」样本）**：`art.ts:369,371` 原 `ink.white`/`ink.lime` 改裸字面量 `'#ffb066'`/`'#8cff66'`（git show 对照实锤），同对手抄 `app.css:114-115`（#hud-hp-fill/#hud-hp-delay），共 4 处无 token；`scoreboard.css:13,85` 新增 amber 族字面量 2 处（`app.css:13` 已有 `--amber`）。
+- **C-12 ☐ phaseName / 房态文案双份**（原 R1-H2 + M7）：phaseName 合并入 `@omb/protocol`（枚举名映射属协议知识）；`roomStateName(state, ctx?)` 参数化「空闲/等待开场」差异。R8 延伸：重生倒计时文案三处（`death.ts:8` 整数秒 / `scoreboard.ts:17` toFixed(1) / `render.ts:93` canvas），`deathStatus` 已抽但 scoreboard 未复用。
 - **C-13 ✅ music Worker 消息类型双份**（原 R1-M8）：`renderer.ts:9-19` vs `render.worker.ts:10-20` → `render-protocol.ts`。
 - **C-14 ⚠️ escapeHtml ×3**（原 R1-M9）：R6 已合并 manual/AI 三处语义一致的 `&<>` 变体；`replay/library.ts` 还需转义引号，保留独立实现。
 - **C-15 ✅ math 微函数**（原 R1-L1）：clamp（music/music.ts:35 export vs camera.ts:56 私有）、clamp01（hud.ts:419）、lerp/lerpAngle（replay/index.ts:356）→ `lib/math.ts`。
@@ -161,6 +166,8 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **C-24 ✅ hud updateTakeover/updateSkills 重复推导**（R3-A7）：self/dead 推导 ×2 → 传参。-2 行（次要，顺手）。
 - **C-25 ☐ help-toggle escape/leave 语义不可区分**（R3-A5，R5 复核仍成立）：`help-toggle.ts:10` 两 action 同返回 false → 合并 `'close'` 或给 leave 附加语义。
 - **C-28 ✅ aim 归属判定的客户端双投影**（R5）：`5087ce8` 抽出 `axis-src.isAimUnderScript`，HUD 文案与 controls guard 共用同一真值表，并覆盖 assist/能力/权威 turret source/手操轴组合。
+- **C-29 ☐ titleBadge 第 3 份浮层定位实现**（R8）：`scoreboard.ts:123-137` `positionTitleDetail` 手写 anchor 钳制/上下翻转/body portal（`:216`），而 `workbench/script-version-placement.ts:40` 已有可复用 `computePanelPlacement`（同为 body portal 形态）。
+- **C-30 ☐ kill-feed 行数双写**（R8）：`kill-feed.ts:4` `KILL_FEED_ROWS = 6` ↔ `kill-feed.css:6` `calc(6 * var(--feed-row))`，改行数需两处同步。
 
 ### 架构建议
 - **C-26 ☐ CanvasStage**（原 R1 架构-1）：三处手写 canvas+DPR+rAF 循环（controls.ts / live.ts / replay/player.ts）→ 统一宿主，把「同尺寸短路」「空闲不重绘」变默认。C-4 的 bug 正是双循环耦合的代价；R4 又一笔实证：cameraZoom 调用行（含 dashing 谓词）在 drawFrame 与 sampleAndSend 间逐字复制（controls.ts:411/440）。**等 game-feel 波次合入后做**。
@@ -176,11 +183,12 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 | `usingWorker` getter | `music/renderer.ts:45-47` | ✅ R6 已删除（`efb8217`） |
 | `RING_MID` | `game/mapdef.ts:31` | ✅ R6 已删除（`efb8217`） |
 | `Sim.ProjectileViews/CoreViews/HealthPackViews` | `sim/view.go:96-100` | ✅ R6 已删除三个零调用 getter（`91c354d`） |
-| `Sim.View/RobotViews/UplinkViews/Arbitrated/Snapshot` | `sim/view.go:86-113` | 仅 sim 测试；`LineOfSight` 被 objectives.go:260 内部用，应降 unexported |
-| `Sim.SetSpawn/Respawn/SetWalls` | `sim/sim.go:238,286` / `collision.go:167` | 生产死；SetWalls 墙校验与 SetMap 的重复（留一删一） |
+| `Sim.View/RobotViews/UplinkViews/Arbitrated` | `sim/view.go:84,93,105,106` | 仅 sim 测试；`LineOfSight` 被 objectives.go 内部用，应降 unexported。R8 更正：`Snapshot` 不存在（基线即无，旧条目名过时） |
+| `Sim.SetSpawn/Respawn/SetWalls` | `sim/sim.go:238,286` / `collision.go:167` | 生产零调用但 sim 测试广泛使用（R8 更正：非纯死）；SetWalls 墙校验与 SetMap 的重复（留一删一） |
 | `Observation.PartnerID/IsPartner` 链 | `sim/contract.go:154-166` + `stats.SetPartnerMap` + encoder.go:247-248 恒 false | deprecated 兼容层，随旧数据支持到期评估删除 |
 | `handleUpstream` 的 `sendLossy` 参数 | `cmd/omb/main.go:472` | `_ = sendLossy` |
-| `server/tmp/manualcheck/`、`server/combat.log`、`server/crash.log`、根目录 `omb.exe` | — | 遗留产物，建议清出库 |
+| 根目录 `omb.exe`、`server/tmp/omb.exe`、`server/combat.log`、`server/crash.log` | — | 均已被 .gitignore 覆盖（R8 降级为本地磁盘卫生，非「在库里」）；`server/tmp/manualcheck/` 已消失 |
+| `ScoreRowRenderer.renderedOptions` | `client/src/game/scoreboard.ts:315,329,347` | R8 新增：声明/赋值/清零但全库零读取（死字段） |
 
 （R4 复核：客户端三件套仍死，行号未变。）
 
@@ -212,10 +220,20 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 5. **结构性**：C-26 CanvasStage · S-8 match.go 拆分 + S-6 单次 AOI · S-5 ReplayCursor · S-22/S-23。
 
 > R7 已移除完成项；部分完成项保留在上述后续范围中。
+> R8：落地顺序不变；X-2 已开工（工作树半成品，见条目）；R8 新增项（D18/C-29/C-30/S-25）并入第 2/3/4 节对应优先级；可执行的清理与在办清单移至根 `TODO.md` 跟踪。
 
 ---
 
 ## 8. 追加记录
+
+### Round 8（2026-10-05，HEAD `6f90d52` + 工作树，repo-steward 全库只读审计）
+- **范围**：R7 基线 `90d5819..6f90d52` 共 88 文件/+3650−559（积分榜重设计、kill-feed/shadow/death 新模块、ScoreRowRenderer 三端统一、64 机填充、墙影投影、64KiB 帧上限、mapgen Gen7/coreSupply、invuln 下发、beta.2 发布链）+ 未提交 X-2 半成品 + 仓库卫生/文档层；三路并行评审，关键断言（颜色回退、零填充、死字段）逐一实锤。
+- **headline**：代码增量整体**收敛**——C-3 脚手架单源、C-4 测试缺口补上、ScoreRowRenderer 三端统一、盾牌比例与帧上限魔法数归一、C-2 沿 harness 方向继续（出现跨脚本 pass 复用新形态）、本区间新增约 1600 行测试。熵增三点：C-11 首次回退（R6 收敛被部分撤销）、TITLE_DETAILS 新手抄（D18）、S-6 在 64 机下成常态。
+- **红线/契约复核（全过）**：mapgen 确定性零违反（唯一 `math.Sqrt` 仍是 sanction 的 slotDirection 用点，本轮 geometry.go 零 diff）；X-7 插画逐常量对比零漂移（Gen7 的内环掩体层与 coreSupply 均不触碰插画骨架常量）；冻结契约（aimAt/cameraShake/frameAt/delayedHealth 回写）全部遵守；C-20 接管标记单轨保持。
+- **正面样本**：`MAX_FRAME_BYTES` 协议单源（proto → `netws/handler.go` → `ts-submit.ts` 三侧）+ golden/timing 互钉，并修复 coder/websocket 默认 32768 静默断连 ~53KiB TS 提交帧的真实 bug；coreSupply 把参与人数编码进 MapDef（入 hashDef 与回放）而非墙钟，设计正确。
+- **台账动作**：轮次日志 +R8；行号基准更新至 `6f90d52`；X-2 ☐→⚠️（工作树零填充+gofmt 未过）；C-3 ☐→⚠️（部分关闭）；C-2/C-4/C-11/C-12/S-2/S-6/D8/D11 增补；新增 D18、C-29、C-30、S-25；死代码清单三处更正 + `renderedOptions` 入列。
+- **仓库卫生（发现移交 TODO.md 跟踪，本轮零清理动作）**：`package-lock.json` 冗余可删（全仓零引用，CI/脚本全 pnpm）；`client/artifacts/*.png` 误提交（4929dd5 带入，零引用）；`docs/plans/{ci-cd-release,docs-rewrite,round-2}.md` 已完结可归档；TODO.md 全勾选需重开（本轮已重开）；`.worktrees/oracle-bot` 分支已并入 main 可 remove；本地 ~130MB 旧二进制/日志（均已被 ignore）。CI 版本链（go 1.25 / node 22 / pnpm 读 packageManager）与 `-p 1` 串行 timing 门核对一致。
+- **未验证**：本轮为静态只读审计，未运行测试/构建（沿用 R7 记录的 477 测试基线）；工作树 X-2 的运行时行为未验证（服务端尚未填充，无新行为可测）。
 
 ### Round 7（2026-10-04，`71925db` → `90d5819`）
 - **跨端单源**：`62d675b` 关闭 X-1/D1（Bot API → Monaco/AI/runtime）；`dbd7c66` 关闭 X-3/X-4/D5（`SimTuning` + `EvControlNotice`）；`ceb69bd` 关闭 X-5/D9（帧与心跳）；`51cec6e` + `06cd7b6` 完成 Replay schema/type/visual 版本单源。

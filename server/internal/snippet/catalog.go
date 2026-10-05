@@ -56,10 +56,32 @@ type Setting struct {
 	S1     string
 }
 
+// ParamKind 参数控件形态（与 proto SnippetSourceView.param 对应）。
+type ParamKind uint32
+
+const (
+	ParamNone      ParamKind = 0 // 无参数
+	ParamNumber    ParamKind = 1 // 数值范围（Min/Max/Step/Unit）
+	ParamWaypoints ParamKind = 2 // 路径点字符串
+)
+
+// Param 参数控件元数据（审计 X-2：目录由服务器单源下发）。
+type Param struct {
+	Kind  ParamKind
+	Min   float64
+	Max   float64
+	Step  float64
+	Unit  string
+	Hint  string
+}
+
 // Module 一条官方 Snippet 的 catalog 条目。
 type Module struct {
 	Kind    Kind
 	Title   string // 展示名（协议下发）
+	Key     string // 客户端本地行键（草稿/控件接线，协议下发）
+	Param   Param  // 参数控件元数据（协议下发）
+	DefaultEnabled bool // 默认是否启用
 	Default Setting
 	// Validate 校验参数并返回规范化后的 Setting（越界/非法 → error）。
 	Validate func(s Setting) (Setting, error)

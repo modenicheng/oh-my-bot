@@ -1,35 +1,42 @@
 # TODO
 
-## 动效问题
+> 2026-10-05 重开：旧清单（动效/平衡/操作/UI 反馈）已全部完成，归档于 git 历史。
+> 以下为 R8 全库只读审计（HEAD `6f90d52`）后的在办与未做项；审计详情与证据见
+> [docs/audits/codebase-maintainability.md](docs/audits/codebase-maintainability.md) 的 Round 8 条目。
 
-- [x] 开屏加特效，描述为从 CLICK TO START 开始侵蚀的字符圈（可以随机侵蚀）整体大概 0.2s
-- [x] 占点的时候慢慢向上抬起，占领完成后视角砸下去砸出一个水花
-- [x] 命中后伤害数字（或延迟扣血指示，红色为实时血量，白底为被攻击前血量。注意连续攻击下白色条应该保持而不是被频繁刷新）或命中特效（或命中声音，一定时间内命中次数越多音高越高（抄的瓦连杀
-- [x] 低血量边框提示（红色、边框加点马赛克）
-- [x] 受击闪一下低血量边框；如果血量没有特别低就没有
-- [x] 冲刺的需要加特效，一个是拖尾，另一个是摄像机拉远一点点（在冲刺的时候，体现速度感）
+## 进行中（工作树未提交）
 
-## 平衡性问题
+- [ ] **X-2 Snippet 目录服务器单源**——半成品，当前状态合入无效：
+  - 服务端：`glue/snippets.go` `snippetSourceViews()` 补填 `Key/Param/DefaultEnabled`；`catalog.go` 各条目补数据；`gofmt`（当前是全库唯一未格式化文件，CI 会挂）。
+  - 客户端：`snippet-panel.ts` 改服务器驱动；`snippets.ts` 的 `SNIPPET_ROWS` 退化为离线兜底。
 
-- [x] 地图生成优化，现在掩体太稀疏、形状太规则
-- [x] 偷桩的时候允许进度保留，设计为：中断 0.5s（30ticks）进度不变，后面每 1s 递减进度（实现：每次回退 30ticks，占领速度的一半）
-- 护盾成功抵挡后有cd // 暂时不加
+## 代码待办（按台账编号）
 
-## 操作问题
+- [ ] **C-11 颜色收口**：`art.ts:369,371` 的 `#ffb066`/`#8cff66` 收进 ink/token（R6 收敛被本轮回退），同对手抄的 `app.css:114-115` 一并 token 化；`scoreboard.css:13,85` amber 字面量接 `var(--amber)`。
+- [ ] **D18 称号规则漂移测试**：`scoreboard.ts:79-96` TITLE_DETAILS 手抄 `stats/titles.go` 评选阈值，建漂移测试或改服务器下发文案。
+- [ ] **C-29** `scoreboard.ts:123-137` `positionTitleDetail` 复用 `script-version-placement.ts` 的 `computePanelPlacement`。
+- [ ] **S-6 AOI 单次构建**：`match.go` 快照循环/runScripts 两处 `BuildObservation` 合并为 `obsByRobot`；SOLO 默认 63 机后（`2e5e74f`）LOS 64→128 次/tick 已成常态。
+- [ ] **C-30** kill-feed 行数单源（`kill-feed.ts:4` ↔ `kill-feed.css:6`）。
+- [ ] **S-25** `generator.go:124` 的 `-1+1` 死算术；solo bot clamp 三连收敛（可选）。
+- [ ] 死代码：`scoreboard.ts` `renderedOptions` 死字段删除；台账死代码清单其余项（`Sim.View/...` 降 unexported 等）。
+- [ ] C-17 延续：feedback.ts 拆分与新内联视觉参数（0.012/0.004/steps 等）命名。
 
-- [x] 瞄准辅助开之后，用户按 `R` 夺回瞄准操作（已实现：辅助脚本正在瞄准时鼠标不再抢炮塔轴，HUD 提示按 R；R 后 Space 交回，guard 重新生效；服务端仲裁语义不变，旧服务器回退逐帧抢占）
-  - 理由：用户可能在开自瞄但没自动开火，需要在游戏界面按左键，但这样会抢占瞄准
-  - UI 反馈设计：当用户尝试在开启带有瞄准功能的脚本的情况下在游戏区域移动鼠标，在HUD 提示玩家按下R获得手动操作
-- [x] AI 生成代码后直接填入编辑器并装载运行；支持房间内版本历史与回退。
-  - 已实现：手动提交 / AI 改码 / 回退均形成服务端权威版本链，失败编译与过期 OCC 结果保留现役代码。
-  - 未提交草稿会自动暂存，可从版本面板找回；重连与跨局沿用同房间历史，离开房间后清理。
-  - AI 文案与排版已说明代码已应用并可回退，版本内容仅对所属玩家定向下发。
+## 需产品拍板
 
-## UI 反馈问题
+- [ ] C-25 Help Escape/Leave 语义是否区分。
+- [ ] S-24① decay 可观测性（中断清零 vs 缓慢衰减不可区分）；② busy 横跳绕过衰减。
+- [ ] C-12 文案统一：phaseName/房态双份；重生倒计时文案三处（`death.ts:8` / `scoreboard.ts:17` / `render.ts:93`）。
+- [ ] D17 HUD 键位摘要三处对拍机制。
 
-- [x] 脚本在控制哪个操作，对应的 HUD 应该通过 橙黄色标记当前操作正在被脚本接管；移除 UI 右下角的当前 xx 正在手操的提示，加一个操作的 HUD 块提示鼠标操作
-- [x] 进入房间后没有能够返回大厅的按钮
+## 仓库卫生（R8 审计发现，均未执行）
 
-## 设计问题
+- [ ] 删除 `package-lock.json`（npm 化石，全仓零引用；CI/脚本统一 `pnpm install --frozen-lockfile`）。
+- [ ] `git rm client/artifacts/*.png`（4929dd5 误提交的评审证据，零引用）并在 `.gitignore` 加 `client/artifacts/`。
+- [ ] 归档 `docs/plans/{ci-cd-release,docs-rewrite,round-2}.md`（三份已完结）。
+- [ ] `git worktree remove .worktrees/oracle-bot`（feat/oracle-bot 已并入 main，worktree 内含整套 node_modules）；顺带 prune Temp/D 盘根的旧 worktree。
+- [ ] 本地磁盘清理（均已被 ignore，不入库）：根/server/server/tmp 三处 ~130MB 旧 `omb.exe`/`omb.exe~`、`combat.log`/`crash.log`。
+- [ ] 文档小漂移：`docs/runbook.md` 构建步骤 `pnpm -r typecheck` → `pnpm typecheck`；README 布局表补 `bots/` 一行；根/client package.json 版本仍 `0.1.0`（release-please 只管 VERSION，确认是否刻意保留）。
 
-- [x] 编辑器在 CLICK TO START 手势后后台预加载；不阻塞开屏、音频解锁或连接，首次打开复用同一加载 Promise。预加载失败不会缓存，实际打开时可重试。
+## 已决策（不再列为任务）
+
+- 护盾成功抵挡后有 CD —— 暂时不加。

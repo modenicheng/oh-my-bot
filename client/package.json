@@ -19,7 +19,8 @@
     "capture:manual": "tsx scripts/capture-manual-assets.mjs",
     "test:live-spectator": "tsx scripts/live-spectator-check.mjs",
     "test:versions": "tsx scripts/version-overlay-check.mjs",
-    "test:console-count": "tsx scripts/console-count-check.mjs"
+    "test:console-count": "tsx scripts/console-count-check.mjs",
+    "test:assist-focus": "tsx scripts/assist-focus-check.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",

@@ -5,19 +5,9 @@ import './scoreboard.css'
 
 export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
 export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number; assist?: number }
-export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; respawnInS?: number; replayEvidence?: ReplayTitleEvidence }
+export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; replayEvidence?: ReplayTitleEvidence }
 
 export type ScoreRowOptions = { titles?: boolean; ended?: boolean }
-
-export function scoreState(row: Pick<ScoreDisplay, 'self' | 'dead' | 'status' | 'respawnInS'>, ended = false): string {
-  if (ended) return row.self ? '自己' : ''
-  if (row.status === 'unknown') return row.self ? '自己' : ''
-  if (row.dead || row.status === 'dead') {
-    const seconds = row.respawnInS
-    return `${row.self ? '自己 · ' : ''}阵亡 · ${Number.isFinite(seconds) && (seconds ?? 0) > 0 ? `${seconds!.toFixed(1)}s 后重生` : '等待重生同步'}`
-  }
-  return row.self ? '自己 · 存活' : '存活'
-}
 
 export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
@@ -51,13 +41,12 @@ export class Scoreboard {
   get hasScores(): boolean { return this.received }
   get ended(): boolean { return this.final }
   display(robots: ReadonlyMap<number, RobotEnt>, self = -1): ScoreDisplay[] {
-    // Position/HP changes do not affect the scoreboard. Cache by the bounded
-    // per-row visibility/status projection so 64-player HUD frames stay cheap
-    // while respawn countdown changes still reach the DOM.
+    // Position/HP/respawn countdown changes do not affect the compact scoreboard.
+    // Cache by the bounded per-row visibility/status projection so 64-player HUD
+    // frames stay cheap.
     const stateKey = this.rows.map(row => {
       const robot = robots.get(row.robot)
-      const respawn = robot?.respawnInS
-      return `${row.robot}:${robot ? (robot.dead ? 'dead' : 'alive') : 'unknown'}:${Number.isFinite(respawn) ? respawn!.toFixed(1) : ''}`
+      return `${row.robot}:${robot ? (robot.dead ? 'dead' : 'alive') : 'unknown'}`
     }).join(';')
     const key = `${this.version}:${self}:${stateKey}`
     if (this.displayCache && this.displayKey === key) return this.displayCache
@@ -67,7 +56,6 @@ export class Scoreboard {
         nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
         dead: !!robot?.dead,
         status: (robot ? (robot.dead ? 'dead' : 'alive') : 'unknown') as 'alive' | 'dead' | 'unknown',
-        respawnInS: robot?.respawnInS,
       }
     })
     this.displayKey = key
@@ -235,9 +223,6 @@ function setClassState(element: HTMLElement, row: ScoreDisplay, ended: boolean):
   element.classList.toggle('score-third', row.rank === 3)
   const dead = row.dead || row.status === 'dead'
   element.classList.toggle('score-dead', dead)
-  element.classList.toggle('score-respawn', dead && Number.isFinite(row.respawnInS) && (row.respawnInS ?? 0) > 0)
-  element.classList.toggle('score-alive', row.status === 'alive' && !dead)
-  element.classList.toggle('score-unknown', row.status === 'unknown' || row.status === undefined)
   element.dataset.rank = String(row.rank)
   element.dataset.status = row.status ?? (dead ? 'dead' : 'unknown')
   if (ended) element.dataset.status = 'final'
@@ -254,10 +239,6 @@ function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRow
   rankNumber.textContent = String(row.rank)
   element.querySelector<HTMLElement>('.score-name')!.textContent = row.nick
   element.querySelector<HTMLElement>('.score-value')!.textContent = String(row.score)
-  const state = element.querySelector<HTMLElement>('.score-state')!
-  const stateText = scoreState({ ...row, dead: row.dead || row.status === 'dead' }, !!options.ended)
-  state.textContent = stateText
-  state.hidden = !stateText
   const evidence = element.querySelector<HTMLElement>('.score-replay-evidence')!
   const recorded = row.replayEvidence
   evidence.hidden = !recorded
@@ -300,11 +281,10 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titlesOrO
   const rank = text('score-rank', '')
   const name = text('score-name', '')
   const value = text('score-value', '')
-  const state = text('score-state', '')
   const badges = document.createElement('div'); badges.className = 'score-titles'
   const evidence = text('score-replay-evidence', '')
   evidence.hidden = true
-  element.append(rank, name, value, state, evidence, badges)
+  element.append(rank, name, value, evidence, badges)
   fillScoreRow(element, row, options)
   return element
 }

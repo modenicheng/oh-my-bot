@@ -287,10 +287,13 @@ export class GameController {
     this.inputEnabled = false
   }
 
-  /** 显式应用 Snippet / AI 结果时开启辅助并归还手操轴，绝不反向关闭。 */
+  /** 显式应用 Snippet / AI 结果时开启辅助并归还手操轴，绝不反向关闭。
+   * 激活成功后把焦点交回战场画布：面板按钮激活时焦点留在面板，输入采样
+   * 处于挂起状态，WASD 将无法抢占脚本轴（服务端仲裁本身正常）。 */
   activateAssist(): boolean {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return false
     if (!this.input.assistOn || (this.world.self?.manualAxesMask ?? 0) !== 0) this.toggleAssist()
+    if (this.input.assistOn) this.canvas.focus({ preventScroll: true })
     return this.input.assistOn
   }
 
@@ -328,7 +331,8 @@ export class GameController {
     )
   }
 
-  /** Space assist 开关：转发给服务器 */
+  /** Space assist 开关：转发给服务器。从工作台辅助按钮触发时焦点不在画布，
+   * 切换成功后同样交回战场，手操抢占立即可用（Space 路径幂等）。 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return
     if (this.input.toggleAssist(this.world.self?.manualAxesMask ?? 0)) {
@@ -339,6 +343,7 @@ export class GameController {
       })))
       this.hud.setAssist(this.input.assistOn)
       this.hud.flashMsg(this.input.assistOn ? '驾驶辅助 ON' : '驾驶辅助 OFF')
+      this.canvas.focus({ preventScroll: true })
     }
   }
 

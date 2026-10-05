@@ -4,10 +4,8 @@
 .score-rank .pixel-icon { width: 12px; height: 12px; color: var(--amber); }
 .score-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .score-value { color: var(--accent); font-variant-numeric: tabular-nums; }
-.score-state, .score-titles, .score-replay-evidence { grid-column: 2 / -1; min-width: 0; font-size: 11px; }
-.score-titles { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 6px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; padding-bottom: 2px; }
-.score-state { color: var(--fg-dim); overflow-wrap: anywhere; }
-.score-replay-evidence { color: var(--fg-dim); font-family: ui-monospace, monospace; }
+.score-titles { grid-column: 2 / -1; min-width: 0; font-size: 11px; display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 6px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; padding-bottom: 2px; }
+.score-replay-evidence { grid-column: 2 / -1; min-width: 0; font-size: 11px; color: var(--fg-dim); font-family: ui-monospace, monospace; }
 .score-self { border-left-color: var(--accent); background: #12232c66; }
 .score-self .score-name { color: var(--accent); }
 .score-first { border-top: 1px solid #fbbf2466; border-bottom: 1px solid #fbbf2433; background: #2a241033; }
@@ -15,10 +13,7 @@
 .score-second .score-rank { color: #c5d0d9; }
 .score-third .score-rank { color: #c99470; }
 .score-dead { border-left-color: var(--danger); opacity: .78; }
-.score-dead .score-state { color: var(--danger); }
-.score-respawn .score-state::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border: 1px solid currentColor; vertical-align: 1px; }
-.score-alive .score-state { color: var(--lime); }
-.score-unknown .score-state { color: var(--fg-dim); }
+.score-dead .score-name { color: var(--danger); }
 /* Badge triggers stay in one horizontal track. Their details are portaled to
    body, so opening one never changes row height or gets clipped by a list. */
 .score-award { display: inline-flex; flex: 0 0 auto; min-width: 0; }
