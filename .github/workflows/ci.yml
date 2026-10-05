@@ -29,8 +29,10 @@ jobs:
         with:
           version: v2.14.0
 
-      - name: go test
-        run: go test -timeout 10m ./...
+      # Strict wall-clock script quotas are production behavior; serialize packages so
+      # unrelated package tests cannot steal their 5–12 ms scheduling windows.
+      - name: go test (serial packages for timing gates)
+        run: go test -p 1 -timeout 10m ./...
 
       - name: go test (race, short)
         run: go test -race -short -timeout 10m ./...

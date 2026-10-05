@@ -168,7 +168,7 @@ docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发�
 
 | 工作流 | 触发 | 作用 |
 |---|---|---|
-| CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ 完整 `go test` + `go test -race -short`（排除 race 下无意义的严格墙钟性能门）；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e） |
+| CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ 包级串行的完整 `go test -p 1`（避免严格墙钟门受跨包 CPU 争用干扰）+ `go test -race -short`（排除 race 下无意义的严格墙钟性能门）；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e） |
 | Release Please (`.github/workflows/release-please.yml`) | push main、手动 | 自动维护 `chore: release` PR（由 conventional commits 汇总）；手动可填高于最新 tag 的 `release_as`（如 `v1.0.0-beta.1`）产指定 release PR；merge 后打 tag + 建 GitHub release |
 | Release (`.github/workflows/release.yml`) | push `v*` tag、手动（tag 必填，须为已存在的 `vX.Y.Z[-pre]` tag） | resolve 校验 tag 并输出 tag+commit，五平台构建（linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64）精确 checkout 该 commit + linux/amd64 smoke（`-version` 严格等于 tag、`/healthz` 200）+ SHA256SUMS + 幂等上传到 GitHub release；五平台产物缺一不发 |
 | Dependabot (`.github/dependabot.yml`) | 每周 | github-actions / gomod（根 go.mod）/ npm（根 pnpm workspace）更新 PR |
