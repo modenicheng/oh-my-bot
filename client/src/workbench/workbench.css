@@ -43,8 +43,8 @@ html[data-workbench-resize="split"] * { cursor: ns-resize !important; }
 #workbench-submit { min-width: 74px; }
 #workbench-assist { min-width: 78px; }
 #workbench-console-toggle { min-width: 82px; font-family: var(--mono); }
-/* 计数槽：等宽 + tabular-nums + 预留 4 位右对齐宽度（长对局折叠计数可上 4 位），位数切换不推挤相邻控件；>4 位自然撑开。 */
-#workbench-console-toggle [data-console-trigger-count] { display: inline-block; min-width: 4ch; color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
+/* 计数槽：等宽 + tabular-nums + 固定 4 位右对齐宽度；超出位数裁剪，绝不推挤相邻控件。 */
+#workbench-console-toggle [data-console-trigger-count] { display: inline-block; width: 4ch; min-width: 4ch; box-sizing: border-box; overflow: hidden; color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
 #workbench-toc { position: absolute; top: 43px; left: 0; right: 0; z-index: 5; max-height: calc(100% - 43px); overflow-y: auto; padding: 8px 0; border-bottom: 1px solid #36505f; background: var(--panel); box-shadow: 0 12px 18px #0005; }
 .workbench-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; padding: 8px 16px 0; font: 11px var(--mono); color: var(--fg-dim); flex: none; }
 .workbench-breadcrumb a { color: inherit; text-decoration: none; }
@@ -75,7 +75,7 @@ html[data-console-resize] * { cursor: ns-resize !important; user-select: none !i
 #workbench .script-console-tab { position: relative; min-height: 34px; padding: 4px 13px; border: 0; border-right: 1px solid var(--line); color: var(--fg); background: #080c12; font-family: var(--mono); }
 #workbench .script-console-tab::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
 /* 与上方 Console 开关计数槽同一套约定：位数切换时 "清空"/"×" 按钮不得位移。 */
-.script-console-tab [data-console-count] { display: inline-block; min-width: 4ch; color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
+.script-console-tab [data-console-count] { display: inline-block; width: 4ch; min-width: 4ch; box-sizing: border-box; overflow: hidden; color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
 #workbench .script-console-actions button { min-width: 34px; min-height: 34px; border: 0; border-left: 1px solid var(--line); }
 #workbench .script-console-close { padding: 0 11px; font: 18px/1 var(--mono); color: var(--fg-dim); }
 #workbench .script-console-close:hover { color: var(--danger); background: #2a151a; }

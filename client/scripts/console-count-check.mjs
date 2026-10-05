@@ -28,7 +28,7 @@ const CLIENT_DIR = resolve(import.meta.dirname, '..')
 const DIST = join(CLIENT_DIR, 'dist')
 const SHOTS = resolve(process.env.OMB_SHOTS || '../.artifacts/console-count')
 
-const R_WARMUP = 1
+const R_IDLE = 0
 const SELF_ID = 101
 const REV = 3
 const MAP_JSON = gen2MapJson('concnt01')
@@ -53,13 +53,15 @@ class ConsoleCountFixture extends FixtureServer {
   onFrame(conn, buf) {
     if (buf[0] === frame.ping) { conn.ws.send(Buffer.from([frame.pong])); return }
     if (buf[0] !== frame.up) return
-    try { fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
+    let msg
+    try { msg = fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
+    if (msg.payload.case === 'join') this.accept(conn)
   }
 
   accept(conn) {
     conn.joined = true
     this.st = freshState()
-    this.send(conn, this.event('roomState', EvRoomStateSchema, { state: R_WARMUP, robotsOnline: 1, hostNick: 'concnt' }, 0))
+    this.send(conn, this.event('roomState', EvRoomStateSchema, { state: R_IDLE, robotsOnline: 1, hostNick: 'concnt' }, 0))
     this.send(conn, this.event('mapBootstrap', EvMapBootstrapSchema, { mapJson: MAP_JSON, mapHash: 'concnt01', generatorVersion: 2 }, 0))
     this.sendFull(conn)
   }
@@ -102,9 +104,10 @@ async function geometry(page) {
 async function badgeProbe(page) {
   return page.evaluate(() => {
     const r1 = v => Math.round(v * 10) / 10
-    const badge = document.querySelector('.script-console-repeat')
+    const badges = [...document.querySelectorAll('.script-console-repeat')]
+    const badge = badges.at(-1)
     if (!badge) return null
-    const position = [...badge.parentElement.children].find(el => el !== badge && el.classList && el.classList.contains('script-console-meta'))
+    const position = [...badge.parentElement.children].find(el => el !== badge)
     if (!position) return null
     const b = badge.getBoundingClientRect()
     const t = position.getBoundingClientRect()
@@ -133,7 +136,7 @@ try {
   await page.fill('#in-room', 'CONCNT')
   await page.fill('#in-nick', 'concnt')
   await page.click('#btn-join')
-  await page.locator('#view-game').waitFor({ timeout: 10000 })
+  await page.locator('#view-game').waitFor({ state: 'visible', timeout: 10000 })
   await page.click('#btn-game-editor')
   await page.locator('#workbench-console-toggle').waitFor({ timeout: 20000 })
 

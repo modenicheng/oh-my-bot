@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest'
 //
 // 规则（与 client/STYLE.md「字体」计数器条目一致）：
 //   1. 计数槽用 var(--mono)，font-variant-numeric: tabular-nums；
-//   2. 预留 4ch、右对齐的 inline-block 槽位（折叠计数可上 4 位，如截图
-//      2773；可扩展，不是只适配某个位数）；
+//   2. 固定 4ch、右对齐的 inline-block 槽位（折叠计数可见 4 位，如截图
+//      2773；超出位数裁剪，不推动相邻控件）；
 //   3. 重复徽标 min-width 覆盖 3 位数（折叠从 ×2 起，无 ×1 出现）。
 const here = new URL('.', import.meta.url)
 const read = (name: string) => readFileSync(new URL(name, here), 'utf8')
@@ -36,7 +36,10 @@ describe('console count slot layout contract', () => {
   ])('%s reserves a right-aligned tabular slot', selector => {
     const rule = ruleFor(selector)
     expect(rule).toContain('font-variant-numeric: tabular-nums')
+    expect(rule).toContain('width: 4ch')
     expect(rule).toContain('min-width: 4ch')
+    expect(rule).toContain('box-sizing: border-box')
+    expect(rule).toContain('overflow: hidden')
     expect(rule).toContain('text-align: right')
     expect(rule).toContain('display: inline-block')
   })
@@ -57,6 +60,8 @@ describe('console count slot layout contract', () => {
     expect(rule).toContain('font: 700 10px/1 var(--mono)')
     // ≥100px 的数值文本（"100" @10px JetBrains Mono ≈ 18px）必须放得下，
     // 9→10、99→100 才不会推移相邻 meta 文本。
-    expect(parseFloat(rule.match(/min-width: ([\d.]+px)/)![1])).toBeGreaterThanOrEqual(24)
+    const width = rule.match(/min-width: ([\d.]+px)/)?.[1]
+    expect(width).toBeDefined()
+    expect(parseFloat(width ?? '0')).toBeGreaterThanOrEqual(24)
   })
 })
