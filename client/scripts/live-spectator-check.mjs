@@ -127,10 +127,10 @@ try {
   await watch.screenshot({ path: join(shots, 'idle.png') })
 
   await host.click('#btn-solo-bots')
-  await until(() => room?.soloBots === 3, 'spectator bot configuration')
+  await until(() => room?.soloBots === 63, 'spectator bot configuration')
   await host.click('#btn-warmup')
-  await until(() => snapshotTick > 90 && robots.size === 4, 'full-world live warmup')
-  await until(() => watch.locator('#live-follow option').count().then(n => n === 5), 'live robot selection')
+  await until(() => snapshotTick > 90 && robots.size === 64, 'full-world live warmup', 30_000)
+  await until(() => watch.locator('#live-follow option').count().then(n => n === 65), 'live robot selection', 30_000)
   assert.ok(await pixels(watch) > 20, 'live canvas is nonblank')
   assert.equal(room.robotsOnline, 1)
   assert.equal(await watch.locator('#live-match').textContent(), '热身中')
@@ -176,7 +176,7 @@ try {
 
   const warmSource = source
   await host.click('#btn-game-start')
-  await until(() => source !== warmSource && snapshotTick > 30 && robots.size === 4, 'new-match spectator bootstrap')
+  await until(() => source !== warmSource && snapshotTick > 30 && robots.size === 64, 'new-match spectator bootstrap', 30_000)
   assert.equal(await watch.locator('#live-follow').inputValue(), '', 'new map resets follow')
   await until(() => watch.locator('#live-zoom').textContent().then(text => text === '1.0\u00d7'), 'new map fits camera')
   assert.equal(room.robotsOnline, 1)

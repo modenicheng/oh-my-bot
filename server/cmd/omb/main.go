@@ -31,6 +31,7 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/listen"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"github.com/modenicheng/oh-my-bot/server/internal/room"
 )
 
 // version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
@@ -163,6 +164,23 @@ func byteSizeHuman(v int64) string {
 	}
 }
 
+func envDefaultSoloBots() uint32 {
+	raw := strings.TrimSpace(os.Getenv("OMB_DEFAULT_SOLO_BOTS"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		log.Printf("invalid OMB_DEFAULT_SOLO_BOTS=%q: %v (using 0)", raw, err)
+		return 0
+	}
+	if n > uint64(room.MaxSoloBots) {
+		log.Printf("OMB_DEFAULT_SOLO_BOTS=%d exceeds %d; clamped", n, room.MaxSoloBots)
+		return room.MaxSoloBots
+	}
+	return uint32(n)
+}
+
 func main() {
 	addr := flag.String("addr", envAddr(), "listen address: host:port, :port (all interfaces), unix:/path/to.sock, or unix:@name (Linux abstract socket)")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -175,6 +193,10 @@ func main() {
 	}
 
 	hub := glue.NewHub()
+	if defaultBots := envDefaultSoloBots(); defaultBots > 0 {
+		hub.SetDefaultSoloBots(defaultBots)
+		log.Printf("new rooms default to %d solo bots (OMB_DEFAULT_SOLO_BOTS)", defaultBots)
+	}
 	serverCfg, cfgErr := ai.LoadServerConfig("")
 	if cfgErr != nil {
 		log.Printf("AI disabled: configuration error: %v", cfgErr)

@@ -678,13 +678,13 @@ func TestSoloBotsNextLaunchConfiguration(t *testing.T) {
 	if err := r.HostCommand(1, ActionSoloBots); err != nil {
 		t.Fatal(err)
 	}
-	if rs := r.StateBroadcast(); rs.SoloBots != 3 || rs.RobotsOnline != 1 {
+	if rs := r.StateBroadcast(); rs.SoloBots != MaxSoloBots || rs.RobotsOnline != 1 {
 		t.Fatalf("state: %+v", rs)
 	}
 	if err := r.HostCommand(1, ActionWarmup); err != nil {
 		t.Fatal(err)
 	}
-	if len(launcher.counts) != 1 || launcher.counts[0] != 3 || !launcher.warmups[0] {
+	if len(launcher.counts) != 1 || launcher.counts[0] != MaxSoloBots || !launcher.warmups[0] {
 		t.Fatal("warmup lost config")
 	}
 	warm := base.handles[0]
