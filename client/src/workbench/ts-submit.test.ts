@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ScriptLanguage } from '@omb/protocol'
 import { INITIAL_SOURCE, INITIAL_SOURCE_TS } from './workbench'
 import {
+  MAX_FRAME_BYTES,
   cleanEmittedJs,
   draftKeyFor,
   flattenTsMessage,
@@ -10,7 +11,9 @@ import {
   languageToProto,
   lineStarts,
   offsetToLineColumn,
+  oversizeScriptMessage,
   pickEmitJs,
+  scriptFrameTooLarge,
   scriptSubmitPayload,
 } from './ts-submit'
 
@@ -193,3 +196,90 @@ describe('languageToProto / scriptSubmitPayload', () => {
     if (!('error' in js)) expect(js.source).toBe(js.editorSource)
   })
 })
+
+describe('MAX_FRAME_BYTES 边界（64 KiB 单帧上限）', () => {
+  it('上限取自协议权威源 TransportTiming，为 65536 字节（非字符数）', () => {
+    expect(MAX_FRAME_BYTES).toBe(65536)
+  })
+
+  it('恰好 65536 字节不超限，65537 字节超限（真实编码帧字节数）', () => {
+    // 逐字节逼近：找到使帧长恰为 65536 与 65537 的源码长度（JS 双份同串）。
+    // source/editor_source 同串，帧长随源码严格单调增 2 字节/字符，故可二分。
+    const frameFor = (n: number) => frameBytesOf('x'.repeat(n), 'x'.repeat(n), ScriptLanguage.JS)
+    let lo = 0, hi = 40000
+    while (frameFor(hi) < 65536) hi *= 2
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2)
+      if (frameFor(mid) < 65536) lo = mid + 1
+      else hi = mid
+    }
+    const atLimit = frameFor(lo)
+    // 帧长步进为 2，奇数 65537 不可达时用 >= 65537 的最小帧验证超限侧。
+    if (atLimit === 65536) {
+      expect(scriptFrameTooLarge(atLimit)).toBe(false) // 恰好上限不拒
+      const over = frameFor(lo + 1)
+      expect(over).toBeGreaterThanOrEqual(65537)
+      expect(scriptFrameTooLarge(over)).toBe(true) // 超一字节即拒
+    } else {
+      expect(atLimit).toBeGreaterThan(65536) // 跳过恰好 65536：首帧已超
+      expect(scriptFrameTooLarge(65536)).toBe(false)
+      expect(scriptFrameTooLarge(atLimit)).toBe(true)
+    }
+    expect(scriptFrameTooLarge(65536)).toBe(false)
+    expect(scriptFrameTooLarge(65537)).toBe(true)
+  })
+
+  it('多字节 UTF-8：字符数远小于字节数时按字节判定', () => {
+    // 「超」= 3 字节/字符：20,000 个字符 = 60,000 字节，字符数在限内但帧超限。
+    const multiByte = '// ' + '超'.repeat(20000) + '\nfunction tick() {}'
+    expect(multiByte.length).toBeLessThan(65536)
+    const payload = scriptSubmitPayload('js', multiByte)
+    if ('error' in payload) throw new Error('payload failed')
+    const frame = frameBytesOf(payload.source, payload.editorSource, payload.language)
+    expect(frame).toBeGreaterThan(65536)
+    expect(scriptFrameTooLarge(frame)).toBe(true)
+  })
+
+  it('TS 编译膨胀：27 KB TS 原文 + 25 KB 编译 JS 超旧 32 KiB、在 64 KiB 内放行', () => {
+    // 用户实测场景（oracle.ts）：源码 27,364 B + 编译产物 25,484 B ≈ 52.8 KB 帧。
+    const tsSource = 'const x: number = 1\n' + 'y'.repeat(27364)
+    const compiled = 'const x = 1;\n' + 'y'.repeat(25484)
+    const payload = scriptSubmitPayload('ts', tsSource, compiled)
+    if ('error' in payload) throw new Error('payload failed')
+    const frame = frameBytesOf(payload.source, payload.editorSource, payload.language)
+    expect(frame).toBeGreaterThan(32768)
+    expect(frame).toBeLessThanOrEqual(65536)
+    expect(scriptFrameTooLarge(frame)).toBe(false)
+  })
+
+  it('超限文案显示实际字节数、上限与检测阶段，TS 附双源码说明', () => {
+    const js = oversizeScriptMessage(70001, 'js')
+    expect(js).toContain('70001 字节')
+    expect(js).toContain('65536 字节（64 KiB）')
+    expect(js).toContain('已在本地预检拦截')
+    expect(js).not.toContain('TS 提交')
+    const ts = oversizeScriptMessage(70001, 'ts')
+    expect(ts).toContain('TS 提交同帧携带编译 JS 与 TS 原文')
+  })
+})
+
+/** 与 encodeClient(toBinary) 等价的手工 wire 长度计算（不依赖 DOM/protobuf 运行时）。 */
+function frameBytesOf(source: string, editorSource: string, language: ScriptLanguage): number {
+  const src = byteLength(source)
+  const ed = byteLength(editorSource)
+  const langLen = language === ScriptLanguage.TS ? 2 : 0 // tag(4,VARINT)+TS(2)；JS=0 缺省不编码
+  const payloadLen = varintLen(2) + varintLen(src) + src + varintLen(3) + varintLen(ed) + ed + langLen
+  const submitLen = varintLen(6) + varintLen(payloadLen) + payloadLen // ClientMsg field 6
+  return 1 + submitLen // encodeClient 首字节 frame.up
+}
+
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
+function varintLen(n: number): number {
+  let l = 0
+  let x = n
+  do { l++; x = Math.floor(x / 128) } while (x > 0)
+  return l
+}

@@ -47,6 +47,11 @@ const (
 	lossyQueueLen     = 4    // 丢帧通道小缓冲：只保留最新几帧
 	scriptLogQueueLen = 32   // Console 独立低优先队列：满时只丢日志
 	reliableQueueLn   = 1024 // 可靠通道大缓冲：满即断
+
+	// maxFrameBytes 单条 WebSocket 消息（编码后的整帧）上限。coder/websocket
+	// 默认 32768，TS 脚本提交（编译 JS + TS 原文同帧）可达 ~53 KiB 会被默默
+	// 断连；显式提到 64 KiB，与客户端提交预检共用权威源 TransportTiming。
+	maxFrameBytes = int64(ombv1.TransportTiming_MAX_FRAME_BYTES)
 )
 
 // queuedFrame keeps superseded match snapshots and logs out of the new map's timeline.
@@ -67,6 +72,8 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		if err != nil {
 			return
 		}
+		// 默认读上限 32 KiB 装不下 TS 脚本提交帧；超限帧会被库直接断连。
+		c.SetReadLimit(maxFrameBytes)
 		defer func() { _ = c.CloseNow() }() // 强制关闭属正常路径，close 错误无信息量
 
 		ctx := r.Context()
