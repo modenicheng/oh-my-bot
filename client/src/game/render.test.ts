@@ -395,3 +395,37 @@ describe('render() uplink anchoring', () => {
     }
   })
 })
+
+// 64 人房间固定相机夹具：世界状态可含 64 台，但机器人本体/白条热路径只处理
+// 当前画布附近的实体。20m 视野与阴影仍由 render() 的统一遮罩在后续层约束。
+describe('render() 64-player viewport work budget', () => {
+  it('draws and samples delayed health only for the visible robot subset', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera()
+    cam.resize(800, 500, 80)
+    cam.follow(0, 0)
+    const world = emptyWorld()
+    world.phase = 2
+    world.self = { robotId: 1 } as WorldState['self']
+    for (let id = 1; id <= 64; id++) {
+      const visible = id <= 8
+      world.robots.set(id, {
+        base: { id, pos: { x: visible ? (id - 4) * 2 : 60 + id, y: visible ? 0 : 60 } },
+        hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0,
+        nick: `R${id}`, color: '#22d3ee', seenAt: 0, invulnerable: false,
+      } as RobotEnt)
+    }
+    let delayedReads = 0
+    const feedback = {
+      cameraShake: () => ({ x: 0, y: 0 }),
+      drawTrails: () => {},
+      draw: () => {},
+      delayedHealth: (_id: number, hpX10: number) => { delayedReads++; return hpX10 / 10 },
+    }
+    renderer.render(world, map(2), cam, { bubbles: [], feedback: feedback as never })
+    expect(renderer.lastFrameStats).toEqual({ robots: 64, culledRobots: 56, drawnRobots: 8, delayedHealthReads: 8 })
+    expect(delayedReads).toBe(8)
+  })
+})

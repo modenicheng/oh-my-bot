@@ -93,13 +93,15 @@ describe('world 消费 tuning（X-3）', () => {
         robots: [create(RobotStateSchema, { base: create(EntityBaseSchema, { id: 7 }), hpX10: 1000, invulnS: 3 })],
       })
       expect(applySnapshot(world, full)).toBe('applied')
-      expect(world.robots.get(7)!.invulnUntil! - performance.now()).toBeCloseTo(3250, -1)
+      expect(world.robots.get(7)!.invulnerable).toBe(true)
+      expect(world.robots.get(7)!.invulnUntil).toBeUndefined()
 
       const ended = create(SnapshotDeltaSchema, {
         tick: 11, baseTick: 10, phase: 1,
         robots: [create(RobotStateSchema, { base: create(EntityBaseSchema, { id: 7 }), hpX10: 1000, invulnS: 0 })],
       })
       expect(applySnapshot(world, ended)).toBe('applied')
+      expect(world.robots.get(7)!.invulnerable).toBe(false)
       expect(world.robots.get(7)!.invulnUntil).toBeUndefined()
     } finally { vi.useRealTimers() }
   })

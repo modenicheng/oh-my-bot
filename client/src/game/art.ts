@@ -42,6 +42,11 @@ function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: nu
 function circle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
   ctx.beginPath(); ctx.arc(x, y, r, 0, tau)
 }
+export function visibleWorld(cam: Camera, wx: number, wy: number, margin = 80): boolean {
+  const x = cam.toPxX(wx), y = cam.toPxY(wy)
+  return x > -margin && y > -margin && x < cam.cw + margin && y < cam.ch + margin
+}
+
 function visible(cam: Camera, x: number, y: number, margin = 80): boolean {
   return x > -margin && y > -margin && x < cam.cw + margin && y < cam.ch + margin
 }

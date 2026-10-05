@@ -34,7 +34,12 @@ export class SpectatorCamera {
     if (this.followId === null) return
     const robot = robots.find(r => r.id === this.followId)
     // Keep the last position through absence/death; follow the next recorded respawn.
-    if (robot) { this.camera.cx = robot.pos.x; this.camera.cy = robot.pos.y }
+    if (robot) this.updateFollow(robot.pos)
+  }
+
+  /** 实时观战的实体表按 id 索引：避免每帧为 64 人创建位置数组。 */
+  updateFollow(pos: { x: number; y: number } | undefined): void {
+    if (this.followId !== null && pos) { this.camera.cx = pos.x; this.camera.cy = pos.y }
   }
 
   pan(dx: number, dy: number): void {

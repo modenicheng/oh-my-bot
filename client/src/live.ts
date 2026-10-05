@@ -255,7 +255,7 @@ export class LiveSpectator {
     if (!this.map || this.disposed) return
     bgm.phase('live', this.world.phase)
     if (this.dpr !== (window.devicePixelRatio || 1)) { this.resize(); return }
-    this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
+    this.camera.updateFollow(this.world.robots.get(this.camera.followId ?? 0)?.base?.pos)
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
     setText(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)

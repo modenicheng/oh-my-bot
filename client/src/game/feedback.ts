@@ -321,10 +321,10 @@ export class GameFeedback {
     return Math.min(1, progress)
   }
 
-  delayedHealth(robot: number, actualX10: number): number {
+  delayedHealth(robot: number, actualX10: number, now = performance.now()): number {
     const visual = this.health.get(robot)
     if (!visual) return actualX10 / 10
-    const delayed = this.delayedHpAt(visual, performance.now())
+    const delayed = this.delayedHpAt(visual, now)
     visual.delayedX10 = delayed
     return Math.max(actualX10, delayed) / 10
   }
