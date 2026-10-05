@@ -109,7 +109,8 @@ describe('confirmed feedback transitions', () => {
     const hack = create(ServerEventSchema, { tick: 11, kind: { case: 'uplinkHack', value: { by: 2, uplinkId: 10, value: 15 } } })
     for (const ev of [kill, kill, other, other, hack, hack]) f.feedback.event(ev, f.world, map, true)
     expect(f.message.mock.calls).toEqual([
-      ['阿甲 击毁 阿乙', 'kill'], ['阿甲 击毁 robot-3', 'kill'], ['阿乙 黑入完成 · +15 分', 'uplink'],
+      ['阿甲 击毁 阿乙', 'kill', { id: 1, name: '阿甲' }],
+      ['阿甲 击毁 robot-3', 'kill', { id: 1, name: '阿甲' }], ['阿乙 黑入完成 · +15 分', 'uplink'],
     ])
     expect(cueCount('death')).toBe(2)
     expect(cueCount('uplinkSuccess')).toBe(1)

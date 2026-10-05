@@ -104,7 +104,7 @@ export class GameController {
     this.renderer = new Renderer(deps.canvas)
     this.hud = new Hud(deps.hudRoot)
     this.feedback = new GameFeedback(
-      (text, kind) => this.hud.flashMsg(text, kind),
+      (text, kind, source) => this.hud.flashMsg(text, kind, source),
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )

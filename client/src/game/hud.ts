@@ -12,6 +12,7 @@ import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
 import { requireEl, setText, fmtClock } from '../ui/dom'
 import { clamp01 } from '../lib/math'
 import { DeathNotice } from './death'
+import { KillFeed, type KillFeedSource } from './kill-feed'
 import './hud.css'
 
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
@@ -41,6 +42,8 @@ export class Hud {
   private scoreRows: HTMLDivElement
   private assistEl: HTMLDivElement
   private assistCard: HTMLDivElement
+  private readonly comms = document.createElement('div')
+  private killFeed: KillFeed
   private msgLine: HTMLDivElement
   private msgTimer: number | undefined
   private innerBanner: HTMLDivElement
@@ -91,7 +94,10 @@ export class Hud {
     this.msgLine.setAttribute('role', 'status')
     if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
     this.msgLine.setAttribute('aria-atomic', 'true')
-    this.leftPanel.append(this.msgLine)
+    this.comms.className = 'hud-comms'
+    this.killFeed = new KillFeed(this.comms)
+    this.comms.append(this.msgLine)
+    this.leftPanel.append(this.comms)
     this.innerBanner = document.createElement('div')
     this.innerBanner.id = 'hud-inner-ring'
     this.innerBanner.className = 'hud-inner-ring'
@@ -116,7 +122,7 @@ export class Hud {
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
   update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false, delayedHp?: number): void {
-    if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
+    if (!world.initialized) { this.clearMsg(); this.killFeed.clear(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
     this.aimCapable = aimCapable
@@ -177,8 +183,9 @@ export class Hud {
   }
 
   /** 有界消息：定时自动清除，dispose 清理定时器（退出对局后可安全重入）。 */
-  flashMsg(text: string, kind: FeedbackKind = 'status'): void {
-    // Keep confirmed kill/upload banners readable through routine combat hints.
+  flashMsg(text: string, kind: FeedbackKind = 'status', source?: KillFeedSource): void {
+    if (kind === 'kill') { this.killFeed.push(text, source); return }
+    // Upload confirmations still take priority over routine hints, independently of kills.
     if (kind === 'status' && this.msgTimer !== undefined && this.msgLine.dataset.kind !== 'status') return
     window.clearTimeout(this.msgTimer)
     const label = document.createElement('span')
@@ -235,6 +242,9 @@ export class Hud {
     this.timeEl.classList.remove('urgent')
     this.innerBanner.remove()
     this.death.dispose()
+    this.killFeed.dispose()
+    this.root.append(this.msgLine)
+    this.comms.remove()
     this.selfScore.parentElement?.remove()
   }
 

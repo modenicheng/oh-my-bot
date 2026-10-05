@@ -17,11 +17,11 @@
 @media (prefers-reduced-motion: reduce) { .hud-death, .hud-death * { animation: none !important; transition: none !important; } }
 
 /* Event panels share the HP/EN anchor; the opening gate belongs to the game stage. */
-#hud-left > #hud-msg {
+#hud-left > .hud-comms > #hud-msg {
   --event-color: #8b98a9;
-  position: absolute;
-  inset: auto auto calc(100% + 12px) -2px;
-  width: calc(100% + 2px);
+  position: relative;
+  inset: auto;
+  width: 100%;
   max-width: none;
   display: flex;
   align-items: center;
@@ -42,7 +42,7 @@
   transition: none;
 }
 
-#hud-left > #hud-msg::after {
+#hud-left > .hud-comms > #hud-msg::after {
   content: '';
   position: absolute;
   inset: 0 8px auto 0;
@@ -50,11 +50,11 @@
   background: #36505f;
 }
 
-#hud-left > #hud-msg[data-kind='kill'] { --event-color: #ff5c5c; }
-#hud-left > #hud-msg[data-kind='uplink'] { --event-color: #b9d985; }
-#hud-left > #hud-msg > .pixel-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--event-color); }
-#hud-left > #hud-msg .hud-event-text { min-width: 0; overflow-wrap: anywhere; }
-#hud-left > #hud-msg.show { opacity: 1; visibility: visible; animation: hud-event-in 160ms steps(3, end); }
+#hud-left > .hud-comms > #hud-msg[data-kind='uplink'] { --event-color: #b9d985; }
+#hud-left > .hud-comms > #hud-msg > .pixel-icon { width: 24px; height: 24px; flex: 0 0 24px; color: var(--event-color); }
+#hud-left > .hud-comms > #hud-msg .hud-event-text { min-width: 0; overflow-wrap: anywhere; }
+#hud-left > .hud-comms > #hud-msg:not(.show) { display: none; }
+#hud-left > .hud-comms > #hud-msg.show { opacity: 1; visibility: visible; animation: hud-event-in 160ms steps(3, end); }
 
 #hud-inner-ring {
   position: absolute;
@@ -118,13 +118,13 @@
 }
 
 @container (max-width: 540px) {
-  #hud-left > #hud-msg { gap: 6px; padding: 10px 8px; font-size: 12px; }
-  #hud-left > #hud-msg > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
+  #hud-left > .hud-comms > #hud-msg { gap: 6px; padding: 10px 8px; font-size: 12px; }
+  #hud-left > .hud-comms > #hud-msg > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
   #hud-inner-ring { gap: 10px; padding: 16px; }
   #hud-inner-ring strong { font-size: 24px; }
   #hud-inner-ring > .pixel-icon { width: 24px; height: 24px; flex-basis: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #hud-left > #hud-msg.show, #hud-inner-ring.show, #hud-time.countdown-pulse { animation: none; transition: none; }
+  #hud-left > .hud-comms > #hud-msg.show, #hud-inner-ring.show, #hud-time.countdown-pulse { animation: none; transition: none; }
 }
