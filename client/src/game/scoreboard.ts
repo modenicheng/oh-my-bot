@@ -212,7 +212,10 @@ function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRow
 
   const badges = element.querySelector<HTMLElement>('.score-titles')!
   badges.hidden = !options.titles
-  if (options.titles) {
+  if (!options.titles) {
+    badges.replaceChildren()
+    titleBadges.delete(element)
+  } else {
     const existing = titleBadges.get(element) ?? new Map<number, HTMLElement>()
     const wanted = new Set((row.titles ?? []).filter(title => titleDetails(title, row.score, row.replayEvidence)))
     for (const [title, badge] of existing) {

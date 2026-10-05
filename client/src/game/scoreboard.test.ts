@@ -167,6 +167,9 @@ describe('authoritative scoreboard', () => {
     expect(element.querySelector('.score-award')).toBe(badge)
     expect(element.querySelector('.score-title-detail')?.textContent).toContain('2（录像已记录）')
     expect(element.querySelector('.score-replay-evidence')).toBe(evidence)
+    renderer.update(parent, [{ ...row(2), titles: [] }], { titles: false })
+    expect(element.querySelectorAll('.score-title')).toHaveLength(0)
+    expect(element.querySelector('.score-titles')?.childElementCount).toBe(0)
   })
 
   it('maps active settlement titles while hiding deprecated BEST_PARTNER', () => {
