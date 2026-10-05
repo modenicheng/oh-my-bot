@@ -117,12 +117,42 @@ export function titleDetails(title: number, score: number, replay?: ReplayTitleE
 
 let nextTitleId = 0
 const titleBadges = new WeakMap<HTMLElement, Map<number, HTMLElement>>()
+const titleDetailsByAward = new WeakMap<HTMLElement, HTMLElement>()
+const titleCleanupByAward = new WeakMap<HTMLElement, () => void>()
+
+function positionTitleDetail(button: HTMLElement, detail: HTMLElement): void {
+  const margin = 12, gap = 6
+  detail.style.maxHeight = `${Math.max(120, window.innerHeight - margin * 2)}px`
+  detail.style.left = `${margin}px`
+  detail.style.top = `${margin}px`
+  const anchor = button.getBoundingClientRect()
+  const popup = detail.getBoundingClientRect()
+  const maxLeft = Math.max(margin, window.innerWidth - popup.width - margin)
+  const left = Math.min(Math.max(anchor.left, margin), maxLeft)
+  const below = anchor.bottom + gap
+  const above = anchor.top - popup.height - gap
+  const top = below + popup.height <= window.innerHeight - margin ? below : Math.max(margin, above)
+  detail.style.left = `${Math.round(left)}px`
+  detail.style.top = `${Math.round(top)}px`
+}
+
+function disposeTitleBadge(award: HTMLElement): void {
+  titleCleanupByAward.get(award)?.()
+  titleCleanupByAward.delete(award)
+  titleDetailsByAward.delete(award)
+}
+
+function disposeRowTitles(element: HTMLElement): void {
+  for (const award of element.querySelectorAll<HTMLElement>('.score-award')) disposeTitleBadge(award)
+  titleBadges.delete(element)
+}
 
 function updateTitleBadge(award: HTMLElement, title: number, score: number, replay?: ReplayTitleEvidence): boolean {
   const info = titleDetails(title, score, replay)
   if (!info) return false
   const button = award.querySelector<HTMLButtonElement>('.score-title')!
-  const detail = award.querySelector<HTMLElement>('.score-title-detail')!
+  const detail = titleDetailsByAward.get(award)
+  if (!detail) return false
   button.textContent = info.name
   button.setAttribute('aria-label', `${info.name}称号`)
   detail.setAttribute('aria-label', `${info.name}称号详情`)
@@ -147,27 +177,50 @@ function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence):
   button.setAttribute('aria-describedby', detail.id)
   button.setAttribute('aria-expanded', 'false')
   button.textContent = info.name
-  let hovered = false, focused = false, pinned = false, dismissed = false, touchActivation = false
+  let triggerHovered = false, detailHovered = false, focused = false, pinned = false, dismissed = false, touchActivation = false
+  let closeTimer: ReturnType<typeof setTimeout> | undefined
+  const onViewportChange = () => { if (!detail.hidden) positionTitleDetail(button, detail) }
   const render = () => {
-    const open = !dismissed && (hovered || focused || pinned)
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = undefined }
+    const open = !dismissed && (triggerHovered || detailHovered || focused || pinned)
     detail.hidden = !open
     button.setAttribute('aria-expanded', String(open))
     award.classList.toggle('is-open', open)
+    if (open) {
+      positionTitleDetail(button, detail)
+      window.addEventListener('resize', onViewportChange)
+      window.addEventListener('scroll', onViewportChange, true)
+    } else {
+      window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('scroll', onViewportChange, true)
+    }
   }
-  award.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') { hovered = true; dismissed = false; render() } })
-  award.addEventListener('pointerleave', () => { hovered = false; render() })
+  const renderSoon = () => {
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = setTimeout(render, 80)
+  }
+  award.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') { triggerHovered = true; dismissed = false; render() } })
+  award.addEventListener('pointerleave', () => { triggerHovered = false; renderSoon() })
+  detail.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') { detailHovered = true; dismissed = false; render() } })
+  detail.addEventListener('pointerleave', () => { detailHovered = false; renderSoon() })
   button.addEventListener('pointerdown', event => { touchActivation = event.pointerType === 'touch' })
   button.addEventListener('focus', () => { focused = true; if (!touchActivation) { dismissed = false; render() } })
-  // Preserve an opened disclosure on blur: collapsing inline content during
-  // pointerdown can move the next control before its click (e.g. Back to room).
-  button.addEventListener('blur', () => { if (focused && !dismissed) pinned = true; focused = false; touchActivation = false; render() })
+  button.addEventListener('blur', () => { focused = false; touchActivation = false; renderSoon() })
   button.addEventListener('click', () => { touchActivation = false; pinned = !pinned; dismissed = !pinned; render() })
   button.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopPropagation(); pinned = false; dismissed = true; render()
     }
   })
-  award.append(button, detail)
+  award.append(button)
+  document.body.append(detail)
+  titleDetailsByAward.set(award, detail)
+  titleCleanupByAward.set(award, () => {
+    if (closeTimer) clearTimeout(closeTimer)
+    window.removeEventListener('resize', onViewportChange)
+    window.removeEventListener('scroll', onViewportChange, true)
+    detail.remove()
+  })
   return award
 }
 
@@ -213,13 +266,13 @@ function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRow
   const badges = element.querySelector<HTMLElement>('.score-titles')!
   badges.hidden = !options.titles
   if (!options.titles) {
+    disposeRowTitles(element)
     badges.replaceChildren()
-    titleBadges.delete(element)
   } else {
     const existing = titleBadges.get(element) ?? new Map<number, HTMLElement>()
     const wanted = new Set((row.titles ?? []).filter(title => titleDetails(title, row.score, row.replayEvidence)))
     for (const [title, badge] of existing) {
-      if (!wanted.has(title)) { badge.remove(); existing.delete(title) }
+      if (!wanted.has(title)) { disposeTitleBadge(badge); badge.remove(); existing.delete(title) }
     }
     for (const [index, title] of [...wanted].entries()) {
       let badge = existing.get(title)
@@ -269,7 +322,7 @@ export class ScoreRowRenderer {
     for (const empty of [...parent.children]) if (empty.classList.contains('score-waiting')) empty.remove()
     for (const [id, element] of this.rows) {
       if (!wanted.has(id) || element.tagName.toLowerCase() !== tag) {
-        element.remove(); this.rows.delete(id); this.removed++
+        disposeRowTitles(element); element.remove(); this.rows.delete(id); this.removed++
       }
     }
     const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
@@ -291,7 +344,7 @@ export class ScoreRowRenderer {
   get createdCount(): number { return this.created }
   get movedCount(): number { return this.moved }
   get removedCount(): number { return this.removed }
-  clear(): void { this.rows.clear(); this.renderedOptions = '' }
+  clear(): void { for (const element of this.rows.values()) disposeRowTitles(element); this.rows.clear(); this.renderedOptions = '' }
 }
 
 export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], names: ReadonlyMap<number, string>, onBack?: () => void, self = -1): void {
@@ -310,7 +363,7 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
     summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${names.get(self) || `robot-${self}`} · ${own.score} 分`))
   } else summary.append(text('end-placement', '最终战果'))
   summary.append(text('end-field', `${rows.length} 位参赛者`))
-  const help = text('end-help', '悬停或聚焦称号查看依据；点击可展开 / 收起，Esc 关闭。')
+  const help = text('end-help', '悬停或聚焦称号即可浮动查看依据；点击可固定，Esc 关闭。')
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
   for (const [i, row] of ranked.entries()) {
@@ -334,5 +387,5 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
 }
 
 export function hideMatchEnd(root: HTMLElement): void {
-  for (const element of root.querySelectorAll('.end-overlay')) element.remove()
+  for (const element of root.querySelectorAll<HTMLElement>('.end-overlay')) { disposeRowTitles(element); element.remove() }
 }

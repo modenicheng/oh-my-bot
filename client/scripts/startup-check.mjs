@@ -546,6 +546,22 @@ try {
   assert.equal(await scoring.locator('#hud-score-rows .score-row').count(), 3)
   assert.equal(await scoring.locator('#hud-score-rows .score-name').first().textContent(), '<b>NO HTML</b>')
   assert.equal(await scoring.locator('#hud-score-rows b').count(), 0)
+  event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 61, rows: Array.from({ length: 64 }, (_, i) => ({ robot: i === 0 ? 202 : 400 + i, score: 1000 - i })) }, 61)
+  await scoring.waitForFunction(() => document.querySelectorAll('#hud-score-rows .score-row').length === 64)
+  const hudScrollLayout = await scoring.evaluate(() => {
+    const shell = document.querySelector('.hud-roster')
+    const rows = document.querySelector('#hud-score-rows')
+    return {
+      shellScroll: shell.scrollHeight - shell.clientHeight,
+      rowsScroll: rows.scrollHeight - rows.clientHeight,
+      shellOverflowY: getComputedStyle(shell).overflowY,
+      rowsOverflowY: getComputedStyle(rows).overflowY,
+    }
+  })
+  assert.equal(hudScrollLayout.shellScroll, 0, 'HUD roster shell is not a second scroll container')
+  assert.ok(hudScrollLayout.rowsScroll > 0, '64-row HUD scoreboard remains scrollable')
+  assert.equal(hudScrollLayout.shellOverflowY, 'hidden')
+  assert.equal(hudScrollLayout.rowsOverflowY, 'auto')
   const outerWeights = await waitForWeights(titleWeights, 'outer ring selects arena stage')
   snapshot('SCOR', 120, 2)
   event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 120, rows: [{ robot: 101, score: 80 }, { robot: 202, score: 25 }, { robot: 303, score: 10 }] }, 120)
@@ -585,6 +601,31 @@ try {
   await scoring.locator('.hud-death').waitFor({ state: 'hidden' })
   assert.equal(await scoring.locator('.end-title').evaluate(el => el === document.activeElement), true, 'settlement focuses heading only from battlefield')
   assert.equal(await scoring.locator('.end-placement').textContent(), '第 1 名')
+  const settlementTitleLayout = await scoring.evaluate(() => {
+    const row = document.querySelector('.end-list .score-self')
+    const buttons = [...row.querySelectorAll('.score-title')]
+    const first = buttons[0]
+    const detail = document.getElementById(first.getAttribute('aria-controls'))
+    const before = row.getBoundingClientRect().height
+    first.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }))
+    const after = row.getBoundingClientRect().height
+    const detailRect = detail.getBoundingClientRect()
+    first.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true, pointerType: 'mouse' }))
+    return {
+      rowHeightDelta: Math.abs(after - before),
+      sameLine: buttons.every(button => Math.abs(button.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top) < 2),
+      portalParent: detail.parentElement === document.body,
+      position: getComputedStyle(detail).position,
+      detailInsideViewport: detailRect.left >= 0 && detailRect.top >= 0 && detailRect.right <= innerWidth && detailRect.bottom <= innerHeight,
+    }
+  })
+  assert.ok(settlementTitleLayout.rowHeightDelta < 2, 'title tooltip does not expand score row')
+  assert.equal(settlementTitleLayout.sameLine, true, 'title tags stay horizontal')
+  assert.equal(settlementTitleLayout.portalParent, true, 'title tooltip is portaled to body')
+  assert.equal(settlementTitleLayout.position, 'fixed')
+  assert.equal(settlementTitleLayout.detailInsideViewport, true)
+  await scoring.mouse.move(0, 0)
+  await scoring.waitForFunction(() => document.querySelector('.end-list .score-title')?.getAttribute('aria-expanded') === 'false')
   await checkTitleDetails(scoring, '.end-list .score-title', /抢人头次数：未提供/)
   await scoring.screenshot({ path: resolve(shots, 'settlement.png') })
   for (const viewport of [{ width: 320, height: 740 }, { width: 844, height: 390 }]) {
@@ -621,6 +662,23 @@ try {
   assert.equal(await scoring.locator('.end-list .score-title').count(), activeTitles.length)
   await scoring.setViewportSize({ width: 320, height: 740 })
   await scoring.emulateMedia({ reducedMotion: 'reduce' })
+  const settlementScrollLayout = await scoring.evaluate(() => {
+    const panel = document.querySelector('.end-panel')
+    const list = document.querySelector('.end-list')
+    const panelStyle = getComputedStyle(panel), listStyle = getComputedStyle(list)
+    return {
+      documentScroll: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      panelScroll: panel.scrollHeight - panel.clientHeight,
+      listScroll: list.scrollHeight - list.clientHeight,
+      panelOverflowY: panelStyle.overflowY,
+      listOverflowY: listStyle.overflowY,
+    }
+  })
+  assert.equal(settlementScrollLayout.documentScroll, 0, 'settlement does not create a document scrollbar')
+  assert.equal(settlementScrollLayout.panelScroll, 0, 'settlement panel is not a second scroll container')
+  assert.ok(settlementScrollLayout.listScroll > 0, 'long settlement list remains scrollable')
+  assert.equal(settlementScrollLayout.panelOverflowY, 'hidden')
+  assert.equal(settlementScrollLayout.listOverflowY, 'auto')
   for (const badge of await scoring.locator('.end-list .score-title').all()) {
     await badge.focus()
     const detail = scoring.locator(`#${await badge.getAttribute('aria-controls')}`)

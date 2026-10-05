@@ -117,8 +117,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 /* 右下：Uplink 面板 + 花名册 + 技能卡组（纯状态显示，非按钮） */
 .hud-right { position: absolute; right: 20px; bottom: 24px; display: flex; flex-direction: column;
              align-items: flex-end; gap: 10px; max-width: min(440px, 52vw); }
-.hud-roster { background: #0a121ce8; border-top: 2px solid #406374; padding: 8px 12px;
-              max-height: 22vh; overflow: auto; pointer-events: auto; }
+.hud-roster { display: flex; flex-direction: column; min-height: 0; background: #0a121ce8; border-top: 2px solid #406374; padding: 8px 12px;
+              max-height: 22vh; overflow: hidden; pointer-events: auto; }
 .hud-right-label { font-size: 11px; letter-spacing: .2em; color: var(--fg-dim); margin-bottom: 6px; }
 #hud-uplink { display: flex; align-items: center; gap: 10px; background: #0a121ce8;
               border: 1px solid var(--line); border-left: 2px solid var(--accent); padding: 6px 12px; }

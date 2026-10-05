@@ -160,16 +160,21 @@ describe('authoritative scoreboard', () => {
     renderer.update(parent, [row(1)], { titles: true })
     const element = parent.firstElementChild!
     const badge = element.querySelector('.score-award')
+    const button = element.querySelector<HTMLButtonElement>('.score-title')!
+    const detail = document.getElementById(button.getAttribute('aria-controls')!)!
     const evidence = element.querySelector('.score-replay-evidence')
+    expect(detail.parentElement).toBe(document.body)
     renderer.update(parent, [row(2)], { titles: true })
     expect(element.querySelectorAll('.score-replay-evidence')).toHaveLength(1)
     expect(element.querySelector('.score-replay-evidence')?.textContent).toContain('K2')
     expect(element.querySelector('.score-award')).toBe(badge)
-    expect(element.querySelector('.score-title-detail')?.textContent).toContain('2（录像已记录）')
+    expect(document.getElementById(detail.id)).toBe(detail)
+    expect(detail.textContent).toContain('2（录像已记录）')
     expect(element.querySelector('.score-replay-evidence')).toBe(evidence)
     renderer.update(parent, [{ ...row(2), titles: [] }], { titles: false })
     expect(element.querySelectorAll('.score-title')).toHaveLength(0)
     expect(element.querySelector('.score-titles')?.childElementCount).toBe(0)
+    expect(document.getElementById(detail.id)).toBeNull()
   })
 
   it('maps active settlement titles while hiding deprecated BEST_PARTNER', () => {
