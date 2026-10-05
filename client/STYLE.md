@@ -45,6 +45,7 @@
 
 - UI：`Inter, system-ui, sans-serif`
 - 数据/代码/时序：`ui-monospace, "JetBrains Mono", monospace`（计分板、日志、编辑器）；HUD 数字与标题用 `Fusion Pixel` 像素字体，含击杀/上链/转段横幅及机器人头顶发言气泡，其余文本不用像素字体
+- 计数器（Console 条数、重复折叠徽标等随运行增长的数字）：用 `--mono` 并设 `font-variant-numeric: tabular-nums`，按位数预留 `min-width`（至少 3ch）且右对齐，位数增长时不推挤相邻控件
 
 ## 图形与入口
 
