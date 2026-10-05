@@ -4,10 +4,9 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
+import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
 import { appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
-const ROBOT_R = 0.6
 const VISION_FEATHER = 3.5
 
 // 旧 512 射线采样 + 多 band 填充已被逐墙精确投影取代（shadow.ts）：每帧每墙
@@ -39,17 +38,10 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D
   readonly lastFrameStats: RenderFrameStats = { robots: 0, culledRobots: 0, drawnRobots: 0, delayedHealthReads: 0 }
   constructor(private canvas: HTMLCanvasElement) {
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('canvas 2d context unavailable')
-    this.ctx = ctx
+    this.ctx = createCanvas2d(canvas)
   }
   resize(w: number, h: number, dpr: number): void {
-    const width = Math.max(1, Math.floor(w * dpr))
-    const height = Math.max(1, Math.floor(h * dpr))
-    // 同值赋 width/height 也会清屏并重置全部 ctx 状态，resize 抖动时须短路。
-    if (this.canvas.width === width && this.canvas.height === height) return
-    this.canvas.width = width
-    this.canvas.height = height
+    resizeCanvas2d(this.canvas, w, h, dpr)
   }
   render(world: WorldState, map: MapDefParsed, cam: Camera, extras: RenderExtras): void {
     const ctx = this.ctx

@@ -13,6 +13,8 @@ const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
 export const ROBOT_SHIELD_RADIUS = 2.05
 export const ROBOT_SHIELD_OUTER_RADIUS = 1.16
+/** 机器人碰撞半径（世界单位）：各渲染器/反馈共用，勿再各自声明本地副本。 */
+export const ROBOT_R = 0.6
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
 /** @deprecated 仅兼容旧调用方；Uplink 绘制不再使用悬浮偏移。 */
 export const UPLINK_LIFT = 0.38
@@ -33,6 +35,24 @@ export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]
   image.src = url
 }))).then(results => results.every(Boolean))
 export const artReady = Promise.all([fontReady, spritesReady])
+
+/** 取 2d 上下文；两个渲染器共用同一失败语义。 */
+export function createCanvas2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas 2d context unavailable')
+  return ctx
+}
+/**
+ * 按 CSS 尺寸 × DPR 设置后备缓冲。同值赋值也会清屏并重置 ctx 状态，
+ * 故尺寸未变时短路——拖拽窗口时渲染器不得被清成黑屏。
+ */
+export function resizeCanvas2d(canvas: HTMLCanvasElement, w: number, h: number, dpr: number): void {
+  const width = Math.max(1, Math.floor(w * dpr))
+  const height = Math.max(1, Math.floor(h * dpr))
+  if (canvas.width === width && canvas.height === height) return
+  canvas.width = width
+  canvas.height = height
+}
 
 function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: number, y: number, size: number): void {
   const image = sprites[name]

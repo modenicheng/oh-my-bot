@@ -4,19 +4,15 @@ import type { MapDefParsed } from '../game/mapdef'
 import type { ReplayFrame } from './index'
 import { phaseNum } from './index'
 import { drawIcon } from '../icons'
-import { ink, mono, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
-const ROBOT_R = 0.6
+import { ink, mono, ROBOT_R, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
 
 export class ReplayRenderer {
   private ctx: CanvasRenderingContext2D
   constructor(private canvas: HTMLCanvasElement) {
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('canvas 2d context unavailable')
-    this.ctx = ctx
+    this.ctx = createCanvas2d(canvas)
   }
   resize(w: number, h: number, dpr: number): void {
-    this.canvas.width = Math.max(1, Math.floor(w * dpr))
-    this.canvas.height = Math.max(1, Math.floor(h * dpr))
+    resizeCanvas2d(this.canvas, w, h, dpr)
   }
   render(frame: ReplayFrame, map: MapDefParsed, cam: Camera, followRobotId: number): void {
     const ctx = this.ctx
