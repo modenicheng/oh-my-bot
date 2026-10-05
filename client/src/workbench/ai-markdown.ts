@@ -7,6 +7,7 @@ import json from 'highlight.js/lib/languages/json'
 import markdown from 'highlight.js/lib/languages/markdown'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
+import { escapeHtml } from '../lib/escape'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
@@ -27,10 +28,6 @@ const LANGUAGE_LABELS: Record<string, string> = {
   bash: 'Shell', sh: 'Shell', shell: 'Shell', zsh: 'Shell',
   json: 'JSON', css: 'CSS', xml: 'HTML', html: 'HTML', svg: 'SVG',
   markdown: 'Markdown', md: 'Markdown',
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function languageName(raw: string | undefined): string {

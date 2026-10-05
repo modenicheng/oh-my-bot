@@ -25,7 +25,7 @@ func replayGameplay(t *testing.T, s *Sim, records []LogRecord, until uint32) {
 	start := s.tick
 	byTick := make(map[uint32][]LogRecord)
 	for _, rec := range records {
-		if rec.Tick > start && (rec.Type == "input" || rec.Type == "control") {
+		if rec.Tick > start && (rec.Type == RecordInput || rec.Type == RecordControl) {
 			byTick[rec.Tick] = append(byTick[rec.Tick], rec)
 		}
 	}
@@ -96,13 +96,13 @@ func TestGameplayLogAndCheckpointReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) == 0 || records[0].Type != "match_start" {
+	if len(records) == 0 || records[0].Type != RecordMatchStart {
 		t.Fatal("missing initial state")
 	}
 	controls, manual := 0, 0
 	var expected []*ombv1.ServerEvent
 	for _, rec := range records {
-		if rec.Type == "control" {
+		if rec.Type == RecordControl {
 			controls++
 			if rec.Control.Say != "" {
 				manual++
@@ -184,20 +184,20 @@ func TestWholeMatchReplayFromInitialAndMidpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) == 0 || records[0].Type != "match_start" {
+	if len(records) == 0 || records[0].Type != RecordMatchStart {
 		t.Fatal("missing initial state")
 	}
 	var middle *Checkpoint
 	var expected []*ombv1.ServerEvent
 	phaseChanges, controls, checkpoints := 0, 0, 0
 	for _, rec := range records {
-		if rec.Type == "checkpoint" {
+		if rec.Type == RecordCheckpoint {
 			checkpoints++
 			if rec.Tick == CoreOpenTick {
 				middle = rec.State
 			}
 		}
-		if rec.Type == "control" {
+		if rec.Type == RecordControl {
 			controls++
 		}
 		if rec.Event != nil {

@@ -63,8 +63,8 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 			return nil, fmt.Errorf("stats: replay record: %w", err)
 		}
 		switch rec.Type {
-		case "match_start", "checkpoint":
-			if rec.Type == "match_start" && len(rec.Players) != 0 {
+		case sim.RecordMatchStart, sim.RecordCheckpoint:
+			if rec.Type == sim.RecordMatchStart && len(rec.Players) != 0 {
 				players := make(map[uint32]uint64, len(rec.Players))
 				nicks := make(map[uint32]string, len(rec.Players))
 				partners := make(map[uint32]uint32, len(rec.Players))
@@ -82,16 +82,16 @@ func ReadReplayFrom(f *os.File, opts ReadReplayOptions) (*ProjectorImpl, error) 
 			if rec.State != nil {
 				p.OnCheckpoint(*rec.State)
 			}
-		case "event":
+		case sim.RecordEvent:
 			if rec.Event != nil {
 				seq++
 				p.OnEventRecord(seq, rec.Tick, rec.Event)
 			}
-		case "input", "control":
+		case sim.RecordInput, sim.RecordControl:
 			// Inputs and controls drive deterministic sim replay, not stats
 			// projection; consume both for complete log compatibility.
 		default:
-			return nil, fmt.Errorf("stats: unknown replay record type %q", rec.Type)
+			return nil, fmt.Errorf("stats: unknown replay record type %v", rec.Type)
 		}
 	}
 	_ = p.Final()

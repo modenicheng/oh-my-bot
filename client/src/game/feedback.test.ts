@@ -7,6 +7,14 @@ import type { MapDefParsed } from './mapdef'
 
 const sound = vi.hoisted(() => ({ play: vi.fn(), setUplink: vi.fn(), stopGame: vi.fn() }))
 vi.mock('../audio', () => ({ audio: sound }))
+
+/** 共享测试环境（C-16）：清 mock + 默认 matchMedia/document 桩；
+ *  个别用例随后可用 vi.stubGlobal 覆盖 hidden/matches。 */
+function stubFeedbackEnv(): void {
+  vi.clearAllMocks()
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  vi.stubGlobal('document', { hidden: false })
+}
 const map: MapDefParsed = { version: 1, generatorVer: 2, seed: 1, mapHash: '', extent: 80,
   walls: [], sectors: [], corePads: [{ id: 20, pos: { x: 43, y: 0 }, group: 0, value: 10 }],
   healthPacks: [{ id: 1, pos: { x: 4, y: 5 } }],
@@ -40,9 +48,7 @@ const opening = (tick: number) => create(ServerEventSchema, { tick, kind: { case
 
 describe('confirmed feedback transitions', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
 
   it('emits start/cancel but never labels successful hacking as interrupted', () => {
@@ -167,6 +173,8 @@ describe('confirmed feedback transitions', () => {
     f.feedback.event(ev, f.world, map, true); f.feedback.event(ev, f.world, map, true)
     expect(cueCount('uplinkCancel')).toBe(0)
     expect(cueCount('uplinkSuccess')).toBe(1)
+    expect(f.feedback.cameraShake(12)).toEqual({ x: 0, y: 0 })
+    expect(f.feedback.cameraShake(20)).toEqual({ x: 0, y: 0 })
     expect(f.message).toHaveBeenCalledExactlyOnceWith('黑入完成 · +15 分 · 本桩冷却 30s', 'uplink')
   })
 
@@ -352,28 +360,69 @@ describe('confirmed feedback transitions', () => {
 
 describe('combat motion presentation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
 
-  it.each([false, true])('draws a thick irregular low-health edge (reduced=%s) without covering the center', reduced => {
+  it.each([false, true])('draws restrained seamless red edge rings (reduced=%s)', reduced => {
     vi.stubGlobal('matchMedia', () => ({ matches: reduced }))
     const f = fixture(), initial = snap(10, 0, true)
     initial.robots[0]!.hpX10 = 200; f.consume(initial)
-    const cells: number[][] = []
-    const ctx = { globalAlpha: 1, save() {}, restore() {}, strokeRect() {},
-      fillRect(x: number, y: number, w: number, h: number) { cells.push([x, y, w, h, this.globalAlpha]) } }
+    const paths: Array<{ rects: number[][]; alpha: number; color: unknown; rule: unknown }> = []
+    let current: number[][] = []
+    const ctx = { globalAlpha: 1, fillStyle: '' as unknown, save() {}, restore() {}, strokeRect() {},
+      beginPath() { current = [] }, rect(...args: number[]) { current.push(args) },
+      fill(rule?: unknown) { paths.push({ rects: current.map(r => [...r]), alpha: this.globalAlpha, color: this.fillStyle, rule }) },
+    }
     const camera = { cw: 800, ch: 600, scale: 10 }
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(cells.length).toBeGreaterThan(100)
-    expect(cells.some(([x, y, w, h]) => y! + h! > 18 && y! + h! < 50 && x! > 50 && x! + w! < 750)).toBe(true)
-    expect(new Set(cells.filter(([x, y]) => x! > 50 && x! < 750 && y! < 50).map(([, y]) => y)).size).toBeGreaterThan(3)
-    expect(cells.some(([x, y, w, h]) => x! < 500 && x! + w! > 300 && y! < 400 && y! + h! > 200)).toBe(false)
-    expect(cells.some(([, , , , alpha]) => alpha! >= 0.5)).toBe(true)
-    const healthy = snap(11, 10); f.consume(healthy); cells.length = 0
+    expect(paths).toHaveLength(3)
+    expect(paths.every(p => p.rule === 'evenodd' && p.color === '#ff756d' && p.rects.length === 2)).toBe(true)
+    if (reduced) {
+      expect(paths.map(p => p.alpha)).toEqual([expect.closeTo(0.306), expect.closeTo(0.1768), expect.closeTo(0.0816)])
+    } else expect(paths.map(p => p.alpha)).toEqual(expect.arrayContaining([expect.any(Number)]))
+    for (const path of paths) {
+      const [outer, inner] = path.rects
+      expect(outer![0]).toBeLessThanOrEqual(inner![0]!)
+      expect(outer![1]).toBeLessThanOrEqual(inner![1]!)
+      expect(outer![0]! + outer![2]!).toBeGreaterThanOrEqual(inner![0]! + inner![2]!)
+      expect(outer![1]! + outer![3]!).toBeGreaterThanOrEqual(inner![1]! + inner![3]!)
+    }
+    // Each band is a single rectangular ring, so all four corners belong to one path with no seams.
+    expect(paths[0]!.rects[0]).toEqual([0, 0, 800, 600])
+    expect(Math.max(...paths.map(p => p.alpha))).toBeLessThanOrEqual(0.52)
+    const healthy = snap(11, 10); f.consume(healthy); paths.length = 0
     f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
-    expect(cells).toHaveLength(0)
+    expect(paths).toHaveLength(0)
+  })
+
+  it('briefly brightens and expands the red frame when hit again at low health', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(), initial = snap(10, 0, true)
+      initial.robots[0]!.hpX10 = 200; f.consume(initial)
+      const paths: Array<{ rects: number[][]; alpha: number }> = []
+      let current: number[][] = []
+      const ctx = { globalAlpha: 1, fillStyle: '' as unknown, save() {}, restore() {}, strokeRect() {}, fillText() {},
+        beginPath() { current = [] }, rect(...args: number[]) { current.push(args) },
+        fill() { paths.push({ rects: current.map(r => [...r]), alpha: this.globalAlpha }) },
+      }
+      const camera = { cw: 800, ch: 600, scale: 10, toPxX: (x: number) => x * 10, toPxY: (y: number) => y * 10 }
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      const base = paths.map(p => ({ rects: p.rects.map(r => [...r]), alpha: p.alpha }))
+
+      const hit = snap(11, 10); hit.robots[0]!.hpX10 = 100; f.consume(hit)
+      paths.length = 0
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      const active = paths.map(p => ({ rects: p.rects.map(r => [...r]), alpha: p.alpha }))
+      expect(active[0]!.rects[1]![0]).toBeGreaterThan(base[0]!.rects[1]![0]!)
+      expect(active[0]!.rects[1]![1]).toBeGreaterThan(base[0]!.rects[1]![1]!)
+      expect(active[0]!.alpha).toBeGreaterThan(base[0]!.alpha)
+
+      now += 241; paths.length = 0
+      f.feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
+      expect(paths.map(p => p.rects)).toEqual(base.map(p => p.rects))
+    } finally { clock.mockRestore() }
   })
 
   it('holds the previous health as a delayed white-bar value across continuous hits', () => {
@@ -396,6 +445,38 @@ describe('combat motion presentation', () => {
     expect(restore).toBeGreaterThan(deeper)
   })
 
+  it('pulls the camera back while hacking, lets dash take priority, and restores afterwards', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const start = f.feedback.cameraZoom(10, false, false)
+    const hack = f.feedback.cameraZoom(11, false, true)
+    const deeper = f.feedback.cameraZoom(14, false, true)
+    const dash = f.feedback.cameraZoom(15, true, true)
+    const restore = f.feedback.cameraZoom(22, false, false)
+    expect(start).toBe(1)
+    expect(hack).toBeLessThan(1)
+    expect(deeper).toBeLessThan(hack)
+    expect(dash).toBeLessThan(deeper)
+    expect(restore).toBeGreaterThan(dash)
+
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    expect(new GameFeedback(vi.fn()).cameraZoom(11, false, true)).toBe(1)
+  })
+
+  it('advances zoom once per tick when draw and input loops call it twice on the same tick', () => {
+    // C-4：rAF drawFrame 与 60Hz sampleAndSend 同 tick 各调一次；同 tick 的第二次
+    // 调用必须返回缓存，否则每 tick 走两步、收敛速度随刷新率漂移（144Hz≈204 步/s）。
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const draw = f.feedback.cameraZoom(11, false, true)
+    const sample = f.feedback.cameraZoom(11, false, true)
+    expect(sample).toBe(draw)
+    const once = new GameFeedback(vi.fn())
+    once.cameraZoom(11, false, true)
+    const single = once.cameraZoom(12, false, true)
+    const twice: number[] = []
+    for (let tick = 11; tick <= 12; tick++) twice.push(f.feedback.cameraZoom(tick, false, true), f.feedback.cameraZoom(tick, false, true))
+    expect(twice[3]).toBe(single)
+  })
+
   it('raises hit pitch during a short confirmed impact chain', () => {
     const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
     f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } } }), seenAt: 0 })
@@ -413,9 +494,7 @@ describe('combat motion presentation', () => {
 
 describe('projectile impact presentation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    vi.stubGlobal('document', { hidden: false })
+    stubFeedbackEnv()
   })
   function painted(feedback: GameFeedback): string[] {
     const colors: string[] = []

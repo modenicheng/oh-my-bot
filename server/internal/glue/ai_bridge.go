@@ -11,7 +11,6 @@ import (
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
-	"github.com/modenicheng/oh-my-bot/server/internal/script"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 	"github.com/modenicheng/oh-my-bot/server/internal/snapshot"
 )
@@ -83,12 +82,12 @@ func (m *Match) handleAiPromptLocked(pid uint64, text string) {
 	var valid bool
 	text, valid = normalizeAIPrompt(text)
 	if !valid {
-		sess.SendReliable(say("AI 请求失败：指令不能为空"))
+		aiNotice(sess, ombv1.EvControlNotice_CN_AI_REQUEST_FAILED, "AI 请求失败：指令不能为空")
 		return
 	}
 	svc := m.ai
 	if svc == nil || svc.provider == nil {
-		sess.SendReliable(say("AI 未启用：服务器未配置 DEEPSEEK_API_KEY（见 config.yaml ai.enabled 与 .env）"))
+		aiNotice(sess, ombv1.EvControlNotice_CN_AI_DISABLED, "AI 未启用：服务器未配置 DEEPSEEK_API_KEY（见 config.yaml ai.enabled 与 .env）")
 		return
 	}
 	snap := m.aiScriptSnapshot(pid)
@@ -118,10 +117,7 @@ func (m *Match) aiScriptSnapshot(pid uint64) aiScriptSnapshot {
 	if !ok {
 		return snap
 	}
-	obs := snapshot.BuildObservation(snapshot.World{
-		FrameView: wv.Frame, Robots: wv.Robots, Projectiles: wv.Projectiles,
-		Cores: wv.Cores, HealthPacks: wv.HealthPacks, Uplinks: wv.Uplinks,
-	}, m.wallIX, rid, 0, wv.ScanRadius(rid))
+	obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rid, 0, wv.ScanRadius(rid))
 	snap.perception = marshalAIPerception(self, obs)
 	return snap
 }
@@ -184,12 +180,12 @@ func marshalAIPerception(self sim.RobotView, obs sim.Observation) string {
 		Projectiles []projectile `json:"projectiles"`
 		Walls       []wall       `json:"walls"`
 	}{Tick: obs.Frame.Tick, Phase: phase, TimeLeft: obs.Frame.TimeLeftS}
-	doc.Self = robot{ID: self.ID, Position: toVec(self.Pos), Velocity: toVec(self.Vel), HP: float64(self.HpX10) / 10, Energy: float64(self.EnergyX10) / 10, Shield: self.ShieldOn, Dead: self.Dead}
+	doc.Self = robot{ID: self.ID, Position: toVec(self.Pos), Velocity: toVec(self.Vel), HP: sim.FromX10(self.HpX10), Energy: sim.FromX10(self.EnergyX10), Shield: self.ShieldOn, Dead: self.Dead}
 	for _, r := range obs.Robots {
 		if r.ID == self.ID {
 			continue
 		}
-		doc.Robots = append(doc.Robots, robot{ID: r.ID, Position: toVec(r.Pos), Velocity: toVec(r.Vel), HP: float64(r.HpX10) / 10, Shield: r.ShieldOn, Dead: r.Dead})
+		doc.Robots = append(doc.Robots, robot{ID: r.ID, Position: toVec(r.Pos), Velocity: toVec(r.Vel), HP: sim.FromX10(r.HpX10), Shield: r.ShieldOn, Dead: r.Dead})
 	}
 	for _, c := range obs.Cores {
 		if c.Alive {
@@ -278,7 +274,7 @@ func (m *Match) handleAgentResult(sess *Session, pid uint64, outcome ai.HandleOu
 	stillSameMatch := m.activeLocked() && svc.quota.CurrentMatchSeq() == matchSeq
 	if err != nil {
 		logAIRequestError(pid, err)
-		sess.SendReliable(say("AI 请求失败：" + aiRejectText(err)))
+		aiNotice(sess, ombv1.EvControlNotice_CN_AI_REQUEST_FAILED, "AI 请求失败："+aiRejectText(err))
 		m.sendAIUsageLocked(sess, pid, svc, outcome.Usage, stillSameMatch)
 		return
 	}
@@ -288,20 +284,26 @@ func (m *Match) handleAgentResult(sess *Session, pid uint64, outcome ai.HandleOu
 		newRev, accepted, serr := ms.SubmitSource(pid, snap.rev, outcome.Result.NewScript)
 		switch {
 		case serr != nil:
-			sess.SendReliable(say("AI 生成脚本编译失败，已丢弃（旧脚本继续运行）：" + serr.Error()))
+			aiNotice(sess, ombv1.EvControlNotice_CN_AI_COMPILE_FAILED, "AI 生成脚本编译失败，已丢弃（旧脚本继续运行）："+serr.Error())
 		case !accepted:
-			sess.SendReliable(say("AI 改码未生效：脚本已被手动更新，AI 结果丢弃（旧脚本继续运行）"))
+			aiNotice(sess, ombv1.EvControlNotice_CN_AI_STALE_SCRIPT, "AI 改码未生效：脚本已被手动更新，AI 结果丢弃（旧脚本继续运行）")
 		default:
+			// ScriptResult 先于版本链快照推送：客户端先终结 AI 面板 pending、
+			// 落 Editor loaded 基线，再由版本链快照触发直填（携带完整源码）。
+			originAI := ombv1.ScriptOrigin_ORIGIN_AI
+			versionID := m.recordScriptVersionLocked(pid, newRev, originAI, outcome.Result.NewScript, outcome.Result.NewScript, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS)
 			sess.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 				Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{
 					ClientScriptId: aiClientScriptID, Ok: true, ScriptRev: newRev,
+					Origin: &originAI, VersionId: &versionID,
 				}},
 			}}})
+			m.pushScriptVersionsLocked(pid)
 		}
 	}
 
 	if outcome.Result.Explain != "" {
-		sess.SendReliable(say("AI 改动说明：" + outcome.Result.Explain))
+		aiNotice(sess, ombv1.EvControlNotice_CN_AI_EXPLAIN, "AI 改动说明："+outcome.Result.Explain)
 	}
 	m.sendAIUsageLocked(sess, pid, svc, outcome.Usage, stillSameMatch)
 }
@@ -342,13 +344,16 @@ func (ms *matchScripts) SubmitSource(playerID uint64, rev uint32, source string)
 	if !ok {
 		return 0, false, fmt.Errorf("player not in match")
 	}
-	rt := ms.m.scriptPool.RuntimeOf(rid)
+	rt := ms.m.scriptPool.Ensure(rid)
 	if rt == nil {
-		rt = script.NewGojaRuntime(script.Config{})
-		ms.m.scriptPool.Register(rid, rt)
-		ms.m.runtimes[rid] = rt
+		return 0, false, fmt.Errorf("match stopped")
 	}
 	newRev, accepted, err := rt.LoadIfRev(rev, source)
+	if err != nil && rt.Source() == "" && len(rt.Snippets()) == 0 {
+		// Ensure 刚建的空 VM 首次装载失败：注销，不留每帧产出 ErrNoModule 的
+		// 空转运行时。已有旧版本则保旧（Hot Swap 语义）。
+		ms.m.scriptPool.Unregister(rid)
+	}
 	if accepted {
 		ms.m.rc.scriptSource[playerID] = source
 		ms.m.sendScriptLogsLocked(rid, rt)
@@ -360,10 +365,11 @@ func (ms *matchScripts) SubmitSource(playerID uint64, rev uint32, source string)
 // pipeline: scored matches persist it, the projector consumes it, and clients
 // receive the public usage counters (never prompts, scripts, or credentials).
 func (m *Match) emitNonSimEvent(ev *ombv1.ServerEvent) {
-	if m.log != nil {
-		m.log.OnEvent(m.tick, ev)
+	if ev == nil {
+		return
 	}
-	glueSink{m: m}.OnEvent(m.tick, ev)
+	ev.Tick = m.tick
+	m.sink.OnEvent(m.tick, ev)
 }
 
 // logAIRequestError 仅记录定位所需的错误元数据，不记录 prompt、脚本或密钥。

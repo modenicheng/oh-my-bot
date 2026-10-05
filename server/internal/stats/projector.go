@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"sort"
@@ -447,10 +448,12 @@ func (p *ProjectorImpl) sortedRobots() []*robotStats {
 
 func sortRows(rows []ScoreRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Score != rows[j].Score {
-			return rows[i].Score > rows[j].Score
-		}
-		return rows[i].RobotID < rows[j].RobotID
+		// Stable keeps the projector's own deterministic row identity (robot
+		// id) for full ties instead of relying on the comparator's strict order.
+		return cmp.Or(
+			cmp.Compare(rows[j].Score, rows[i].Score),     // score desc
+			cmp.Compare(rows[i].RobotID, rows[j].RobotID), // tie: robot id asc
+		) < 0
 	})
 }
 

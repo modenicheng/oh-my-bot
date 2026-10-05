@@ -238,3 +238,32 @@ html[data-console-resize] * { cursor: ns-resize !important; user-select: none !i
   .snippet-source-toggle { font-size: 0 !important; }
   .ai-composer textarea { min-height: 44px; }
 }
+
+/* ---- 脚本版本浮层（AI 直填 + 版本回退）：body portal，战术终端紧凑列表 ---- */
+#script-versions-toggle { position: relative; min-width: 64px; font-family: var(--mono); }
+.script-versions-badge { display: inline-block; min-width: 14px; margin-left: 4px; padding: 0 3px; border: 1px solid var(--accent); color: var(--accent); font: 10px/14px var(--mono); text-align: center; }
+/* 面板挂 document.body（position:fixed；几何由 script-version-placement 计算
+   并内联写入，不再被编辑器标题栏的 overflow/层叠上下文裁剪）。按钮在 portal
+   内脱离 #workbench 后代选择器，这里单独钉住同款基础样式。 */
+.script-versions-panel { position: fixed; z-index: 60; display: flex; flex-direction: column; margin: 0; border: 1px solid #36505f; background: #0b1016; box-shadow: 0 14px 26px #0008; }
+.script-versions-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--line); color: var(--fg-dim); background: transparent; font: 10px var(--mono); cursor: pointer; }
+.script-versions-panel button:hover:not(:disabled) { color: var(--fg); border-color: #496473; }
+.script-versions-panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.script-versions-panel button:disabled { opacity: .45; cursor: default; }
+.script-versions-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px 6px; border-bottom: 1px solid var(--line); color: var(--fg); font-size: 12px; letter-spacing: .04em; }
+.script-versions-hint { color: var(--fg-dim); font: 9px var(--mono); }
+.script-versions-list { overflow-y: auto; padding: 4px 0; scrollbar-gutter: stable; }
+.script-version-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-left: 2px solid transparent; }
+.script-version-row + .script-version-row { border-top: 1px solid #131a22; }
+.script-version-row[data-current="true"] { border-left-color: var(--lime); background: #0e141b; }
+.script-version-meta { display: grid; gap: 2px; min-width: 0; }
+.script-version-label { color: var(--fg); font: 11px var(--mono); overflow-wrap: anywhere; }
+.script-version-time { color: var(--fg-dim); font: 9px var(--mono); }
+.script-version-action { flex: none; }
+.script-version-action button { min-height: 26px; padding: 3px 8px; font: 10px var(--mono); }
+.script-version-current-tag { display: inline-block; padding: 2px 6px; border: 1px solid var(--lime); color: var(--lime); font: 10px var(--mono); letter-spacing: .08em; }
+.script-versions-stash { margin: 6px 12px; min-height: 28px; border: 1px dashed #477383; color: var(--fg-dim); background: transparent; font: 10px var(--mono); }
+.script-versions-stash:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.script-versions-status { padding: 6px 12px 8px; border-top: 1px solid var(--line); color: var(--fg-dim); font: 10px/1.5 var(--mono); }
+.script-versions-status:empty { display: none; }
+.script-versions-empty { margin: 0; padding: 14px 16px; color: var(--fg-dim); font-size: 11px; line-height: 1.6; }

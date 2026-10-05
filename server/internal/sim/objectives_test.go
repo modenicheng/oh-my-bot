@@ -331,6 +331,72 @@ func TestCorePeriodsWeightsPickupsAndPhaseChange(t *testing.T) {
 		t.Fatal("4:00 weights did not move centrally")
 	}
 }
+func TestCoreTargetReplenishmentAndLegacyWaves(t *testing.T) {
+	t.Run("target replenishes initial and periodic supply", func(t *testing.T) {
+		s := NewSim(91, nil, nil)
+		m := gameMap()
+		m.CoreZone.Radius = 0
+		m.CoreRules.PeriodTicks = 60
+		m.CoreRules.TargetAlive = 4
+		m.CoreRules.GroupWeights = map[Phase][]float64{PhaseOuterRing: {1}, PhaseCoreOpen: {1}}
+		for i := 0; i < 8; i++ {
+			m.CorePads = append(m.CorePads, CorePadDef{ID: uint32(50 + i), Pos: Vec2{20 + float64(i), 0}, Group: 0, Value: 10})
+		}
+		if err := s.SetMap(m); err != nil {
+			t.Fatal(err)
+		}
+		s.Tick()
+		alive := func() int {
+			n := 0
+			for _, core := range s.cores {
+				if core.Alive {
+					n++
+				}
+			}
+			return n
+		}
+		if got := alive(); got != 4 {
+			t.Fatalf("initial alive = %d, want 4", got)
+		}
+		for i := range s.cores {
+			if s.cores[i].Alive {
+				s.cores[i].Alive = false
+				break
+			}
+		}
+		advance(s, 59)
+		if got := alive(); got != 3 {
+			t.Fatalf("refilled before period: %d", got)
+		}
+		s.Tick()
+		if got := alive(); got != 4 {
+			t.Fatalf("periodic alive = %d, want 4", got)
+		}
+	})
+
+	t.Run("legacy target zero spawns exactly one per wave", func(t *testing.T) {
+		s := NewSim(92, nil, nil)
+		m := gameMap()
+		m.CoreZone.Radius = 0
+		m.CoreRules.TargetAlive = 0
+		m.CoreRules.GroupWeights = map[Phase][]float64{PhaseOuterRing: {1}, PhaseCoreOpen: {1}}
+		m.CorePads = []CorePadDef{{ID: 50, Pos: Vec2{20, 0}, Group: 0, Value: 10}, {ID: 51, Pos: Vec2{22, 0}, Group: 0, Value: 10}}
+		if err := s.SetMap(m); err != nil {
+			t.Fatal(err)
+		}
+		s.Tick()
+		alive := 0
+		for _, core := range s.cores {
+			if core.Alive {
+				alive++
+			}
+		}
+		if alive != 1 {
+			t.Fatalf("legacy first wave alive = %d, want 1", alive)
+		}
+	})
+}
+
 func TestCoreWeightedSelectionDeterministic(t *testing.T) {
 	m := gameMap()
 	m.CoreZone.Radius = 0

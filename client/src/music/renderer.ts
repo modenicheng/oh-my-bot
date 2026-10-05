@@ -5,18 +5,7 @@
 
 import { renderSong, type SongRender } from './render';
 import type { SongSpec } from './types';
-
-interface RenderRequest {
-  token: number;
-  song: SongSpec;
-  sampleRate: number;
-}
-
-interface RenderResponse {
-  token: number;
-  render?: SongRender;
-  error?: string;
-}
+import type { RenderRequest, RenderResponse } from './render-protocol';
 
 const CACHE_LIMIT = 2;
 
@@ -40,10 +29,6 @@ export class SongRenderer {
     } catch {
       this.worker = null; // fall back to rendering on the main thread
     }
-  }
-
-  get usingWorker(): boolean {
-    return this.worker !== null;
   }
 
   render(song: SongSpec, sampleRate: number): Promise<SongRender> {

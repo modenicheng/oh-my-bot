@@ -7,6 +7,7 @@
 package glue
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -27,12 +28,6 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/stats"
 )
 
-const (
-	tickHz     = 60
-	frameDue   = 12 * time.Millisecond
-	matchTicks = 8 * 60 * tickHz // 28800
-)
-
 // Match 一个运行中的对局。
 type Match struct {
 	rc *RoomConn
@@ -41,6 +36,10 @@ type Match struct {
 	mapDef *sim.MapDef
 	proj   *stats.ProjectorImpl
 	log    *sim.MatchEventLog
+	// sink is the effective event pipeline assembled in NewMatch (glue-only or
+	// log+glue multiSink). Non-sim events must flow through the same chain so
+	// they are persisted and projected identically.
+	sink sim.EventSink
 
 	// scoreboard 记录最近一次已广播的实时积分榜指纹与事件，用于变更时才重发与观战者 catch-up。
 	lastScoreboard     string
@@ -50,7 +49,6 @@ type Match struct {
 	wallIX   *snapshot.WallIndex
 
 	scriptPool *script.RunPool
-	runtimes   map[uint32]*script.GojaRuntime // robotID -> runtime（脚本装载/热更）
 
 	robotOf      map[uint64]uint32 // playerID -> robotID
 	playerOf     map[uint32]uint64 // robotID -> playerID
@@ -120,7 +118,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	// scored match share one budget as required by ADR-0010.
 
 	// 地图：种子由房间状态机在 Start 时生成（经 Launch 传入）
-	def, err := mapgen.Generate(seed)
+	def, err := mapgen.GenerateForPlayers(seed, len(players))
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: %w", err)
 	}
@@ -155,6 +153,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		sinkAll = multiSink{primary: ml, secondary: sinkAll}
 	}
 	m.sim = sim.NewSim(seed, ids, sinkAll)
+	m.sink = sinkAll
 	if err := m.sim.SetMap(def); err != nil {
 		if m.log != nil {
 			_ = m.log.Close()
@@ -186,7 +185,6 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
-	m.runtimes = map[uint32]*script.GojaRuntime{}
 	m.scriptPool = script.NewRunPool(script.Config{})
 	for rid := range m.botRobots {
 		rt := script.NewGojaRuntime(script.Config{})
@@ -199,7 +197,6 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 			return nil, fmt.Errorf("test bot %d: %w", rid, err)
 		}
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
 		m.sim.AssistToggle(rid)
 	}
 	// 玩家脚本和 assist 是房间身份状态：新局重新装配运行时，但不丢失
@@ -336,13 +333,16 @@ func (m *Match) submitScriptLocked(pid uint64, src string) (ok bool, errMsg stri
 	if !ok {
 		return false, "not in match", 0
 	}
-	rt := m.scriptPool.RuntimeOf(rid)
+	rt := m.scriptPool.Ensure(rid)
 	if rt == nil {
-		rt = script.NewGojaRuntime(script.Config{})
-		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
+		return false, "match stopped", 0
 	}
 	if err := rt.Load(src); err != nil {
+		if rt.Source() == "" && len(rt.Snippets()) == 0 {
+			// Ensure 刚建的空 VM 首次装载失败：注销，不留每帧产出 ErrNoModule
+			// 的空转运行时。已有旧版本则保旧（Hot Swap 语义）。
+			m.scriptPool.Unregister(rid)
+		}
 		return false, err.Error(), rt.Rev() // 旧版本继续跑
 	}
 	m.rc.scriptSource[pid] = src
@@ -410,6 +410,9 @@ func (m *Match) bootstrapLocked(s *Session) {
 	m.sendMapBootstrapLocked(s)
 	m.forceResyncLocked(s.playerID)
 	m.sendSnippetStateLocked(s)
+	// 版本链补发：异步 NewMatch 装配期间发生的写入只到旧会话；接管/重连
+	// 后由此对齐（Bind 已对无对局场景补发，这里覆盖发布时点）。
+	m.rc.sendScriptVersionsStateLocked(s.playerID)
 }
 
 // applySavedPlayerScripts restores room-scoped player code before snippets are
@@ -429,7 +432,6 @@ func (m *Match) applySavedPlayerScripts(players map[uint64]SessionInfo) {
 			continue
 		}
 		m.scriptPool.Register(rid, rt)
-		m.runtimes[rid] = rt
 	}
 }
 
@@ -450,7 +452,23 @@ func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(m.mapDef)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
-	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer)}}}}})
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer), Tuning: simTuning()}}}}})
+}
+
+// simTuning 下发客户端可见的对局数值（审计 X-3）：仅漂移高危集（HUD/渲染/
+// 音效消费的 D3/D5 常量），内部专用常量不在此堆入。值与 server sim 常量同源，
+// 由 glue 的 SimTuning golden 测试与客户端 FALLBACK_TUNING_HEX 互钉：服务器改
+// 常量而不动此函数（或反之）两侧测试即刻失败。
+func simTuning() *ombv1.SimTuning {
+	return &ombv1.SimTuning{
+		TickRate:            uint32(sim.TickRate),
+		MaxHpX10:            sim.ToX10(sim.MaxHP),
+		MaxEnergyX10:        sim.ToX10(sim.MaxEnergy),
+		FireCost:            sim.FireCost,
+		HackDurationTicks:   sim.HackDuration,
+		InvulnDurationTicks: sim.InvulnDuration,
+		VisionRadius:        sim.VisionRadius,
+	}
 }
 
 // bootstrapSpectatorLocked attaches a read-only observer to this match.
@@ -497,14 +515,7 @@ func (m *Match) forceSpectatorResyncLocked(pid uint64) {
 func (m *Match) spectatorReplayEndLocked(s *Session) {
 	m.sendMapBootstrapLocked(s)
 	wv := m.sim.WorldView()
-	obs := snapshot.BuildSpectatorObservation(snapshot.World{
-		FrameView:   wv.Frame,
-		Robots:      wv.Robots,
-		Projectiles: wv.Projectiles,
-		Cores:       wv.Cores,
-		HealthPacks: wv.HealthPacks,
-		Uplinks:     wv.Uplinks,
-	})
+	obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
 	enc := m.specEncoders[s.playerID]
 	if enc == nil {
 		enc = snapshot.NewEncoder()
@@ -534,7 +545,7 @@ func (m *Match) run() {
 			}
 		}
 	}()
-	ticker := time.NewTicker(time.Second / tickHz)
+	ticker := time.NewTicker(time.Second / sim.TickRate)
 	defer ticker.Stop()
 	for {
 		select {
@@ -581,14 +592,7 @@ func (m *Match) step() {
 			enc.ForceFull()
 			m.encoders[rv.ID] = enc
 		}
-		obs := snapshot.BuildObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
 		robot, _ := m.sim.Robot(rv.ID)
@@ -619,16 +623,9 @@ func (m *Match) step() {
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
-	ended := m.tick >= matchTicks && !m.warmup
+	ended := m.tick >= sim.MatchTicks && !m.warmup
 	if len(m.rc.spectators) > 0 {
-		obs := snapshot.BuildSpectatorObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		})
+		obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
 		for pid, s := range m.rc.spectators {
 			enc := m.specEncoders[pid]
 			if enc == nil {
@@ -658,7 +655,7 @@ func (m *Match) step() {
 		}
 	}
 
-	if m.tick >= matchTicks && !m.warmup {
+	if m.tick >= sim.MatchTicks && !m.warmup {
 		m.finish(wv)
 		m.Stop()
 		return
@@ -682,7 +679,7 @@ func (m *Match) persistAssistStateLocked() {
 
 // scoreboardEveryTicks 实时积分榜最小广播间隔（2s）：榜是低频信息，无需 60Hz；
 // 变化时立即重发，最多每 2s 一拍，兼顾带宽与新鲜度。
-const scoreboardEveryTicks = 2 * tickHz
+const scoreboardEveryTicks = 2 * sim.TickRate
 
 // maybeBroadcastScoreboard 在局内定期（或积分变化时）向全部玩家与观战者广播实时积分榜。
 // 不落 Match Event Log：榜属于低价值可再生态，重连/观战 catch-up 用 lastScoreboardEv。
@@ -730,28 +727,23 @@ func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 }
 
 // runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
+// 遍历注册表（scriptPool 是运行时唯一权威）；id 升序保证 Submit 顺序确定化。
 func (m *Match) runScripts(wv sim.WorldView) {
-	if len(m.runtimes) == 0 {
+	ids := m.scriptPool.IDs()
+	if len(ids) == 0 {
 		return
 	}
-	deadline := time.Now().Add(frameDue)
-	for rid := range m.runtimes {
+	deadline := time.Now().Add(sim.FrameBudget)
+	for _, rid := range ids {
 		self, ok := robotOf(wv, rid)
 		if !ok {
 			continue
 		}
-		obs := snapshot.BuildObservation(snapshot.World{
-			FrameView:   wv.Frame,
-			Robots:      wv.Robots,
-			Projectiles: wv.Projectiles,
-			Cores:       wv.Cores,
-			HealthPacks: wv.HealthPacks,
-			Uplinks:     wv.Uplinks,
-		}, m.wallIX, rid, 0, wv.ScanRadius(rid))
+		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rid, 0, wv.ScanRadius(rid))
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
-		rt := m.runtimes[res.ID]
+		rt := m.scriptPool.RuntimeOf(res.ID)
 		if res.Err != nil || res.Deferred {
 			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
 			if rt != nil && !res.Deferred {
@@ -807,12 +799,12 @@ func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
 	return out
 }
 
-// stableRobotID：playerID → 稳定 robotID（FNV-1a 32 位；冲突在 NewSim 排序时自然暴露）。
+// stableRobotID：playerID → 稳定 robotID（FNV-1a 32 位，小端字节序；冲突在 NewSim 排序时自然暴露）。
+// 输出与旧手写实现逐位一致（见 golden 测试）——这是线上身份算法，改动词须带回归验证。
 func stableRobotID(pid uint64) uint32 {
-	h := uint32(2166136261)
-	for i := 0; i < 8; i++ {
-		h ^= uint32(pid >> (i * 8) & 0xff)
-		h *= 16777619
-	}
-	return h
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], pid)
+	h := fnv.New32a()
+	_, _ = h.Write(buf[:])
+	return h.Sum32()
 }

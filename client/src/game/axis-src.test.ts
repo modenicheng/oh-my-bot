@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ControlSource, type SelfState } from '@omb/protocol'
-import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
+import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover, isAimUnderScript } from './axis-src'
 
 const self = (patch: Partial<SelfState>): SelfState =>
   ({ robotId: 1, moveSrc: ControlSource.CS_UNSPECIFIED, turretSrc: ControlSource.CS_UNSPECIFIED,
@@ -38,6 +38,63 @@ describe('aim control mode stays distinct from per-tick output', () => {
     expect(aimControlStatus(idle, true)).toBe('standby')
     expect(aimControlStatus(idle, false)).toBe('manual')
     expect(aimControlStatus(undefined, true)).toBe('unavailable')
+  })
+})
+
+describe('isAimUnderScript truth table (single source for HUD and guard)', () => {
+  // 全组合真值表：16 行覆盖 assistOn × aimCapable × turretSrc(script|other) × holdsAim。
+  // turretSrc 只分「脚本系」与「非脚本系」（CS_HUMAN/CS_UNSPECIFIED/undefined 同栏）。
+  const CS: ControlSource[] = [ControlSource.CS_SCRIPT, ControlSource.CS_SNIPPET]
+  const NOT_CS: (ControlSource | undefined)[] = [ControlSource.CS_HUMAN, ControlSource.CS_UNSPECIFIED, undefined]
+  const table: { assistOn: boolean; aimCapable: boolean; turretSrc: ControlSource | undefined; holdsAim: boolean; under: boolean }[] = []
+  for (const assistOn of [false, true])
+    for (const aimCapable of [false, true])
+      for (const turretSrc of [...CS, ...NOT_CS])
+        for (const holdsAim of [false, true])
+          table.push({ assistOn, aimCapable, turretSrc, holdsAim,
+            under: assistOn && (aimCapable || CS.includes(turretSrc as ControlSource)) && !holdsAim })
+
+  it('matches the frozen 40-row truth table', () => {
+    expect(table).toHaveLength(40)
+    for (const row of table) {
+      expect(isAimUnderScript(row.assistOn, row.aimCapable, row.turretSrc, row.holdsAim)).toBe(row.under)
+    }
+  })
+
+  it('guard lets the human keep the axis once seized (R), regardless of capability', () => {
+    for (const turretSrc of [...CS, ...NOT_CS]) {
+      for (const aimCapable of [false, true]) {
+        expect(isAimUnderScript(true, aimCapable, turretSrc, true)).toBe(false)
+      }
+    }
+  })
+
+  it('script turret echoes keep the guard on even with no local capability signal', () => {
+    for (const turretSrc of CS) {
+      expect(isAimUnderScript(true, false, turretSrc, false)).toBe(true)
+    }
+  })
+
+  it('assist off or no signal and no script echo never guards', () => {
+    for (const turretSrc of NOT_CS) {
+      expect(isAimUnderScript(true, false, turretSrc, false)).toBe(false)
+    }
+    for (const turretSrc of [...CS, ...NOT_CS]) {
+      expect(isAimUnderScript(false, true, turretSrc, false)).toBe(false)
+    }
+  })
+
+  it('agrees with aimControlStatus standby (HUD and guard share one projection)', () => {
+    // 未被权威 manual 证据拦截时：standby ⇔ isAimUnderScript(…, holdsAim=false)
+    const idle = self({ assistOn: true, manualAxesMask: 0 })
+    for (const aimCapable of [false, true]) {
+      for (const turretSrc of [ControlSource.CS_SCRIPT, ControlSource.CS_SNIPPET, ControlSource.CS_UNSPECIFIED, undefined] as (ControlSource | undefined)[]) {
+        const state = { ...idle, turretSrc }
+        const status = aimControlStatus(state as SelfState, aimCapable)
+        const under = isAimUnderScript(true, aimCapable, turretSrc, false)
+        expect(status === 'standby').toBe(under && !CS.includes(turretSrc as ControlSource))
+      }
+    }
   })
 })
 

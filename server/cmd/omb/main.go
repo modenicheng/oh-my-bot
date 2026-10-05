@@ -36,6 +36,12 @@ import (
 // version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
 var version = "dev"
 
+// joinFailedPrefix 是进房被拒的兼容字符串协议前缀（过渡期，X-4）：新服务器
+// 双形态下发——先 EvControlNotice{code=CN_JOIN_FAILED}，再 robot=0 EvSay
+// "join failed: <原因>"（旧客户端据此终止重试并展示原因）。
+// TS 侧前缀常量由 packages/protocol/test/golden.test.ts 互钉。
+const joinFailedPrefix = "join failed:"
+
 //go:embed all:web
 var webFS embed.FS
 
@@ -413,10 +419,11 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput,
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
-			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig:
-			sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-				Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: readonly spectator connection"}},
-			}}})
+			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig,
+			*ombv1.ClientMsg_ScriptRollback:
+			// X-4：结构化 notice 在前、兼容 join-failed say 在后（旧客户端前缀解析）。
+			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "readonly spectator connection"))
+			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
 			return
 		}
 		return
@@ -447,6 +454,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	case *ombv1.ClientMsg_ScriptSubmit:
 		if cur := (*sess); cur != nil {
 			cur.SubmitScript(p.ScriptSubmit)
+		}
+	case *ombv1.ClientMsg_ScriptRollback:
+		if cur := (*sess); cur != nil {
+			cur.ScriptRollback(p.ScriptRollback)
 		}
 	case *ombv1.ClientMsg_Say:
 		if cur := (*sess); cur != nil {
@@ -483,9 +494,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	hub.Register(sess)
 	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
 		hub.Unregister(sess)
-		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
-		}}})
+		sendJoinFailedReliable(sendReliable, err.Error())
 		return
 	}
 	if old := *sessOut; old != nil {
@@ -495,8 +504,16 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	rc.BroadcastRoomState()
 }
 
+// sendJoinFailedReliable 双形态下发 join 拒绝（X-4）：结构化 controlNotice 在前、
+// 兼容 "join failed:" 前缀 say 在后。顺序与 glue.sendJoinFailed 一致，由
+// cmd/omb 测试与客户端 dedupeControlNoticeSay 互钉。
+func sendJoinFailedReliable(send func(*ombv1.ServerMsg), reason string) {
+	send(glue.ControlNotice(ombv1.EvControlNotice_CN_JOIN_FAILED, reason))
+	send(glue.SystemSay(joinFailedPrefix + " " + reason))
+}
+
 // handleSpectate attaches a read-only live observer. Reuses the established
-// "join failed:" robot-0 say prefix so the client RoomSession stops retrying
+// joinFailedPrefix robot-0 say prefix so the client RoomSession stops retrying
 // exactly like a rejected player join.
 func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
 	if spec == nil {
@@ -508,9 +525,7 @@ func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendL
 	hub.Register(sess)
 	if err := rc.BindSpectator(sess); err != nil {
 		hub.Unregister(sess)
-		sendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
-			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: "join failed: " + err.Error()}},
-		}}})
+		sendJoinFailedReliable(sendReliable, err.Error())
 		return
 	}
 	if old := *sessOut; old != nil {

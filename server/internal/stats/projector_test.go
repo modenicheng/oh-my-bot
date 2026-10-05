@@ -148,6 +148,43 @@ func TestLiveSortedByScoreDesc(t *testing.T) {
 	}
 }
 
+func TestSortRowsScoreDescRobotIdTiebreak(t *testing.T) {
+	rows := []ScoreRow{
+		{RobotID: 9, Score: 10},
+		{RobotID: 2, Score: 25},
+		{RobotID: 7, Score: 10},
+		{RobotID: 4, Score: -5},
+		{RobotID: 1, Score: 25},
+	}
+	sortRows(rows)
+	want := []uint32{1, 2, 7, 9, 4} // 25 desc (1<2), 10 desc (7<9), -5 last
+	for i, id := range want {
+		if rows[i].RobotID != id {
+			t.Fatalf("order[%d] = %d, want %d (full: %v)", i, rows[i].RobotID, id, robotIDs(rows))
+		}
+	}
+}
+
+func TestSortRowsStableOnFullTie(t *testing.T) {
+	// Identical score+robot-id cannot occur for distinct rows, but rows equal
+	// in every compared field (same robot recorded twice) must keep relative
+	// order — SliceStable contract relied on by the projector.
+	a, b := ScoreRow{RobotID: 5, Score: 10, Nick: "first"}, ScoreRow{RobotID: 5, Score: 10, Nick: "second"}
+	rows := []ScoreRow{b, a}
+	sortRows(rows)
+	if rows[0].Nick != "second" || rows[1].Nick != "first" {
+		t.Fatalf("full tie reordered rows: %v, %v", rows[0].Nick, rows[1].Nick)
+	}
+}
+
+func robotIDs(rows []ScoreRow) []uint32 {
+	ids := make([]uint32, len(rows))
+	for i, r := range rows {
+		ids[i] = r.RobotID
+	}
+	return ids
+}
+
 func TestLiveCarriesIdentity(t *testing.T) {
 	p := NewProjector()
 	p.SetPlayerMap(map[uint32]uint64{1: 100, 2: 200})

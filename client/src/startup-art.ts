@@ -1,3 +1,5 @@
+import { hash32 } from './lib/hash'
+
 // 固定字形只改变笔画内字符：保持标题可读，而非整屏随机闪烁。
 const GLYPHS: Record<string, string[]> = {
   O: ['01110', '11011', '11011', '11011', '11011', '11011', '01110'],
@@ -19,7 +21,7 @@ export function erodeText(text: string, progress: number, seed = 0): string {
   const debris = '#*+:.'
   return Array.from(text, (char, index) => {
     if (/\s/.test(char) || progress <= 0) return char
-    const hash = Math.imul(index + 1 + seed, 0x45d9f3b) >>> 0
+    const hash = hash32(index + 1 + seed)
     const start = (hash % 997) / 997 * 0.58
     const age = (progress - start) / 0.3
     if (age <= 0) return char

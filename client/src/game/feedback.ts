@@ -1,14 +1,23 @@
 import type { ClientInput, ServerEvent, SnapshotDelta } from '@omb/protocol'
 import { audio, type SoundCue } from '../audio'
 import type { Camera } from './camera'
-import type { MapDefParsed, MapUplink, MapVec2 } from './mapdef'
+import { type MapDefParsed, type MapUplink, type MapVec2 } from './mapdef'
+import { hackMaxX10 } from './tuning'
 import type { WorldState } from './world'
 
 const tau = Math.PI * 2
 const CAMERA_SHAKE_TICKS = 16
-const UPLINK_SLAM_TICKS = 12
 const DAMAGE_HOLD_MS = 420
 const DAMAGE_FADE_MS = 620
+const DAMAGE_POPUP_MS = 850
+const HIT_CHAIN_MS = 520
+const HIT_CHAIN_MAX = 6
+const HIT_CHAIN_PITCH_STEP = 0.07
+const ZOOM_DASH_TARGET = 0.92
+const ZOOM_HACK_TARGET = 0.96
+const ZOOM_DASH_BLEND = 0.64
+const ZOOM_HACK_BLEND = 0.82
+const ZOOM_NORMAL_BLEND = 0.78
 const TRAIL_TICKS = 15
 const LOW_HEALTH_X10 = 250
 const CAMERA_SHAKE_DIRECTIONS = [[1, 1], [-1, 1], [-1, -1], [1, -1]] as const
@@ -42,10 +51,11 @@ export class GameFeedback {
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
   private shake: { tick: number; seed: number } | undefined
-  private slam: { tick: number; seed: number } | undefined
   private selfLow = false
   private lowHitAt = -Infinity
   private dashZoom = { value: 1, tick: 0 }
+  /** cameraZoom 每 tick 只推进一步（C-4）：记录已缓存的 tick，undefined 表示尚未推进过。 */
+  private zoomAtTick: number | undefined
   private hitChain = { at: -Infinity, count: 0 }
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
@@ -60,12 +70,12 @@ export class GameFeedback {
     this.hackers.clear(); this.completed.clear(); this.near = 0; this.baseline = false; this.lastDenied = -Infinity
     this.quietThroughTick = -1; this.phase = undefined; this.innerOpened = false
     this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
-    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined; this.slam = undefined
-    this.selfLow = false; this.lowHitAt = -Infinity; this.dashZoom = { value: 1, tick: 0 }; this.hitChain = { at: -Infinity, count: 0 }
+    this.held = { fire: false, shield: false, interact: false }; this.shake = undefined
+    this.selfLow = false; this.lowHitAt = -Infinity; this.dashZoom = { value: 1, tick: 0 }; this.hitChain = { at: -Infinity, count: 0 }; this.zoomAtTick = undefined
     audio.stopGame()
   }
 
-  pause(): void { this.effects = []; this.damage = []; this.trails.clear(); this.near = 0; this.baseline = false; this.shake = undefined; this.slam = undefined; audio.stopGame() }
+  pause(): void { this.effects = []; this.damage = []; this.trails.clear(); this.near = 0; this.baseline = false; this.shake = undefined; audio.stopGame() }
 
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
     const transitions = this.baseline && !snap.full && active && !document.hidden
@@ -156,7 +166,7 @@ export class GameFeedback {
     }
     this.near = id
     const u = world.uplinks.get(id)
-    audio.setUplink(!id ? 'off' : u?.hackingId === world.self?.robotId ? 'hacking' : 'near', (u?.progressX10 ?? 0) / 80)
+    audio.setUplink(!id ? 'off' : u?.hackingId === world.self?.robotId ? 'hacking' : 'near', (u?.progressX10 ?? 0) / hackMaxX10(world.tuning))
   }
 
   event(ev: ServerEvent, world: WorldState, map: MapDefParsed, active: boolean): void {
@@ -182,9 +192,9 @@ export class GameFeedback {
           this.add('impact', k.value.at, k.value.shield || k.value.invulnerable ? white : k.value.target ? red : k.value.color || world.projectiles.get(k.value.projectile)?.color || world.robots.get(k.value.owner)?.color || cyan, k.value.projectile, 330)
           const cue = k.value.shield || k.value.invulnerable ? 'shieldHit' : 'hit'
           const now = performance.now()
-          this.hitChain.count = now - this.hitChain.at <= 520 ? Math.min(6, this.hitChain.count + 1) : 1
+          this.hitChain.count = now - this.hitChain.at <= HIT_CHAIN_MS ? Math.min(HIT_CHAIN_MAX, this.hitChain.count + 1) : 1
           this.hitChain.at = now
-          this.sound(cue, k.value.at, world, 1, k.value.target === selfId, cue === 'hit' ? 1 + (this.hitChain.count - 1) * 0.07 : 1)
+          this.sound(cue, k.value.at, world, 1, k.value.target === selfId, cue === 'hit' ? 1 + (this.hitChain.count - 1) * HIT_CHAIN_PITCH_STEP : 1)
         }
         if (k.value.target === selfId && !k.value.invulnerable) this.message(k.value.shield ? '护盾吸收命中' : '机体受击')
         break
@@ -222,7 +232,6 @@ export class GameFeedback {
         if (k.value.by === selfId) {
           audio.play('uplinkSuccess')
           this.completed.set(k.value.uplinkId, ev.tick)
-          this.slam = { tick: ev.tick, seed: ev.tick + k.value.uplinkId * 17 }
           this.message(`黑入完成 · +${k.value.value} 分 · 本桩冷却 30s`, 'uplink')
         } else {
           if (p) this.sound('uplinkSuccess', p, world)
@@ -289,27 +298,21 @@ export class GameFeedback {
         x += Math.round(direction[0] * 8 * decay); y += Math.round(direction[1] * 6 * decay)
       }
     }
-    const slam = this.slam
-    if (slam) {
-      const age = Math.max(0, tick - slam.tick)
-      if (age >= UPLINK_SLAM_TICKS) this.slam = undefined
-      else {
-        const fall = age < 4 ? -8 + age * 4.5 : 10 * (1 - (age - 4) / (UPLINK_SLAM_TICKS - 4))
-        const direction = CAMERA_SHAKE_DIRECTIONS[Math.abs(slam.seed + age) % CAMERA_SHAKE_DIRECTIONS.length]!
-        x += Math.round(direction[0] * 2 * (1 - age / UPLINK_SLAM_TICKS))
-        y += Math.round(fall)
-      }
-    }
     return { x, y }
   }
 
-  cameraZoom(tick: number, dashing: boolean): number {
+  cameraZoom(tick: number, dashing: boolean, hacking = false): number {
     if (this.reduced.matches) return 1
+    // rAF drawFrame 与 60Hz sampleAndSend 同 tick 各调一次（C-4）：同 tick 返回
+    // 缓存，每 tick 只推进一步，收敛速度不随刷新率变化（此前 144Hz≈204 步/s）。
+    if (this.zoomAtTick === tick) return this.dashZoom.value
     const elapsed = Math.max(1, Math.min(6, tick - this.dashZoom.tick || 1))
-    const target = dashing ? 0.92 : 1
-    const blend = 1 - Math.pow(dashing ? 0.64 : 0.78, elapsed)
+    const target = dashing ? ZOOM_DASH_TARGET : hacking ? ZOOM_HACK_TARGET : 1
+    const base = dashing ? ZOOM_DASH_BLEND : hacking ? ZOOM_HACK_BLEND : ZOOM_NORMAL_BLEND
+    const blend = 1 - Math.pow(base, elapsed)
     this.dashZoom.value += (target - this.dashZoom.value) * blend
     this.dashZoom.tick = tick
+    this.zoomAtTick = tick
     return this.dashZoom.value
   }
 
@@ -355,7 +358,7 @@ export class GameFeedback {
     let damageKept = 0
     for (let i = 0; i < this.damage.length; i++) {
       const popup = this.damage[i]!
-      if (now - popup.at < 850) this.damage[damageKept++] = popup
+      if (now - popup.at < DAMAGE_POPUP_MS) this.damage[damageKept++] = popup
     }
     this.damage.length = damageKept
     ctx.save()
@@ -401,7 +404,7 @@ export class GameFeedback {
     ctx.globalAlpha = 1
     ctx.font = '14px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     for (const popup of this.damage) {
-      const t = Math.min(1, (now - popup.at) / 850)
+      const t = Math.min(1, (now - popup.at) / DAMAGE_POPUP_MS)
       const drift = this.reduced.matches ? 0 : (10 + (popup.seed % 5)) * t
       const x = cam.toPxX(popup.pos.x) + ((popup.seed % 7) - 3)
       const y = cam.toPxY(popup.pos.y) - 20 - drift
@@ -411,29 +414,25 @@ export class GameFeedback {
       ctx.fillStyle = red; ctx.fillText(text, x, y)
     }
     if (this.selfLow) {
-      const flash = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
-      const pulse = this.reduced.matches ? 0.64 : 0.64 + Math.sin(now / 650) * 0.06
-      const alpha = Math.min(0.9, pulse + flash * 0.24)
-      const cell = 8, layers = Math.min(5, Math.floor(Math.min(cam.cw, cam.ch) / (cell * 5)))
+      // A confirmed hit while already low briefly brightens and expands the same restrained red frame.
+      const hit = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / 240)
+      const pulse = this.reduced.matches ? 0.34 : 0.34 + Math.sin(now / 700) * 0.02
+      const alpha = Math.min(0.52, pulse + hit * 0.16)
+      const shortSide = Math.min(cam.cw, cam.ch)
+      const horizontalDepth = shortSide * (0.012 + hit * 0.004)
+      const sideDepth = shortSide * (0.034 + hit * 0.008)
+      const steps = [0, 0.36, 0.7, 1]
+      const opacity = [0.9, 0.52, 0.24]
       ctx.fillStyle = red
-      // Spatial noise stays stable between frames: irregular damage, not strobing static.
-      for (let side = 0; side < 4; side++) {
-        const length = side < 2 ? cam.cw : cam.ch
-        for (let row = 0; row < layers; row++) {
-          for (let along = 0; along < length; along += cell) {
-            let hash = Math.imul((along / cell + 1) ^ ((row + 1) * 193) ^ ((side + 1) * 941), 0x45d9f3b)
-            hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b) >>> 0
-            const random = (hash % 997) / 997
-            if (row > 0 && random > 1 - row * 0.19) continue
-            const size = Math.min(cell, length - along)
-            const depth = row * cell
-            ctx.globalAlpha = alpha * (0.8 + (hash % 17) / 85) * (1 - row * 0.13)
-            if (side === 0) ctx.fillRect(along, depth, size, cell)
-            else if (side === 1) ctx.fillRect(along, cam.ch - depth - cell, size, cell)
-            else if (side === 2) ctx.fillRect(depth, along, cell, size)
-            else ctx.fillRect(cam.cw - depth - cell, along, cell, size)
-          }
-        }
+      // Each band is one continuous rectangular ring. Corners share the same path, so no seams.
+      for (let i = 0; i < opacity.length; i++) {
+        const outerX = sideDepth * steps[i]!, outerY = horizontalDepth * steps[i]!
+        const innerX = sideDepth * steps[i + 1]!, innerY = horizontalDepth * steps[i + 1]!
+        ctx.globalAlpha = alpha * opacity[i]!
+        ctx.beginPath()
+        ctx.rect(outerX, outerY, cam.cw - outerX * 2, cam.ch - outerY * 2)
+        ctx.rect(innerX, innerY, cam.cw - innerX * 2, cam.ch - innerY * 2)
+        ctx.fill('evenodd')
       }
     }
     ctx.restore()

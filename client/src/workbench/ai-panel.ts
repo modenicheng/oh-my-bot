@@ -1,8 +1,9 @@
-import type { EvAiQuota, EvAiUsage } from '@omb/protocol'
+import type { EvAiQuota, EvAiUsage, EvControlNotice } from '@omb/protocol'
 import {
-  aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay,
+  aiHotSwapNotice, aiQuotaText, appendAiStreamText, checkAiPrompt, isAiDirectedSay, isAiDirectedNotice, isAiNoticeError,
   type AiFeedItem, type AiQuotaState,
 } from './ai-assist'
+import { escapeHtml } from '../lib/escape'
 import './ai-panel.css'
 
 // marked + highlight.js 只服务 AI 面板：动态加载以移出首屏主 chunk（启动时并行
@@ -16,7 +17,7 @@ const markdownReady: Promise<AiMarkdownModule> = import('./ai-markdown').then(mo
 
 function renderAiMarkdownLazy(source: string, streaming = false): string {
   if (markdownModule) return markdownModule.renderAiMarkdown(source, streaming)
-  return source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return escapeHtml(source)
 }
 
 export type AiStreamChannel = 'reasoning' | 'answer'
@@ -78,7 +79,7 @@ export class AiPanelView {
         <div class="ai-core-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
         <div class="ai-heading-copy">
           <h2>AI 脚本操作员</h2>
-          <p>读取当前脚本与战场感知，生成后直接热更</p>
+          <p>生成结果直接写入编辑器并装载，可随时在编辑器「版本」回退</p>
         </div>
         <div class="ai-runtime-status" data-state="idle"><span class="ai-runtime-dot"></span><span class="ai-runtime-label">待命</span></div>
       </header>
@@ -194,6 +195,18 @@ export class AiPanelView {
   acceptDirectedSay(text: string): boolean {
     if (!isAiDirectedSay(text, this.pending)) return false
     const isError = text.startsWith('AI 请求失败：') || text.startsWith('AI 生成脚本编译失败') || text.startsWith('AI 改码未生效') || text.startsWith('AI 未启用')
+    this.pushNotice(isError, text)
+    return true
+  }
+
+  /** X-4：结构化控制通知（新服务器路径）。错误类终结 pending；explain 为 info。 */
+  acceptControlNotice(notice: EvControlNotice): boolean {
+    if (!isAiDirectedNotice(notice)) return false
+    this.pushNotice(isAiNoticeError(notice), notice.text)
+    return true
+  }
+
+  private pushNotice(isError: boolean, text: string): void {
     const turn = this.currentTurn()
     if (turn) {
       turn.notices.push({ id: this.nextNoticeId++, kind: isError ? 'error' : 'info', text })
@@ -204,7 +217,6 @@ export class AiPanelView {
       this.activeTurnId = undefined
     }
     this.render()
-    return true
   }
 
   acceptStream(channel: AiStreamChannel, delta: string): void {
@@ -339,7 +351,7 @@ export class AiPanelView {
     if (!this.turns.length) {
       const empty = document.createElement('section')
       empty.className = 'ai-empty-state'
-      empty.innerHTML = `<div class="ai-empty-scope" aria-hidden="true"><span></span><span></span><span></span></div><h3>等待脚本任务</h3><p>描述你想改变的战术。AI 会展示思考过程、生成说明与完整高亮代码，然后热更当前机器人。</p>`
+      empty.innerHTML = `<div class="ai-empty-scope" aria-hidden="true"><span></span><span></span><span></span></div><h3>等待脚本任务</h3><p>描述你想改变的战术。AI 会展示思考过程与改动说明，生成结果直接写入编辑器并装载运行；旧版本随时可回退。</p>`
       fragment.append(empty)
     }
     for (const turn of this.turns) {
@@ -432,7 +444,7 @@ export class AiPanelView {
     if (turn.status === 'done' && turn.assistAction === 'ready') {
       const action = document.createElement('div')
       action.className = 'ai-apply-action'
-      action.innerHTML = '<div class="ai-apply-copy"><strong>脚本已应用到 Bot</strong><span>要立即交给驾驶辅助接管吗？</span></div><button type="button" class="ai-apply-button"><span>应用到 Bot 并激活驾驶辅助</span><b aria-hidden="true">→</b></button>'
+      action.innerHTML = '<div class="ai-apply-copy"><strong>AI 版本已写入编辑器并装载运行</strong><span>不满意？在编辑器「版本」抽屉可一键回退到之前的版本。</span></div><button type="button" class="ai-apply-button"><span>激活驾驶辅助让脚本接管</span><b aria-hidden="true">→</b></button>'
       action.querySelector<HTMLButtonElement>('.ai-apply-button')!.addEventListener('click', () => this.activateAssist(turn.id))
       assistant.append(action)
     }

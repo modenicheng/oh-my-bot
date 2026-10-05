@@ -296,7 +296,10 @@ try {
   await game.locator('#game-canvas').focus()
   await game.keyboard.press('c')
   await game.locator('#workbench').waitFor({ state: 'visible', timeout: 10000 })
-  // M 键切到文档面板（内嵌 ManualView），再点“目录”开关显示侧栏。
+  // M 是战场全局快捷键；编辑器预加载后 Monaco 会更快接管输入焦点，
+  // 在编辑器内按 m 应输入代码而不是切面板。因此先显式把焦点还给战场，
+  // 再验证 M 切到文档面板（内嵌 ManualView）。
+  await game.locator('#game-canvas').focus()
   await game.keyboard.press('m')
   await game.locator('#workbench-toc-toggle').waitFor({ state: 'visible' })
   await game.locator('#workbench-toc-toggle').click()

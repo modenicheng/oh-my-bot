@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"cmp"
 	"sort"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -29,32 +30,32 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 	// to the robot whose counter reached the max value first (lowest "*At"
 	// tick; an equal tick keeps the earlier-sorted robot). A counter of 0 for
 	// everyone awards nothing.
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.kills, r.killsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.kills, r.killsAt },
 		ombv1.Title_WAR_MACHINE, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.cores, r.coresAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.cores, r.coresAt },
 		ombv1.Title_SCAVENGER, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.uplinks, r.uplinksAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.uplinks, r.uplinksAt },
 		ombv1.Title_SIGNAL_THIEF, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.wallHits, r.wallHitsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.wallHits, r.wallHitsAt },
 		ombv1.Title_WALL_HEAD, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.deaths, r.deathsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.deaths, r.deathsAt },
 		ombv1.Title_CNMB, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.aiRounds, r.aiRoundsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.aiRounds, r.aiRoundsAt },
 		ombv1.Title_AI_REGULAR, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.scriptErrors, r.scriptErrorsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.scriptErrors, r.scriptErrorsAt },
 		ombv1.Title_AI_IDIOT, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.hitsLanded, r.hitsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.hitsLanded, r.hitsAt },
 		ombv1.Title_BARRAGE, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.killSteals, r.killStealsAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.killSteals, r.killStealsAt },
 		ombv1.Title_KILL_STEAL, award)
-	p.awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.healedX10, r.healedAt },
+	awardMax(sorted, func(r *robotStats) (int32, uint32) { return r.healedX10, r.healedAt },
 		ombv1.Title_HEALER, award)
 
 	// ---- RUNNER: max cumulative checkpoint distance, first achiever wins.
 	p.awardMaxDist(sorted, ombv1.Title_RUNNER, award)
 
 	// ---- SURVIVOR: max contiguous alive segment length, first achiever wins.
-	p.awardMaxSortedUint(sorted, func(r *robotStats) (uint32, uint32) { return r.maxSurvTicks, r.maxSurvAt },
+	awardMax(sorted, func(r *robotStats) (uint32, uint32) { return r.maxSurvTicks, r.maxSurvAt },
 		ombv1.Title_SURVIVOR, award)
 
 	// ---- PEACEMAKER: score >= p75 of all players, zero kills.
@@ -75,8 +76,10 @@ func (p *ProjectorImpl) evaluateTitles(sorted []*robotStats) map[uint32][]TitleI
 
 // awardMax awards title to the unique maximum of value() when max > 0. Ties
 // among max holders resolve to the earliest reachedAt tick; an exact tick tie
-// keeps the first in sorted order (stable by robotID).
-func (p *ProjectorImpl) awardMax(sorted []*robotStats, value func(*robotStats) (int32, uint32),
+// keeps the first in sorted order (stable by robotID). Generic over the metric
+// type (int32 counters, uint32 SURVIVOR segments, ...): V must be ordered so
+// "greater" and the zero floor mean the same thing across call sites.
+func awardMax[V cmp.Ordered](sorted []*robotStats, value func(*robotStats) (V, uint32),
 	title ombv1.Title, award func(uint32, ombv1.Title)) {
 	if len(sorted) == 0 {
 		return
@@ -89,26 +92,8 @@ func (p *ProjectorImpl) awardMax(sorted []*robotStats, value func(*robotStats) (
 			best, bestVal, bestAt = r, v, at
 		}
 	}
-	if bestVal > 0 {
-		award(best.id, title)
-	}
-}
-
-// awardMaxSortedUint is awardMax for uint32 metrics (SURVIVOR).
-func (p *ProjectorImpl) awardMaxSortedUint(sorted []*robotStats, value func(*robotStats) (uint32, uint32),
-	title ombv1.Title, award func(uint32, ombv1.Title)) {
-	if len(sorted) == 0 {
-		return
-	}
-	best := sorted[0]
-	bestVal, bestAt := value(best)
-	for _, r := range sorted[1:] {
-		v, at := value(r)
-		if v > bestVal || (v == bestVal && at < bestAt) {
-			best, bestVal, bestAt = r, v, at
-		}
-	}
-	if bestVal > 0 {
+	var zero V
+	if bestVal > zero {
 		award(best.id, title)
 	}
 }

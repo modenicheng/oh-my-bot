@@ -29,6 +29,7 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 		{Payload: &ombv1.ClientMsg_ScriptSubmit{ScriptSubmit: &ombv1.ScriptSubmit{Source: "function tick() {}"}}},
 		{Payload: &ombv1.ClientMsg_AssistToggle{AssistToggle: &ombv1.AssistToggle{}}},
 		{Payload: &ombv1.ClientMsg_AiPrompt{AiPrompt: &ombv1.AiPrompt{Text: "prompt"}}},
+		{Payload: &ombv1.ClientMsg_ScriptRollback{ScriptRollback: &ombv1.ScriptRollback{VersionId: 1}}},
 		{Payload: &ombv1.ClientMsg_Say{Say: &ombv1.Say{Text: "hello"}}},
 	}
 	for _, cmd := range commands {
@@ -37,8 +38,16 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 		if session != original || !session.IsSpectator() || rc.Room.MemberCount() != 0 || rc.Room.HostID() != 0 {
 			t.Fatalf("command %T changed spectator identity or room", cmd.Payload)
 		}
-		if len(received) != 1 || !strings.HasPrefix(received[0].GetEvent().GetSay().GetText(), "join failed:") {
-			t.Fatalf("command %T was not rejected", cmd.Payload)
+		// X-4：拒绝 = 结构化 notice + 兼容 join-failed say（顺序固定：notice 在前）。
+		if len(received) != 2 {
+			t.Fatalf("command %T: got %d messages, want 2", cmd.Payload, len(received))
+		}
+		notice := received[0].GetEvent().GetControlNotice()
+		if notice == nil || notice.GetCode() != ombv1.EvControlNotice_CN_READONLY_SPECTATOR {
+			t.Fatalf("command %T: first message is not a readonly-spectator notice: %+v", cmd.Payload, received[0])
+		}
+		if !strings.HasPrefix(received[1].GetEvent().GetSay().GetText(), "join failed:") {
+			t.Fatalf("command %T: second message lost join-failed prefix", cmd.Payload)
 		}
 	}
 	received = nil

@@ -2,20 +2,17 @@
 // say 气泡事件、结算覆盖层。令牌严格走 client/STYLE.md：radius 0、1px #1f2733
 // 描边、荧光只用于状态高亮。技能卡是状态显示（含键帽），不是可点击按钮。
 import type { WorldState, RobotEnt } from './world'
-import type { MapDefParsed, MapUplink } from './mapdef'
+import { type MapDefParsed, type MapUplink } from './mapdef'
+import { hackMaxX10 } from './tuning'
 import { phaseName } from './render'
 import { type Scoreboard, type ScoreDisplay, scoreRow } from './scoreboard'
 import { icon, type IconName } from '../icons'
 import type { FeedbackKind } from './feedback'
 import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
+import { requireEl, setText, fmtClock } from '../ui/dom'
+import { clamp01 } from '../lib/math'
 import './hud.css'
 
-const MAX_HP = 1000   // hp_x10（×10）
-const MAX_EN = 1000   // energy_x10（×10）
-const TICK_HZ = 60    // 服务器固定 60Hz 绝对 tick
-const FIRE_COST_EN = 5   // server sim.FireCost
-const HACK_TICKS = 480   // server sim.HackDuration（480 tick = 8s）
-const HACK_MAX_X10 = 80  // progress_x10 满值（8s × 10）
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
 const INNER_MS = 4200
 const AIM_HINT_MS = 4000 // 瞄准 guard 提示节流间隔
@@ -28,10 +25,11 @@ interface SkillCard {
   cd: HTMLElement
 }
 
-type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'takeover' | 'standby'
+type CardState = 'ready' | 'cooling' | 'active' | 'off' | 'standby'
 
 export class Hud {
   private hpFill: HTMLDivElement
+  private hpDelay: HTMLDivElement
   private enFill: HTMLDivElement
   private hpText: HTMLSpanElement
   private enText: HTMLSpanElement
@@ -58,31 +56,35 @@ export class Hud {
   private uplinkTrack: HTMLDivElement
   private uplinkFill: HTMLDivElement
   private lastHp = -1
+  private lastHpDelay = -1
   private lastEn = -1
   private lastRows: ScoreDisplay[] = NO_ROWS
   private uplinkPct = -1
   private assistRenderedOn: boolean | undefined
   private takeoverRendered = ''
   private aimStatusText = AIM_STATUS_TEXT.unavailable
+  /** 瞄准能力信号（Workbench 上报），updateTakeover 供 aimControlStatus 用。 */
+  private aimCapable = false
 
   constructor(private root: HTMLElement) {
-    this.hpFill = req(root, 'hud-hp-fill')
-    this.enFill = req(root, 'hud-en-fill')
-    this.hpText = req(root, 'hud-hp-text')
-    this.enText = req(root, 'hud-en-text')
-    this.leftPanel = req(root, 'hud-left')
-    this.phaseEl = req(root, 'hud-phase')
-    this.timeEl = req(root, 'hud-time')
-    this.scoreRows = req(root, 'hud-score-rows')
+    this.hpFill = requireEl(root, 'hud-hp-fill')
+    this.hpDelay = requireEl(root, 'hud-hp-delay')
+    this.enFill = requireEl(root, 'hud-en-fill')
+    this.hpText = requireEl(root, 'hud-hp-text')
+    this.enText = requireEl(root, 'hud-en-text')
+    this.leftPanel = requireEl(root, 'hud-left')
+    this.phaseEl = requireEl(root, 'hud-phase')
+    this.timeEl = requireEl(root, 'hud-time')
+    this.scoreRows = requireEl(root, 'hud-score-rows')
     const ownScore = document.createElement('div')
     ownScore.id = 'hud-self-score'
     ownScore.append(document.createTextNode('当前积分'))
     this.selfScore = document.createElement('strong')
     ownScore.append(this.selfScore)
     this.leftPanel.append(ownScore)
-    this.assistEl = req(root, 'hud-assist')
-    this.assistCard = req(root, 'skill-assist')
-    this.msgLine = req(root, 'hud-msg')
+    this.assistEl = requireEl(root, 'hud-assist')
+    this.assistCard = requireEl(root, 'skill-assist')
+    this.msgLine = requireEl(root, 'hud-msg')
     this.msgLine.setAttribute('role', 'status')
     if (!this.msgLine.hasAttribute('aria-live')) this.msgLine.setAttribute('aria-live', 'polite')
     this.msgLine.setAttribute('aria-atomic', 'true')
@@ -96,38 +98,42 @@ export class Hud {
     this.innerBanner.hidden = true
     root.append(this.innerBanner)
     this.skills = {
-      move: { root: req(root, 'skill-move'), cd: req(root, 'skill-move-cd') },
-      aim: { root: req(root, 'skill-aim'), cd: req(root, 'skill-aim-cd') },
-      fire: { root: req(root, 'skill-fire'), cd: req(root, 'skill-fire-cd') },
-      dash: { root: req(root, 'skill-dash'), cd: req(root, 'skill-dash-cd') },
-      shield: { root: req(root, 'skill-shield'), cd: req(root, 'skill-shield-cd') },
-      uplink: { root: req(root, 'skill-uplink'), cd: req(root, 'skill-uplink-cd') },
+      move: { root: requireEl(root, 'skill-move'), cd: requireEl(root, 'skill-move-cd') },
+      aim: { root: requireEl(root, 'skill-aim'), cd: requireEl(root, 'skill-aim-cd') },
+      fire: { root: requireEl(root, 'skill-fire'), cd: requireEl(root, 'skill-fire-cd') },
+      dash: { root: requireEl(root, 'skill-dash'), cd: requireEl(root, 'skill-dash-cd') },
+      shield: { root: requireEl(root, 'skill-shield'), cd: requireEl(root, 'skill-shield-cd') },
+      uplink: { root: requireEl(root, 'skill-uplink'), cd: requireEl(root, 'skill-uplink-cd') },
     }
-    this.uplinkPanel = req(root, 'hud-uplink')
-    this.uplinkText = req(root, 'hud-uplink-text')
-    this.uplinkTrack = req(root, 'hud-uplink-track')
-    this.uplinkFill = req(root, 'hud-uplink-fill')
+    this.uplinkPanel = requireEl(root, 'hud-uplink')
+    this.uplinkText = requireEl(root, 'hud-uplink-text')
+    this.uplinkTrack = requireEl(root, 'hud-uplink-track')
+    this.uplinkFill = requireEl(root, 'hud-uplink-fill')
   }
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
-  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false): void {
+  update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false, delayedHp?: number): void {
     if (!world.initialized) { this.clearMsg(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
+    this.aimCapable = aimCapable
 
     // 常态机体用低饱和绿，能量用青色；数值与颜色共同标识状态。
+    const tuning = world.tuning
     this.leftPanel.classList.toggle('dead', !!self?.dead)
     if (self) {
-      const hp = clamp01(self.hpX10 / MAX_HP)
-      const en = clamp01(self.energyX10 / MAX_EN)
+      const hp = clamp01(self.hpX10 / tuning.maxHpX10)
+      const delayed = clamp01((delayedHp ?? self.hpX10 / 10) / (tuning.maxHpX10 / 10))
+      const en = clamp01(self.energyX10 / tuning.maxEnergyX10)
       // scaleX 走合成器路径（app.css transition 同步为 transform），width 每帧触发 layout。
       if (hp !== this.lastHp) { this.lastHp = hp; this.hpFill.style.transform = `scaleX(${hp})` }
+      if (delayed !== this.lastHpDelay) { this.lastHpDelay = delayed; this.hpDelay.style.transform = `scaleX(${delayed})` }
       if (en !== this.lastEn) { this.lastEn = en; this.enFill.style.transform = `scaleX(${en})` }
       setText(this.hpText, self.dead ? `重生 ${self.respawnInS.toFixed(1)}s` : `${Math.round(self.hpX10 / 10)}`)
       setText(this.enText, `${Math.round(self.energyX10 / 10)}`)
     } else {
-      this.lastHp = this.lastEn = 0
-      this.hpFill.style.transform = this.enFill.style.transform = 'scaleX(0)'
+      this.lastHp = this.lastHpDelay = this.lastEn = 0
+      this.hpFill.style.transform = this.hpDelay.style.transform = this.enFill.style.transform = 'scaleX(0)'
       setText(this.hpText, '—'); setText(this.enText, '—')
     }
 
@@ -137,11 +143,8 @@ export class Hud {
 
     // 阶段 / 时间
     setText(this.phaseEl, phaseName(world.phase))
-    const t = Math.max(0, world.timeLeftS)
-    const m = Math.floor(t / 60)
-    const s = Math.floor(t % 60)
-    const clock = world.initialized ? `${m}:${String(s).padStart(2, '0')}` : '—:—'
-    if (this.timeEl.textContent !== clock) this.timeEl.textContent = clock
+    const clock = world.initialized ? fmtClock(world.timeLeftS) : '—:—'
+    setText(this.timeEl, clock)
     this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
     setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
@@ -160,7 +163,7 @@ export class Hud {
     }
 
     this.updateSkills(world, self)
-    this.updateTakeover(world, aimCapable)
+    this.updateTakeover(world, self)
     this.updateUplink(world, map, self)
   }
 
@@ -261,13 +264,14 @@ export class Hud {
       return
     }
     const dead = self.dead
-    const en = self ? self.energyX10 / 10 : 0
-    const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick)
+    const tuning = world.tuning
+    const en = self.energyX10 / 10
+    const fireCd = cdSeconds(world.self?.fireReadyTick, world.tick, tuning.tickRate)
 
-    // 开火：无 CD 概念外的能量门槛（5/发）；间隔 250ms 仅在射击后瞬时可见
+    // 开火：无 CD 概念外的能量门槛（服务器 fire_cost，X-3）；间隔 250ms 仅在射击后瞬时可见
     if (dead) this.setCard(this.skills.fire, 'off', '阵亡')
     else if (self.shieldOn) this.setCard(this.skills.fire, 'off', '护盾中')
-    else if (en < FIRE_COST_EN) this.setCard(this.skills.fire, 'off', `EN ${FIRE_COST_EN}`)
+    else if (en < tuning.fireCost) this.setCard(this.skills.fire, 'off', `EN ${tuning.fireCost}`)
     else if (fireCd === undefined) this.setCard(this.skills.fire, 'ready', '—')
     else if (fireCd > 0) this.setCard(this.skills.fire, 'cooling', `${fireCd.toFixed(1)}s`)
     else this.setCard(this.skills.fire, 'ready', '—')
@@ -299,21 +303,23 @@ export class Hud {
       return
     }
     const ent = world.uplinks.get(nearest.id)
+    const hackMax = hackMaxX10(world.tuning)
+    const hackSeconds = Math.round(world.tuning.hackDurationTicks / world.tuning.tickRate)
     let pct = 0
     let text: string
     if (ent && world.self !== undefined && ent.hackingId === selfId) {
-      pct = progressPct(ent.progressX10)
+      pct = progressPct(ent.progressX10, hackMax)
       text = `黑入 ${pct}%`
       this.setCard(card, 'active', `${pct}%`)
     } else if (ent && ent.myCooldownS > 0) {
       text = `冷却 ${Math.ceil(ent.myCooldownS)}秒`
       this.setCard(card, 'cooling', `${Math.ceil(ent.myCooldownS)}s`)
     } else if (ent && ent.hackingId !== 0) {
-      pct = progressPct(ent.progressX10)
+      pct = progressPct(ent.progressX10, hackMax)
       text = '他人正在黑入'
       this.setCard(card, 'off', '占用中')
     } else {
-      text = `按住 E/F · ${Math.round(HACK_TICKS / TICK_HZ)}秒`
+      text = `按住 E/F · ${hackSeconds}秒`
       this.setCard(card, 'ready', '按住')
     }
     if (this.uplinkPanel.hidden) this.uplinkPanel.hidden = false
@@ -346,11 +352,11 @@ export class Hud {
   // 输出某轴时对应卡标 data-takeover="script"（琥珀色，见 hud.css）。服务器逐
   // tick 回显仲裁来源，人一按键即抢占，标记随之消失。等值守卫：快照 60Hz 到达
   // 而接管组合极少变化。快照丢失/未初始化时旧标记保留，下一次快照修正。
-  private updateTakeover(world: WorldState, aimCapable: boolean): void {
+  private updateTakeover(world: WorldState, self: RobotEnt | undefined): void {
     const t = axisTakeover(world.self)
-    const aim = aimControlStatus(world.self, aimCapable)
+    const aim = aimControlStatus(world.self, this.aimCapable)
     this.aimStatusText = AIM_STATUS_TEXT[aim]
-    const dead = !!world.robots.get(world.self?.robotId ?? -1)?.dead
+    const dead = !!self?.dead
     const sig = `${world.self ? 1 : 0}${dead ? 1 : 0}${t.move ? 1 : 0}${aim}${t.fire ? 1 : 0}${t.ability ? 1 : 0}`
     if (sig === this.takeoverRendered) return
     this.takeoverRendered = sig
@@ -366,14 +372,16 @@ export class Hud {
       return
     }
     // 自瞄已启用但本 tick 没有输出时保持待机，不误报手操或正在跟踪。
+    // C-20：接管归一走 data-takeover 轨（含微光，见 hud.css）；aim 的 standby
+    // 是独立语义位（data-state），不再另设接管轨。
     this.setTakeover(this.skills.move, t.move)
     this.setTakeover(this.skills.aim, !dead && aim === 'aiming')
     if (dead) {
       this.setCard(this.skills.move, 'off', '阵亡')
       this.setCard(this.skills.aim, 'off', '阵亡')
     } else {
-      this.setCard(this.skills.move, t.move ? 'takeover' : 'ready', t.move ? '脚本' : '手操')
-      this.setCard(this.skills.aim, aim === 'aiming' ? 'takeover' : aim === 'standby' ? 'standby' : 'ready', this.aimStatusText)
+      this.setCard(this.skills.move, 'ready', t.move ? '脚本' : '手操')
+      this.setCard(this.skills.aim, aim === 'standby' ? 'standby' : 'ready', this.aimStatusText)
     }
   }
 
@@ -386,13 +394,13 @@ export class Hud {
 // ---- helpers ---------------------------------------------------------------
 
 /** 绝对 tick → 剩余秒（一位小数由调用方格式化）；字段缺失返回 undefined（未知）。 */
-function cdSeconds(readyTick: number | undefined, nowTick: number): number | undefined {
+function cdSeconds(readyTick: number | undefined, nowTick: number, tickRate: number): number | undefined {
   if (readyTick === undefined) return undefined
-  return Math.max(0, (readyTick - nowTick) / TICK_HZ)
+  return Math.max(0, (readyTick - nowTick) / tickRate)
 }
 
-function progressPct(progressX10: number): number {
-  const v = Math.round((progressX10 / HACK_MAX_X10) * 100)
+function progressPct(progressX10: number, hackMax: number): number {
+  const v = Math.round((progressX10 / hackMax) * 100)
   return v < 0 ? 0 : v > 100 ? 100 : v
 }
 
@@ -406,18 +414,4 @@ function nearestUplink(map: MapDefParsed, phase: number, x: number, y: number): 
     if (d <= u.interactR && d < bestD) { best = u; bestD = d }
   }
   return best
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v
-}
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text
-}
-
-function req<T extends HTMLElement>(root: HTMLElement, id: string): T {
-  const el = root.querySelector(`#${id}`) as T | null
-  if (!el) throw new Error(`HUD 缺少元素 #${id}`)
-  return el
 }

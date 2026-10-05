@@ -32,6 +32,4 @@ export function midiToName(midi: number): string {
   return `${name}${octave}`;
 }
 
-export function clamp(value: number, min: number, max: number): number {
-  return value < min ? min : value > max ? max : value;
-}
+export { clamp } from '../lib/math';

@@ -4,14 +4,18 @@ import type { MapDefParsed } from './mapdef'
 
 export const ink = {
   bg: '#070d14', floor: '#101b25', panel: '#182735', line: '#29414f',
-  text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d',
+  text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d', white: '#f4fbff',
 } as const
 export const mono = '"Fusion Pixel", ui-monospace, monospace'
 const FONT_10 = `10px ${mono}`
 const FONT_11 = `11px ${mono}`
 const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
+export const ROBOT_SHIELD_RADIUS = 2.05
+export const ROBOT_SHIELD_OUTER_RADIUS = 1.16
 const motion = matchMedia('(prefers-reduced-motion: reduce)')
+/** @deprecated 仅兼容旧调用方；Uplink 绘制不再使用悬浮偏移。 */
+export const UPLINK_LIFT = 0.38
 const sources = {
   robot: new URL('../assets/robot.svg', import.meta.url).href,
   turret: new URL('../assets/turret.svg', import.meta.url).href,
@@ -20,16 +24,15 @@ const sources = {
   healthPack: new URL('../assets/health-pack.svg', import.meta.url).href,
 }
 const sprites = {} as Record<keyof typeof sources, HTMLImageElement>
-export const artReady = Promise.all([
-  document.fonts.load(`12px ${mono}`).catch(() => []),
-  ...Object.entries(sources).map(([name, url]) => new Promise<void>(resolve => {
+export const fontReady = document.fonts.load(`12px ${mono}`).then(fonts => fonts.length > 0, () => false)
+export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]) => new Promise<boolean>(resolve => {
   const image = new Image()
   sprites[name as keyof typeof sources] = image
-  image.onload = () => resolve()
-  image.onerror = () => resolve()
+  image.onload = () => resolve(true)
+  image.onerror = () => resolve(false)
   image.src = url
-})),
-])
+}))).then(results => results.every(Boolean))
+export const artReady = Promise.all([fontReady, spritesReady])
 
 function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: number, y: number, size: number): void {
   const image = sprites[name]
@@ -52,7 +55,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   for (let i = 0; i < 8; i++) {
     const a = (i - 0.5) * tau / 8
     ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 80 * s, a, a + tau / 8); ctx.closePath()
-    ctx.fillStyle = i % 2 ? '#13212b' : '#101b25'; ctx.fill()
+    ctx.fillStyle = i % 2 ? '#13212b' : ink.floor; ctx.fill()
   }
   ctx.lineWidth = 1; ctx.strokeStyle = '#263b4760'
   const left = Math.max(-80, Math.floor(cam.toWorldX(0) / 4) * 4)
@@ -178,22 +181,27 @@ export function drawRobot(ctx: CanvasRenderingContext2D, cam: Camera, wx: number
     ctx.strokeStyle = color; ctx.lineWidth = 2
     for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(x, y, r + 6, i * tau / 4 + 0.15, i * tau / 4 + 0.65); ctx.stroke() }
   }
+  const guardR = r * ROBOT_SHIELD_RADIUS
+  const guardOuterR = guardR * ROBOT_SHIELD_OUTER_RADIUS
   if (shield) {
-    const sr = r * 1.65 + 5
-    circle(ctx, x, y, sr); ctx.fillStyle = '#eff9ff12'; ctx.fill()
-    ctx.strokeStyle = '#f4fbff'; ctx.lineWidth = Math.max(3, cam.scale * 0.06); ctx.stroke()
-    circle(ctx, x, y, sr + 4); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 1; ctx.stroke()
+    circle(ctx, x, y, guardR); ctx.fillStyle = '#eff9ff12'; ctx.fill()
+    ctx.strokeStyle = ink.white; ctx.lineWidth = r * 0.18; ctx.stroke()
+    circle(ctx, x, y, guardOuterR); ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = r * 0.06; ctx.stroke()
+    const marker = r * 0.22
     ctx.fillStyle = '#ffffff'
     for (let i = 0; i < 4; i++) {
       const a = i * tau / 4
-      ctx.fillRect(Math.round(x + Math.cos(a) * sr) - 2, Math.round(y + Math.sin(a) * sr) - 2, 4, 4)
+      ctx.fillRect(x + Math.cos(a) * guardR - marker / 2, y + Math.sin(a) * guardR - marker / 2, marker, marker)
     }
   }
-  if (invulnerable || dashing) {
-    ctx.lineWidth = 1; ctx.strokeStyle = ink.cyan
-    ctx.globalAlpha = invulnerable && !motion.matches ? 0.65 + 0.25 * Math.sin(tick / 12) : 0.85
-    if (invulnerable) ctx.setLineDash([3, 4])
-    circle(ctx, x, y, r + (dashing ? 9 : 5)); ctx.stroke()
+  if (invulnerable) {
+    ctx.globalAlpha = motion.matches ? 0.64 : 0.64 + 0.1 * Math.sin(tick / 12)
+    circle(ctx, x, y, guardR); ctx.fillStyle = `${ink.lime}14`; ctx.fill()
+    ctx.strokeStyle = ink.lime; ctx.lineWidth = r * 0.12; ctx.setLineDash([r * 0.3, r * 0.2]); ctx.stroke()
+    circle(ctx, x, y, guardOuterR); ctx.globalAlpha *= 0.52; ctx.lineWidth = r * 0.06; ctx.setLineDash([]); ctx.stroke()
+  } else if (dashing) {
+    ctx.lineWidth = r * 0.07; ctx.strokeStyle = ink.cyan; ctx.globalAlpha = 0.85
+    circle(ctx, x, y, r * 1.75); ctx.stroke()
   }
   ctx.restore()
 }
@@ -219,7 +227,7 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.globalAlpha = available ? 1 : 0.35
   sprite(ctx, 'healthPack', x, y + bob, size)
   if (available) {
-    ctx.strokeStyle = '#b9d98588'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
+    ctx.strokeStyle = `${ink.lime}88`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
   } else if (respawnInS > 0) {
     ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
     ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)
@@ -227,23 +235,72 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.restore()
 }
 
-export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0, lift = 0): void {
+function drawMainUplink(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, ready: boolean, progress: number): void {
+  // Armored command relay: a centered chassis, directional crown and twin energy banks.
+  // All hardware stays fixed; progress only fills the four paired cells from bottom to top.
+  ctx.beginPath(); ctx.moveTo(x - size * 0.42, y - size * 0.7)
+  ctx.lineTo(x + size * 0.42, y - size * 0.7); ctx.lineTo(x + size * 0.7, y - size * 0.42)
+  ctx.lineTo(x + size * 0.7, y + size * 0.42); ctx.lineTo(x + size * 0.42, y + size * 0.7)
+  ctx.lineTo(x - size * 0.42, y + size * 0.7); ctx.lineTo(x - size * 0.7, y + size * 0.42)
+  ctx.lineTo(x - size * 0.7, y - size * 0.42); ctx.closePath()
+  ctx.fillStyle = '#101e28'; ctx.fill(); ctx.strokeStyle = '#73939e'; ctx.lineWidth = 1; ctx.stroke()
+  ctx.fillStyle = ink.panel; ctx.fillRect(x - size * 0.58, y - size * 0.4, size * 1.16, size * 0.8)
+  ctx.strokeStyle = ink.line; ctx.strokeRect(x - size * 0.58, y - size * 0.4, size * 1.16, size * 0.8)
+
+  ctx.strokeStyle = '#b6cdd2'; ctx.lineWidth = Math.max(1, size * 0.04); ctx.beginPath()
+  for (const side of [-1, 1]) {
+    ctx.moveTo(x + side * size * 0.22, y - size * 0.7)
+    ctx.lineTo(x + side * size * 0.42, y - size * 0.7); ctx.lineTo(x + side * size * 0.7, y - size * 0.42)
+    ctx.moveTo(x + side * size * 0.7, y + size * 0.42)
+    ctx.lineTo(x + side * size * 0.42, y + size * 0.7); ctx.lineTo(x + side * size * 0.22, y + size * 0.7)
+    ctx.moveTo(x + side * size * 0.28, y - size * 0.7)
+    ctx.lineTo(x + side * size * 0.28, y - size * 0.94); ctx.lineTo(x + side * size * 0.44, y - size * 0.94)
+  }
+  ctx.moveTo(x, y - size * 0.7); ctx.lineTo(x, y - size * 1.12); ctx.stroke()
+  ctx.fillStyle = ready ? ink.lime : ink.dim
+  ctx.fillRect(x - size * 0.12, y - size * 1.12, size * 0.24, size * 0.06)
+  for (const side of [-1, 1]) ctx.fillRect(x + side * size * 0.4 - size * 0.04, y - size * 0.98, size * 0.08, size * 0.08)
+
+  ctx.beginPath(); ctx.moveTo(x, y - size * 0.34); ctx.lineTo(x + size * 0.3, y)
+  ctx.lineTo(x, y + size * 0.34); ctx.lineTo(x - size * 0.3, y); ctx.closePath()
+  ctx.fillStyle = '#2c4650'; ctx.fill(); ctx.strokeStyle = ink.text; ctx.lineWidth = 1; ctx.stroke()
+  ctx.strokeStyle = '#7aa1a7'; ctx.beginPath()
+  ctx.moveTo(x, y - size * 0.24); ctx.lineTo(x, y + size * 0.24)
+  ctx.moveTo(x - size * 0.2, y); ctx.lineTo(x + size * 0.2, y); ctx.stroke()
+  ctx.fillStyle = ink.floor; ctx.fillRect(x - size * 0.1, y - size * 0.12, size * 0.2, size * 0.24)
+  ctx.strokeStyle = '#b6cdd2'; ctx.strokeRect(x - size * 0.1, y - size * 0.12, size * 0.2, size * 0.24)
+  ctx.fillStyle = ready ? ink.lime : ink.dim; ctx.fillRect(x - size * 0.04, y - size * 0.04, size * 0.08, size * 0.08)
+
+  for (const side of [-1, 1]) {
+    const bx = x + side * size * 0.49 - size * 0.06
+    ctx.strokeStyle = '#486768'; ctx.strokeRect(bx - size * 0.03, y - size * 0.36, size * 0.18, size * 0.72)
+    for (let i = 0; i < 4; i++) {
+      const by = y + size * (0.22 - i * 0.17)
+      ctx.fillStyle = '#486768'; ctx.fillRect(bx, by, size * 0.12, size * 0.1)
+      const filled = Math.min(1, Math.max(0, progress * 4 - i))
+      if (filled > 0) { ctx.fillStyle = ink.cyan; ctx.fillRect(bx, by, size * 0.12 * filled, size * 0.1) }
+    }
+  }
+}
+
+export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, main: boolean, ready: boolean, progress = 0, _lift = 0): void {
+  // Keep the legacy argument for callers; neither hardware nor its base floats.
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(12, (main ? 2.1 : 1.7) * cam.scale)
   if (!visible(cam, x, y)) return
   ctx.save(); ctx.globalAlpha = ready || progress > 0 ? 1 : 0.55
-  if (lift > 0) {
-    const shadowY = y + lift * 0.38 * cam.scale
-    ctx.fillStyle = '#02070c99'; ctx.beginPath(); ctx.ellipse(x, shadowY + size * 0.35, size * (0.48 - lift * 0.12), size * 0.16, 0, 0, tau); ctx.fill()
-    ctx.strokeStyle = '#22d3ee55'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.beginPath(); ctx.moveTo(x, y + size * 0.45); ctx.lineTo(x, shadowY); ctx.stroke(); ctx.setLineDash([])
+  if (main) drawMainUplink(ctx, x, y, size, ready, progress)
+  else {
+    circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
+    sprite(ctx, 'uplink', x, y, size)
   }
-  circle(ctx, x, y, size * 0.7); ctx.fillStyle = '#1c343a'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#486768'; ctx.stroke()
-  sprite(ctx, 'uplink', x, y, size)
   if (progress > 0) {
-    circle(ctx, x, y, size * 0.9); ctx.strokeStyle = '#49616e'; ctx.lineWidth = 5; ctx.stroke()
-    ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
-    const a = -tau / 4 + Math.min(1, progress) * tau
-    ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
-    ctx.fillStyle = '#f4fbff'; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    if (!main) {
+      circle(ctx, x, y, size * 0.9); ctx.strokeStyle = '#49616e'; ctx.lineWidth = 5; ctx.stroke()
+      ctx.strokeStyle = ink.cyan; ctx.lineWidth = 5; ctx.beginPath()
+      const a = -tau / 4 + Math.min(1, progress) * tau
+      ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
+      ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
+    }
     ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
     ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
   }
@@ -268,7 +325,7 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   if (!trail) {
     // One bounded beam, no frame-history allocations and no trail beyond the authoritative projectile.
     trail = ctx.createLinearGradient(-bucket, 0, 0, 0)
-    trail.addColorStop(0, '#22d3ee00'); trail.addColorStop(1, color)
+    trail.addColorStop(0, `${ink.cyan}00`); trail.addColorStop(1, color)
     cached.set(key, trail)
   }
   ctx.fillStyle = trail; ctx.fillRect(-length, -2, length, 4)
@@ -278,13 +335,15 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
 export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false, delayedHp = hp): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
-  const clearance = shield ? r * 1.65 + 9 : r
+  const clearance = shield ? r * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : r
   const w = Math.max(24, r * 2.5), by = y - clearance - 12
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
   const actualRatio = Math.min(1, Math.max(0, hp / 100))
   const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / 100))
-  if (delayedRatio > actualRatio) { ctx.fillStyle = '#f4fbff'; ctx.fillRect(x - w / 2, by, w * delayedRatio, 3) }
-  ctx.fillStyle = hp > 25 ? ink.lime : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
+  if (delayedRatio > actualRatio) {
+    ctx.fillStyle = '#ffb066'; ctx.fillRect(x - w / 2 + w * actualRatio, by, w * (delayedRatio - actualRatio), 3)
+  }
+  ctx.fillStyle = hp > 25 ? '#8cff66' : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
   ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()

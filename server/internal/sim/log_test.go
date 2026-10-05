@@ -68,7 +68,7 @@ func TestMatchEventLogRoundTrip(t *testing.T) {
 		t.Fatalf("got %d records, want %d", len(records), len(events))
 	}
 	for i, record := range records {
-		if record.Type != "event" || record.Tick != events[i].Tick || !proto.Equal(record.Event, events[i]) {
+		if record.Type != RecordEvent || record.Tick != events[i].Tick || !proto.Equal(record.Event, events[i]) {
 			t.Fatalf("event %d differs: %+v", i, record)
 		}
 	}
@@ -174,13 +174,13 @@ func TestMatchEventLogCheckpointAndReplay(t *testing.T) {
 	respawns := make(map[uint32][]uint32)
 	for _, record := range records {
 		switch record.Type {
-		case "match_start":
+		case RecordMatchStart:
 			initial = record.State
-		case "checkpoint":
+		case RecordCheckpoint:
 			checkpoints = append(checkpoints, *record.State)
-		case "input":
+		case RecordInput:
 			inputs[record.Tick] = append(inputs[record.Tick], record)
-		case "event":
+		case RecordEvent:
 			events = append(events, record.Event)
 			if ev := record.Event.GetRespawn(); ev != nil {
 				respawns[record.Tick] = append(respawns[record.Tick], ev.Robot)

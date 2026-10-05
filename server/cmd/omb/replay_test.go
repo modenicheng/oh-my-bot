@@ -31,33 +31,66 @@ func TestVisualReplayExportsContinuousAuthoritativeFrames(t *testing.T) {
 	if err := writeVisualReplay(&out, bytes.NewReader(source.Bytes())); err != nil {
 		t.Fatal(err)
 	}
-	var visual []replayVisualRecord
-	scanner := bufio.NewScanner(bytes.NewReader(out.Bytes()))
-	for scanner.Scan() {
+	// visual 行结构：{type,v,tick,phase,robots[{id,pos:{x,y},heading,hp,energy,alive,invulnerable}],projectiles}
+	type visualVec struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	type visualRobot struct {
+		ID           uint32    `json:"id"`
+		Pos          visualVec `json:"pos"`
+		Heading      float64   `json:"heading"`
+		HP           float64   `json:"hp"`
+		Energy       float64   `json:"energy"`
+		Alive        bool      `json:"alive"`
+		Invulnerable bool      `json:"invulnerable"`
+	}
+	type visualRecord struct {
+		Type        string        `json:"type"`
+		V           int           `json:"v"`
+		Tick        uint32        `json:"tick"`
+		Phase       string        `json:"phase"`
+		Robots      []visualRobot `json:"robots"`
+		Projectiles []struct {
+			ID      uint32    `json:"id"`
+			Owner   uint32    `json:"owner"`
+			Pos     visualVec `json:"pos"`
+			Heading float64   `json:"heading"`
+		} `json:"projectiles"`
+	}
+	var visual []visualRecord
+	scanned := bufio.NewScanner(bytes.NewReader(out.Bytes()))
+	scanned.Buffer(make([]byte, 4096), sim.MaxLogLine)
+	for scanned.Scan() {
 		var record struct {
 			Type string `json:"type"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		if err := json.Unmarshal(scanned.Bytes(), &record); err != nil {
 			t.Fatal(err)
 		}
 		if record.Type == "input" || record.Type == "control" || record.Type == "checkpoint" {
 			t.Fatalf("visual export leaked %s record", record.Type)
 		}
 		if record.Type == "visual" {
-			var frame replayVisualRecord
-			if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil {
+			var frame visualRecord
+			if err := json.Unmarshal(scanned.Bytes(), &frame); err != nil {
 				t.Fatal(err)
 			}
 			visual = append(visual, frame)
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanned.Err(); err != nil {
 		t.Fatal(err)
 	}
 	if len(visual) != 11 || visual[0].Tick != 0 || visual[len(visual)-1].Tick != 60 {
 		t.Fatalf("unexpected visual frames: %+v", visual)
 	}
-	if visual[1].Robots[0][1] == visual[len(visual)-1].Robots[0][1] {
+	for _, frame := range visual {
+		if frame.Type != "visual" || frame.V != int(ombv1.ReplayVisualVersion_REPLAY_VISUAL_V2) {
+			t.Fatalf("visual frame missing v2 shape: %+v", frame)
+		}
+	}
+	if visual[1].Robots[0].Pos.X == visual[len(visual)-1].Robots[0].Pos.X {
 		t.Fatal("visual export froze robot position")
 	}
 }

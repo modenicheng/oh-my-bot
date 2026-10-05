@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { sleep, until, startStaticServer, gen2MapJson, FixtureServer, frame } from './harness.mjs'
 // game-feel-check.mjs — focused browser regression for ongoing game-feel UI.
 //
 // Scope: client/scripts/game-feel-check.mjs + package.json "test:feel" only.
@@ -30,10 +31,8 @@ import {
   EvUplinkHackSchema, EvCorePickupSchema, EvHealSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
   EvScriptResultSchema,
 } from '../../packages/protocol/src/index.ts'
-import http from 'node:http'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve, extname } from 'node:path'
-import { WebSocketServer } from 'ws'
+import { existsSync, mkdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 
 // ---------------------------------------------------------------- constants
@@ -54,36 +53,11 @@ const UPLINK_ID = 900
 const SELF_POS = { x: 0, y: 0 }
 const ENEMY_POS = { x: 8, y: -3 }
 
-// gen2 minimal valid map: walls non-empty but far away and never blocking,
-// one uplink with interactR 2.5 m ~1.8 m from self, one core pad, core zone.
-// Vec2/Rect use Go-style uppercase keys (mapdef.ts accepts both cases).
-const MAP_JSON = JSON.stringify({
-  version: 1,
-  generator_ver: 2,
-  seed: 20260206,
-  map_hash: 'feelfix01',
-  walls: [
-    { id: 1, min: { X: -66, Y: -60 }, max: { X: -58, Y: 60 } },
-    { id: 2, min: { X: 58, Y: -60 }, max: { X: 66, Y: 60 } },
-  ],
-  sectors: [
-    { id: 1, spawn_area: { Min: { X: -50, Y: -40 }, Max: { X: -35, Y: -25 } }, center: { X: -42, Y: -32 } },
-    { id: 2, spawn_area: { Min: { X: 35, Y: 25 }, Max: { X: 50, Y: 40 } }, center: { X: 42, Y: 32 } },
-  ],
-  uplinks: [{ id: UPLINK_ID, pos: { X: 1.5, Y: 1.0 }, main: false, interact_r: 2.5, active_phase: 1 }],
-  core_pads: [{ id: 1, pos: { X: 3, Y: 3 }, group: 0, value: 10 }],
-  health_packs: [{ id: 7, pos: { X: 20, Y: 0 } }],
-  core_zone: { radius: 30, unlock_phase: 2 },
-})
-
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' }
-
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-async function until(fn, label, timeout = 10000) {
-  const end = Date.now() + timeout
-  while (Date.now() < end) { if (await fn()) return true; await sleep(50) }
-  throw new Error(`Timed out: ${label}`)
-}
+// gen2 minimal valid map (harness.gen2MapJson): walls non-empty but far away and
+// never blocking, one uplink with interactR 2.5 m ~1.8 m from self, one core pad,
+// core zone. Vec2/Rect use Go-style uppercase keys (mapdef.ts accepts both cases).
+// This script pins the uplink at (1.5, 1.0) so its interact radius reaches self.
+const MAP_JSON = gen2MapJson('feelfix01', { uplink: { id: UPLINK_ID, pos: { X: 1.5, Y: 1.0 } } })
 
 // ---------------------------------------------------------------- fixture
 function freshState() {
@@ -92,8 +66,8 @@ function freshState() {
     phase: PHASE_OUTER,
     timeLeftS: 480,
     robots: [
-      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'feeltest', color: '#22d3ee' },
-      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, nick: 'ENEMY-A', color: '#ff756d' },
+      { base: { id: SELF_ID, pos: { ...SELF_POS }, heading: 0 }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, invulnS: 0, nick: 'feeltest', color: '#22d3ee' },
+      { base: { id: ENEMY_ID, pos: { ...ENEMY_POS }, heading: Math.PI }, hpX10: 1000, energyX10: 1000, shieldOn: false, dashing: false, dead: false, respawnInS: 0, invulnS: 0, nick: 'ENEMY-A', color: '#ff756d' },
     ],
     projectiles: [], cores: [],
     healthPacks: [{ base: { id: 7, pos: { x: 20, y: 0 }, heading: 0 }, available: true, respawnInS: 0 }],
@@ -103,36 +77,18 @@ function freshState() {
   }
 }
 
-class Fixture {
+class Fixture extends FixtureServer {
   constructor() {
-    this.conns = new Set()
+    super()
     this.inputs = []
     this.joins = 0
     this.assistToggles = 0
     this.st = freshState()
   }
 
-  attach(server) {
-    const wss = new WebSocketServer({ noServer: true })
-    this.wss = wss
-    server.on('upgrade', (req, sock, head) => {
-      const { pathname } = new URL(req.url, 'http://localhost')
-      if (pathname !== '/ws') { sock.destroy(); return }
-      wss.handleUpgrade(req, sock, head, ws => this.onWs(ws))
-    })
-  }
-
-  onWs(ws) {
-    const conn = { ws, joined: false }
-    this.conns.add(conn)
-    ws.on('message', data => this.onFrame(conn, Buffer.from(data)))
-    ws.on('close', () => this.conns.delete(conn))
-    ws.on('error', () => {})
-  }
-
   onFrame(conn, buf) {
-    if (buf[0] === 0x00) { conn.ws.send(Buffer.from([0x01])); return } // ping -> pong (net.ts 4s watchdog)
-    if (buf[0] !== 0x02) return
+    if (buf[0] === frame.ping) { conn.ws.send(Buffer.from([frame.pong])); return } // ping -> pong (net.ts 4s watchdog)
+    if (buf[0] !== frame.up) return
     let msg
     try { msg = fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
     const c = msg.payload
@@ -165,11 +121,9 @@ class Fixture {
     // roomAction / aiPrompt / snippetConfig: ignored by fixture
   }
 
-  send(conn, msg) { if (conn.ws.readyState === 1) conn.ws.send(Buffer.concat([Buffer.from([0x03]), toBinary(ServerMsgSchema, msg)])) }
-  bcast(msg) { for (const c of this.conns) this.send(c, msg) }
-
+  /** events default to the current sim tick, like the pre-harness fixture did */
   event(kindCase, schema, val, tick = this.st.tick) {
-    return create(ServerMsgSchema, { payload: { case: 'event', value: create(ServerEventSchema, { tick, kind: { case: kindCase, value: create(schema, val) } }) } })
+    return super.event(kindCase, schema, val, tick)
   }
 
   /** join acceptance: roomState -> mapBootstrap -> full snapshot (state resets each join) */
@@ -186,8 +140,8 @@ class Fixture {
     const st = this.st
     const ack = this.inputs.length ? this.inputs[this.inputs.length - 1].seq : 0
     const robots = st.robots.map(r => full
-      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, nick: r.nick, color: r.color }
-      : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS })
+      ? { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, invulnS: r.invulnS ?? 0, nick: r.nick, color: r.color }
+      : { base: r.base, hpX10: r.hpX10, energyX10: r.energyX10, shieldOn: r.shieldOn, dashing: r.dashing, dead: r.dead, respawnInS: r.respawnInS, invulnS: r.invulnS ?? 0 })
     return create(SnapshotDeltaSchema, {
       tick: st.tick, ackSeq: ack, phase: st.phase, timeLeftS: st.timeLeftS,
       full, baseTick,
@@ -228,17 +182,7 @@ class Fixture {
 }
 
 // ---------------------------------------------------------------- http static
-function startHttp() {
-  const server = http.createServer((req, res) => {
-    let p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
-    if (p === '/' || !existsSync(join(DIST, p))) p = '/index.html'
-    const file = join(DIST, p)
-    if (!existsSync(file) || !file.startsWith(DIST)) { res.writeHead(404); res.end('not found'); return }
-    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' })
-    res.end(readFileSync(file))
-  })
-  return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)))
-}
+const startHttp = () => startStaticServer(PORT, DIST)
 
 // ---------------------------------------------------------------- audio probe
 // Init-script instrumentation: the real WebAudio implementation is untouched
@@ -268,11 +212,29 @@ const AUDIO_INIT = `(() => {
 })()`
 
 // Observe actual Canvas calls, not application internals or screenshot heuristics.
+const CAMERA_INIT = `(() => {
+  const radii = window.__ombArenaRadii = []
+  const arc = CanvasRenderingContext2D.prototype.arc
+  CanvasRenderingContext2D.prototype.arc = function (x, y, radius, ...rest) {
+    if (this.canvas?.id === 'game-canvas' && radius > 1000) { radii.push(radius); if (radii.length > 500) radii.shift() }
+    return arc.call(this, x, y, radius, ...rest)
+  }
+})()`
+
 const COLOR_INIT = `(() => {
-  const log = window.__ombColors = { beams: [], impacts: [] }
+  const log = window.__ombColors = { beams: [], impacts: [], guards: [] }
   const gradients = new WeakMap()
   const proto = CanvasRenderingContext2D.prototype
   const gradient = proto.createLinearGradient, stop = CanvasGradient.prototype.addColorStop, fill = proto.fillRect
+  const begin = proto.beginPath, arc = proto.arc, strokePath = proto.stroke
+  proto.beginPath = function (...args) { this.__ombLastArc = null; return begin.apply(this, args) }
+  proto.arc = function (x, y, radius, ...args) { this.__ombLastArc = { x, y, radius }; return arc.call(this, x, y, radius, ...args) }
+  proto.stroke = function (...args) {
+    if (this.canvas.id === 'game-canvas' && this.strokeStyle === '#b9d985' && this.__ombLastArc) {
+      log.guards.push({ ...this.__ombLastArc, lineWidth: this.lineWidth }); if (log.guards.length > 200) log.guards.shift()
+    }
+    return strokePath.apply(this, args)
+  }
   proto.createLinearGradient = function (...args) {
     const value = gradient.apply(this, args); gradients.set(value, []); return value
   }
@@ -430,6 +392,7 @@ async function skillHudText(page) {
 async function fullPass(browser, fix) {
   const ctx = await browser.newContext({ viewport: { width: 2048, height: 1152 }, deviceScaleFactor: 1.25, permissions: ['clipboard-read', 'clipboard-write'] })
   await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(CAMERA_INIT)
   const page = await ctx.newPage()
   page.setDefaultTimeout(9000)
   const errors = []
@@ -457,9 +420,9 @@ async function fullPass(browser, fix) {
     // --- stationary aim: mouse move changes ClientInput aim (AXIS_AIM), no move echo
     const aimMark = lastSeq(fix)
     await page.mouse.move(1024, 400)
-    await sleep(200)
+    await sleep(350)
     await page.mouse.move(1500, 700)
-    await sleep(200)
+    await sleep(350)
     const aimFrames = framesSince(fix, aimMark).filter(f => (f.axisMask & 0b10) !== 0)
     assert.ok(aimFrames.length >= 5, `aim takeover frames >=5, got ${aimFrames.length}`)
     const aimSpread = Math.max(...aimFrames.map(f => f.aim)) - Math.min(...aimFrames.map(f => f.aim))
@@ -527,12 +490,12 @@ async function fullPass(browser, fix) {
     await until(async () => /OFF/i.test(((await page.locator('#hud-assist').textContent()) || '').trim()), 'HUD assist OFF after all-script branch')
 
     // --- held E then F across >=10 input frames, release false
-    // hold 窗口 600ms：断言仍是「≥10 个持续 interact 帧 + 释放后全 false」，
-    // 只是把观察窗拉长以兼容低采样吞吐的宿主（本机 headless ~20Hz，300ms 仅 6-7 帧）。
+    // hold 窗口 800ms：断言仍是「≥10 个持续 interact 帧 + 释放后全 false」，
+    // 只延长观察窗以兼容低采样吞吐的宿主；不降低持续输入帧数契约。
     for (const key of ['e', 'f']) {
       const mark = lastSeq(fix)
       await page.keyboard.down(key)
-      await sleep(600)
+      await sleep(800)
       const held = framesSince(fix, mark)
       const on = held.filter(f => f.interact === true && f.fire === false)
       assert.ok(on.length >= 10, `held ${key.toUpperCase()}: >=10 interact frames (got ${on.length}/${held.length})`)
@@ -659,13 +622,26 @@ async function fullPass(browser, fix) {
     assert.equal(await audioStarted(page), aQuiet, 'full resync must not replay shot/impact/spawn audio')
     assert.equal(await hudMsgText(page), quietMessage, 'full resync must not replay messages')
 
-    // --- uplink: hold E; 25% / 75% visuals, completion, personal CD deny, interruption
+    // --- uplink: the authoritative object stays fixed; self hacking pulls the camera back.
+    const arenaRadius = async () => page.evaluate(() => {
+      const values = window.__ombArenaRadii || []
+      const value = values.length ? values.at(-1) : 0
+      values.length = 0
+      return value
+    })
+    await page.evaluate(() => { window.__ombArenaRadii.length = 0 })
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusIdle = await arenaRadius()
+    assert.ok(radiusIdle > 1000, `baseline arena radius captured (${radiusIdle})`)
     await page.keyboard.down('e')
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: true, hackingId: SELF_ID, progressX10: 5, myCooldownS: 0 } })
     await fix.step(st => { st.uplinks[0].progressX10 = 20 }) // 2.0s / 8.0s = 25%
     assert.match(await hudMsgText(page), /黑入/, `uplink 25%: hacking banner expected (got "${await hudMsgText(page)}")`)
     assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '25')
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '25%')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusHacking = await arenaRadius()
+    assert.ok(radiusHacking < radiusIdle - 5, `hacking zooms the camera out (${radiusIdle} -> ${radiusHacking})`)
     await shot(page, '04-uplink25.png')
     const vis25 = await canvasCenter(page)
     await fix.step(st => { st.uplinks[0].progressX10 = 40 })
@@ -682,6 +658,10 @@ async function fullPass(browser, fix) {
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: false, hackingId: 0, progressX10: 0, myCooldownS: 30 } })
     await page.keyboard.up('e')
     await sleep(120)
+    await fix.step(() => {}); await fix.step(() => {}); await fix.step(() => {})
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const radiusRecovered = await arenaRadius()
+    assert.ok(radiusRecovered > radiusHacking + 5, `camera restores after hacking (${radiusHacking} -> ${radiusRecovered})`)
     assert.ok((await audioStarted(page)) > aDone, 'uplink completion must fire success audio')
     assert.match(await hudMsgText(page), /黑入完成/)
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '30s')
@@ -825,6 +805,7 @@ async function quickPass(browser, fix, viewport, label, shotName) {
 async function bannerPass(browser, fix, reduced = false) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reduced ? 'reduce' : 'no-preference' })
   await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(COLOR_INIT)
   await ctx.addInitScript(() => {
     const drawText = CanvasRenderingContext2D.prototype.fillText
     const setTransform = CanvasRenderingContext2D.prototype.setTransform
@@ -869,19 +850,70 @@ async function bannerPass(browser, fix, reduced = false) {
     fix.bcast(pickup); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate pickup is silent')
 
+    // 权威 invuln_s：显示绿色双层护盾；所有尺寸由机器人半径派生。
+    await page.evaluate(() => { window.__ombColors.guards = [] })
+    await fix.step(st => { st.robots[1].invulnS = 3; st.timeLeftS = 31 })
+    await until(async () => await page.evaluate(() => window.__ombColors.guards.length >= 2), 'green invulnerability shield')
+    const guards = await page.evaluate(() => {
+      const values = window.__ombColors.guards
+      for (let i = values.length - 2; i >= 0; i--) {
+        const inner = values[i], outer = values[i + 1]
+        if (Math.abs(outer.radius / inner.radius - 1.16) < 0.01
+          && Math.abs(inner.lineWidth / outer.lineWidth - 2) < 0.05) return [inner, outer]
+      }
+      return values.slice(-4)
+    })
+    assert.equal(guards.length, 2, `find a same-frame green shield pair (${JSON.stringify(guards)})`)
+    assert.ok(Math.abs(guards[1].radius / guards[0].radius - 1.16) < 0.01, `invulnerability shield matches the ordinary shield proportions (${guards[0].radius}, ${guards[1].radius})`)
+    assert.ok(Math.abs(guards[0].lineWidth / guards[1].lineWidth - 2) < 0.05, `invulnerability shield line widths stay proportional (${guards[0].lineWidth}, ${guards[1].lineWidth})`)
+    await shot(page, reduced ? '23-invulnerable-green-reduced.png' : '22-invulnerable-green.png')
+    await fix.step(st => { st.robots[1].invulnS = 0; st.timeLeftS = 31 })
+    await page.evaluate(() => { window.__ombColors.guards = [] })
+    await sleep(100)
+    const lingeringGuard = await page.evaluate(() => {
+      const values = window.__ombColors.guards
+      for (let i = 0; i < values.length - 1; i++) {
+        const inner = values[i], outer = values[i + 1]
+        if (Math.abs(inner.x - outer.x) < 0.01 && Math.abs(inner.y - outer.y) < 0.01
+          && Math.abs(outer.radius / inner.radius - 1.16) < 0.01
+          && Math.abs(inner.lineWidth / outer.lineWidth - 2) < 0.05) return [inner, outer]
+      }
+      return null
+    })
+    assert.equal(lingeringGuard, null, 'invulnerability shield disappears on authoritative zero')
+
     await fix.step(st => { st.robots[0].hpX10 = 200; st.timeLeftS = 31 })
-    await sleep(300)
-    const borderPixels = await page.locator('#game-canvas').evaluate(canvas => {
+    await sleep(80)
+    const hudDamage = await page.evaluate(() => {
+      const actual = getComputedStyle(document.querySelector('#hud-hp-fill'))
+      const delayed = getComputedStyle(document.querySelector('#hud-hp-delay'))
+      return { actualColor: actual.backgroundColor, delayedColor: delayed.backgroundColor, actualTransform: actual.transform, delayedTransform: delayed.transform }
+    })
+    assert.equal(hudDamage.actualColor, 'rgb(140, 255, 102)', 'HUD actual HP uses the brighter green')
+    assert.equal(hudDamage.delayedColor, 'rgb(255, 176, 102)', 'HUD delayed damage uses a high-contrast warm trail')
+    assert.notEqual(hudDamage.actualTransform, hudDamage.delayedTransform, 'HUD delayed damage remains behind the actual HP after a hit')
+    await sleep(220)
+    const lowHealthPixels = await page.locator('#game-canvas').evaluate(canvas => {
       const ctx = canvas.getContext('2d')
       const ratio = canvas.width / canvas.getBoundingClientRect().width
-      const y = Math.round(20 * ratio)
-      const pixels = ctx.getImageData(0, y, canvas.width, Math.max(1, Math.round(8 * ratio))).data
-      let red = 0
-      for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 65 && pixels[i] > pixels[i + 1] * 1.4 && pixels[i] > pixels[i + 2] * 1.3) red++
-      return red
+      const depth = Math.max(1, Math.round(12 * ratio))
+      const bands = [
+        ctx.getImageData(0, 0, canvas.width, depth).data,
+        ctx.getImageData(0, canvas.height - depth, canvas.width, depth).data,
+        ctx.getImageData(0, depth, depth, canvas.height - depth * 2).data,
+        ctx.getImageData(canvas.width - depth, depth, depth, canvas.height - depth * 2).data,
+      ]
+      return bands.map(pixels => {
+        let red = 0
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
+          if (r > 75 && r > g * 1.35 && r > b * 1.2) red++
+        }
+        return red
+      })
     })
-    assert.ok(borderPixels > 100, 'low-health mosaic is visibly present 20px inside the screen edge')
-    await shot(page, reduced ? '24-low-health-reduced.png' : '23-low-health-mosaic.png')
+    assert.ok(lowHealthPixels.every(count => count > 120), `all four low-health edges are visibly red (${lowHealthPixels.join(', ')})`)
+    await shot(page, reduced ? '24-low-health-red-reduced.png' : '23-low-health-red.png')
 
     await fix.step(st => {
       st.robots[0].hpX10 = 700
@@ -958,10 +990,13 @@ async function bannerPass(browser, fix, reduced = false) {
       fix.bcast(defeated); await sleep(80)
       assert.equal(await page.evaluate(() => window.__cameraShakes.length), count, 'duplicate self defeat does not restart camera shake')
     }
+    await page.evaluate(() => { window.__cameraShakes = [] })
     const hack = fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 })
     fix.bcast(hack)
     await until(async () => /黑入完成/.test(await hudMsgText(page)), 'uplink banner')
     assert.equal(await page.locator('#hud-msg').getAttribute('data-kind'), 'uplink')
+    await sleep(100)
+    assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'successful hacking never moves the camera')
     await shot(page, reduced ? '14-uplink-reduced.png' : '12-uplink-banner.png')
 
     await page.locator('#game-canvas').focus()

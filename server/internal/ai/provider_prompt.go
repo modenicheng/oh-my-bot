@@ -1,13 +1,16 @@
 package ai
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/modenicheng/oh-my-bot/server/internal/botapi"
+)
 
 // buildSystemPrompt 的静态组成部分（provider_deepseek.go 组装）。
 //
-// 语料来源：packages/bot-api/src/index.ts + runtime.ts 的 Go 侧精简镜像，
-// 以及 docs/manual/code/bot-scripting.md 的 tick 模型要点。手册章节本身由
-// PromptContext.Manual 在运行时注入（audience=both 章节由 glue 层挑选），
-// 不在此硬编码。
+// API 类型语料来自 internal/botapi 内嵌的 @omb/bot-api 权威源副本
+//（审计 X-1：不再维护手抄镜像）；手册章节由 PromptContext.Manual 在
+// 运行时注入（audience=both 章节由 glue 层挑选），不在此硬编码。
 
 // fence 是 markdown 代码围栏（Go 原始字符串无法内嵌反引号，经拼接注入）。
 const fence = "```"
@@ -28,57 +31,34 @@ func systemInstruction() string {
 
 	b.WriteString("\nUse the flat API: call `bot.scan()` for observations, read `bot.self.position`, and call `bot.navigateTo()` / `bot.move()` / `bot.aimAt()` / `bot.fire()` directly. Never generate `ctx.api`, `ctx.obs`, `self.pos`, or `api.aim`. Prefer `navigateTo` for movement goals. Health packs are collected by movement contact; there is no `pickup()`.\n")
 
-	b.WriteString("\n能量：上限 100、回复 10/s。开火 5/发、dash 20/s、shield 约 18/s、pulseScan 12。动作只对当前 tick 生效；持续动作要每 tick 调用。shield 与 dash 互斥且 shield 优先。\n\n")
+	b.WriteString("\n动作只对当前 tick 生效；持续动作要每 tick 调用。shield 与 dash 互斥且 shield 优先。各动作的成本/射程/冷却数值见上方各方法注释。\n\n")
 	b.WriteString("刻意不提供（不要幻想调用）：寻路、弹道预测、威胁评估、检测玩家是否在手操（脚本感知不到手操状态，分轴仲裁已处理）。API 之外不存在任何全局函数或对象。\n")
 	return b.String()
 }
 
-// botAPITypes @omb/bot-api 类型定义摘要（packages/bot-api/src/index.ts 镜像）。
+// botAPITypes 输出 @omb/bot-api 类型定义（权威源 verbatim 副本）：
+// 手册式成员注释（成本/射程/冷却数值）随之进入 prompt，无需手工同步。
+// 单行注释头（文件级 // 注释）不属于 API 面，剔除以压缩 token；
+// 生成副本与权威源的新鲜度由 internal/botapi 测试对拍保证。
 func botAPITypes() string {
-	return `interface BotContext extends L0, L1 {
-  self: Self           // 自己的状态
-  game: GameInfo       // 局时、阶段
-  scan(): Observation  // 免费感知：服务器已按视野 20m + 墙体遮挡裁剪好的最近快照，零成本任意频次
+	return fence + "ts\n" + stripLineComments(botapi.Source) + "\n" + fence
 }
 
-interface Vec2 { x: number; y: number }
-interface RobotRef { id: number; position: Vec2; velocity: Vec2; hp: number }
-
-interface Self { hp: number; energy: number; position: Vec2; velocity: Vec2 }
-interface GameInfo { time: number; timeLeft: number; phase: 'OUTER_RING' | 'CORE_OPEN'; mapSeed: number }
-
-interface ProjectileRef { id: number; owner: number; x: number; y: number; heading: number }
-
-interface Observation {
-  tick: number
-  robots: RobotRef[]
-  cores: (Vec2 & { id: number })[]
-  uplinks: (Vec2 & { id: number; ready: boolean; holder?: number })[]
-  projectiles: ProjectileRef[]
-  healthPacks: (Vec2 & { id: number; available: boolean; respawnInS: number })[]
-  walls: { id: number; min: Vec2; max: Vec2 }[]
-}
-
-// L0 原语（自己组合策略）
-interface L0 {
-  move(vx: number, vy: number): void   // 全向移动，速度上限 8 m/s
-  aimAt(angle: number): void           // 炮塔转向（弧度）
-  fire(): void                         // 间隔 250ms、耗能 5/发、有效射程 16m（16–20m 精度衰减）
-  dash(): void                         // 按住式 16m/s、持续耗能 20/s、无冷却/无无敌帧
-  shield(on: boolean): void            // 减伤 65%、不可开火、移速约 80%、耗能约 18/s
-  interact(): void                     // Uplink 引导黑入（2.5m 内、引导 8s）
-  say(text: string): void              // 喊话 3s CD，自由文本
-}
-
-// L1 便利层
-interface L1 {
-  navigateTo(pos: Vec2): void
-  moveTo(pos: Vec2): void
-  aimAt(target: RobotRef): void
-  nearestEnemy(): RobotRef | null     // 最近可见敌人
-  nearestCore(): Vec2 | null
-  nearestUplink(): Vec2 | null
-  pulseScan(): Observation     // 半径 32m、耗能 12、CD 2s，仍不穿墙
-}
-`
+// stripLineComments 删除 TS 源中整行的 // 注释（文件头/行尾注释）。
+// interface/JSDoc 声明保留；字符串字面量内不存在 // （本源已核对）。
+func stripLineComments(src string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if i := strings.Index(line, " //"); i >= 0 {
+			line = line[:i]
+		}
+		// 行内注释剥离后去除行尾空白，保证输出稳定。
+		b.WriteString(strings.TrimRight(line, " \t"))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

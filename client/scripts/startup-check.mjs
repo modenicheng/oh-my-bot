@@ -76,6 +76,54 @@ async function open(options = {}) {
   return page
 }
 const ready = page => page.locator('#startup[data-state="ready"]').waitFor({ timeout: 20000 })
+const geometry = []
+async function centered(page, label, promptVisible) {
+  const measurements = await page.evaluate(() => {
+    const bounds = selector => {
+      const element = document.querySelector(selector)
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return { center: rect.x + rect.width / 2, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        width: rect.width, height: rect.height, display: style.display, visibility: style.visibility }
+    }
+    const prompt = bounds('#startup-start')
+    const promptWrapper = bounds('.startup-float')
+    const brand = bounds('.startup-brand')
+    const loader = bounds('.startup-loader')
+    const footer = bounds('.startup-footer')
+    const selectors = ['.startup-loader', '.startup-load-list', '.startup-progress', '#startup-track', '#startup-percent', '.startup-load-note']
+    return { viewport: innerWidth, height: innerHeight, prompt, promptWrapper, brand, loader, footer,
+      overflow: document.documentElement.scrollWidth > innerWidth,
+      parts: selectors.map(selector => ({ selector, ...bounds(selector) })) }
+  })
+  assert.equal(measurements.overflow, false, `${label}: no horizontal document overflow`)
+  const promptReserved = measurements.promptWrapper.display !== 'none' && measurements.promptWrapper.width > 0 && measurements.promptWrapper.height > 0
+  const renderedPrompt = promptReserved && measurements.promptWrapper.visibility !== 'hidden'
+  assert.equal(promptReserved, true, `${label}: PRESS TO START slot remains reserved`)
+  assert.equal(renderedPrompt, promptVisible, `${label}: PRESS TO START visibility`)
+  assert.ok(measurements.brand.bottom <= measurements.loader.top, `${label}: brand does not overlap loader`)
+  assert.ok(measurements.loader.bottom <= measurements.footer.top, `${label}: loader does not overlap footer`)
+  assert.ok(measurements.loader.top >= 0 && measurements.loader.bottom <= measurements.height, `${label}: loader stays vertically visible`)
+  for (const part of measurements.parts) {
+    assert.ok(Math.abs(part.center - measurements.viewport / 2) <= 2, `${label} ${part.selector}: viewport axis`)
+    if (promptVisible) assert.ok(Math.abs(part.center - measurements.prompt.center) <= 2, `${label} ${part.selector}: prompt axis`)
+    assert.ok(part.left >= 0 && part.right <= measurements.viewport, `${label} ${part.selector}: no clipping`)
+  }
+  const loaderStyle = await page.locator('.startup-loader').evaluate(element => {
+    const style = getComputedStyle(element)
+    return { fontSize: parseFloat(style.fontSize), userSelect: style.userSelect }
+  })
+  assert.equal(loaderStyle.userSelect, 'none', `${label}: loading content cannot be selected`)
+  geometry.push({ label, viewport: measurements.viewport, height: measurements.height,
+    viewportDelta: Math.max(...measurements.parts.map(part => Math.abs(part.center - measurements.viewport / 2))),
+    promptDelta: promptVisible ? Math.max(...measurements.parts.map(part => Math.abs(part.center - measurements.prompt.center))) : null,
+    loaderTop: measurements.loader.top, loaderBottom: measurements.loader.bottom,
+    loaderFont: loaderStyle.fontSize, loaderUserSelect: loaderStyle.userSelect })
+}
+const sampleProgress = page => page.locator('#startup-progress').evaluate(element => ({
+  visual: Number(element.dataset.visual), real: Number(element.dataset.real), cap: Number(element.dataset.cap),
+  aria: Number(element.getAttribute('aria-valuenow')), track: document.getElementById('startup-track').textContent,
+}))
 async function assertEventually(check) {
   for (let i = 0; i < 100; i++) {
     if (check()) return
@@ -124,6 +172,172 @@ try {
   await page.screenshot({ path: resolve(shots, 'erosion-late.png') })
   await entered(page)
   await page.close()
+
+  // Editor chunk preload: Monaco starts with the splash resource bundle, not
+  // inside the trusted gesture that enters the app. The splash ready gate waits
+  // for the preload (subject to startup.ts's outer timeout); entering the room
+  // and opening the editor must not create a second module request.
+  const editorRequests = []
+  let releasePreload
+  const preloadHeld = new Promise(resolve => { releasePreload = resolve })
+  const preload = await open()
+  await preload.route('**/assets/editor-*.js', async route => {
+    editorRequests.push(route.request().url())
+    await preloadHeld
+    await route.continue()
+  })
+  await preload.goto('http://127.0.0.1:18425', { waitUntil: 'domcontentloaded' })
+  await assertEventually(() => editorRequests.length === 1)
+  assert.equal(await preload.locator('#startup').getAttribute('data-state'), 'loading', 'held Monaco preload keeps splash in resource-loading state')
+  const loadRows = preload.locator('.startup-load-row')
+  assert.equal(await loadRows.count(), 5, 'client/fonts/audio/sprites/editor each get a loading row')
+  assert.deepEqual(await loadRows.evaluateAll(rows => rows.map(row => row.dataset.resource)), ['client', 'fonts', 'audio', 'sprites', 'editor'])
+  const loadingEditor = preload.locator('.startup-load-row[data-resource="editor"]')
+  assert.match((await loadingEditor.innerText()).replace(/\s+/g, ''), /^Loadingeditor\.{1,3}\[>>\]$/)
+  await preload.waitForFunction(() => document.querySelectorAll('.startup-load-row[data-state="done"]').length === 4)
+  const dotsBefore = await loadingEditor.locator('.startup-load-dots').textContent()
+  await preload.waitForFunction(previous => document.querySelector('.startup-load-row[data-resource="editor"] .startup-load-dots')?.textContent !== previous, dotsBefore)
+  const liveBefore = await preload.locator('#startup-status').textContent()
+  assert.equal(await loadingEditor.locator('.startup-load-dots').getAttribute('aria-hidden'), 'true')
+  assert.equal(await preload.locator('#startup-resources').getAttribute('aria-live'), null)
+  const samples = [await sampleProgress(preload)]
+  for (let i = 0; i < 4; i++) {
+    await preload.waitForTimeout(300)
+    samples.push(await sampleProgress(preload))
+  }
+  assert.ok(samples.at(-1).visual > samples[0].visual, 'perceived progress moves between fixed real milestones')
+  for (const [index, sample] of samples.entries()) {
+    assert.equal(sample.real, 80, 'holding editor leaves authoritative milestones unchanged')
+    assert.equal(sample.cap, 95)
+    assert.ok(sample.visual < sample.cap && sample.aria < 100, 'pending resource never reaches its cap or completion')
+    if (index) assert.ok(sample.visual >= samples[index - 1].visual, 'visual progress never regresses')
+    assert.match(sample.track, /^\[[#=+>.]{28}\]$/)
+  }
+  assert.ok(new Set(samples.map(sample => sample.track)).size > 1, 'character track itself animates')
+  assert.equal(await preload.locator('#startup-status').textContent(), liveBefore, 'animation does not mutate the live region')
+  const loadingViewports = [
+    { label: 'wide-desktop-loading', width: 2540, height: 1520, shot: 'resource-loading-wide.png' },
+    { label: 'desktop-loading', width: 1440, height: 900, shot: 'resource-loading.png' },
+    { label: 'laptop-loading', width: 1280, height: 720 },
+    { label: 'mobile-loading', width: 390, height: 844, shot: 'resource-loading-mobile.png' },
+    { label: 'narrow-mobile-loading', width: 320, height: 740 },
+    { label: 'mobile-landscape-loading', width: 844, height: 390, shot: 'resource-loading-landscape.png' },
+  ]
+  for (const viewport of loadingViewports) {
+    await preload.setViewportSize({ width: viewport.width, height: viewport.height })
+    await centered(preload, viewport.label, false)
+    assert.equal(await preload.locator('#startup-start').isVisible(), false, `${viewport.label}: CTA hidden while loading`)
+    if (viewport.label === 'desktop-loading') {
+      const box = await preload.locator('.startup-loader').boundingBox()
+      assert.ok(box, 'desktop-loading: loader has geometry')
+      await preload.mouse.move(box.x + 4, box.y + 4)
+      await preload.mouse.down()
+      await preload.mouse.move(box.x + box.width - 4, box.y + box.height - 4, { steps: 8 })
+      await preload.mouse.up()
+      assert.equal(await preload.evaluate(() => getSelection()?.toString() ?? ''), '', 'desktop-loading: drag does not select loader text')
+    }
+    if (viewport.shot) await preload.screenshot({ path: resolve(shots, viewport.shot) })
+  }
+  await preload.setViewportSize({ width: 1440, height: 900 })
+  await preload.mouse.click(30, 30)
+  assert.equal(await preload.evaluate(() => window.__startupContexts.length), 0, 'loading splash does not consume a gesture')
+  releasePreload()
+  await ready(preload)
+  assert.equal(editorRequests.length, 1, 'splash resources issue exactly one editor chunk request')
+  assert.equal((await preload.locator('.startup-load-row[data-resource="editor"]').innerText()).replace(/\s+/g, ''), 'Loadededitor[OK]')
+  assert.equal(await preload.locator('#startup-track').textContent(), `[${'#'.repeat(28)}]`)
+  assert.equal(await preload.locator('#startup-percent').textContent(), '100%')
+  assert.equal(await preload.locator('#startup-progress').getAttribute('aria-valuenow'), '100')
+  assert.equal(await preload.locator('#startup-load-note').textContent(), 'ALL SYSTEMS READY')
+  await preload.waitForTimeout(1250)
+  const readyViewports = [
+    { label: 'wide-desktop-ready', width: 2540, height: 1520, shot: 'resource-ready-wide.png' },
+    { label: 'desktop-ready', width: 1440, height: 900, shot: 'resource-ready.png' },
+    { label: 'mobile-ready', width: 390, height: 844, shot: 'resource-ready-mobile.png' },
+    { label: 'mobile-landscape-ready', width: 844, height: 390 },
+  ]
+  for (const viewport of readyViewports) {
+    await preload.setViewportSize({ width: viewport.width, height: viewport.height })
+    await centered(preload, viewport.label, true)
+    assert.equal(await preload.locator('#startup-start').isVisible(), true, `${viewport.label}: CTA appears only when ready`)
+    const loading = geometry.find(item => item.label === viewport.label.replace('-ready', '-loading'))
+    const readyGeometry = geometry.at(-1)
+    assert.ok(loading, `${viewport.label}: matching loading geometry exists`)
+    assert.ok(Math.abs(readyGeometry.loaderTop - loading.loaderTop) <= 0.1, `${viewport.label}: loader top stays fixed when CTA appears`)
+    assert.ok(Math.abs(readyGeometry.loaderBottom - loading.loaderBottom) <= 0.1, `${viewport.label}: loader bottom stays fixed when CTA appears`)
+    if (viewport.shot) await preload.screenshot({ path: resolve(shots, viewport.shot) })
+  }
+  await preload.setViewportSize({ width: 1440, height: 900 })
+  console.log('Held-editor progress:', JSON.stringify(samples))
+  await preload.keyboard.press('Enter')
+  await entered(preload)
+  assert.equal(editorRequests.length, 1, 'trusted start gesture does not trigger Monaco loading')
+
+  // Reach the game view like players do, then open the already-preloaded editor.
+  await preload.locator('#in-room').fill('PREL')
+  await preload.locator('#in-nick').fill('preload-test')
+  await preload.locator('#btn-join').click()
+  await preload.locator('#view-room').waitFor({ state: 'visible', timeout: 10000 })
+  // Mock 服务器 join 只回 roomState；游戏视图由 mapBootstrap 触发（真实服
+  // 务器同样如此），下发后 enterGame 进战斗视图。
+  event('PREL', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
+  await preload.locator('#view-game').waitFor({ state: 'visible', timeout: 10000 })
+  assert.equal(editorRequests.length, 1, 'game entry does not add editor fetches')
+  await preload.locator('#btn-game-editor').click()
+  await preload.locator('#workbench-code .monaco-editor').waitFor({ state: 'visible', timeout: 20000 })
+  assert.equal(editorRequests.length, 1, 'opening the editor reuses the splash preload')
+  assert.equal(await preload.evaluate(() => document.getElementById('workbench-editor-loading').hidden), true)
+  assert.deepEqual(errors, [])
+  await preload.close()
+
+  // The existing 8s escape hatch permits entry, but never invents readiness.
+  const timeoutPage = await open({ reducedMotion: 'reduce' })
+  let releaseTimeout
+  const timeoutHeld = new Promise(resolve => { releaseTimeout = resolve })
+  let timeoutEditorRequests = 0
+  await timeoutPage.route('**/assets/editor-*.js', async route => {
+    timeoutEditorRequests++
+    await timeoutHeld
+    await route.continue()
+  })
+  await timeoutPage.goto('http://127.0.0.1:18425', { waitUntil: 'domcontentloaded' })
+  await timeoutPage.waitForFunction(() => document.querySelectorAll('.startup-load-row[data-state="done"]').length === 4)
+  const reducedBefore = await sampleProgress(timeoutPage)
+  const reducedDots = await timeoutPage.locator('[data-resource="editor"] .startup-load-dots').textContent()
+  await timeoutPage.waitForTimeout(500)
+  assert.deepEqual(await sampleProgress(timeoutPage), reducedBefore, 'reduced motion snaps to milestones with a stationary track')
+  assert.equal(reducedBefore.visual, 80)
+  assert.equal(await timeoutPage.locator('[data-resource="editor"] .startup-load-dots').textContent(), reducedDots)
+  await timeoutPage.keyboard.press('Enter')
+  assert.equal(await timeoutPage.evaluate(() => window.__startupContexts.length), 0, 'pending resources still block early input')
+  await ready(timeoutPage)
+  assert.equal(await timeoutPage.locator('#startup').getAttribute('data-assets'), 'background')
+  assert.equal((await sampleProgress(timeoutPage)).visual, 80)
+  assert.equal(await timeoutPage.locator('[data-resource="editor"]').getAttribute('data-state'), 'loading')
+  assert.match(await timeoutPage.locator('#startup-load-note').textContent(), /RESOURCES STILL LOADING/)
+  assert.doesNotMatch(await timeoutPage.locator('#startup-load-note').textContent(), /ALL SYSTEMS READY/)
+  await timeoutPage.screenshot({ path: resolve(shots, 'resource-background.png') })
+  await timeoutPage.keyboard.press('Enter')
+  await entered(timeoutPage)
+  assert.equal(timeoutEditorRequests, 1, 'timeout entry also reuses the pending Monaco request')
+  releaseTimeout()
+  await timeoutPage.waitForLoadState('networkidle')
+  await timeoutPage.close()
+
+  const degraded = await open({ reducedMotion: 'reduce' })
+  await degraded.route('**/assets/editor-*.js', route => route.abort())
+  await degraded.goto('http://127.0.0.1:18425', { waitUntil: 'domcontentloaded' })
+  await ready(degraded)
+  assert.equal(await degraded.locator('#startup').getAttribute('data-assets'), 'degraded')
+  assert.equal(await degraded.locator('[data-resource="editor"]').getAttribute('data-state'), 'error')
+  assert.match(await degraded.locator('[data-resource="editor"]').innerText(), /Unavailable editor/)
+  assert.ok((await sampleProgress(degraded)).visual < 100)
+  assert.match(await degraded.locator('#startup-load-note').textContent(), /SOME RESOURCES UNAVAILABLE/)
+  await degraded.screenshot({ path: resolve(shots, 'resource-degraded.png') })
+  await degraded.keyboard.press('Enter')
+  await entered(degraded)
+  await degraded.close()
+
   for (const key of ['Enter', 'Space', 'a']) {
     const p = await open()
     await p.goto('http://127.0.0.1:18425')
@@ -381,6 +595,7 @@ try {
   assert.equal(await broken.evaluate(() => window.__startupContexts.length), 0)
   await broken.close()
   assert.deepEqual(errors, [])
+  console.log('Loader centering:', JSON.stringify(geometry))
   console.log('PASS: startup/audio/ASCII/mobile; lobby/navigation; direct live isolation; authoritative scoreboard/settlement/reset; title/arena/final looping music + mute; live scores + replay settlement/seek')
 } finally {
   await browser.close()

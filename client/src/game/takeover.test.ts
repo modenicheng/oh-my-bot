@@ -1,17 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Camera } from './camera'
 import { AXIS_ABILITY, AXIS_AIM, AXIS_FIRE, AXIS_MOVE, InputSampler } from './input'
-
-class Target extends EventTarget {
-  closest(): null { return null }
-  rect = { left: 40, top: 20, width: 800, height: 500 }
-  getBoundingClientRect() { return this.rect }
-}
-function send(target: EventTarget, type: string, props: Record<string, unknown> = {}) {
-  const event = new Event(type, { cancelable: true })
-  for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value })
-  target.dispatchEvent(event)
-}
+import { Target, send } from './test-targets'
 
 /** 细粒度人工接管：Space 三分支 + 边沿触发 + 恢复不重抢（ADR-0009）。 */
 describe('fine-grained manual takeover', () => {

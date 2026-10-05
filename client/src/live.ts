@@ -1,21 +1,20 @@
 import type { ServerMsg } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
 import { SpectatorCamera } from './replay/spectator'
+import { bindSpectateControls } from './replay/spectate-controls'
 import { artReady } from './game/art'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
+import { resolveTuning } from './game/tuning'
 import { Renderer, phaseName, type SayBubble } from './game/render'
 import { Scoreboard, type ScoreDisplay, scoreRow } from './game/scoreboard'
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
+import { el as domEl, fmtClock, setText } from './ui/dom'
 
 export interface LiveSpectatorDeps {
   root: HTMLElement
   canvas: HTMLCanvasElement
   onExit: () => void
-}
-
-function setTxt(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text
 }
 
 /** A spectator owns only its camera and snapshot consumer, never gameplay input. */
@@ -44,7 +43,7 @@ export class LiveSpectator {
   private lastEnded = false
   /** 脏标记：快照/事件/相机变化才整帧重绘，空闲观战不再永动重绘。 */
   private dirty = true
-  private drag: { id: number; x: number; y: number } | null = null
+  private disposeControls: (() => void) | null = null
   private follow: HTMLSelectElement
   private status: HTMLElement
   private retry: HTMLButtonElement
@@ -100,7 +99,7 @@ export class LiveSpectator {
   }
 
   private el<T extends HTMLElement = HTMLElement>(id: string): T {
-    return this.deps.root.querySelector<T>(`#${id}`)!
+    return domEl<T>(this.deps.root, id)
   }
 
   /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径都可安全高频调用）。 */
@@ -136,10 +135,9 @@ export class LiveSpectator {
       this.resyncSent = false
       this.status.textContent = '已连接'
       this.deps.root.dataset.tick = String(this.world.tick)
-      setTxt(this.phaseEl, phaseName(this.world.phase))
-      const seconds = Math.max(0, Math.floor(this.world.timeLeftS))
-      setTxt(this.timeEl, `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`)
-      setTxt(this.countEl, `机器人 ${this.world.robots.size}`)
+      setText(this.phaseEl, phaseName(this.world.phase))
+      setText(this.timeEl, fmtClock(this.world.timeLeftS))
+      setText(this.countEl, `机器人 ${this.world.robots.size}`)
       // 花名册只依赖 full 快照（nick 仅 full 携带）与机器人集合规模变化，
       // delta 帧跳过逐快照的排序/序列化。
       if (snap.full || this.world.robots.size !== this.rosterSize) this.updateRoster()
@@ -157,6 +155,7 @@ export class LiveSpectator {
         const sameMap = source === this.mapSource
         this.mapSource = source
         this.map = map
+        this.world.tuning = resolveTuning(kind.value.tuning)
         if (!sameMap) this.camera.fit()
         this.resetMatchDisplay()
         this.resize()
@@ -259,7 +258,7 @@ export class LiveSpectator {
     this.camera.update([...this.world.robots.values()].flatMap(r => r.base?.pos ? [{ id: r.base.id, pos: r.base.pos }] : []))
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
-    setTxt(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
+    setText(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
     if (this.bubbles.length) this.bubbles = this.bubbles.filter(b => performance.now() - b.at < 4000)
     this.renderer.render(this.world, this.map, this.camera.camera, { bubbles: this.bubbles })
   }
@@ -285,69 +284,27 @@ export class LiveSpectator {
       this.session = new RoomSession()
       void this.connect(this.roomCode)
     }, { signal })
-    this.follow.addEventListener('change', () => { camera.follow(this.follow.value ? Number(this.follow.value) : null); this.requestDraw() }, { signal })
-    this.el('live-free').addEventListener('click', () => { camera.follow(null); this.requestDraw() }, { signal })
-    this.el('live-fit').addEventListener('click', () => { camera.fit(); this.requestDraw() }, { signal })
-    this.el('live-in').addEventListener('click', () => { camera.zoomAt(1.25); this.requestDraw() }, { signal })
-    this.el('live-out').addEventListener('click', () => { camera.zoomAt(0.8); this.requestDraw() }, { signal })
-    canvas.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || !e.isPrimary || !this.map) return
-      canvas.focus({ preventScroll: true })
-      canvas.setPointerCapture(e.pointerId)
-      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }
-      canvas.classList.add('dragging')
-      e.preventDefault()
-    }, { signal })
-    canvas.addEventListener('pointermove', e => {
-      if (!this.drag || e.pointerId !== this.drag.id) return
-      camera.pan(e.clientX - this.drag.x, e.clientY - this.drag.y)
-      this.drag.x = e.clientX; this.drag.y = e.clientY
-      this.requestDraw()
-    }, { signal })
-    const release = (e: PointerEvent) => { if (e.pointerId === this.drag?.id) this.endDrag() }
-    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) canvas.addEventListener(event, release, { signal })
-    window.addEventListener('blur', () => this.endDrag(), { signal })
     window.addEventListener('resize', () => this.resize(), { signal })
-    canvas.addEventListener('wheel', e => {
-      if (!this.map) return
-      e.preventDefault()
-      const rect = canvas.getBoundingClientRect()
-      const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1
-      camera.zoomAt(Math.exp(-Math.max(-400, Math.min(400, e.deltaY * units)) * 0.002), e.clientX - rect.left, e.clientY - rect.top)
-      this.requestDraw()
-    }, { signal, passive: false })
-    root.addEventListener('keydown', e => {
-      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 'Escape') { e.preventDefault(); this.deps.onExit(); return }
-      if (e.target !== canvas || !this.map) return
-      switch (e.key) {
-        case 'ArrowLeft': camera.pan(48, 0); break
-        case 'ArrowRight': camera.pan(-48, 0); break
-        case 'ArrowUp': camera.pan(0, 48); break
-        case 'ArrowDown': camera.pan(0, -48); break
-        case '+': case '=': camera.zoomAt(1.25); break
-        case '-': case '_': camera.zoomAt(0.8); break
-        case 'Home': camera.fit(); break
-        default: return
-      }
-      e.preventDefault()
-      this.requestDraw()
-    }, { signal })
-  }
-
-  private endDrag(): void {
-    const id = this.drag?.id
-    this.drag = null
-    const canvas = this.deps.canvas
-    canvas.classList.remove('dragging')
-    if (id !== undefined && canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id)
+    // 与回放观战共用的滚轮/拖拽/键盘/按钮交互；Space 不拦截（live 无播放语义）。
+    this.disposeControls = bindSpectateControls({
+      root, canvas,
+      camera,
+      enabled: () => this.map !== null,
+      onExit: () => this.deps.onExit(),
+      follow: this.follow,
+      free: this.el('live-free'),
+      fit: this.el('live-fit'),
+      zoomIn: this.el('live-in'),
+      zoomOut: this.el('live-out'),
+      requestDraw: () => this.requestDraw(),
+    })
   }
 
   dispose(): void {
     this.disposed = true
     this.session.close()
     cancelAnimationFrame(this.raf)
-    this.endDrag()
+    this.disposeControls?.()
     this.events.abort()
     this.observer.disconnect()
   }

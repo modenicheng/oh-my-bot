@@ -33,7 +33,7 @@ func TestStatsSummary(t *testing.T) {
 				outerA += a
 			}
 		}
-		t.Logf("seed=%d hash=%.16s walls=%d (center %d, mid %d density %.4f, outer %d density %.4f) uplinks=6+1 pads=16/12/6",
-			seed, def.MapHash, len(def.Walls), centerN, midN, midA/midBand, outerN, outerA/outerBand)
+		t.Logf("seed=%d hash=%.16s walls=%d (center %d/%.1fm², mid %d density %.4f, outer %d density %.4f) uplinks=6+1 pads=16/12/6 target=%d",
+			seed, def.MapHash, len(def.Walls), centerN, centerA, midN, midA/midBand, outerN, outerA/outerBand, def.CoreRules.TargetAlive)
 	}
 }

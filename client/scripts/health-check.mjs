@@ -1,6 +1,7 @@
 import { startClient } from './startup-helpers.mjs'
 import { parseReplayNDJSON } from '../src/replay/model.ts'
 import { ReplayIndex } from '../src/replay/index.ts'
+import { goVec2Lenient } from '../src/lib/gojson.ts'
 import { chromium } from 'playwright'
 import WebSocket from 'ws'
 import { create, fromBinary } from '@bufbuild/protobuf'
@@ -52,11 +53,10 @@ async function until(fn, label, timeout = 20_000) {
 
 function parseMap(raw) {
   const source = JSON.parse(raw)
-  const vec = value => ({ x: Number(value?.X ?? value?.x ?? 0), y: Number(value?.Y ?? value?.y ?? 0) })
   return {
     generatorVer: Number(source.generator_ver),
-    walls: source.walls.map(wall => ({ min: vec(wall.min), max: vec(wall.max) })),
-    healthPacks: source.health_packs.map(pack => ({ id: Number(pack.id), pos: vec(pack.pos) })),
+    walls: source.walls.map(wall => ({ min: goVec2Lenient(wall.min), max: goVec2Lenient(wall.max) })),
+    healthPacks: source.health_packs.map(pack => ({ id: Number(pack.id), pos: goVec2Lenient(pack.pos) })),
   }
 }
 
@@ -263,7 +263,7 @@ try {
   const startFrame = [...encodeClient(create(ClientMsgSchema, { payload: { case: 'roomAction', value: create(RoomActionSchema, { kind: RoomAction_Kind.START }) } }))]
   await host.evaluate(bytes => window.__healthSockets.at(-1).send(Uint8Array.from(bytes)), startFrame)
   await until(() => observed.map?.healthPacks.length === 4 && observed.robot?.base?.pos && shooter.world.robots.get(shooter.world.selfId)?.base?.pos, 'match bootstrap', 20_000)
-  assert.equal(observed.map.generatorVer, 6, 'actual match uses gen6')
+  assert.equal(observed.map.generatorVer, 7, 'actual match uses gen7')
 
   const pack = observed.map.healthPacks
     .map(value => ({ ...value, distance: Math.hypot(value.pos.x - observed.robot.base.pos.x, value.pos.y - observed.robot.base.pos.y) }))

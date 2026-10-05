@@ -1,6 +1,8 @@
 // 相机：跟随自机，视口固定逻辑尺寸 40m×25m 缩放到窗口（等比，letterbox 不裁切）。
 // 地图大于视口时平移并钳制在地图范围内。
 
+import { clamp } from '../lib/math'
+
 export const VIEW_W = 40 // 逻辑视口宽（米）
 export const VIEW_H = 25 // 逻辑视口高（米）
 
@@ -51,8 +53,4 @@ export class Camera {
   /** 画布像素 → 世界（鼠标 aim 反算） */
   toWorldX(px: number): number { return (px - this.cw / 2) / this.scale + this.cx }
   toWorldY(py: number): number { return (py - this.ch / 2) / this.scale + this.cy }
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v
 }

@@ -41,6 +41,20 @@ type World struct {
 	Uplinks     []sim.UplinkView
 }
 
+// WorldOf 把 sim 的冻结 WorldView 转为本包 World（逐字段拷贝，不共享底层
+// 可变状态；切片本身只读，直传即可）。Controls/PulseScans/AckSeqs 属于
+// glue 专用通道，不进入感知裁剪输入。
+func WorldOf(wv sim.WorldView) World {
+	return World{
+		FrameView:   wv.Frame,
+		Robots:      wv.Robots,
+		Projectiles: wv.Projectiles,
+		Cores:       wv.Cores,
+		HealthPacks: wv.HealthPacks,
+		Uplinks:     wv.Uplinks,
+	}
+}
+
 // BuildObservation filters a frozen world from observerID's point of view.
 // Robots and projectiles require range plus line of sight; the observer is always visible.
 // Cores, health packs, and uplinks are public map objects. Uplink personal cooldowns

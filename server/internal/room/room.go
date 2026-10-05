@@ -10,6 +10,7 @@
 package room
 
 import (
+	"cmp"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -342,63 +343,25 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		if r.state != Idle && r.state != Ended {
 			return fmt.Errorf("%w: Warmup from %s", ErrIllegalTransit, r.state)
 		}
-		if len(r.members) == 0 {
-			return ErrNoPlayers
-		}
-		if r.launcher == nil {
-			return ErrNoLauncher
-		}
-		seed, err := newSeed()
+		seed, playerIDs, soloLauncher, err := r.prepareLaunchLocked()
 		if err != nil {
-			return fmt.Errorf("room: generate seed: %w", err)
+			return err
 		}
-		playerIDs := make([]uint64, len(r.joinOrder))
-		copy(playerIDs, r.joinOrder)
-		var soloLauncher SoloBotLauncher
-		if r.soloBots > 0 {
-			var ok bool
-			soloLauncher, ok = r.launcher.(SoloBotLauncher)
-			if !ok {
-				return ErrNoSoloBots
-			}
-		}
-		r.state = Warmup
-		// LaunchWarmup 须快（异步装配，同 Launch 契约：不得回调 Room）。
-		if soloLauncher != nil {
-			r.match = soloLauncher.LaunchWarmupWithBots(seed, playerIDs, r.soloBots)
-		} else {
-			r.match = r.launcher.LaunchWarmup(seed, playerIDs)
-		}
+		r.launchWarmupLocked(seed, playerIDs, soloLauncher)
 		return nil
 
 	case ActionStart:
 		if r.state != Warmup && r.state != Idle {
 			return fmt.Errorf("%w: Start from %s", ErrIllegalTransit, r.state)
 		}
-		if len(r.members) == 0 {
-			return ErrNoPlayers
-		}
-		if r.launcher == nil {
-			return ErrNoLauncher
-		}
-		seed, err := newSeed()
+		seed, playerIDs, soloLauncher, err := r.prepareLaunchLocked()
 		if err != nil {
-			return fmt.Errorf("room: generate seed: %w", err)
+			return err
 		}
-		playerIDs := make([]uint64, len(r.joinOrder))
-		copy(playerIDs, r.joinOrder)
 		// Launch is invoked while holding the room lock to keep the
 		// transition atomic (no ABORT can interleave between the state check
 		// and storing the handle). Contract: Launch must be quick and must not
 		// call back into this Room, or it will deadlock.
-		var soloLauncher SoloBotLauncher
-		if r.soloBots > 0 {
-			var ok bool
-			soloLauncher, ok = r.launcher.(SoloBotLauncher)
-			if !ok {
-				return ErrNoSoloBots
-			}
-		}
 		if r.match != nil {
 			r.match.Abort()
 		}
@@ -434,36 +397,56 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		}
 		// Ended → Warmup：房间保留、立即装配热身实例（"局散房不散"，玩家回到
 		// 可漫游/改码状态等待下一局）。
-		if len(r.members) == 0 {
-			return ErrNoPlayers
-		}
-		if r.launcher == nil {
-			return ErrNoLauncher
-		}
-		seed, err := newSeed()
+		seed, playerIDs, soloLauncher, err := r.prepareLaunchLocked()
 		if err != nil {
-			return fmt.Errorf("room: generate seed: %w", err)
+			return err
 		}
-		playerIDs := make([]uint64, len(r.joinOrder))
-		copy(playerIDs, r.joinOrder)
-		var soloLauncher SoloBotLauncher
-		if r.soloBots > 0 {
-			var ok bool
-			soloLauncher, ok = r.launcher.(SoloBotLauncher)
-			if !ok {
-				return ErrNoSoloBots
-			}
-		}
-		r.state = Warmup
-		if soloLauncher != nil {
-			r.match = soloLauncher.LaunchWarmupWithBots(seed, playerIDs, r.soloBots)
-		} else {
-			r.match = r.launcher.LaunchWarmup(seed, playerIDs)
-		}
+		r.launchWarmupLocked(seed, playerIDs, soloLauncher)
 		return nil
 
 	default:
 		return fmt.Errorf("room: unknown action %d", int(action))
+	}
+}
+
+// prepareLaunchLocked runs the shared launch preparation for WARMUP, START
+// and RESTART, in a fixed error-precedence order: seated players →
+// configured launcher → fresh crypto/rand seed → join-order roster →
+// SoloBotLauncher capability when solo bots are configured. Nothing is
+// mutated on failure. Caller holds mu.
+func (r *Room) prepareLaunchLocked() (seed uint64, playerIDs []uint64, soloLauncher SoloBotLauncher, err error) {
+	if len(r.members) == 0 {
+		return 0, nil, nil, ErrNoPlayers
+	}
+	if r.launcher == nil {
+		return 0, nil, nil, ErrNoLauncher
+	}
+	seed, err = newSeed()
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("room: generate seed: %w", err)
+	}
+	playerIDs = make([]uint64, len(r.joinOrder))
+	copy(playerIDs, r.joinOrder)
+	if r.soloBots > 0 {
+		var ok bool
+		soloLauncher, ok = r.launcher.(SoloBotLauncher)
+		if !ok {
+			return 0, nil, nil, ErrNoSoloBots
+		}
+	}
+	return seed, playerIDs, soloLauncher, nil
+}
+
+// launchWarmupLocked is the shared WARMUP/RESTART tail: move to Warmup and
+// immediately assemble a warmup instance ("局散房不散" — the room persists,
+// players return to roaming/reconfiguring while awaiting the next match).
+// LaunchWarmup 须快（异步装配，同 Launch 契约：不得回调 Room）。Caller holds mu.
+func (r *Room) launchWarmupLocked(seed uint64, playerIDs []uint64, soloLauncher SoloBotLauncher) {
+	r.state = Warmup
+	if soloLauncher != nil {
+		r.match = soloLauncher.LaunchWarmupWithBots(seed, playerIDs, r.soloBots)
+	} else {
+		r.match = r.launcher.LaunchWarmup(seed, playerIDs)
 	}
 }
 
@@ -514,10 +497,10 @@ func (r *Room) SessionScores() []ScoreRow {
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Score != rows[j].Score {
-			return rows[i].Score > rows[j].Score
-		}
-		return rows[i].PlayerID < rows[j].PlayerID
+		return cmp.Or(
+			cmp.Compare(rows[j].Score, rows[i].Score),       // score desc
+			cmp.Compare(rows[i].PlayerID, rows[j].PlayerID), // tie: id asc
+		) < 0
 	})
 	return rows
 }

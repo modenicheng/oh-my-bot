@@ -42,7 +42,7 @@ func ReplayVisualFrames(source io.Reader, sampleEvery uint32) ([]ReplayVisualFra
 	if err != nil {
 		return nil, err
 	}
-	if len(records) == 0 || records[0].Type != "match_start" || records[0].State == nil {
+	if len(records) == 0 || records[0].Type != RecordMatchStart || records[0].State == nil {
 		return nil, fmt.Errorf("sim: replay missing start")
 	}
 	if err := validateReplayContinuity(records); err != nil {
@@ -63,7 +63,7 @@ func ReplayVisualFrames(source io.Reader, sampleEvery uint32) ([]ReplayVisualFra
 		nextTick := s.tick + 1
 		for index < len(records) && records[index].Tick == nextTick {
 			record := records[index]
-			if record.Type == "input" || record.Type == "control" {
+			if record.Type == RecordInput || record.Type == RecordControl {
 				if err := s.applyReplayRecord(record); err != nil {
 					return nil, err
 				}
@@ -88,7 +88,7 @@ func visualFrame(view WorldView) ReplayVisualFrame {
 	for i, robot := range view.Robots {
 		frame.Robots[i] = ReplayVisualRobot{
 			ID: robot.ID, Pos: robot.Pos, Heading: robot.Turret,
-			HP: float64(robot.HpX10) / 10, Energy: float64(robot.EnergyX10) / 10,
+			HP: FromX10(robot.HpX10), Energy: FromX10(robot.EnergyX10),
 			Alive: !robot.Dead, Invulnerable: robot.InvulnS > 0,
 		}
 	}

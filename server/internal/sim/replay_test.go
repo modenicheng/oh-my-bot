@@ -138,6 +138,30 @@ func TestRestoreCheckpointDetachesAndRejectsInvalidState(t *testing.T) {
 	}
 }
 
+// TestRestoreCheckpointRejectsExpiredDecayAt pins the off-by-one fix in the
+// v3 uplink decay validation (S-24③): DecayAt must lie strictly after the
+// checkpoint tick. DecayAt == cp.Tick has already expired (decay fires on
+// tick >= DecayAt) and must be rejected, as must any earlier value.
+func TestRestoreCheckpointRejectsExpiredDecayAt(t *testing.T) {
+	for name, decayAt := range map[string]uint32{
+		"expired one tick ago":  179,
+		"expired at checkpoint": 180,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _ := uplinkSim(t)
+			s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
+			stepTicks(s, 180)
+			s.robots[0].Position = Vec2{23, 0}
+			s.Tick()
+			cp := s.Snapshot()
+			cp.Uplinks[0].DecayAt = decayAt
+			if _, err := RestoreCheckpoint(cp, nil); err == nil {
+				t.Fatal("expired DecayAt accepted")
+			}
+		})
+	}
+}
+
 func TestRestoreCheckpointRejectsNilUplinkCooldownMap(t *testing.T) {
 	s, _ := uplinkSim(t)
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})

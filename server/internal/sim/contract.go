@@ -87,8 +87,9 @@ type CoreZoneDef struct {
 
 // CoreRulesDef：Core 刷新规则的唯一 owner（T1 消费）。
 type CoreRulesDef struct {
-	PeriodTicks  int                 `json:"period_ticks"`  // 刷新周期（tick）
-	GroupWeights map[Phase][]float64 `json:"group_weights"` // 各阶段各组刷新权重
+	PeriodTicks  int                 `json:"period_ticks"`           // 补货周期（tick）
+	TargetAlive  int                 `json:"target_alive,omitempty"` // 每波补到的场上 Core 目标数；0=旧地图每波仅生成 1 个
+	GroupWeights map[Phase][]float64 `json:"group_weights"`          // 各阶段各组刷新权重
 }
 
 // ============ 帧视图（T1 产、T2/T3 消费；每 tick 快照、不可变） ============
@@ -121,6 +122,12 @@ type ProjView struct {
 	Heading   float64
 	Color     string // 服务器权威射手颜色：射手离 AOI 后弹丸仍可自足着色（表现层专用）
 }
+
+// ToX10 / FromX10 是游戏单位（HP/能量/治疗量）与协议 x10 定点表示之间
+// 唯一的换算实现（S-16）。快照编码器中按截断语义量化的 progress 字段
+// （int32(x*10)）刻意不经此换算：四舍五入会改变已下发数值。
+func ToX10(v float64) int32   { return int32(math.Round(v * 10)) }
+func FromX10(v int32) float64 { return float64(v) / 10 }
 
 type CoreView struct {
 	ID    uint32

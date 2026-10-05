@@ -1,10 +1,17 @@
 import { asciiField, asciiTitle, erodeText } from './startup-art'
+import { advanceProgress, asciiProgress, loadingDots, progressPercent, progressTarget, type ResourceState } from './startup-progress'
+import { hash32 } from './lib/hash'
+import { startupResources } from './startup-resources'
 import { initAppVersion } from './version'
 
 const root = document.getElementById('startup')!
 const status = document.getElementById('startup-status')!
 const retry = document.getElementById('startup-retry')!
-const progress = document.getElementById('startup-progress') as HTMLProgressElement
+const progress = document.getElementById('startup-progress')!
+const track = document.getElementById('startup-track')!
+const percent = document.getElementById('startup-percent')!
+const resourceList = document.getElementById('startup-resources')!
+const loadNote = document.getElementById('startup-load-note')!
 const title = document.getElementById('startup-ascii')!
 const field = document.getElementById('startup-field')!
 const startPrompt = document.getElementById('startup-start')!
@@ -17,10 +24,102 @@ let ready = false
 let starting = false
 
 const EROSION_MS = 900
+const loadTasks = [
+  { id: 'client', label: 'client' },
+  ...startupResources.map(({ id, label }) => ({ id, label })),
+] as const
+type LoadTaskId = typeof loadTasks[number]['id']
+const loadStates = new Map<LoadTaskId, ResourceState>(loadTasks.map(task => [task.id, 'loading']))
+const loadRows = new Map<LoadTaskId, { row: HTMLElement; text: HTMLElement; dots: HTMLElement; sigil: HTMLElement }>()
+let visualProgress = 0
+let lastProgressAt = performance.now()
+let entryPermitted = false
+
+function setText(element: HTMLElement, text: string): void {
+  if (element.textContent !== text) element.textContent = text
+}
+
+function buildLoadingRows(): void {
+  for (const task of loadTasks) {
+    const row = document.createElement('p')
+    row.className = 'startup-load-row'
+    row.dataset.resource = task.id
+    row.dataset.state = 'loading'
+    const label = document.createElement('span')
+    label.className = 'startup-load-label'
+    const text = document.createElement('span')
+    text.className = 'startup-load-text'
+    text.textContent = `Loading ${task.label}`
+    const dots = document.createElement('span')
+    dots.className = 'startup-load-dots'
+    dots.setAttribute('aria-hidden', 'true')
+    const sigil = document.createElement('span')
+    sigil.className = 'startup-load-sigil'
+    sigil.setAttribute('aria-hidden', 'true')
+    sigil.textContent = '[>>]'
+    label.append(text, dots)
+    row.append(label, sigil)
+    resourceList.append(row)
+    loadRows.set(task.id, { row, text, dots, sigil })
+  }
+  renderProgress()
+}
+
+function renderProgress(now = performance.now()): void {
+  if (starting || root.hidden) return
+  const target = progressTarget([...loadStates.values()])
+  visualProgress = advanceProgress(visualProgress, target, now - lastProgressAt, motion.matches)
+  lastProgressAt = now
+  // Expose actual and visual values separately for diagnostics, never as download bytes.
+  progress.dataset.real = String(target.real)
+  progress.dataset.cap = String(target.cap)
+  progress.dataset.visual = visualProgress.toFixed(3)
+  setText(track, asciiProgress(visualProgress, Math.floor(now / 150), 28, motion.matches))
+  const value = String(progressPercent(visualProgress))
+  setText(percent, `${value}%`)
+  if (progress.getAttribute('aria-valuenow') !== value) progress.setAttribute('aria-valuenow', value)
+  for (const [id, elements] of loadRows) {
+    if (loadStates.get(id) === 'loading') setText(elements.dots, loadingDots(motion.matches ? 2 : Math.floor(now / 400)))
+  }
+  if (!entryPermitted || root.dataset.state === 'error') return
+  const complete = target.complete && visualProgress === 100
+  root.dataset.assets = complete ? 'complete' : target.pending ? 'background' : target.failed ? 'degraded' : 'pending'
+  if (target.complete && !complete) return
+  const note = complete ? 'ALL SYSTEMS READY' : target.pending
+    ? 'READY TO ENTER / RESOURCES STILL LOADING' : 'READY TO ENTER / SOME RESOURCES UNAVAILABLE'
+  setText(loadNote, note)
+  if (!ready) {
+    ready = true
+    root.dataset.state = 'ready'
+    root.setAttribute('aria-busy', 'false')
+    retry.hidden = true
+    if (!document.hidden) root.focus({ preventScroll: true })
+    setText(status, `${status.textContent} ${note}.`)
+  }
+}
+
+function settleLoadTask(id: LoadTaskId, state: Exclude<ResourceState, 'loading'>): void {
+  // Account for elapsed time under the OLD target before advancing a milestone.
+  const now = performance.now()
+  renderProgress(now)
+  loadStates.set(id, state)
+  if (starting || root.hidden) return
+  const elements = loadRows.get(id)!
+  elements.row.dataset.state = state
+  setText(elements.text, `${state === 'done' ? 'Loaded' : 'Unavailable'} ${id}`)
+  setText(elements.sigil, state === 'done' ? '[OK]' : '[!!]')
+  setText(elements.dots, '')
+  // Only resource state changes reach this live region, never animation frames.
+  setText(status, loadTasks.map(task => `${loadStates.get(task.id) === 'done' ? 'Loaded' : loadStates.get(task.id) === 'error' ? 'Unavailable' : 'Loading'} ${task.label}.`).join(' '))
+  const done = [...loadStates.values()].filter(value => value === 'done').length
+  progress.setAttribute('aria-valuetext', `${done} of ${loadTasks.length} resources loaded; progress estimated between milestones`)
+  renderProgress(now)
+}
 
 function paint(): void {
   title.textContent = asciiTitle(frame)
   field.textContent = asciiField(frame++, Math.ceil(innerWidth / 18), Math.ceil(innerHeight / 30))
+  renderProgress()
 }
 function stopAnimation(): void { window.clearInterval(animation); animation = undefined }
 function erodeScreen(): void {
@@ -38,12 +137,13 @@ function erodeScreen(): void {
   const tiles: { x: number; y: number; at: number; glyph: string }[] = []
   for (let y = 0; y < height; y += cell) {
     for (let x = 0; x < width; x += cell) {
-      const hash = Math.imul((x / cell + 1) * 73 + (y / cell + 1) * 193, 0x45d9f3b) >>> 0
+      const hash = hash32((x / cell + 1) * 73 + (y / cell + 1) * 193)
       const distance = Math.hypot(x + cell / 2 - ox, y + cell / 2 - oy) / farthest
       tiles.push({ x, y, at: 0.15 + distance * 0.52 + (hash % 101) / 101 * 0.17, glyph: '01[]{}+*#'[hash % 9]! })
     }
   }
-  const texts = [title, field, startPrompt, status,
+  const texts = [title, field, startPrompt, loadNote,
+    ...[...loadRows.values()].flatMap(({ text, sigil, dots }) => [text, sigil, dots]),
     root.querySelector<HTMLElement>('.startup-tagline')!, document.getElementById('startup-help')!]
     .map((element, seed) => ({ element, text: element.textContent ?? '', seed: seed * 173 }))
   const backdrop = getComputedStyle(root).backgroundColor
@@ -80,6 +180,7 @@ function erodeScreen(): void {
 function syncAnimation(): void {
   stopAnimation()
   if (root.hidden || starting || document.hidden) return
+  lastProgressAt = performance.now()
   paint()
   if (!motion.matches) animation = window.setInterval(paint, 100)
 }
@@ -87,7 +188,7 @@ function fail(): void {
   ready = false
   root.dataset.state = 'error'
   root.setAttribute('aria-busy', 'false')
-  status.textContent = '客户端加载失败，请重新加载。'
+  loadNote.textContent = 'CLIENT LOAD FAILED · RELOAD REQUIRED'
   retry.hidden = false
 }
 function enter(): void {
@@ -136,29 +237,34 @@ function activate(event: MouseEvent | KeyboardEvent): void {
 }
 
 async function prepare(): Promise<void> {
+  buildLoadingRows()
+  for (const resource of startupResources) {
+    resource.promise.then(
+      loaded => settleLoadTask(resource.id, loaded ? 'done' : 'error'),
+      error => {
+        console.warn(`Startup resource unavailable: ${resource.id}`, error)
+        settleLoadTask(resource.id, 'error')
+      },
+    )
+  }
   const slow = window.setTimeout(() => {
-    status.textContent = '加载时间较长，请检查网络，或重新加载。'
+    loadNote.textContent = 'STILL LOADING · CHECK NETWORK IF THIS PERSISTS'
     retry.hidden = false
   }, 15000)
   try {
     application = await import('./main')
-    status.textContent = '正在准备字体与机甲素材…'
+    settleLoadTask('client', 'done')
     let timeout: number | undefined
-    // 图片与字体已有渲染兜底，网络挂起不永久阻止进入。
-    const assetsLoaded = await Promise.race([
-      application.ready.then(() => true),
-      new Promise<boolean>(resolve => { timeout = window.setTimeout(() => resolve(false), 8000) }),
+    // 图片、字体、音频与编辑器都有降级/重试路径；挂起时不永久阻止进入。
+    await Promise.race([
+      application.ready,
+      new Promise<void>(resolve => { timeout = window.setTimeout(resolve, 8000) }),
     ]).finally(() => window.clearTimeout(timeout))
-    progress.max = 1
-    progress.value = 1
-    root.dataset.state = 'ready'
-    root.setAttribute('aria-busy', 'false')
-    status.textContent = assetsLoaded ? '准备就绪' : '准备就绪 · 部分素材将继续在后台加载'
-    retry.hidden = true
-    ready = true
-    root.focus({ preventScroll: true })
+    entryPermitted = true
+    renderProgress()
   } catch (error) {
     console.error('Client loading failed', error)
+    settleLoadTask('client', 'error')
     fail()
   } finally { window.clearTimeout(slow) }
 }

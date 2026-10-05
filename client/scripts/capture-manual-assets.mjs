@@ -16,6 +16,7 @@ import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema, EvScoreboardSchema, EvMatchEndSchema, EvScriptLogSchema,
 } from '../../packages/protocol/src/index.ts'
+import { gen2MapJson, frame } from './harness.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const clientRoot = resolve(here, '..')
@@ -116,30 +117,14 @@ async function captureUI(browser) {
   const CORE_POS = { x: -2.4, y: 0 }
   const PHASE_OUTER = 1, R_PLAYING = 2, CS_HUMAN = 1
 
-  // MapDef 走 Go JSON 序列化形状（snake_case 键、大写 X/Y），与 mapdef.ts parseMapDef 兼容。
-  const MAP_JSON = JSON.stringify({
-    version: 1,
-    generator_ver: 2,
-    seed: 20260206,
-    map_hash: 'capture01',
-    walls: [
-      { id: 1, min: { X: -66, Y: -60 }, max: { X: -58, Y: 60 } },
-      { id: 2, min: { X: 58, Y: -60 }, max: { X: 66, Y: 60 } },
-    ],
-    sectors: [
-      { id: 1, spawn_area: { Min: { X: -50, Y: -40 }, Max: { X: -35, Y: -25 } }, center: { X: -42, Y: -32 } },
-      { id: 2, spawn_area: { Min: { X: 35, Y: 25 }, Max: { X: 50, Y: 40 } }, center: { X: 42, Y: 32 } },
-    ],
-    uplinks: [{ id: 900, pos: { X: 0, Y: 6 }, main: false, interact_r: 2.5, active_phase: 1 }],
-    core_pads: [{ id: 1, pos: { X: -2.4, Y: 0 }, group: 0, value: 10 }],
-    health_packs: [{ id: 7, pos: { X: 2.2, Y: 0 } }],
-    core_zone: { radius: 30, unlock_phase: 2 },
-  })
+  // MapDef 走 Go JSON 序列化形状（snake_case 键、大写 X/Y），与 mapdef.ts parseMapDef
+  // 兼容；与 pickup-visual-check 同源（harness.gen2MapJson），仅 uplink 挪到 (0, 6)。
+  const MAP_JSON = gen2MapJson('capture01', { uplink: { id: 900, pos: { X: 0, Y: 6 }, main: false, interact_r: 2.5, active_phase: 1 } })
 
   // 协议编解码（与 manual-check 同源：@omb/protocol 生成的 schema）
   const MAP_JSON_STR = MAP_JSON
-  function frame(payload) {
-    return Buffer.concat([Buffer.from([3]), toBinary(ServerMsgSchema, create(ServerMsgSchema, { payload }))])
+  function frameMsg(payload) {
+    return Buffer.concat([Buffer.from([frame.down]), toBinary(ServerMsgSchema, create(ServerMsgSchema, { payload }))])
   }
 
   const server = createServer(async (req, res) => {
@@ -154,16 +139,16 @@ async function captureUI(browser) {
   wss.on('connection', (ws) => {
     ws.on('message', (data) => {
       const buf = Buffer.from(data)
-      if (buf[0] === 0x00) { ws.send(Buffer.from([0x01])); return } // ping → pong
-      if (buf[0] !== 0x02) return // 0x02 = protobuf 消息帧
+      if (buf[0] === frame.ping) { ws.send(Buffer.from([frame.pong])); return } // ping → pong
+      if (buf[0] !== frame.up) return // 0x02 = protobuf 消息帧
       let msg
       try { msg = fromBinary(ClientMsgSchema, buf.subarray(1)) } catch { return }
       const cmd = msg.payload
       // join 后推 roomState + mapBootstrap + snapshot
       if (cmd.case === 'join') {
-        ws.send(frame({ case: 'event', value: create(ServerEventSchema, { kind: { case: 'roomState',
+        ws.send(frameMsg({ case: 'event', value: create(ServerEventSchema, { kind: { case: 'roomState',
           value: create(EvRoomStateSchema, { state: R_PLAYING, robotsOnline: 2, hostNick: '截图中' }) } }) }))
-        ws.send(frame({ case: 'event', value: create(ServerEventSchema, { tick: 0, kind: { case: 'mapBootstrap',
+        ws.send(frameMsg({ case: 'event', value: create(ServerEventSchema, { tick: 0, kind: { case: 'mapBootstrap',
           value: create(EvMapBootstrapSchema, { mapJson: MAP_JSON_STR, mapHash: 'capture01', generatorVersion: 2 }) } }) }))
         const snap = {
           tick: 600, ackSeq: 1, phase: PHASE_OUTER, timeLeftS: 240, full: true,
@@ -175,11 +160,11 @@ async function captureUI(browser) {
           healthPacks: [{ base: { id: 7, pos: PACK_POS }, available: true }],
           self: { robotId: SELF_ID, moveSrc: CS_HUMAN, turretSrc: CS_HUMAN, assistOn: true, manualAxesMask: 3 },
         }
-        ws.send(frame({ case: 'snapshot', value: create(SnapshotDeltaSchema, snap) }))
+        ws.send(frameMsg({ case: 'snapshot', value: create(SnapshotDeltaSchema, snap) }))
         // 记分板
-        ws.send(frame({ case: 'event', value: create(ServerEventSchema, { tick: 600, kind: { case: 'scoreboard',
+        ws.send(frameMsg({ case: 'event', value: create(ServerEventSchema, { tick: 600, kind: { case: 'scoreboard',
           value: create(EvScoreboardSchema, { tick: 600, rows: [{ robot: 202, score: 12 }, { robot: SELF_ID, score: 35 }] }) } }) }))
-        const logEvent = (tick, text, level = 'log') => frame({ case: 'event', value: create(ServerEventSchema, { tick, kind: { case: 'scriptLog',
+        const logEvent = (tick, text, level = 'log') => frameMsg({ case: 'event', value: create(ServerEventSchema, { tick, kind: { case: 'scriptLog',
           value: create(EvScriptLogSchema, { robotId: SELF_ID, scriptRev: 4, tick, level, text }) } }) })
         ws.send(logEvent(601, 'scan complete'))
         ws.send(logEvent(602, 'scan complete'))
@@ -327,7 +312,7 @@ async function captureUI(browser) {
   await page.fill('#in-nick', '截图者')
   await page.click('#btn-join')
   await page.waitForSelector('#view-game', { state: 'visible', timeout: 10000 })
-  wss.clients.forEach((ws) => ws.send(frame({ case: 'event', value: create(ServerEventSchema, { kind: { case: 'matchEnd',
+  wss.clients.forEach((ws) => ws.send(frameMsg({ case: 'event', value: create(ServerEventSchema, { kind: { case: 'matchEnd',
     value: create(EvMatchEndSchema, { scores: [{ robot: SELF_ID, score: 42, titles: [6] }, { robot: 202, score: 12 }] }) } }) })))
   await page.waitForSelector('.end-overlay', { timeout: 5000 })
   await page.screenshot({ path: join(DOC_IMAGES, 'ui-match-end.png') })

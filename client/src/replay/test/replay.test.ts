@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseReplayNDJSON, ReplayParseError } from '../model'
 import { ReplayIndex } from '../index'
-import { Title } from '@omb/protocol'
+import { Title, ReplayRecordType, replayRecordDiskName, replayRecordTypeFromDisk } from '@omb/protocol'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/REPLAY1-000000001.jsonl', import.meta.url),
@@ -54,8 +54,91 @@ describe('parseReplayNDJSON', () => {
     expect(() => parseReplayNDJSON('{"schema_version":1}\n')).toThrow(ReplayParseError)
   })
 
+  it('未知 schema_version 显式拒绝（X-6/D12）', () => {
+    const v2 = '{"schema_version":2}\n' + JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } })
+    expect(() => parseReplayNDJSON(v2)).toThrow(ReplayParseError)
+    expect(() => parseReplayNDJSON(v2)).toThrow(/schema_version=2/)
+    expect(() => parseReplayNDJSON('{"schema_version":99}\n')).toThrow(/schema_version=99/)
+  })
+
+  it('已知 schema_version=1 正常解析；头行位置无关后续记录', () => {
+    const ok = parseReplayNDJSON('{"schema_version":1}\n' + JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }))
+    expect(ok.records).toHaveLength(1)
+  })
+
   it('非法 JSON 行报行号', () => {
     expect(() => parseReplayNDJSON('{"schema_version":1}\nnot json\n')).toThrow(/第 2 行/)
+  })
+})
+
+describe('回放 schema 权威源（X-6）', () => {
+  it('记录类型盘上名与权威枚举互钉（与 Go sim.RecordTypeDiskName 同规则）', () => {
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_EVENT)).toBe('event')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_MATCH_START)).toBe('match_start')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_INPUT)).toBe('input')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_CONTROL)).toBe('control')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_CHECKPOINT)).toBe('checkpoint')
+    expect(replayRecordDiskName(ReplayRecordType.REPLAY_VISUAL)).toBe('visual')
+    for (const disk of ['event', 'match_start', 'input', 'control', 'checkpoint', 'visual']) {
+      expect(replayRecordTypeFromDisk(disk)).toBeDefined()
+    }
+    expect(replayRecordTypeFromDisk('future_record')).toBeUndefined()
+  })
+
+  it('visual v2（命名字段）与 v1（历史位置数组）等价解出', () => {
+    const v2 = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'visual', v: 2, tick: 6, phase: 2, robots: [
+        { id: 1, pos: { x: 6, y: 3 }, heading: 1.5, hp: 90, energy: 80, alive: true, invulnerable: true },
+      ], projectiles: [
+        { id: 9, owner: 1, pos: { x: 2, y: 2 }, heading: 0 },
+      ] }),
+    ].join('\n'))
+    const v1 = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'visual', tick: 6, phase: 2, robots: [[1, 6, 3, 1.5, 90, 80, 1, 1]], projectiles: [[9, 1, 2, 2, 0]] }),
+    ].join('\n'))
+    expect(v2.visualFrames).toEqual(v1.visualFrames)
+    expect(v2.visualFrames[0]?.robots[0]?.invulnerable).toBe(true)
+  })
+
+  it('缺 v 字段的 visual 行按 v1 历史形态解出', () => {
+    const data = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'visual', tick: 0, phase: 1, robots: [[1, 0, 0, 0, 100, 100, 1, 0]], projectiles: [] }),
+    ].join('\n'))
+    expect(data.visualFrames[0]?.robots[0]?.hp).toBe(100)
+  })
+
+  it('未知 visual 版本显式拒绝（不静默错读位置数组语义）', () => {
+    const lines = [
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'visual', v: 3, tick: 0, robots: [] }),
+    ].join('\n')
+    expect(() => parseReplayNDJSON(lines)).toThrow(ReplayParseError)
+    expect(() => parseReplayNDJSON(lines)).toThrow(/v=3/)
+  })
+
+  it('visual v2 坏载荷报错常行号', () => {
+    const lines = [
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      '{"type":"visual","v":2,"tick":"x","robots":[]}',
+    ].join('\n')
+    expect(() => parseReplayNDJSON(lines)).toThrow(/第 2 行/)
+  })
+
+  it('事件严格解码：protojson 键名归一到 snake_case，省略 event.tick 回退信封 tick', () => {
+    const data = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'event', tick: 60, event: { kill: { killer: 1, victim: 2, assists: [3, 4] } } }),
+      JSON.stringify({ type: 'event', tick: 120, event: { tick: 120, match_end: { scores: [{ robot: 1, score: 5, titles: ['HEALER'] }] } } }),
+    ].join('\n'))
+    const kill = data.records.find(r => r.event?.kind === 'kill')
+    expect(kill?.tick).toBe(60)
+    expect(kill?.event?.payload.assists).toEqual([3, 4])
+    const end = data.records.find(r => r.event?.kind === 'match_end')
+    expect(end?.tick).toBe(120)
+    expect(end?.event?.payload.scores[0].titles).toEqual(['HEALER'])
   })
 })
 

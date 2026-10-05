@@ -369,7 +369,7 @@ func TestSnippetOnlyRuntimeProducesAttributedCommands(t *testing.T) {
 	if rt3 != nil {
 		t.Fatal("snippet-only clear must unregister the runtime")
 	}
-	if _, still := m.runtimes[rid]; still {
-		t.Fatal("match runtime map still holds cleared runtime")
+	if m.scriptPool.RuntimeOf(rid) != nil {
+		t.Fatal("match pool still holds cleared runtime")
 	}
 }

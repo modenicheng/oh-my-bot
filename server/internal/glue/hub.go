@@ -100,9 +100,12 @@ type RoomConn struct {
 	snippets     map[uint64][]snippet.Setting
 	scriptSource map[uint64]string
 	assist       map[uint64]bool
-	match        *Match
-	launcher     room.SimLauncher
-	launch       atomic.Pointer[asyncHandle]
+	// scriptVersions 每玩家脚本版本链（房间身份状态：AI 直填 + 版本回退的
+	// 服务器权威记录；跨局保留，显式离开清理，观战结构性不可见）。
+	scriptVersions map[uint64]*scriptVersionChain
+	match          *Match
+	launcher       room.SimLauncher
+	launch         atomic.Pointer[asyncHandle]
 
 	// ai is shared by warmup and its following scored match, so both consume
 	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
@@ -114,6 +117,7 @@ func newRoomConn(code string) *RoomConn {
 		Code: code, Room: room.NewRoom(code, 0),
 		sessions: map[uint64]*Session{}, spectators: map[uint64]*Session{}, identities: map[string]SessionInfo{},
 		snippets: map[uint64][]snippet.Setting{}, scriptSource: map[uint64]string{}, assist: map[uint64]bool{},
+		scriptVersions: map[uint64]*scriptVersionChain{},
 	}
 }
 
@@ -170,6 +174,8 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 		}
 	}
 	rc.sessions[s.playerID] = s
+	// 版本链属房间身份：无对局的重连/接管也补发（AI 直填 + 回退的客户端基准）。
+	rc.sendScriptVersionsStateLocked(s.playerID)
 	if m := rc.match; m != nil && m.activeLocked() {
 		m.bootstrapLocked(s)
 	}
@@ -273,6 +279,23 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 		rc.broadcastRoomStateLocked()
 	})
 }
+
+// normalizeScriptEditorSource preserves legacy submissions while separating
+// executable JavaScript from the owner editor model. Missing or unknown language
+// values use JavaScript compatibility semantics.
+func normalizeScriptEditorSource(sub *ombv1.ScriptSubmit) (string, ombv1.ScriptLanguage) {
+	if sub.GetLanguage() != ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS {
+		// JavaScript has one source of truth: version exactly what the runtime
+		// loaded, ignoring a mismatched optional editor_source.
+		return sub.GetSource(), ombv1.ScriptLanguage_SCRIPT_LANGUAGE_JS
+	}
+	editorSource := sub.GetSource()
+	if sub.EditorSource != nil {
+		editorSource = sub.GetEditorSource()
+	}
+	return editorSource, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS
+}
+
 func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 	if sub == nil {
 		return
@@ -282,8 +305,35 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 		if m == nil || !m.activeLocked() {
 			return
 		}
-		ok, errMsg, rev := m.submitScriptLocked(s.playerID, sub.GetSource())
-		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev}}}}})
+		runtimeSource := sub.GetSource()
+		editorSource, language := normalizeScriptEditorSource(sub)
+		ok, errMsg, rev := m.submitScriptLocked(s.playerID, runtimeSource)
+		var versionID uint32
+		if ok {
+			// 版本记录（不推送）：ScriptResult 回执先发，版本链快照随后，
+			// 客户端按固定顺序消费（回执 → 版本链）。运行时始终装载 JS，
+			// 版本链另存编辑器源码与语言供 owner 恢复 JS/TS 模型。
+			versionID = m.recordScriptVersionLocked(s.playerID, rev, ombv1.ScriptOrigin_ORIGIN_MANUAL, runtimeSource, editorSource, language)
+		}
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{ClientScriptId: sub.GetClientScriptId(), Ok: ok, Error: errMsg, ScriptRev: rev, VersionId: &versionID}}}}})
+		if ok {
+			m.pushScriptVersionsLocked(s.playerID)
+		}
+	})
+}
+
+// ScriptRollback 把玩家自己的历史版本设为当前版本（仅房间玩家；观战者被
+// withRoom 结构性拒绝，上游路由还会提前拒绝并回结构化 notice）。
+func (s *Session) ScriptRollback(rb *ombv1.ScriptRollback) {
+	if rb == nil {
+		return
+	}
+	s.withRoom(func(rc *RoomConn) {
+		m := rc.match
+		if m == nil || !m.activeLocked() {
+			return
+		}
+		m.rollbackScriptLocked(s.playerID, rb.GetVersionId())
 	})
 }
 func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
@@ -337,6 +387,7 @@ func (s *Session) LeaveRoom() {
 		delete(rc.snippets, s.playerID)
 		delete(rc.scriptSource, s.playerID)
 		delete(rc.assist, s.playerID) // 身份释放：同房间 Bot 状态随之清理
+		delete(rc.scriptVersions, s.playerID)
 		_ = rc.Room.Leave(s.playerID)
 		if s.hub != nil {
 			s.hub.mu.Lock()
@@ -376,6 +427,42 @@ func (rc *RoomConn) broadcastRoomStateLocked() {
 }
 func say(text string) *ombv1.ServerMsg {
 	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Text: text}}}}}
+}
+
+// SystemSay is the exported robot-0 system Say used outside glue (cmd/omb
+// upstream routing). The "join failed: " prefix is a client contract: the
+// RoomSession treats it as a terminal join failure and stops retrying.
+func SystemSay(text string) *ombv1.ServerMsg { return say(text) }
+
+// controlNoticeMsg 是结构化控制通知（审计 X-4）的下行帧：join 拒绝 / AI 状态
+// 等控制面文案的机器可读形态。过渡期与旧客户端兼容：sendNotice 先发本事件、
+// 紧随同文 robot=0 SystemSay（旧客户端按前缀解析）；新客户端消费 notice 后对
+// 成对 say 去重（packages/protocol dedupeControlNoticeSay，顺序由两侧测试互钉）。
+// 不落 Match Event Log：这些通知不属于对局事件流。
+func controlNoticeMsg(code ombv1.EvControlNotice_Code, text string) *ombv1.ServerMsg {
+	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_ControlNotice{ControlNotice: &ombv1.EvControlNotice{Code: code, Text: text}},
+	}}}
+}
+
+// ControlNotice 导出结构化控制通知构造（cmd/omb 上行路由在 glue 之外，无 Session
+// 可用，需自行控制发送顺序：notice 在前、兼容 say 在后）。
+func ControlNotice(code ombv1.EvControlNotice_Code, text string) *ombv1.ServerMsg {
+	return controlNoticeMsg(code, text)
+}
+
+// sendNotice 定向成对下发：notice 在前、兼容 say 在后（固定顺序，客户端去重依赖）。
+// AI 类通知由 aiNotice 包装（say 带原有 AI 前缀文案，兼容旧面板分流）。
+func sendNotice(s *Session, code ombv1.EvControlNotice_Code, text string) {
+	s.SendReliable(controlNoticeMsg(code, text))
+	s.SendReliable(SystemSay(text))
+}
+
+// aiNotice 保持过渡期双形态文案一致：notice.text 与兼容 say 同文
+// （旧客户端靠前缀分流，新客户端靠 code）。join 拒绝的双形态在 cmd/omb
+// （sendJoinFailedReliable），不在此重复。
+func aiNotice(s *Session, code ombv1.EvControlNotice_Code, text string) {
+	sendNotice(s, code, text)
 }
 
 type launcherAdapter struct{ rc *RoomConn }

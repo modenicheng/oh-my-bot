@@ -68,14 +68,14 @@
 #hud-time.urgent { color: #ff5c5c; text-shadow: none; }
 #hud-time.countdown-pulse { animation: hud-countdown 480ms steps(4, end); }
 
-/* 脚本接管标记（ADR-0009）：正在由脚本/Snippet 输出的轴，对应技能卡用
-   amber 令牌描边+图标+微光（STYLE.md 警告色；荧光纪律允许的状态高亮）。 */
-.skill[data-takeover='script'] { border-top-color: #fbbf24; }
-.skill[data-takeover='script'] .skill-icon { color: #fbbf24; }
-.skill[data-takeover='script'] .skill-cd { color: #fbbf24; }
-.skill[data-state='takeover'] .skill-icon { color: #fbbf24; box-shadow: 0 0 8px #fbbf2440; }
-.skill[data-state='takeover'] .skill-cd { color: #fbbf24; }
-/* 待机仍是辅助模式，但不宣称本 tick 正在瞄准目标。 */
+/* 脚本接管标记（ADR-0009，C-20 单轨）：正在由脚本/Snippet 输出的轴，对应
+   技能卡统一 data-takeover="script" 轨——描边/图标/文案 amber + 图标微光
+   （STYLE.md 警告色；荧光纪律允许的状态高亮）。standby 是独立语义位
+   （data-state），只做手工调暗的琥珀变体，不加微光。 */
+.skill[data-takeover='script'] { border-top-color: var(--amber); }
+.skill[data-takeover='script'] .skill-icon { color: var(--amber); box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 25%, transparent); }
+.skill[data-takeover='script'] .skill-cd { color: var(--amber); }
+/* 待机仍是辅助模式，但不宣称本 tick 正在瞄准目标（手工调暗的琥珀变体，非 --amber 本值）。 */
 .skill[data-state='standby'] { border-top-color: #a68b4b; }
 .skill[data-state='standby'] .skill-icon, .skill[data-state='standby'] .skill-cd { color: #d1b46b; }
 

@@ -3,15 +3,16 @@
 import {
   ResyncRequestSchema, ClientMsgSchema,
   type ServerMsg, type SnapshotDelta, type SelfState,
-  type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState,
+  type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState, type SimTuning,
 } from '@omb/protocol'
 import { create } from '@bufbuild/protobuf'
 import { encodeClient } from '@omb/protocol'
+import { FALLBACK_TUNING, invulnWindowMs } from './tuning'
 
 export interface RobotEnt extends RobotState {
   /** 本地渲染帧时间戳（无敌闪烁等动画用） */
   seenAt: number
-  /** 本地无敌近似截止（ms）：wire 无 invuln 字段，以 dead→alive 转变近似（重生后 4s + 250ms 容差） */
+  /** 无敌显示截止（ms）：优先使用权威 invuln_s；旧服务器缺失时以 dead→alive 近似。 */
   invulnUntil?: number
 }
 export interface ProjEnt extends ProjectileState { seenAt: number }
@@ -32,6 +33,8 @@ export interface WorldState {
   uplinks: Map<number, UplinkEnt>
   /** 最近 ack 的 input seq（服务器确认到哪） */
   ackSeq: number
+  /** 服务器下发的对局数值（X-3）；未收到 bootstrap 时为兜底值（旧服务器） */
+  tuning: Readonly<SimTuning>
 }
 
 export function emptyWorld(): WorldState {
@@ -39,6 +42,7 @@ export function emptyWorld(): WorldState {
     tick: 0, initialized: false, phase: 0, timeLeftS: 0,
     robots: new Map(), projectiles: new Map(), cores: new Map(), healthPacks: new Map(), uplinks: new Map(),
     ackSeq: 0,
+    tuning: FALLBACK_TUNING,
   }
 }
 
@@ -70,12 +74,15 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
 
   // 60Hz 快照逐实体到达：复用已有实体对象原地更新（派生字段先于 assign 求值，
   // 避免覆盖后语义变化），仅 full 重建/首见时新建——消除每秒数千个小对象分配。
+  const invulnMs = invulnWindowMs(world.tuning)
   for (const r of snap.robots) {
     const id = r.base?.id ?? 0
     const prev = world.robots.get(id)
-    // 无敌近似：仅识别 delta 帧上的 dead→alive 转变（重生后 ~4s，服务器 InvulnDuration=240tick=4s）。
-    // full 重建时无 prev，不做近似（避免 resync 后全员误闪烁；代价是首帧出生闪烁缺失，可接受）。
-    const invulnUntil = prev?.dead && !r.dead ? now + 4250 : prev?.invulnUntil
+    // 新服务器每帧状态携带 optional invuln_s，full/resync 也能恢复显示；
+    // 字段存在且为 0 时立即关闭。只有旧服务器缺失字段时才走 dead→alive 兜底。
+    const invulnUntil = r.invulnS !== undefined
+      ? r.invulnS > 0 ? now + r.invulnS * 1000 + 250 : undefined
+      : prev?.dead && !r.dead ? now + invulnMs : prev?.invulnUntil
     // delta 帧不带 nick/color（full 才带），保留旧 meta
     const nick = r.nick || prev?.nick || ''
     const color = r.color || prev?.color || ''

@@ -77,7 +77,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 			if cp.SimulationVersion >= 3 {
 				invalidDecay = (uplink.HackingID != 0 && uplink.DecayAt != 0) ||
 					(uplink.ProgressTicks == 0 && uplink.DecayAt != 0) ||
-					(uplink.DecayAt != 0 && uplink.DecayAt < cp.Tick)
+					(uplink.DecayAt != 0 && uplink.DecayAt <= cp.Tick)
 			}
 			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil || invalidDecay ||
 				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
@@ -109,7 +109,7 @@ func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error)
 	if err != nil {
 		return nil, err
 	}
-	if len(records) == 0 || records[0].Type != "match_start" || records[len(records)-1].Tick < targetTick {
+	if len(records) == 0 || records[0].Type != RecordMatchStart || records[len(records)-1].Tick < targetTick {
 		return nil, fmt.Errorf("sim: replay missing start or target coverage")
 	}
 	if err := validateReplayContinuity(records); err != nil {
@@ -118,10 +118,10 @@ func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error)
 	checkpoint := records[0].State
 	for i := 1; i < len(records); i++ {
 		record := &records[i]
-		if record.Type == "match_start" {
+		if record.Type == RecordMatchStart {
 			return nil, fmt.Errorf("sim: duplicate replay start")
 		}
-		if record.Type == "checkpoint" && record.Tick <= targetTick {
+		if record.Type == RecordCheckpoint && record.Tick <= targetTick {
 			checkpoint = record.State
 		}
 	}
@@ -136,7 +136,7 @@ func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error)
 	for s.tick < targetTick {
 		for index < len(records) && records[index].Tick == s.tick+1 {
 			record := &records[index]
-			if record.Type == "input" || record.Type == "control" {
+			if record.Type == RecordInput || record.Type == RecordControl {
 				if err := s.applyReplayRecord(*record); err != nil {
 					return nil, err
 				}
@@ -170,9 +170,9 @@ func validateReplayContinuity(records []LogRecord) error {
 	for i := 1; i < len(records); i++ {
 		record := records[i]
 		switch record.Type {
-		case "match_start":
+		case RecordMatchStart:
 			return fmt.Errorf("sim: duplicate replay start")
-		case "checkpoint":
+		case RecordCheckpoint:
 			cp := record.State
 			if cp.Seed != initial.Seed || cp.SimulationVersion != initial.SimulationVersion ||
 				!reflect.DeepEqual(cp.Map, initial.Map) || !reflect.DeepEqual(cp.Walls, initial.Walls) || len(cp.Robots) != len(initial.Robots) {
@@ -191,12 +191,12 @@ func validateReplayContinuity(records []LogRecord) error {
 			if _, err := RestoreCheckpoint(*cp, nil); err != nil {
 				return err
 			}
-		case "input", "control":
+		case RecordInput, RecordControl:
 			seq, ok := sequences[record.RobotID]
 			if !ok {
 				return fmt.Errorf("sim: replay control for unknown robot %d", record.RobotID)
 			}
-			if record.Type == "input" {
+			if record.Type == RecordInput {
 				input := record.Input
 				pendingCopy := seq.pending != nil && record.Tick == initial.Tick+1 && *input == *seq.pending
 				if seq.has && (input.Seq < seq.latest || (input.Seq == seq.latest && !pendingCopy)) {
@@ -217,7 +217,7 @@ func (s *Sim) applyReplayRecord(record LogRecord) error {
 	}
 	r := &s.robots[i]
 	switch record.Type {
-	case "input":
+	case RecordInput:
 		if record.Input == nil || (r.HasSeq && (record.Input.Seq < r.LatestSeq ||
 			(record.Input.Seq == r.LatestSeq && (!r.InputPending || *record.Input != r.PendingInput)))) {
 			return fmt.Errorf("sim: replay input sequence did not advance")
@@ -225,7 +225,7 @@ func (s *Sim) applyReplayRecord(record LogRecord) error {
 		// Records contain consumed/coalesced input, not another upstream
 		// packet. Overwrite pending state already captured by match_start.
 		r.PendingInput, r.LatestSeq, r.HasSeq, r.InputPending = *record.Input, record.Input.Seq, true, true
-	case "control":
+	case RecordControl:
 		c := record.Control
 		r.Control.PendingScript = cloneCommands(c.Script)
 		r.Control.ScriptPending = c.Script != nil || c.ScriptFailed

@@ -19,7 +19,7 @@
 
 import { notesFromTokens, tokenizePattern } from './pattern';
 import { renderVoice, voiceTailSeconds, type ScheduledNote } from './synth';
-import { clamp } from './music';
+import { clamp } from '../lib/math';
 import { loopSeconds, loopSteps, type SongSpec, type StageId } from './types';
 
 /** Corner frequency of the DC blocker, in Hz. */
@@ -248,14 +248,4 @@ export function renderSong(song: SongSpec, sampleRate: number, options: RenderOp
     stagePeak,
     headroom: mixPeak > 0 ? Math.min(2.2, DRY_HEADROOM / mixPeak) : 1,
   };
-}
-
-/** Find the note sounding at `frame` on one voice (notes are sorted by start). */
-export function noteAt(notes: ScheduledNote[], frame: number): ScheduledNote | null {
-  let best: ScheduledNote | null = null;
-  for (const note of notes) {
-    if (note.startFrame > frame) break;
-    if (frame < note.startFrame + note.gateFrames) best = note;
-  }
-  return best;
 }

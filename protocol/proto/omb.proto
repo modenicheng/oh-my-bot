@@ -21,6 +21,43 @@ enum Phase { PHASE_UNSPECIFIED = 0; OUTER_RING = 1; CORE_OPEN = 2; }
 // 控制轴来源（ADR-0009 分轴仲裁）
 enum ControlSource { CS_UNSPECIFIED = 0; CS_HUMAN = 1; CS_SCRIPT = 2; CS_SNIPPET = 3; }
 
+// 脚本版本来源：谁写入了这个版本（编辑器草稿提交 / AI 改码 / 版本回退）。
+enum ScriptOrigin {
+  SCRIPT_ORIGIN_UNSPECIFIED = 0; // 兼容缺省：按 ORIGIN_MANUAL 处理
+  ORIGIN_MANUAL = 1;             // 玩家编辑器手动提交
+  ORIGIN_AI = 2;                 // AI 改码热更
+  ORIGIN_ROLLBACK = 3;           // 玩家版本回退
+}
+
+// 脚本编辑语言（版本链/回退的编辑器恢复语义；服务器 runtime 恒为 JavaScript）。
+enum ScriptLanguage {
+  SCRIPT_LANGUAGE_UNSPECIFIED = 0; // 兼容缺省：按 SCRIPT_LANGUAGE_JS 处理
+  SCRIPT_LANGUAGE_JS = 1;         // JavaScript：editor_source 即运行源码
+  SCRIPT_LANGUAGE_TS = 2;         // TypeScript：editor_source 为 TS 原文，运行源码为浏览器编译后的 JS
+}
+
+// WS 传输心跳/时序参数唯一权威源（审计 X-5）：不在网上序列化，仅供两侧传输实现取值。
+// TS 消费：packages/protocol/src/ws.ts + messages.ts（frame）；Go 消费：server/internal/netws/handler.go。
+// 数值由两侧测试互钉（netws/timing_test.go ↔ packages/protocol/test/golden.test.ts），
+// 且测试会解析本文件与生成代码对拍，防止改这里忘跑 buf generate。改值须同步评估两侧语义。
+// allow_alias 仅为放行当前恰好相等的独立常量（8000 连接超时/存活阈值、2000 ping 间隔/写超时）；
+// 数值间无语义绑定，后续可各自独立修改（改后别名自然消失）。
+enum TransportTiming {
+  option allow_alias = true;
+  // ADR-0012 首字节帧类型（0x00-0x03 不可变更，旧客户端/服务器互操作依赖）。
+  FRAME_PING = 0;  // ping 帧首字节 0x00（任一方向；载荷 8B 时间戳）
+  FRAME_PONG = 1;  // pong 帧首字节 0x01（收到 ping 的一方回显载荷）
+  FRAME_UP = 2;    // 上行 ClientMsg 帧首字节 0x02
+  FRAME_DOWN = 3;  // 下行 ServerMsg 帧首字节 0x03
+  // 连接与心跳时序（毫秒）。
+  CONNECT_TIMEOUT_MS = 8000;      // 客户端 WS 连接建立超时
+  PING_INTERVAL_MS = 2000;        // 双侧心跳 ping 间隔
+  LIVENESS_TIMEOUT_MS = 8000;     // 客户端无任何有效入帧判定断线的阈值
+  LIVENESS_CHECK_MS = 1000;       // 客户端存活检查轮询周期
+  SERVER_READ_TIMEOUT_MS = 10000; // 服务器单次上行读超时（半开连接回收）
+  SERVER_WRITE_TIMEOUT_MS = 2000; // 服务器单帧下行写超时
+}
+
 // ============ 上行（0x02 帧） ============
 
 message ClientInput {
@@ -46,7 +83,21 @@ message RoomAction {
   enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; SOLO_BOTS = 5; }
   Kind kind = 1;
 }
-message ScriptSubmit { uint32 client_script_id = 1; string source = 2; }
+// source 恒为服务器可执行的 JavaScript 运行源码（旧字段，兼容旧服务器）。
+// TS 提交：source = 浏览器编译产物 JS，editor_source = TS 原文，language = TS。
+// JS 提交（缺省）：source = editor_source = 编辑器原文，language 缺省或 JS。
+message ScriptSubmit {
+  uint32 client_script_id = 1;
+  string source = 2;         // 运行源码（服务器执行的 JavaScript）
+  optional string editor_source = 3; // 编辑器原文（TS 提交时 = TS 源码；JS 缺省 = source）
+  optional ScriptLanguage language = 4; // 编辑语言（缺省 = JS）
+}
+
+// 房间作用域脚本版本回退：把某玩家自己的历史版本设为当前版本。
+// 只能回退自己的版本；观战/他人 → 拒绝（版本链 owner-only）。
+message ScriptRollback {
+  uint32 version_id = 1; // 目标历史版本 id（EvScriptVersion.id；0/未知 → 拒绝保旧）
+}
 
 // ============ Snippet 驾驶辅助（v0.3 §9-2：官方 Bot Script 模块，可查看源码） ============
 
@@ -94,6 +145,7 @@ message ClientMsg {
     Say say = 10;
     SpectateRoom spectate = 11;
     SnippetConfig snippet_config = 12; // 驾驶辅助配置（仅房间玩家、active match）
+    ScriptRollback script_rollback = 13; // 脚本版本回退（仅房间玩家；观战拒绝）
   }
 }
 
@@ -116,6 +168,7 @@ message RobotState {
   string nick = 8;         // 仅 full 快照携带
   string color = 9;        // 仅 full 快照携带
   bool is_partner = 10 [deprecated = true]; // 旧客户端兼容；新对局恒 false
+  optional uint32 invuln_s = 11; // 权威无敌剩余秒数；缺失表示旧服务器，0=无
 }
 
 message ProjectileState {
@@ -232,6 +285,37 @@ message EvScriptResult { // ScriptSubmit 的应答（nack 不落事件日志，�
   bool ok = 2;
   string error = 3; // 编译/加载错误摘要
   uint32 script_rev = 4; // 服务器侧版本号（单调递增）
+  optional ScriptOrigin origin = 5; // 本版本写入来源（AI 改码回执必带；手动提交缺省）
+  optional uint32 version_id = 6;    // 本版本在房间版本链中的 id（成功时携带）
+}
+
+// 单个脚本版本记录（房间作用域，玩家自己的版本链；bounded history）。
+message EvScriptVersion {
+  uint32 id = 1;          // 版本 id（房间内按玩家单调递增；0 保留）
+  uint32 script_rev = 2;  // 该版本装载后的 runtime rev（回显用）
+  ScriptOrigin origin = 3;// 写入来源（手动/AI/回退）
+  uint64 wall_ms = 4;     // 写入墙钟（Unix 毫秒；展示排序用，非权威时序）
+  string source = 5;      // 编辑器恢复源码（owner-only：JS 版 = 运行源码；TS 版 = TS 原文；缺省 = 运行源码）
+  optional ScriptLanguage language = 6; // 编辑语言（缺省 = JS；owner-only 恢复编辑器用）
+}
+
+// EvScriptVersions 玩家脚本版本链的 owner-only 定向快照：任一版本写入
+// （手动/AI/回退，成功才记录）后下发，重连/bootstrap 时补发当前链。
+// current_id 指向当前生效版本；历史有界（旧版本自动淘汰，淘汰后不再出现）。
+// 不落 Match Event Log：版本链属房间身份状态，非对局事件。
+message EvScriptVersions {
+  repeated EvScriptVersion versions = 1; // 按时间升序（旧 → 新）
+  uint32 current_id = 2;                 // 当前生效版本 id（0 = 无已记录版本）
+}
+
+// EvScriptRollbackResult ScriptRollback 的定向回执（owner-only，不落事件日志）。
+message EvScriptRollbackResult {
+  bool ok = 1;
+  string error = 2;      // 拒绝原因（版本不存在/不属于你/编译失败等）
+  uint32 version_id = 3; // ok 时 = 回退后的当前版本 id；失败时 = 当前版本 id
+  uint32 script_rev = 4; // ok 时 = 回退装载后的 runtime rev（失败保旧 = 旧 rev）
+  string source = 5;     // ok 时 = 回退后编辑器恢复源码（owner-only；失败为空）
+  optional ScriptLanguage language = 6; // ok 时 = 编辑语言（缺省 = JS；owner-only）
 }
 
 message SnippetSourceView { // 单条官方 Snippet 的可查看源码（当教材）
@@ -254,6 +338,44 @@ message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务�
   string map_json = 1;         // MapDef 序列化（与 mapgen.Generate 同源）
   string map_hash = 2;        // 一致性校验
   uint32 generator_version = 3;
+  SimTuning tuning = 4;        // 客户端可见对局数值（审计 X-3；缺失 = 旧服务器，客户端用本地兜底）
+}
+
+// SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
+// owner，经 EvMapBootstrap 一次性可靠下发。只放客户端实际消费的漂移高危集
+// （审计 D3/D5），不倾倒内部专用常量；不落 Match Event Log，回放不消费
+// （回放积分走事件流 EvMatchEnd.scores，旧录像用客户端兜底值）。
+// 定点约定与线上一致：hp/energy ×10；时长一律 tick（60Hz），客户端按 tick_rate 换算。
+message SimTuning {
+  uint32 tick_rate = 1;              // 服务器固定 tick 频率（HUD 冷却换算分母）
+  sint32 max_hp_x10 = 2;             // HP 条分母（×10）
+  sint32 max_energy_x10 = 3;         // 能量条分母（×10）
+  double fire_cost = 4;              // 开火能量门槛（技能卡「EN n」显示）
+  uint32 hack_duration_ticks = 5;    // Uplink 引导总时长；progress_x10 满值 = ticks×10/tick_rate
+  uint32 invuln_duration_ticks = 6;  // 重生无敌时长（客户端无敌闪烁窗口）
+  double vision_radius = 7;          // 视野/战争雾半径（米）
+}
+
+// EvControlNotice（审计 X-4）：结构化控制通知，取代 "join failed:" / "AI …"
+// 前缀字符串协议。过渡期服务器对每条 notice 同时下发 robot=0 的 EvSay 旧形态
+// （旧客户端按前缀解析；新客户端按 code 分流并对重复 say 去重）。
+// 不落 Match Event Log：join 拒绝发生在对局外，AI 回执是定向消息。
+message EvControlNotice {
+  enum Code {
+    CN_UNSPECIFIED = 0;
+    // ---- join/spectate 拒绝（终态：客户端停止重试并展示原因） ----
+    CN_JOIN_FAILED = 1;        // 进房/观战被拒（房间满/码无效/身份冲突等，text = 服务器原因）
+    CN_READONLY_SPECTATOR = 2; // 观战连接试图执行玩家操作（只读契约）
+    // ---- AI 改码状态（定向，仅 owner 可见；错误类终结面板 pending） ----
+    CN_AI_REQUEST_FAILED = 10;  // 请求失败/配额拒绝
+    CN_AI_DISABLED = 11;        // 服务器未启用 AI
+    CN_AI_COMPILE_FAILED = 12;  // 生成脚本编译失败（旧脚本继续运行）
+    CN_AI_STALE_SCRIPT = 13;    // 脚本已被手动更新，AI 结果丢弃
+    CN_AI_EXPLAIN = 14;         // 改动说明（info，非错误）
+    CN_SCRIPT_ROLLBACK_FAILED = 15; // 版本回退失败（版本不存在/编译失败；现役脚本保旧）
+  }
+  Code code = 1;
+  string text = 2; // 人类可读文案（过渡期与旧 say 同文）；UI 以 code 分流，text 仅展示
 }
 
 message EvAiUsage { // AI 配额事实（每次扣减/护栏触顶）
@@ -316,6 +438,9 @@ message ServerEvent {
     EvSnippetUsage snippet_usage = 31; // OLD_SCHOOL 埋点：某轴最终采用 CS_SNIPPET（0.5s 节流/robot）
     EvSnippetResult snippet_result = 32; // SnippetConfig 定向回执（不落事件日志，仅 owner 下发）
     EvAiStream ai_stream = 33; // AI 上游 SSE 文本增量（仅 owner，下发即展示，不落事件日志）
+    EvControlNotice control_notice = 34; // 结构化控制通知（审计 X-4；不落事件日志）
+    EvScriptVersions script_versions = 35; // 脚本版本链 owner-only 快照（不落事件日志）
+    EvScriptRollbackResult script_rollback_result = 36; // 版本回退定向回执（不落事件日志）
   }
 }
 
@@ -338,4 +463,70 @@ message ServerMsg {
     SnapshotDelta snapshot = 1;
     ServerEvent event = 2;
   }
+}
+
+// ============ 回放 JSONL 记录 schema（审计 X-6） ============
+// 本节是回放 Match Event Log（data/matches/*.jsonl）记录形态的唯一权威源。
+// 这些值不经 WS 传输；两侧（Go sim/log.go + 客户端 replay/model.ts）从生成
+// 代码取值，测试互钉，防止手抄常量漂移。
+// 磁盘形态仍是 NDJSON 信封：{"schema_version":1} 头行 + 每行
+// {"type":"<record_type>","tick":N,...}；本节只权威化版本号、记录类型名
+// 与 visual 采样行 —— checkpoint/event 载荷本身分别是 sim 状态与 ServerEvent
+// 的既有序列化，不在此重复声明。
+
+// 回放 JSONL 文件的 schema 版本（logHeader.schema_version）。历史文件 = 1；
+// 未知更高版本必须显式拒绝，不得静默错读。
+enum ReplaySchemaVersion {
+  REPLAY_SCHEMA_V_UNSPECIFIED = 0;
+  REPLAY_SCHEMA_V1 = 1; // 当前：NDJSON 信封 + type 字符串记录
+}
+
+// 回放记录的 "type" 盘上字符串（枚举值名去掉 REPLAY_ 前缀后小写下划线即盘上
+// 名，如 REPLAY_MATCH_START → "match_start"）。记录同一 tick 内的顺序有意义。
+enum ReplayRecordType {
+  REPLAY_UNSPECIFIED = 0;
+  REPLAY_EVENT = 1;        // {"type":"event","tick":N,"event":ServerEvent(protojson)}
+  REPLAY_MATCH_START = 2;  // {"type":"match_start","tick":0,"state":Checkpoint,...}
+  REPLAY_INPUT = 3;        // {"type":"input","tick":N,"robot_id":R,"input":ClientInput(protojson)}
+  REPLAY_CONTROL = 4;      // {"type":"control","tick":N,"robot_id":R,"control":ControlRecord}
+  REPLAY_CHECKPOINT = 5;   // {"type":"checkpoint","tick":N,"state":Checkpoint}
+  REPLAY_VISUAL = 6;       // 浏览器导出行（cmd/omb ?visual=1）；载荷见 ReplayVisualFrame
+}
+
+// visual 采样行的形态版本（ReplayVisualFrame.v）。
+// v1（历史）：无版本字段；robots/projectiles 为位置数组 [id,x,y,heading,hp,
+// energy,alive,invuln] / [id,owner,x,y,heading]，字段含义只由位置约定 ——
+// 这就是审计指出的「紧凑数组二义性」。v2 起显式带 v 命名字段，新导出恒 v2。
+enum ReplayVisualVersion {
+  REPLAY_VISUAL_V_UNSPECIFIED = 0; // 读侧视为 v1（历史行无 v 字段）
+  REPLAY_VISUAL_V1 = 1;           // 历史位置数组形态（只读兼容，不再写出）
+  REPLAY_VISUAL_V2 = 2;           // 命名字段形态（protojson），自本版起导出
+}
+
+// v2 visual 采样行载荷（{"type":"visual","v":2,"tick":N,...}）。
+// 来源于服务器确定性重放（sim.ReplayVisualFrames）；紧凑数组形态（v1）不再
+// 写出，v1 行由读侧适配器解出本消息的等价字段。
+message ReplayVisualFrame {
+  ReplayVisualVersion v = 1; // 形态版本；v2 导出恒为 REPLAY_VISUAL_V2
+  uint32 tick = 2;
+  Phase phase = 3;
+  repeated ReplayVisualRobot robots = 4;
+  repeated ReplayVisualProjectile projectiles = 5;
+}
+
+message ReplayVisualRobot {
+  uint32 id = 1;
+  Vec2 pos = 2;
+  double heading = 3; // 炮塔朝向（弧度）
+  double hp = 4;      // 游戏单位（非 x10），与 v1 历史行一致
+  double energy = 5;
+  bool alive = 6;
+  bool invulnerable = 7;
+}
+
+message ReplayVisualProjectile {
+  uint32 id = 1;
+  uint32 owner = 2;
+  Vec2 pos = 3;
+  double heading = 4;
 }

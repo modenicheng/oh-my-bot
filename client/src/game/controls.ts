@@ -3,14 +3,16 @@
 import { create } from '@bufbuild/protobuf'
 import {
   AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema,
-  type ServerMsg, type EvMatchEnd,
+  type ServerMsg, type EvMatchEnd, type SimTuning,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { parseMapDef, type MapDefParsed } from './mapdef'
+import { resolveTuning } from './tuning'
 import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldState } from './world'
 import { Camera } from './camera'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
 import { InputSampler, AXIS_AIM } from './input'
+import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback } from './feedback'
@@ -120,7 +122,7 @@ export class GameController {
   }
 
   /** 收到 mapBootstrap：解析地图，进入游戏态 */
-  onMapBootstrap(mapJson: string): boolean {
+  onMapBootstrap(mapJson: string, tuning?: SimTuning): boolean {
     try {
       this.map = parseMapDef(mapJson)
     } catch (err) {
@@ -141,6 +143,8 @@ export class GameController {
     this.feedback.reset()
     this.input.assistOn = this.assistPreference
     this.world = emptyWorld()
+    // X-3：服务器权威对局数值；缺失（旧服务器）resolveTuning 回退兜底
+    this.world.tuning = resolveTuning(tuning)
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
     this.hud.setAssist(false)
     this.setupCanvas()
@@ -312,12 +316,16 @@ export class GameController {
 
   /** 每帧按本地信号更新瞄准 guard：辅助开启 + 瞄准能力脚本在场 + 人未
    * 持有炮塔轴（本地粘滞位）时，鼠标移动不抢炮塔轴，R 显式夺取。
+   * 判定与 HUD 文案同源（axis-src.isAimUnderScript，C-28）：能力信号在服务器
+   * turret_src 回显之前就生效（本地先行时序不变）。
    * 字段缺失（旧服务器）不启用 guard，保持逐帧鼠标抢占。 */
   private syncAimGuard(): void {
-    const self = this.world.self
-    this.input.aimUnderScript = this.input.assistOn
-      && (this.assistAimCapable || self?.turretSrc === ControlSource.CS_SCRIPT || self?.turretSrc === ControlSource.CS_SNIPPET)
-      && !this.input.holdsAim()
+    this.input.aimUnderScript = isAimUnderScript(
+      this.input.assistOn,
+      this.assistAimCapable,
+      this.world.self?.turretSrc,
+      this.input.holdsAim(),
+    )
   }
 
   /** Space assist 开关：转发给服务器 */
@@ -397,6 +405,12 @@ export class GameController {
     this.resizeObserver = undefined
   }
 
+  private selfHacking(selfId: number): boolean {
+    if (selfId === 0) return false
+    for (const uplink of this.world.uplinks.values()) if (uplink.hackingId === selfId) return true
+    return false
+  }
+
   private drawFrame(): void {
     if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
@@ -408,7 +422,8 @@ export class GameController {
     // 防止重生后残余 held 键第一帧重新抢占。
     if (self?.dead) this.input.resetTakeover()
     const pos = self?.base?.pos
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
+    const hacking = this.selfHacking(selfId)
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
@@ -424,7 +439,8 @@ export class GameController {
     this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     this.extras.feedback = this.feedback
     this.renderer.render(this.world, this.map, this.cam, this.extras)
-    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
+    this.hud.update(this.world, this.map, this.scores, this.assistAimCapable,
+      self ? this.feedback.delayedHealth(selfId, self.hpX10) : undefined)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)
     if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }
@@ -437,7 +453,8 @@ export class GameController {
     const pos = self?.base?.pos
     const sx = pos?.x ?? 0
     const sy = pos?.y ?? 0
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead))
+    const hacking = this.selfHacking(selfId)
+    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
     if (pos) this.cam.follow(pos.x, pos.y)
     const { msg, active } = this.input.sample(sx, sy)
     this.feedback.input(msg, this.world, this.map)

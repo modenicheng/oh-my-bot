@@ -1,6 +1,7 @@
 package script
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -160,6 +161,35 @@ func (p *RunPool) RuntimeOf(id uint32) *GojaRuntime {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.runtimes[id]
+}
+
+// Ensure 取 id 的已注册运行时；不存在则创建并注册后返回（尚未装载任何
+// 模块）。首次装载失败的调用方应立即 Unregister(id)，避免空 VM 常驻
+// 池内逐帧产出 ErrNoModule。池已关闭时返回 nil。
+func (p *RunPool) Ensure(id uint32) *GojaRuntime {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil
+	}
+	if rt := p.runtimes[id]; rt != nil {
+		return rt
+	}
+	rt := NewGojaRuntime(Config{})
+	p.runtimes[id] = rt
+	return rt
+}
+
+// IDs 返回全部已注册运行时 id 的升序快照（帧内 Submit 顺序确定化）。
+func (p *RunPool) IDs() []uint32 {
+	p.mu.Lock()
+	ids := make([]uint32, 0, len(p.runtimes))
+	for id := range p.runtimes {
+		ids = append(ids, id)
+	}
+	p.mu.Unlock()
+	slices.Sort(ids)
+	return ids
 }
 
 // Submit 异步提交一个脚本 tick（当前帧）。不阻塞；返回 nil 表示已入队。

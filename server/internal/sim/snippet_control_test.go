@@ -232,7 +232,7 @@ func TestSnippetAttributionReplayedFromControlRecords(t *testing.T) {
 	// control 记录 JSON 往返后 SnippetAxes 保留（回放确定性）。
 	found := false
 	for _, rec := range recs {
-		if rec.Type != "control" || rec.Control == nil || rec.Control.Script == nil {
+		if rec.Type != RecordControl || rec.Control == nil || rec.Control.Script == nil {
 			continue
 		}
 		if rec.Control.Script.SnippetAxes&AxisMove != 0 {

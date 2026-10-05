@@ -1,11 +1,20 @@
 package sim
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+)
+
+// ErrMapRequired 与 ErrIdentityFrozen 供上层以 errors.Is 判别
+// 「地图缺失/对局已并进」这类无法恢复的装配期错误（S-18）；
+// 文案保持不变以免破坏依赖错误字符串的现有调用方。
+var (
+	ErrMapRequired    = errors.New("sim: map required before match start")
+	ErrIdentityFrozen = errors.New("sim: identity already set or match started")
 )
 
 func cloneMap(m *MapDef) *MapDef {
@@ -28,7 +37,7 @@ func cloneMap(m *MapDef) *MapDef {
 // spawn selection are transactional; caller mutation cannot affect the match.
 func (s *Sim) SetMap(def *MapDef) error {
 	if s.tick != 0 || def == nil {
-		return fmt.Errorf("sim: map required before match start")
+		return ErrMapRequired
 	}
 	m := cloneMap(def)
 	sort.Slice(m.Walls, func(i, j int) bool { return m.Walls[i].ID < m.Walls[j].ID })
@@ -68,6 +77,9 @@ func (s *Sim) SetMap(def *MapDef) error {
 	}
 	if len(m.CorePads) > 0 && (m.CoreRules.PeriodTicks <= 0 || uint64(m.CoreRules.PeriodTicks) > math.MaxUint32) {
 		return fmt.Errorf("sim: invalid core period")
+	}
+	if m.CoreRules.TargetAlive < 0 || m.CoreRules.TargetAlive > len(m.CorePads) {
+		return fmt.Errorf("sim: invalid core target")
 	}
 	for phase, weights := range m.CoreRules.GroupWeights {
 		if !validPhase(phase) {
@@ -295,7 +307,7 @@ func (s *Sim) stepHealthPacks() {
 			r.HP += heal
 			pack.ReadyAt = s.tick + HealthPackCooldown
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Heal{Heal: &ombv1.EvHeal{
-				By: r.ID, Id: pack.ID, HealX10: int32(math.Round(heal * 10)), At: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y},
+				By: r.ID, Id: pack.ID, HealX10: ToX10(heal), At: &ombv1.Vec2{X: pack.Pos.X, Y: pack.Pos.Y},
 			}}})
 			break
 		}
@@ -307,7 +319,7 @@ func (s *Sim) stepCores() {
 		return
 	}
 	if s.tick == 1 || s.tick%uint32(s.mapDef.CoreRules.PeriodTicks) == 0 {
-		s.spawnCore()
+		s.replenishCores()
 	}
 	for i := range s.cores {
 		core := &s.cores[i]
@@ -329,9 +341,32 @@ func (s *Sim) stepCores() {
 	}
 }
 
-// Each period chooses one non-full group by its current phase weight, then one
-// empty pad uniformly. Existing live cores are never duplicated or removed.
-func (s *Sim) spawnCore() {
+// Each period refills to the map-authored live target. Historical maps omit
+// TargetAlive and retain their exact one-core-per-period semantics. Existing
+// live cores are never duplicated or removed.
+func (s *Sim) replenishCores() {
+	target := s.mapDef.CoreRules.TargetAlive
+	if target <= 0 {
+		s.spawnCore()
+		return
+	}
+	alive := 0
+	for _, core := range s.cores {
+		if core.Alive && (!s.zoneLocked() || core.Pos.Len() >= s.mapDef.CoreZone.Radius) {
+			alive++
+		}
+	}
+	for alive < target {
+		if !s.spawnCore() {
+			return
+		}
+		alive++
+	}
+}
+
+// spawnCore chooses one non-full group by phase weight, then one empty pad.
+// It returns false when no weighted legal pad remains.
+func (s *Sim) spawnCore() bool {
 	weights := s.mapDef.CoreRules.GroupWeights[Phase(s.phase)]
 	available := make([][]int, len(weights))
 	total := 0.0
@@ -346,7 +381,7 @@ func (s *Sim) spawnCore() {
 		}
 	}
 	if total <= 0 {
-		return
+		return false
 	}
 	pick := s.randomUnit() * total
 	for g, ids := range available {
@@ -356,7 +391,8 @@ func (s *Sim) spawnCore() {
 		pick -= weights[g]
 		if pick < 0 {
 			s.cores[ids[int(s.random()%uint64(len(ids)))]].Alive = true
-			return
+			return true
 		}
 	}
+	return false
 }

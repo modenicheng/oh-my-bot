@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { sleep, pageErrors } from './harness.mjs'
 // Real-server acceptance for recorded, read-only spectator navigation.
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
@@ -19,7 +20,6 @@ const base = `http://${addr}`
 const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', addr], { cwd: work, stdio: 'ignore' })
 let spawnError
 server.on('error', error => { spawnError = error })
-const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function until(fn, label, timeout = 15000) {
   const end = Date.now() + timeout
   while (Date.now() < end) {
@@ -50,13 +50,12 @@ async function seek(page, tick) {
   }, tick)
 }
 let browser, page
-const errors = []
 let sockets = 0
 try {
   await until(() => fetch(`${base}/healthz`).then(r => r.ok).catch(() => false), 'server')
   browser = await chromium.launch()
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  page.on('pageerror', e => errors.push(String(e)))
+  const errors = pageErrors(page)
   page.on('websocket', () => sockets++)
   await page.goto(`${base}/?view=spectator&replay=${matchId}`)
   await startClient(page)

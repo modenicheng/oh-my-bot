@@ -2,8 +2,9 @@
 // 连接层见 net.ts，游戏视图见 game/，页面样式与职责约定见 client/STYLE.md。
 import { create } from '@bufbuild/protobuf'
 import { ClientMsgSchema, RoomActionSchema, LeaveRoomSchema,
-         RoomAction_Kind, EvRoomState_State,
-         type ServerMsg } from '@omb/protocol'
+         RoomAction_Kind, EvRoomState_State, EvControlNotice_Code,
+         joinRejection, controlNotice, dedupeControlNoticeSay,
+         type ServerMsg, type EvControlNotice } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
@@ -15,18 +16,17 @@ import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
 import { mountIcons } from './icons'
 import { audio } from './audio'
-import { artReady } from './game/art'
 import { bgm } from './music/bgm'
 import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
+import { $ } from './ui/dom'
+import { startupReady } from './startup-resources'
 
-export const ready = Promise.all([artReady, bgm.preload()])
+export const ready = startupReady
 
 mountIcons(document)
 
 // ---- DOM ---------------------------------------------------------------
-
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
 const app = $('app') as HTMLDivElement & { classList: DOMTokenList }
 const viewJoin = $<HTMLElement>('view-join')
@@ -117,6 +117,25 @@ function sendRoomAction(kind: RoomAction_Kind): void {
 let session: RoomSession | null = null
 let lastJoin: { roomCode: string; nick: string; color: string } | null = null
 let awaitingFull = false
+/** 最近一条结构化控制通知（X-4）：用于成对下发旧 say 的去重。 */
+let lastControlNotice: EvControlNotice | undefined
+
+/** join/spectate 被拒（终态）：终结会话与游戏视图，回大厅展示原因。 */
+function handleJoinRejected(reason: string): void {
+  connectionNotice.hidden = true
+  awaitingFull = false
+  stopRttLoop()
+  session?.close()
+  session = null
+  game?.exit()
+  game = null
+  workbench.resetMatch()
+  syncWorkbench()
+  setStatus('down', '进房失败')
+  showView('join')
+  lobby.showError(`无法加入房间：${reason}`)
+  lobby.setJoining(false)
+}
 
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   if (session?.state === 'connecting') return
@@ -271,26 +290,30 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     const ev = msg.payload.value
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
     if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
+    if (ev.kind.case === 'scriptVersions') { workbench.acceptScriptVersions(ev.kind.value); return }
+    if (ev.kind.case === 'scriptRollbackResult') { workbench.acceptScriptRollbackResult(ev.kind.value); return }
     if (ev.kind.case === 'aiQuota') { workbench.acceptAiQuota(ev.kind.value); return }
     if (ev.kind.case === 'aiStream') { workbench.acceptAiStream(ev.kind.value); return }
     if (ev.kind.case === 'aiUsage') workbench.acceptAiUsage(ev.kind.value)
     if (ev.kind.case === 'scriptLog') { workbench.acceptScriptLog(ev.kind.value); return }
     if (ev.kind.case === 'matchEnd') workbench.resetMatch()
-    if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && workbench.consumeAiDirectedSay(ev.kind.value.text)) return
-    if (ev.kind.case === 'say' && ev.kind.value.robot === 0 && ev.kind.value.text.startsWith('join failed:')) {
-      connectionNotice.hidden = true
-      awaitingFull = false
-      stopRttLoop()
-      session?.close()
-      session = null
-      game?.exit()
-      game = null
-      workbench.resetMatch()
-      syncWorkbench()
-      setStatus('down', '进房失败')
-      showView('join')
-      lobby.showError(`无法加入房间：${ev.kind.value.text.slice('join failed:'.length).trim()}`)
-      lobby.setJoining(false)
+    // X-4：结构化控制通知优先；过渡期服务器成对下发同文 say，去重后旧前缀路径只作旧服务器回退
+    const notice = controlNotice(msg)
+    if (notice) {
+      if (notice.code === EvControlNotice_Code.CN_JOIN_FAILED) {
+        handleJoinRejected(notice.text)
+        return
+      }
+      // 仅记住已消费的 notice：未知 code 不吞兼容 say（文案仍对用户可见）
+      if (workbench.consumeControlNotice(notice)) { lastControlNotice = notice; return }
+    }
+    if (ev.kind.case === 'say' && ev.kind.value.robot === 0) {
+      if (dedupeControlNoticeSay(msg, lastControlNotice)) { lastControlNotice = undefined; return }
+      if (workbench.consumeAiDirectedSay(ev.kind.value.text)) return
+    }
+    const joinFailed = joinRejection(msg)
+    if (joinFailed !== undefined) {
+      handleJoinRejected(joinFailed.reason)
       return
     }
     if (ev.kind.case === 'mapBootstrap') {
@@ -301,7 +324,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       if (!game) enterGame()
       awaitingFull = true
       game?.setActive(false)
-      const ok = game?.onMapBootstrap(ev.kind.value.mapJson) ?? false
+      const ok = game?.onMapBootstrap(ev.kind.value.mapJson, ev.kind.value.tuning) ?? false
       syncWorkbench()
       if (ok && !utilityView) showView('game')
       if (ok && utilityView) showView(utilityView, utilityRoute)

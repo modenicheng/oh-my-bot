@@ -17,10 +17,56 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+// 回放 JSONL 记录 schema 的唯一权威源是 protocol/proto/omb.proto（审计 X-6）：
+// 版本号（ReplaySchemaVersion）、记录类型（ReplayRecordType）与 visual 采样行
+// 形态（ReplayVisualVersion/ReplayVisualFrame）均从生成枚举/消息取值，两侧
+// 测试互钉（sim/log_schema_test.go ↔ packages/protocol/test/golden.test.ts）。
+// 磁盘形态保持 NDJSON 信封不变：头行 {"schema_version":1} + 每行
+// {"type":"<record_type>","tick":N,...}，旧录像文件继续可读。
+
+// SchemaVersion is the replay JSONL schema version this build writes and the
+// maximum it can read. Higher versions are rejected explicitly.
+const SchemaVersion = int(ombv1.ReplaySchemaVersion_REPLAY_SCHEMA_V1)
+
+// MaxLogLine 是单条 JSONL 记录的字节上限（写入前校验与读取侧 scanner
+// 缓冲共用；cmd/omb/replay_visual.go 等消费者必须引用本常量而非复制字面量）。
+const MaxLogLine = 16 * 1024 * 1024
+
+// RecordType 是 LogRecord.Type 的枚举形态；盘上 "type" 字符串由
+// RecordTypeDiskName 从权威枚举名推导（REPLAY_MATCH_START → "match_start"）。
+type RecordType = ombv1.ReplayRecordType
+
+// 记录类型常量：名字来自生成枚举，避免多处手抄字符串。
 const (
-	SchemaVersion = 1
-	maxLogLine    = 16 * 1024 * 1024
+	RecordEvent      = ombv1.ReplayRecordType_REPLAY_EVENT
+	RecordMatchStart = ombv1.ReplayRecordType_REPLAY_MATCH_START
+	RecordInput      = ombv1.ReplayRecordType_REPLAY_INPUT
+	RecordControl    = ombv1.ReplayRecordType_REPLAY_CONTROL
+	RecordCheckpoint = ombv1.ReplayRecordType_REPLAY_CHECKPOINT
+	RecordVisual     = ombv1.ReplayRecordType_REPLAY_VISUAL
 )
+
+// replayTypePrefix 是权威枚举值名的公共前缀；盘上名 = 去前缀后小写。
+const replayTypePrefix = "REPLAY_"
+
+// RecordTypeDiskName 返回记录类型的盘上 "type" 字符串。与客户端
+// replayRecordDiskName 同一规则，golden 测试互钉。
+func RecordTypeDiskName(t RecordType) string {
+	name := t.String()
+	if rest, ok := strings.CutPrefix(name, replayTypePrefix); ok {
+		return strings.ToLower(rest)
+	}
+	return strings.ToLower(name)
+}
+
+// RecordTypeFromDisk 解析盘上 "type" 字符串；未知字符串返回 false。
+func RecordTypeFromDisk(name string) (RecordType, bool) {
+	t, ok := ombv1.ReplayRecordType_value[replayTypePrefix+strings.ToUpper(name)]
+	if !ok || t == int32(ombv1.ReplayRecordType_REPLAY_UNSPECIFIED) {
+		return 0, false
+	}
+	return ombv1.ReplayRecordType(t), true
+}
 
 // MatchPlayer records the stable identity and pairing used by the live projector.
 // Older logs may omit Players and still be read with externally supplied tables.
@@ -36,7 +82,7 @@ type MatchPlayer struct {
 // Type is event, match_start (initial state), input, control, or checkpoint.
 // Record order within a tick is significant.
 type LogRecord struct {
-	Type    string
+	Type    RecordType
 	Tick    uint32
 	Event   *ombv1.ServerEvent
 	State   *Checkpoint
@@ -50,6 +96,9 @@ type logHeader struct {
 	SchemaVersion int `json:"schema_version"`
 }
 
+// diskRecord 的 input 载荷是 ombv1.ClientInput 的 protojson（字段名与旧
+// sim.Input JSON tag 逐字相同：seq/axis_mask/move_x/move_y/fire/aim/dash/
+// shield/interact），历史文件与旧读取器继续互通。
 type diskRecord struct {
 	Type    string          `json:"type"`
 	Tick    uint32          `json:"tick"`
@@ -57,7 +106,7 @@ type diskRecord struct {
 	State   *Checkpoint     `json:"state,omitempty"`
 	Players []MatchPlayer   `json:"players,omitempty"`
 	RobotID uint32          `json:"robot_id,omitempty"`
-	Input   *Input          `json:"input,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
 	Control *ControlRecord  `json:"control,omitempty"`
 }
 
@@ -137,7 +186,7 @@ func (l *MatchEventLog) SetPlayers(players []MatchPlayer) error {
 		return l.err
 	}
 	if l.players != nil || l.started {
-		return errors.New("sim: identity already set or match started")
+		return ErrIdentityFrozen
 	}
 	seen := make(map[uint32]bool, len(players))
 	for _, player := range players {
@@ -176,29 +225,59 @@ func (l *MatchEventLog) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 		l.err = err
 		return
 	}
-	l.append(diskRecord{Type: "event", Tick: tick, Event: data})
+	l.append(diskRecord{Type: RecordTypeDiskName(RecordEvent), Tick: tick, Event: data})
 	if ev.GetMatchEnd() != nil {
 		_ = l.Flush()
 	}
 }
 
 func (l *MatchEventLog) OnMatchInit(state Checkpoint) {
-	l.append(diskRecord{Type: "match_start", Tick: state.Tick, State: &state, Players: l.players})
+	l.append(diskRecord{Type: RecordTypeDiskName(RecordMatchStart), Tick: state.Tick, State: &state, Players: l.players})
 	l.started = true
 	_ = l.Flush()
 }
 
 func (l *MatchEventLog) OnInput(tick uint32, robotID uint32, input Input) {
-	l.append(diskRecord{Type: "input", Tick: tick, RobotID: robotID, Input: &input})
+	data, err := encodeInputJSON(input)
+	if err != nil {
+		if l.writable() {
+			l.err = err
+		}
+		return
+	}
+	l.append(diskRecord{Type: RecordTypeDiskName(RecordInput), Tick: tick, RobotID: robotID, Input: data})
 }
 
 func (l *MatchEventLog) OnControl(tick, robotID uint32, control ControlRecord) {
-	l.append(diskRecord{Type: "control", Tick: tick, RobotID: robotID, Control: &control})
+	l.append(diskRecord{Type: RecordTypeDiskName(RecordControl), Tick: tick, RobotID: robotID, Control: &control})
 }
 
 func (l *MatchEventLog) OnCheckpoint(state Checkpoint) {
-	l.append(diskRecord{Type: "checkpoint", Tick: state.Tick, State: &state})
+	l.append(diskRecord{Type: RecordTypeDiskName(RecordCheckpoint), Tick: state.Tick, State: &state})
 	_ = l.Flush()
+}
+
+// encodeInputJSON 序列化 input 记录载荷：ombv1.ClientInput 的 protojson
+// （UseProtoNames，与 event 载荷同一编码器）。字段名与旧 sim.Input 的 JSON
+// tag 完全一致，旧文件/旧读取器无感互通。
+func encodeInputJSON(input Input) ([]byte, error) {
+	return (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&ombv1.ClientInput{
+		Seq: input.Seq, AxisMask: uint32(input.AxisMask), MoveX: input.MoveX, MoveY: input.MoveY,
+		Fire: input.Fire, Aim: input.Aim, Dash: input.Dash, Shield: input.Shield, Interact: input.Interact,
+	})
+}
+
+// decodeInputJSON 解码 input 载荷。容错历史文件的宽松数值形态：JSON 数字
+// 一律经 float64 中转（encoding/json 对 interface{} 的默认形态），再按目标
+// 位宽收窄；NaN/Inf 不是合法 JSON，protojson 也不会产出。
+func decodeInputJSON(data []byte) (*Input, error) {
+	var wire ombv1.ClientInput
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(data, &wire); err != nil {
+		return nil, err
+	}
+	input := Input{Seq: wire.Seq, AxisMask: AxisMask(wire.AxisMask), MoveX: wire.MoveX, MoveY: wire.MoveY,
+		Fire: wire.Fire, Aim: wire.Aim, Dash: wire.Dash, Shield: wire.Shield, Interact: wire.Interact}
+	return &input, nil
 }
 
 func (l *MatchEventLog) append(record diskRecord) {
@@ -219,7 +298,7 @@ func (l *MatchEventLog) append(record diskRecord) {
 		l.err = err
 		return
 	}
-	if len(data)+1 > maxLogLine {
+	if len(data)+1 > MaxLogLine {
 		l.err = errors.New("sim: log record exceeds size limit")
 		return
 	}
@@ -265,7 +344,7 @@ func NewMatchEventLogReader(r io.Reader) (*MatchEventLogReader, error) {
 		return nil, errors.New("sim: nil log reader")
 	}
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 4096), maxLogLine)
+	scanner.Buffer(make([]byte, 4096), MaxLogLine)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, err
@@ -276,7 +355,7 @@ func NewMatchEventLogReader(r io.Reader) (*MatchEventLogReader, error) {
 	if err := decodeJSON(scanner.Bytes(), &header); err != nil {
 		return nil, fmt.Errorf("sim: header: %w", err)
 	}
-	if header.SchemaVersion != SchemaVersion {
+	if header.SchemaVersion <= 0 || header.SchemaVersion > SchemaVersion {
 		return nil, fmt.Errorf("sim: unsupported schema_version %d", header.SchemaVersion)
 	}
 	return &MatchEventLogReader{scanner: scanner, line: 1}, nil
@@ -302,14 +381,21 @@ func (r *MatchEventLogReader) Read() (*LogRecord, error) {
 	if err := decodeJSON(r.scanner.Bytes(), &disk); err != nil {
 		return fail(err)
 	}
+	recordType, ok := RecordTypeFromDisk(disk.Type)
+	if !ok {
+		return fail(fmt.Errorf("unknown log record type %q", disk.Type))
+	}
+	// 写读两侧共用同一路径校验：先把盘上名规范成权威枚举的推导名。
+	disk.Type = RecordTypeDiskName(recordType)
 	if err := validateRecord(disk); err != nil {
 		return fail(err)
 	}
 	if disk.Tick < r.lastTick {
 		return fail(errors.New("ticks moved backwards"))
 	}
-	record := &LogRecord{Type: disk.Type, Tick: disk.Tick, State: disk.State, Players: disk.Players, RobotID: disk.RobotID, Input: disk.Input, Control: disk.Control}
-	if disk.Type == "event" {
+	record := &LogRecord{Type: recordType, Tick: disk.Tick, State: disk.State, Players: disk.Players, RobotID: disk.RobotID, Control: disk.Control}
+	switch recordType {
+	case ombv1.ReplayRecordType_REPLAY_EVENT:
 		record.Event = &ombv1.ServerEvent{}
 		if err := protojson.Unmarshal(disk.Event, record.Event); err != nil {
 			return fail(err)
@@ -317,6 +403,12 @@ func (r *MatchEventLogReader) Read() (*LogRecord, error) {
 		if record.Event.Kind == nil || record.Event.Tick != disk.Tick {
 			return fail(errors.New("missing event kind or inconsistent tick"))
 		}
+	case ombv1.ReplayRecordType_REPLAY_INPUT:
+		input, err := decodeInputJSON(disk.Input)
+		if err != nil {
+			return fail(fmt.Errorf("input payload: %w", err))
+		}
+		record.Input = input
 	}
 	r.lastTick = disk.Tick
 	return record, nil
@@ -362,26 +454,26 @@ func validateRecord(r diskRecord) error {
 	if r.Tick > MatchTicks {
 		return errors.New("sim: log tick beyond match end")
 	}
-	if r.Type != "control" && r.Control != nil {
+	if r.Type != RecordTypeDiskName(RecordControl) && r.Control != nil {
 		return errors.New("sim: unexpected control payload")
 	}
-	if r.Type != "match_start" && len(r.Players) != 0 {
+	if r.Type != RecordTypeDiskName(RecordMatchStart) && len(r.Players) != 0 {
 		return errors.New("sim: unexpected match identity")
 	}
 	switch r.Type {
-	case "control":
-		if r.Control == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 || r.Input != nil {
+	case RecordTypeDiskName(RecordControl):
+		if r.Control == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 || len(r.Input) != 0 {
 			return errors.New("sim: invalid control record")
 		}
-	case "event":
-		if len(r.Event) == 0 || r.State != nil || r.Input != nil || r.RobotID != 0 || r.Tick == 0 {
+	case RecordTypeDiskName(RecordEvent):
+		if len(r.Event) == 0 || r.State != nil || len(r.Input) != 0 || r.RobotID != 0 || r.Tick == 0 {
 			return errors.New("sim: invalid event record")
 		}
-	case "match_start", "checkpoint":
-		if r.State == nil || r.State.Tick != r.Tick || len(r.Event) != 0 || r.Input != nil || r.RobotID != 0 {
+	case RecordTypeDiskName(RecordMatchStart), RecordTypeDiskName(RecordCheckpoint):
+		if r.State == nil || r.State.Tick != r.Tick || len(r.Event) != 0 || len(r.Input) != 0 || r.RobotID != 0 {
 			return errors.New("sim: invalid state record")
 		}
-		if (r.Type == "match_start" && r.Tick != 0) || (r.Type == "checkpoint" && (r.Tick == 0 || r.Tick%CheckpointInterval != 0)) {
+		if (r.Type == RecordTypeDiskName(RecordMatchStart) && r.Tick != 0) || (r.Type == RecordTypeDiskName(RecordCheckpoint) && (r.Tick == 0 || r.Tick%CheckpointInterval != 0)) {
 			return errors.New("sim: invalid state record tick")
 		}
 		if r.State.Robots == nil || r.State.Walls == nil {
@@ -390,7 +482,7 @@ func validateRecord(r diskRecord) error {
 		if r.State.SimulationVersion < 0 || r.State.SimulationVersion > SimulationVersion {
 			return fmt.Errorf("sim: unsupported simulation_version %d", r.State.SimulationVersion)
 		}
-		if r.Type == "match_start" && len(r.Players) != 0 {
+		if r.Type == RecordTypeDiskName(RecordMatchStart) && len(r.Players) != 0 {
 			known := make(map[uint32]bool, len(r.State.Robots))
 			for _, robot := range r.State.Robots {
 				known[robot.ID] = true
@@ -411,9 +503,16 @@ func validateRecord(r diskRecord) error {
 				}
 			}
 		}
-	case "input":
-		if r.Input == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 ||
-			r.Input.MoveX < -1000 || r.Input.MoveX > 1000 || r.Input.MoveY < -1000 || r.Input.MoveY > 1000 || r.Input.AxisMask & ^allAxes != 0 || !finite(r.Input.Aim) {
+	case RecordTypeDiskName(RecordInput):
+		if len(r.Input) == 0 || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 {
+			return errors.New("sim: invalid input record")
+		}
+		var wire ombv1.ClientInput
+		if err := (protojson.UnmarshalOptions{}).Unmarshal(r.Input, &wire); err != nil {
+			return fmt.Errorf("sim: invalid input payload: %w", err)
+		}
+		if wire.MoveX < -1000 || wire.MoveX > 1000 || wire.MoveY < -1000 || wire.MoveY > 1000 ||
+			wire.AxisMask&^uint32(allAxes) != 0 || !finite(wire.Aim) {
 			return errors.New("sim: invalid input record")
 		}
 	default:

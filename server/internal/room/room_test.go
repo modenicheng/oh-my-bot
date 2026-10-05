@@ -1,6 +1,7 @@
 package room
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -292,6 +293,67 @@ func TestStartWithoutLauncherRejected(t *testing.T) {
 	if r.State() != Idle {
 		t.Fatalf("state = %v, want Idle", r.State())
 	}
+}
+
+// All three launch actions share prepareLaunchLocked; the error precedence
+// (players → launcher → solo-bots capability) and the no-mutation guarantee
+// must hold for every one of them.
+func TestLaunchPreparationErrorPrecedence(t *testing.T) {
+	t.Run("no_players_before_no_launcher", func(t *testing.T) {
+		// Members absent but launcher configured: the players check wins over
+		// a nil launcher for the actions reachable without members. (RESTART
+		// cannot reach this branch in practice: when the last member leaves,
+		// hostship resets to 0 and ErrNotHost fires first — preserved behavior.)
+		r := NewRoom("ABC234", 1)
+		r.SetSimLauncher(nil) // both failures reachable; players must win
+		for _, a := range []Action{ActionWarmup, ActionStart} {
+			err := r.HostCommand(1, a)
+			if !errors.Is(err, ErrNoPlayers) {
+				t.Fatalf("%s err = %v, want ErrNoPlayers", a, err)
+			}
+		}
+	})
+
+	t.Run("launcher_check_before_solo_bots_capability", func(t *testing.T) {
+		r, _ := newTestRoom(t) // launcher set, 1 member
+		r.SetSimLauncher(nil)
+		// Enable solo bots so both failure modes are reachable.
+		if err := r.HostCommand(1, ActionSoloBots); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range []Action{ActionWarmup, ActionStart} {
+			if err := r.HostCommand(1, a); err != ErrNoLauncher {
+				t.Fatalf("%s err = %v, want ErrNoLauncher", a, err)
+			}
+		}
+		if r.State() != Idle {
+			t.Fatalf("state = %v, want Idle", r.State())
+		}
+	})
+
+	t.Run("solo_bots_capability_across_all_launch_actions", func(t *testing.T) {
+		for _, a := range []Action{ActionWarmup, ActionStart, ActionRestart} {
+			t.Run(a.String(), func(t *testing.T) {
+				r, launcher := newTestRoom(t)
+				if a == ActionRestart {
+					// Reach Ended with solo bots off (a plain launcher cannot
+					// launch with bots on), then re-enable them for RESTART.
+					mustAction(t, r, 1, ActionStart)
+					r.EndMatch()
+				}
+				if err := r.HostCommand(1, ActionSoloBots); err != nil {
+					t.Fatal(err)
+				}
+				before, launches := r.State(), launcher.launchCount()
+				if err := r.HostCommand(1, a); err != ErrNoSoloBots {
+					t.Fatalf("err = %v, want ErrNoSoloBots", err)
+				}
+				if r.State() != before || launcher.launchCount() != launches {
+					t.Fatal("failed launch mutated room state")
+				}
+			})
+		}
+	})
 }
 
 // --- host permission ----------------------------------------------------

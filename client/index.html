@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="/src/app.css">
 </head>
 <body data-startup>
-  <section id="startup" role="dialog" tabindex="0" aria-modal="true" aria-labelledby="startup-title" aria-describedby="startup-help startup-status" aria-busy="true" data-state="loading">
+  <section id="startup" role="dialog" tabindex="0" aria-modal="true" aria-labelledby="startup-title" aria-describedby="startup-help startup-status startup-load-note" aria-busy="true" data-state="loading" data-assets="pending">
     <pre id="startup-field" class="startup-field" aria-hidden="true"></pre>
     <div class="startup-brand">
       <h1 id="startup-title" class="startup-sr">OH MY BOT</h1>
@@ -22,10 +22,19 @@
   ####  ##  ##    ##   ##   ##      #####   ####    ##</pre>
       <p class="startup-tagline">代码上场，机甲开战。</p>
     </div>
-    <div class="startup-center"><div class="startup-float"><p id="startup-start">PRESS TO START</p></div></div>
+    <div class="startup-center">
+      <div class="startup-float"><p id="startup-start">PRESS TO START</p></div>
+      <div class="startup-loader">
+        <div id="startup-progress" class="startup-progress" role="progressbar" aria-label="Startup preparation (estimated between resource milestones)" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="startup-track" aria-hidden="true">[&gt;...........................]</span>
+          <span id="startup-percent" aria-hidden="true">0%</span>
+        </div>
+        <div id="startup-resources" class="startup-load-list" aria-label="Startup resources"></div>
+        <p id="startup-load-note" class="startup-load-note">PREPARING SYSTEMS</p>
+      </div>
+    </div>
+    <p id="startup-status" class="startup-sr" role="status" aria-live="polite" aria-atomic="true">Loading client, fonts, audio, sprites and editor.</p>
     <div class="startup-footer">
-      <p id="startup-status" role="status" aria-live="polite">正在加载客户端…</p>
-      <progress id="startup-progress" aria-label="首屏资源加载"></progress>
       <p id="startup-help">点击任意位置或按键开始 · 启用背景音乐与音效</p>
       <a id="startup-retry" href="">加载遇到问题？重新加载</a>
       <noscript>请启用 JavaScript 后重新加载，以启动游戏。</noscript>
@@ -105,7 +114,7 @@
         </form>
         <div class="hud-left" id="hud-left">
           <div class="hud-bar-label"><span><span data-icon="heart"></span>HP · 机体</span><span class="hud-bar-num" id="hud-hp-text">100</span></div>
-          <div class="hud-bar"><div class="hud-bar-fill" id="hud-hp-fill"></div></div>
+          <div class="hud-bar"><div class="hud-bar-fill hud-hp-delay" id="hud-hp-delay"></div><div class="hud-bar-fill" id="hud-hp-fill"></div></div>
           <div class="hud-bar-label"><span><span data-icon="energy"></span>EN · 能量</span><span class="hud-bar-num" id="hud-en-text">100</span></div>
           <div class="hud-bar"><div class="hud-bar-fill" id="hud-en-fill"></div></div>
         </div>

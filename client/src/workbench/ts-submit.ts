@@ -1,5 +1,8 @@
 // TypeScript 提交的纯工具：诊断按 TS 原始行列格式化、发射产物清理、
-// 草稿键按语言分离。不依赖 Monaco 与 DOM，便于单元测试。
+// 草稿键按语言分离、ScriptSubmit payload 组装。不依赖 Monaco 与 DOM，
+// 便于单元测试。
+
+import { ScriptLanguage } from '@omb/protocol'
 
 export type BotLanguage = 'js' | 'ts'
 
@@ -105,4 +108,29 @@ export function languagePrefKey(roomCode: string, nick: string): string {
 /** 取发射产物中的 JavaScript（跳过 .d.ts / map）。 */
 export function pickEmitJs(files: TsEmitFile[]): string | undefined {
   return files.find(file => /\.js$/i.test(file.name))?.text
+}
+
+/** 语言 → 协议枚举（ScriptSubmit.language）。 */
+export function languageToProto(language: BotLanguage): ScriptLanguage {
+  return language === 'ts' ? ScriptLanguage.TS : ScriptLanguage.JS
+}
+
+/**
+ * 组装 ScriptSubmit payload（纯函数，workbench 与 Vitest 共用）：
+ * - JS：source = editorSource = 编辑器原文，language = JS；
+ * - TS：source = 编译产物 JS（服务器执行），editorSource = TS 原文，
+ *   language = TS。
+ * 发送侧不得直接内联此逻辑：编译产物与编辑原文必须成对出现。
+ */
+export function scriptSubmitPayload(
+  language: BotLanguage,
+  editorSource: string,
+  compiledJs?: string,
+): { clientScriptId: number; source: string; editorSource: string; language: ScriptLanguage } | { error: string } {
+  if (language === 'ts') {
+    if (compiledJs === undefined) return { error: 'TypeScript 编译未产出 JavaScript。' }
+    if (!compiledJs) return { error: 'TypeScript 编译产物为空，未提交。' }
+    return { clientScriptId: 0, source: compiledJs, editorSource: editorSource || '', language: languageToProto('ts') }
+  }
+  return { clientScriptId: 0, source: editorSource, editorSource, language: languageToProto('js') }
 }

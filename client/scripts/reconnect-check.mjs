@@ -1,4 +1,5 @@
 import { startClient } from './startup-helpers.mjs'
+import { pageErrors } from './harness.mjs'
 import { chromium } from 'playwright'
 import { fromBinary } from '@bufbuild/protobuf'
 import { ServerMsgSchema, ClientMsgSchema } from '../../packages/protocol/src/index.ts'
@@ -46,9 +47,8 @@ try {
     }
   })
   const page = await context.newPage()
-  const errors = [], robots = new Map(), inputs = []
+  const errors = pageErrors(page), robots = new Map(), inputs = []
   let latest, activeTransport, fullCount = 0, connections = 0, bootstraps = 0
-  page.on('pageerror', e => errors.push(String(e)))
   page.on('websocket', ws => {
     connections++
     const transport = { closed: false, lastSelf: null }

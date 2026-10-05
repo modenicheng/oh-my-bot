@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -40,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 6 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 7 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -147,8 +148,8 @@ func TestTopologyInvariants(t *testing.T) {
 		if def.CoreZone.UnlockPhase != sim.PhaseCoreOpen {
 			t.Fatalf("seed %d: core zone unlock phase %d", seed, def.CoreZone.UnlockPhase)
 		}
-		if def.CoreRules.PeriodTicks != 1200 {
-			t.Fatalf("seed %d: period %d", seed, def.CoreRules.PeriodTicks)
+		if def.CoreRules.PeriodTicks != 1200 || def.CoreRules.TargetAlive != 4 {
+			t.Fatalf("seed %d: core supply period=%d target=%d", seed, def.CoreRules.PeriodTicks, def.CoreRules.TargetAlive)
 		}
 		wantW := map[sim.Phase][]float64{
 			sim.PhaseOuterRing: {0.6, 0.4, 0.0},
@@ -203,11 +204,10 @@ func TestTopologyInvariants(t *testing.T) {
 		if mega != 2 {
 			t.Fatalf("seed %d: mega pads = %d, want 2", seed, mega)
 		}
-		// Gen6 has seven complete batches: five single-AABB strata plus two
-		// mid-ring strata whose wedge cover is a two-piece L assembly
-		// (4×0.7 base + perpendicular 2×0.7 stub, positively overlapping).
-		if len(def.Walls) != 72 {
-			t.Fatalf("seed %d: walls = %d, want 72", seed, len(def.Walls))
+		// Gen7 has eight complete batches: two long central strata, four other
+		// single-AABB strata, and two mid-ring two-piece L strata.
+		if len(def.Walls) != 80 {
+			t.Fatalf("seed %d: walls = %d, want 80", seed, len(def.Walls))
 		}
 		for i, w := range def.Walls {
 			if w.ID != uint32(i+1) {
@@ -222,6 +222,51 @@ func TestTopologyInvariants(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestCoreSupplyScalesWithParticipants(t *testing.T) {
+	cases := []struct{ players, period, target int }{
+		{1, 1200, 4}, {5, 900, 6}, {12, 720, 10}, {24, 600, 16}, {40, 480, 24}, {50, 480, 28},
+	}
+	for _, tc := range cases {
+		period, target := coreSupply(tc.players)
+		if period != tc.period || target != tc.target {
+			t.Fatalf("players %d: period/target = %d/%d, want %d/%d", tc.players, period, target, tc.period, tc.target)
+		}
+		def, err := GenerateForPlayers(42, tc.players)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if def.CoreRules.PeriodTicks != tc.period || def.CoreRules.TargetAlive != tc.target {
+			t.Fatalf("players %d map rules = %+v", tc.players, def.CoreRules)
+		}
+	}
+	one, _ := GenerateForPlayers(42, 1)
+	fifty, _ := GenerateForPlayers(42, 50)
+	if one.MapHash == fifty.MapHash {
+		t.Fatal("participant-scaled rules must be part of the authoritative map hash")
+	}
+	if !reflect.DeepEqual(one.Walls, fifty.Walls) || !reflect.DeepEqual(one.CorePads, fifty.CorePads) {
+		t.Fatal("participant count changed deterministic geometry instead of only supply rules")
+	}
+	ids := make([]uint32, 50)
+	for i := range ids {
+		ids[i] = uint32(i + 1)
+	}
+	world := sim.NewSim(42, ids, nil)
+	if err := world.SetMap(fifty); err != nil {
+		t.Fatal(err)
+	}
+	world.Tick()
+	alive := 0
+	for _, core := range world.WorldView().Cores {
+		if core.Alive {
+			alive++
+		}
+	}
+	if alive != 28 {
+		t.Fatalf("50-player first wave has %d live cores, want 28", alive)
 	}
 }
 

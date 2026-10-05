@@ -237,8 +237,8 @@ func (b *vmBindings) buildTickContext(frame sim.ScriptFrame, cmd commandSink) *g
 	// ---- self: Self { hp, energy, position, velocity } ----
 	selfObj := vm.NewObject()
 	defineReadonly(selfObj, "id", vm.ToValue(self.ID))
-	defineReadonly(selfObj, "hp", vm.ToValue(x10ToFloat(self.HpX10)))
-	defineReadonly(selfObj, "energy", vm.ToValue(x10ToFloat(self.EnergyX10)))
+	defineReadonly(selfObj, "hp", vm.ToValue(sim.FromX10(self.HpX10)))
+	defineReadonly(selfObj, "energy", vm.ToValue(sim.FromX10(self.EnergyX10)))
 	defineReadonly(selfObj, "position", readonlyVec2(vm, self.Pos))
 	defineReadonly(selfObj, "velocity", readonlyVec2(vm, self.Vel))
 
