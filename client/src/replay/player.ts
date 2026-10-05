@@ -401,9 +401,9 @@ export class ReplayPlayer {
       const signature = JSON.stringify([frame.finalScores !== null, rows, [...frame.scores]])
       if (signature !== this.scoreMarkup) {
         scoreEl.replaceChildren(...rows.map((row, i) => {
-          const element = scoreRow({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
-            self: false, dead: false }, 'div', frame.finalScores !== null)
           const score = frame.scores.get(row.robot)
+          const element = scoreRow({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
+            self: false, dead: false, replayEvidence: score }, 'div', frame.finalScores !== null)
           if (score) {
             const detail = document.createElement('span'); detail.className = 'score-state'
             detail.textContent = `K${score.kill} H${score.hit} C${score.core} U${score.uplink} A${score.assist}`

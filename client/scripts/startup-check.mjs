@@ -25,10 +25,10 @@ function broadcast(room, payload) {
 function event(room, kind, schema, value, tick = 0) {
   broadcast(room, { case: 'event', value: create(ServerEventSchema, { tick, kind: { case: kind, value: create(schema, value) } }) })
 }
-function snapshot(room, tick, phase, self = true) {
+function snapshot(room, tick, phase, self = true, dead = false, respawnInS = 0) {
   broadcast(room, { case: 'snapshot', value: create(SnapshotDeltaSchema, { tick, full: true, phase, timeLeftS: 300,
     robots: [101, 202].map(id => ({ base: { id, pos: { x: id === 101 ? 0 : 8, y: 0 } }, hpX10: 1000, energyX10: 1000,
-      nick: id === 101 ? 'score-test' : '<b>NO HTML</b>', color: '#22d3ee' })),
+      nick: id === 101 ? 'score-test' : '<b>NO HTML</b>', color: '#22d3ee', dead: id === 101 && dead, respawnInS: id === 101 ? respawnInS : 0 })),
     ...(self ? { self: { robotId: 101, moveSrc: 1, turretSrc: 1 } } : {}),
   }) })
 }
@@ -50,7 +50,7 @@ sockets.on('connection', socket => {
 })
 async function open(options = {}) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, ...options })
-  page.on('pageerror', error => errors.push(String(error)))
+  page.on('pageerror', error => { errors.push(String(error)); console.error(error) })
   await page.addInitScript(() => {
     window.__startupContexts = []
     window.__musicSources = []
@@ -76,6 +76,34 @@ async function open(options = {}) {
   return page
 }
 const ready = page => page.locator('#startup[data-state="ready"]').waitFor({ timeout: 20000 })
+async function checkTitleDetails(page, selector, expected) {
+  const button = page.locator(selector).first()
+  const detail = page.locator(`#${await button.getAttribute('aria-controls')}`)
+  assert.equal(await button.getAttribute('aria-expanded'), 'false')
+  await button.hover()
+  await detail.waitFor({ state: 'visible' })
+  assert.match(await detail.innerText(), expected)
+  assert.match(await detail.innerText(), /最终积分/)
+  // Keyboard focus opens the same evidence, Escape dismisses without losing focus.
+  await button.focus()
+  await page.mouse.move(0, 0)
+  assert.equal(await detail.isVisible(), true)
+  await page.keyboard.press('Escape')
+  assert.equal(await detail.isVisible(), false)
+  assert.equal(await button.evaluate(el => el === document.activeElement), true)
+  await page.keyboard.press('Enter')
+  assert.equal(await detail.isVisible(), true)
+  await page.keyboard.press('Space')
+  assert.equal(await detail.isVisible(), false)
+  await page.keyboard.press('Tab')
+}
+async function contained(page, selector) {
+  const box = await page.locator(selector).boundingBox()
+  assert.ok(box, `${selector}: has layout`)
+  const { width, height } = page.viewportSize()
+  assert.ok(box.x >= -1 && box.x + box.width <= width + 1, `${selector}: fits horizontally`)
+  assert.ok(box.y >= -1 && box.y + box.height <= height + 1, `${selector}: fits vertically`)
+}
 const geometry = []
 async function centered(page, label, promptVisible) {
   const measurements = await page.evaluate(() => {
@@ -476,6 +504,7 @@ try {
   await directLive.waitForFunction(() => document.querySelector('#live-scores .score-title')?.textContent === '苟王')
   assert.equal(await directLive.locator('#live-scores .score-self').count(), 0)
   assert.equal(await directLive.locator('#live-scores .score-value').first().textContent(), '42')
+  await checkTitleDetails(directLive, '#live-scores .score-title', /最长连续存活时长：未提供/)
   await directLive.locator('#live-back').click()
   assert.equal(await directLive.locator('#view-join').isVisible(), true)
   await directLive.close()
@@ -524,16 +553,47 @@ try {
   await waitForWeights(outerWeights, 'inner ring selects final stage')
   assert.equal(await scoring.evaluate(() => window.__musicSources.filter(entry => entry.source.loop).length), loopsBefore, 'stage changes do not restart looping sources')
   await scoring.screenshot({ path: resolve(shots, 'score-hud.png') })
+  await scoring.locator('#game-canvas').focus()
+  snapshot('SCOR', 123, 2, true, true, 3)
+  await scoring.locator('.hud-death').waitFor({ state: 'visible' })
+  assert.equal(await scoring.locator('.death-countdown').textContent(), '3 秒后重生')
+  assert.equal(await scoring.locator('.death-score').textContent(), '当前积分 80')
+  assert.equal(await scoring.locator('#game-canvas').evaluate(el => el === document.activeElement), true, 'death does not steal focus')
+  await scoring.screenshot({ path: resolve(shots, 'death-desktop.png') })
+  snapshot('SCOR', 124, 2, true, true, 0)
+  await scoring.waitForFunction(() => document.querySelector('.death-countdown')?.textContent === '等待重生同步')
+  assert.equal(await scoring.locator('.death-announcement').textContent(), '机体已损毁，等待自动重生。')
+  for (const viewport of [{ width: 320, height: 740 }, { width: 844, height: 390 }]) {
+    await scoring.setViewportSize(viewport)
+    await contained(scoring, '.hud-death')
+  }
+  await scoring.screenshot({ path: resolve(shots, 'death-landscape.png') })
+  await scoring.setViewportSize({ width: 1440, height: 900 })
+  snapshot('SCOR', 125, 2)
+  await scoring.locator('.hud-death').waitFor({ state: 'hidden' })
+  snapshot('SCOR', 126, 2, true, true, 2)
+  await scoring.locator('.hud-death').waitFor({ state: 'visible' })
   const final = { scores: [{ robot: 101, score: 99, titles: [Title.KILL_STEAL, Title.HEALER] }, { robot: 202, score: 25 }] }
-  event('SCOR', 'matchEnd', EvMatchEndSchema, final, 121)
-  event('SCOR', 'matchEnd', EvMatchEndSchema, final, 121)
-  event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 122, rows: [{ robot: 101, score: 0 }] }, 122)
+  event('SCOR', 'matchEnd', EvMatchEndSchema, final, 127)
+  event('SCOR', 'matchEnd', EvMatchEndSchema, final, 127)
+  event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 128, rows: [{ robot: 101, score: 0 }] }, 128)
   await scoring.locator('.end-overlay').waitFor({ state: 'visible' })
   assert.equal(await scoring.locator('.end-overlay').count(), 1)
   assert.equal(await scoring.locator('.end-list .score-self .score-value').textContent(), '99')
   assert.deepEqual(await scoring.locator('.end-list .score-self .score-title').allTextContents(), ['抢人头', '耐活王'])
   assert.equal(await scoring.locator('.end-list .score-no-title').textContent(), '暂无称号')
+  await scoring.locator('.hud-death').waitFor({ state: 'hidden' })
+  assert.equal(await scoring.locator('.end-title').evaluate(el => el === document.activeElement), true, 'settlement focuses heading only from battlefield')
+  assert.equal(await scoring.locator('.end-placement').textContent(), '第 1 名')
+  await checkTitleDetails(scoring, '.end-list .score-title', /抢人头次数：未提供/)
   await scoring.screenshot({ path: resolve(shots, 'settlement.png') })
+  for (const viewport of [{ width: 320, height: 740 }, { width: 844, height: 390 }]) {
+    await scoring.setViewportSize(viewport)
+    await contained(scoring, '.end-panel')
+    await scoring.locator('.end-back').scrollIntoViewIfNeeded()
+    await contained(scoring, '.end-back')
+  }
+  await scoring.setViewportSize({ width: 1440, height: 900 })
   await scoring.locator('.end-back').click()
   await scoring.locator('#view-room').waitFor({ state: 'visible' })
   for (let i = 0; i < 40; i++) {
@@ -552,7 +612,64 @@ try {
   event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 1, rows: [{ robot: 101, score: 0 }] }, 1)
   await scoring.waitForFunction(() => document.querySelector('#hud-self-score strong')?.textContent === '0')
   assert.equal(await scoring.locator('.end-overlay').count(), 0, 'new bootstrap removes old settlement')
+  assert.equal(await scoring.locator('.hud-death').count(), 1, 'new controller does not leak death panels')
+  assert.equal(await scoring.locator('.hud-death').isVisible(), false)
+  // Long lists and every active title remain reachable in a narrow viewport.
+  const activeTitles = [...Array.from({ length: 9 }, (_, i) => i + 1), 11, 12, 13, 14, 15]
+  event('SCOR', 'matchEnd', EvMatchEndSchema, { scores: Array.from({ length: 64 }, (_, i) => ({ robot: 101 + i, score: 64 - i, titles: i === 0 ? [...activeTitles, Title.BEST_PARTNER, 999] : [] })) }, 2)
+  await scoring.waitForFunction(() => document.querySelectorAll('.end-list .score-row').length === 64)
+  assert.equal(await scoring.locator('.end-list .score-title').count(), activeTitles.length)
+  await scoring.setViewportSize({ width: 320, height: 740 })
+  await scoring.emulateMedia({ reducedMotion: 'reduce' })
+  for (const badge of await scoring.locator('.end-list .score-title').all()) {
+    await badge.focus()
+    const detail = scoring.locator(`#${await badge.getAttribute('aria-controls')}`)
+    assert.equal(await detail.isVisible(), true)
+    assert.match(await detail.innerText(), /未提供/)
+    assert.equal(await detail.evaluate(el => getComputedStyle(el).animationName), 'none')
+    await scoring.keyboard.press('Escape')
+  }
+  await contained(scoring, '.end-panel')
+  await scoring.locator('.end-back').scrollIntoViewIfNeeded()
+  await contained(scoring, '.end-back')
+  await scoring.screenshot({ path: resolve(shots, 'settlement-mobile-long.png') })
+  await scoring.locator('.end-back').click()
+  event('SCOR', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
+  snapshot('SCOR', 1, 1)
+  event('SCOR', 'matchEnd', EvMatchEndSchema, { scores: [] }, 2)
+  await scoring.locator('.end-empty').waitFor()
+  assert.equal(await scoring.locator('.end-list').count(), 0)
+  assert.equal(await scoring.locator('.end-back').isVisible(), true)
   await scoring.close()
+
+  const touchScores = await open({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+  await touchScores.goto('http://127.0.0.1:18425')
+  await ready(touchScores)
+  await touchScores.touchscreen.tap(30, 30)
+  await entered(touchScores)
+  await touchScores.locator('#in-room').fill('TOUC')
+  await touchScores.locator('#in-nick').fill('touch-test')
+  await touchScores.locator('#btn-join').tap()
+  await touchScores.locator('#view-room').waitFor({ state: 'visible' })
+  await assertEventually(() => [...sockets.clients].some(socket => socket.testRoom === 'TOUC'))
+  event('TOUC', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
+  await touchScores.locator('#view-game').waitFor({ state: 'visible' })
+  snapshot('TOUC', 1, 1)
+  await touchScores.waitForFunction(() => document.querySelector('#hud-hp-text')?.textContent === '100')
+  event('TOUC', 'matchEnd', EvMatchEndSchema, { scores: [{ robot: 101, score: 0, titles: [Title.OLD_SCHOOL] }] }, 2)
+  const touchBadge = touchScores.locator('.end-list .score-title')
+  await touchBadge.waitFor()
+  const touchDetail = touchScores.locator(`#${await touchBadge.getAttribute('aria-controls')}`)
+  await touchBadge.tap()
+  assert.equal(await touchDetail.isVisible(), true)
+  assert.ok((await touchBadge.boundingBox()).height >= 44, 'touch disclosure target is at least 44px')
+  await contained(touchScores, '.end-panel')
+  await touchScores.screenshot({ path: resolve(shots, 'settlement-touch.png') })
+  await touchBadge.tap()
+  assert.equal(await touchDetail.isVisible(), false)
+  await touchScores.locator('.end-back').tap()
+  await touchScores.locator('#view-room').waitFor({ state: 'visible' })
+  await touchScores.close()
 
   const replay = await open()
   const replayText = [
@@ -563,7 +680,7 @@ try {
     { type: 'event', tick: 60, event: { hit: { from: 101, to: 202 } } },
     { type: 'event', tick: 120, event: { phase_change: { from: 1, to: 2 } } },
     { type: 'event', tick: 125, event: { match_end: { scores: [
-      { robot: 101, score: 77, titles: ['KILL_STEAL', 'HEALER'] }, { robot: 202, score: 0 },
+      { robot: 101, score: 77, titles: ['KILL_STEAL', 'HEALER', 'BARRAGE'] }, { robot: 202, score: 0 },
     ] } } },
   ].map(record => JSON.stringify(record)).join(String.fromCharCode(10))
   await replay.route('**/api/matches', route => route.fulfill({ json: ['SCOR-1'] }))
@@ -578,7 +695,9 @@ try {
     el.value = '125'; el.dispatchEvent(new Event('input', { bubbles: true }))
   })
   await replay.waitForFunction(() => document.querySelector('#rp-score .score-value')?.textContent === '77')
-  assert.deepEqual(await replay.locator('#rp-score .score-title').allTextContents(), ['抢人头', '耐活王'])
+  assert.deepEqual(await replay.locator('#rp-score .score-title').allTextContents(), ['抢人头', '耐活王', '弹幕大师'])
+  await checkTitleDetails(replay, '#rp-score .score-title', /抢人头次数：未提供/)
+  await checkTitleDetails(replay, '#rp-score .score-title >> text=弹幕大师', /命中次数：1（录像已记录）/)
   assert.equal(await replay.locator('#rp-score b').count(), 0)
   await replay.locator('#rp-timeline').evaluate(el => {
     el.value = '60'; el.dispatchEvent(new Event('input', { bubbles: true }))

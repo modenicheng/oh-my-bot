@@ -11,6 +11,7 @@ import type { FeedbackKind } from './feedback'
 import { AIM_STATUS_TEXT, aimControlStatus, axisTakeover } from './axis-src'
 import { requireEl, setText, fmtClock } from '../ui/dom'
 import { clamp01 } from '../lib/math'
+import { DeathNotice } from './death'
 import './hud.css'
 
 const MSG_MS = 2600      // 消息驻留时长（有界定时器，dispose 可清理）
@@ -65,8 +66,10 @@ export class Hud {
   private aimStatusText = AIM_STATUS_TEXT.unavailable
   /** 瞄准能力信号（Workbench 上报），updateTakeover 供 aimControlStatus 用。 */
   private aimCapable = false
+  private death: DeathNotice
 
   constructor(private root: HTMLElement) {
+    this.death = new DeathNotice(root)
     this.hpFill = requireEl(root, 'hud-hp-fill')
     this.hpDelay = requireEl(root, 'hud-hp-delay')
     this.enFill = requireEl(root, 'hud-en-fill')
@@ -148,6 +151,7 @@ export class Hud {
     this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
 
     setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
+    this.death.update(self, world.initialized, scores?.ended ?? false, scores?.score(selfId))
     // scoreboard.display 内部按 (版本, self, 阵亡位) 缓存：引用相同即数据未变，
     // 免去此前每帧 JSON.stringify 签名与整表重建。
     const rows = scores?.display(world.robots, selfId) ?? NO_ROWS
@@ -230,6 +234,7 @@ export class Hud {
     this.clearMsg(); this.clearInnerRing(); this.clearCountdown()
     this.timeEl.classList.remove('urgent')
     this.innerBanner.remove()
+    this.death.dispose()
     this.selfScore.parentElement?.remove()
   }
 

@@ -3,7 +3,8 @@ import type { RobotEnt } from './world'
 import './scoreboard.css'
 
 export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
-export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean }
+export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number }
+export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; replayEvidence?: ReplayTitleEvidence }
 
 export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
@@ -61,25 +62,83 @@ export class Scoreboard {
   }
 }
 
+// Criteria mirror server/internal/stats/titles.go. ScoreRow does not carry
+// the underlying counters; AOI events cannot reconstruct whole-match totals.
+const TITLE_DETAILS: Partial<Record<Title, { name: string; rule: string; metric: string }>> = {
+  [Title.WAR_MACHINE]: { name: '战争机器', rule: '击杀次数最多。', metric: '击杀次数' },
+  [Title.SCAVENGER]: { name: '垃圾佬', rule: '拾取核心次数最多，并非核心得分最高。', metric: '核心拾取次数' },
+  [Title.SIGNAL_THIEF]: { name: '信号大盗', rule: '完成 Uplink 上传次数最多。', metric: '目标贡献（上传次数）' },
+  [Title.RUNNER]: { name: '跑路大师', rule: '检查点累计移动距离最长。', metric: '累计移动距离' },
+  [Title.WALL_HEAD]: { name: '铁头娃', rule: '记录的撞墙次数最多。', metric: '撞墙次数' },
+  [Title.SURVIVOR]: { name: '苟王', rule: '单次连续存活时间最长，并非累计存活时间。', metric: '最长连续存活时长' },
+  [Title.PEACEMAKER]: { name: '和平使者', rule: '零击杀，且积分达到全场第 75 百分位；至少两人参赛。', metric: '击杀次数' },
+  [Title.AI_IDIOT]: { name: '人工智障', rule: '记录的脚本错误次数最多。', metric: '脚本错误次数' },
+  [Title.BARRAGE]: { name: '弹幕大师', rule: '命中次数最多，并非开火次数最多。', metric: '命中次数' },
+  [Title.AI_REGULAR]: { name: 'AI 常客', rule: 'AI 对话轮数最多。', metric: 'AI 对话轮数' },
+  [Title.OLD_SCHOOL]: { name: '古法编程', rule: '对局结束时在场，未使用 AI 对话，且没有 Snippet 实际接管记录。', metric: 'AI 对话轮数 / Snippet 接管记录' },
+  [Title.CNMB]: { name: '充能面包', rule: '死亡次数最多。', metric: '死亡次数' },
+  [Title.KILL_STEAL]: { name: '抢人头', rule: '抢人头次数最多：终结者对目标本条生命的伤害占比低于 50%。', metric: '抢人头次数' },
+  [Title.HEALER]: { name: '耐活王', rule: '累计有效治疗量最多。', metric: '有效治疗量' },
+}
+
 export function titleName(title: number): string {
-  switch (title) {
-    case Title.WAR_MACHINE: return '战争机器'
-    case Title.SCAVENGER: return '垃圾佬'
-    case Title.SIGNAL_THIEF: return '信号大盗'
-    case Title.RUNNER: return '跑路大师'
-    case Title.WALL_HEAD: return '铁头娃'
-    case Title.SURVIVOR: return '苟王'
-    case Title.PEACEMAKER: return '和平使者'
-    case Title.AI_IDIOT: return '人工智障'
-    case Title.BARRAGE: return '弹幕大师'
-    case Title.BEST_PARTNER: return '' // deprecated legacy replay value
-    case Title.AI_REGULAR: return 'AI 常客'
-    case Title.OLD_SCHOOL: return '古法编程'
-    case Title.CNMB: return '充能面包'
-    case Title.KILL_STEAL: return '抢人头'
-    case Title.HEALER: return '耐活王'
-    default: return ''
+  return TITLE_DETAILS[title as Title]?.name ?? '' // deprecated/unknown replay values stay hidden
+}
+
+export function titleDetails(title: number, score: number, replay?: ReplayTitleEvidence): { name: string; rule: string; evidence: string; source: string } | undefined {
+  const detail = TITLE_DETAILS[title as Title]
+  if (!detail) return undefined
+  const tie = title === Title.PEACEMAKER || title === Title.OLD_SCHOOL ? '' : ' 并列时按先达到该数值者优先，再按机器人编号判定；全场为零不授予。'
+  const recorded = title === Title.WAR_MACHINE || title === Title.PEACEMAKER ? replay?.kill
+    : title === Title.SCAVENGER ? replay?.core : title === Title.SIGNAL_THIEF ? replay?.uplink
+      : title === Title.BARRAGE ? replay?.hit : undefined
+  const known = recorded !== undefined && Number.isSafeInteger(recorded) && recorded >= 0
+  return { name: detail.name, rule: detail.rule + tie,
+    evidence: `${detail.metric}：${known ? `${recorded}（录像已记录）` : '未提供'}；最终积分：${score}。`,
+    source: known
+      ? '次数来自录像截至当前时刻的事件记录，缺失事件无法补全；不替代服务器完整评选统计。称号与积分来自结算记录，旧录像的规则可能不同。'
+      : '称号与积分来自结算记录。当前协议未提供该项统计明细，不从积分或局部事件反推；旧录像的评选规则可能不同。',
   }
+}
+
+let nextTitleId = 0
+function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence): HTMLElement | undefined {
+  const info = titleDetails(title, score, replay)
+  if (!info) return undefined
+  const award = document.createElement('div'); award.className = 'score-award'
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'score-title'
+  button.textContent = info.name
+  const detail = document.createElement('div'); detail.className = 'score-title-detail'; detail.hidden = true
+  detail.id = `score-title-detail-${++nextTitleId}`
+  detail.setAttribute('role', 'note')
+  detail.setAttribute('aria-label', `${info.name}称号详情`)
+  detail.append(text('title-rule', info.rule), text('title-evidence', info.evidence), text('title-source', info.source))
+  button.setAttribute('aria-controls', detail.id)
+  button.setAttribute('aria-describedby', detail.id)
+  button.setAttribute('aria-expanded', 'false')
+  let hovered = false, focused = false, pinned = false, dismissed = false, touchActivation = false
+  const render = () => {
+    const open = !dismissed && (hovered || focused || pinned)
+    detail.hidden = !open
+    button.setAttribute('aria-expanded', String(open))
+    award.classList.toggle('is-open', open)
+  }
+  award.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') { hovered = true; dismissed = false; render() } })
+  award.addEventListener('pointerleave', () => { hovered = false; render() })
+  button.addEventListener('pointerdown', event => { touchActivation = event.pointerType === 'touch' })
+  button.addEventListener('focus', () => { focused = true; if (!touchActivation) { dismissed = false; render() } })
+  // Preserve an opened disclosure on blur: collapsing inline content during
+  // pointerdown can move the next control before its click (e.g. Back to room).
+  // Click or Escape explicitly closes it; hover-only previews still disappear.
+  button.addEventListener('blur', () => { if (focused && !dismissed) pinned = true; focused = false; touchActivation = false; render() })
+  button.addEventListener('click', () => { touchActivation = false; pinned = !pinned; dismissed = !pinned; render() })
+  button.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); pinned = false; dismissed = true; render()
+    }
+  })
+  award.append(button, detail)
+  return award
 }
 
 function text(className: string, value: string): HTMLSpanElement {
@@ -97,9 +156,11 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titles = 
   if (state) element.append(text('score-state', state))
   if (titles) {
     const badges = document.createElement('div'); badges.className = 'score-titles'
-    const names = (row.titles ?? []).map(titleName).filter(Boolean)
-    for (const name of names) badges.append(text('score-title', name))
-    if (!names.length) badges.append(text('score-no-title', '暂无称号'))
+    for (const title of row.titles ?? []) {
+      const badge = titleBadge(title, row.score, row.replayEvidence)
+      if (badge) badges.append(badge)
+    }
+    if (!badges.childElementCount) badges.append(text('score-no-title', '暂无称号'))
     element.append(badges)
   }
   return element
@@ -109,19 +170,39 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
   hideMatchEnd(root)
   const overlay = document.createElement('div'); overlay.className = 'end-overlay'
   overlay.setAttribute('role', 'region'); overlay.setAttribute('aria-label', '对局结算')
-  overlay.append(text('end-title', '对局结算'))
+  const panel = document.createElement('section'); panel.className = 'end-panel'
+  const header = document.createElement('header'); header.className = 'end-header'
+  const heading = document.createElement('h2'); heading.className = 'end-title'; heading.textContent = '对局结算'
+  header.append(heading, text('end-caption', '战场已关闭，战果已记录'))
+  const ranked = rankedScores(rows)
+  const ownRank = ranked.findIndex(row => row.robot === self)
+  const summary = document.createElement('div'); summary.className = 'end-summary'
+  if (ownRank >= 0) {
+    const own = ranked[ownRank]!
+    summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${names.get(self) || `robot-${self}`} · ${own.score} 分`))
+  } else summary.append(text('end-placement', '最终战果'))
+  summary.append(text('end-field', `${rows.length} 位参赛者`))
+  const help = text('end-help', '悬停或聚焦称号查看依据；点击可展开 / 收起，Esc 关闭。')
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
-  for (const [i, row] of rankedScores(rows).entries()) {
+  for (const [i, row] of ranked.entries()) {
     list.append(scoreRow({ ...row, rank: i + 1, nick: names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
-  if (!rows.length) overlay.append(text('end-empty', '本局无得分记录'))
-  else overlay.append(list)
+  const footer = document.createElement('footer'); footer.className = 'end-footer'
+  footer.append(text('end-source', '积分与称号以服务器结算为准；未提供的统计不作估算。'))
   if (onBack) {
     const back = document.createElement('button'); back.type = 'button'; back.className = 'end-back'
-    back.textContent = '回到房间'; back.addEventListener('click', onBack); overlay.append(back)
+    back.textContent = '回到房间'; back.addEventListener('click', onBack); footer.append(back)
   }
+  panel.append(header, summary, help)
+  if (!rows.length) panel.append(text('end-empty', '本局无得分记录'))
+  else panel.append(list)
+  panel.append(footer)
+  overlay.append(panel)
   root.append(overlay)
+  // A region, not a modal: workbench and room controls remain accessible.
+  // Move focus only when the battle canvas owned it, never out of an editor.
+  if (document.activeElement?.id === 'game-canvas') { heading.tabIndex = -1; heading.focus({ preventScroll: true }) }
 }
 
 export function hideMatchEnd(root: HTMLElement): void {
