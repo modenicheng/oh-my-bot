@@ -4,7 +4,7 @@ import { icon } from '../icons'
 import './scoreboard.css'
 
 export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
-export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number }
+export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number; assist?: number }
 export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; respawnInS?: number; replayEvidence?: ReplayTitleEvidence }
 
 export type ScoreRowOptions = { titles?: boolean; ended?: boolean }
@@ -51,31 +51,28 @@ export class Scoreboard {
   get hasScores(): boolean { return this.received }
   get ended(): boolean { return this.final }
   display(robots: ReadonlyMap<number, RobotEnt>, self = -1): ScoreDisplay[] {
-    // HUD/观战/回放每帧调用：输出只依赖 (rows 版本, self, 各行阵亡位)。
-    // 阵亡位压进一个整数做键，命中即返回同一数组供调用方引用比对。
-    let deadBits = 0
-    const cacheable = this.rows.length <= 30
-    if (cacheable) {
-      for (let i = 0; i < this.rows.length; i++) if (robots.get(this.rows[i]!.robot)?.dead) deadBits |= 1 << i
-      const key = `${this.version}:${self}:${deadBits}`
-      if (this.displayCache && this.displayKey === key) return this.displayCache
-      const rows = rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
+    // Position/HP changes do not affect the scoreboard. Cache by the bounded
+    // per-row visibility/status projection so 64-player HUD frames stay cheap
+    // while respawn countdown changes still reach the DOM.
+    const stateKey = this.rows.map(row => {
+      const robot = robots.get(row.robot)
+      const respawn = robot?.respawnInS
+      return `${row.robot}:${robot ? (robot.dead ? 'dead' : 'alive') : 'unknown'}:${Number.isFinite(respawn) ? respawn!.toFixed(1) : ''}`
+    }).join(';')
+    const key = `${this.version}:${self}:${stateKey}`
+    if (this.displayCache && this.displayKey === key) return this.displayCache
+    const rows = rankedScores(this.rows).map((row, i) => {
+      const robot = robots.get(row.robot)
+      return { ...row, rank: i + 1,
         nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
-        dead: !!robots.get(row.robot)?.dead,
-        status: robots.has(row.robot) ? (robots.get(row.robot)!.dead ? 'dead' : 'alive') : 'unknown',
-        respawnInS: robots.get(row.robot)?.respawnInS,
-      }))
-      this.displayKey = key
-      this.displayCache = rows
-      return rows
-    }
-    this.displayCache = null
-    return rankedScores(this.rows).map((row, i) => ({ ...row, rank: i + 1,
-      nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
-      dead: !!robots.get(row.robot)?.dead,
-      status: robots.has(row.robot) ? (robots.get(row.robot)!.dead ? 'dead' : 'alive') : 'unknown',
-      respawnInS: robots.get(row.robot)?.respawnInS,
-    }))
+        dead: !!robot?.dead,
+        status: (robot ? (robot.dead ? 'dead' : 'alive') : 'unknown') as 'alive' | 'dead' | 'unknown',
+        respawnInS: robot?.respawnInS,
+      }
+    })
+    this.displayKey = key
+    this.displayCache = rows
+    return rows
   }
 }
 
@@ -119,12 +116,28 @@ export function titleDetails(title: number, score: number, replay?: ReplayTitleE
 }
 
 let nextTitleId = 0
+const titleBadges = new WeakMap<HTMLElement, Map<number, HTMLElement>>()
+
+function updateTitleBadge(award: HTMLElement, title: number, score: number, replay?: ReplayTitleEvidence): boolean {
+  const info = titleDetails(title, score, replay)
+  if (!info) return false
+  const button = award.querySelector<HTMLButtonElement>('.score-title')!
+  const detail = award.querySelector<HTMLElement>('.score-title-detail')!
+  button.textContent = info.name
+  button.setAttribute('aria-label', `${info.name}称号`)
+  detail.setAttribute('aria-label', `${info.name}称号详情`)
+  detail.querySelector<HTMLElement>('.title-rule')!.textContent = info.rule
+  detail.querySelector<HTMLElement>('.title-evidence')!.textContent = info.evidence
+  detail.querySelector<HTMLElement>('.title-source')!.textContent = info.source
+  return true
+}
+
 function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence): HTMLElement | undefined {
   const info = titleDetails(title, score, replay)
   if (!info) return undefined
-  const award = document.createElement('div'); award.className = 'score-award'
+  const award = document.createElement('div'); award.className = 'score-award'; award.dataset.title = String(title)
   const button = document.createElement('button'); button.type = 'button'; button.className = 'score-title'
-  button.textContent = info.name
+  button.setAttribute('aria-label', `${info.name}称号`)
   const detail = document.createElement('div'); detail.className = 'score-title-detail'; detail.hidden = true
   detail.id = `score-title-detail-${++nextTitleId}`
   detail.setAttribute('role', 'note')
@@ -133,6 +146,7 @@ function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence):
   button.setAttribute('aria-controls', detail.id)
   button.setAttribute('aria-describedby', detail.id)
   button.setAttribute('aria-expanded', 'false')
+  button.textContent = info.name
   let hovered = false, focused = false, pinned = false, dismissed = false, touchActivation = false
   const render = () => {
     const open = !dismissed && (hovered || focused || pinned)
@@ -146,7 +160,6 @@ function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence):
   button.addEventListener('focus', () => { focused = true; if (!touchActivation) { dismissed = false; render() } })
   // Preserve an opened disclosure on blur: collapsing inline content during
   // pointerdown can move the next control before its click (e.g. Back to room).
-  // Click or Escape explicitly closes it; hover-only previews still disappear.
   button.addEventListener('blur', () => { if (focused && !dismissed) pinned = true; focused = false; touchActivation = false; render() })
   button.addEventListener('click', () => { touchActivation = false; pinned = !pinned; dismissed = !pinned; render() })
   button.addEventListener('keydown', event => {
@@ -167,35 +180,59 @@ function setClassState(element: HTMLElement, row: ScoreDisplay, ended: boolean):
   element.classList.toggle('score-first', row.rank === 1)
   element.classList.toggle('score-second', row.rank === 2)
   element.classList.toggle('score-third', row.rank === 3)
-  element.classList.toggle('score-dead', row.dead)
-  element.classList.toggle('score-alive', !row.dead)
+  const dead = row.dead || row.status === 'dead'
+  element.classList.toggle('score-dead', dead)
+  element.classList.toggle('score-respawn', dead && Number.isFinite(row.respawnInS) && (row.respawnInS ?? 0) > 0)
+  element.classList.toggle('score-alive', row.status === 'alive' && !dead)
+  element.classList.toggle('score-unknown', row.status === 'unknown' || row.status === undefined)
   element.dataset.rank = String(row.rank)
-  element.dataset.status = row.status ?? (row.dead ? 'dead' : 'alive')
+  element.dataset.status = row.status ?? (dead ? 'dead' : 'unknown')
   if (ended) element.dataset.status = 'final'
 }
 
 function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRowOptions): void {
   setClassState(element, row, !!options.ended)
   const rank = element.querySelector<HTMLElement>('.score-rank')!
-  rank.replaceChildren()
-  if (row.rank === 1) rank.append(icon('crown'))
-  rank.append(text('score-rank-number', String(row.rank)))
-  const name = element.querySelector<HTMLElement>('.score-name')!
-  name.textContent = row.nick
-  const value = element.querySelector<HTMLElement>('.score-value')!
-  value.textContent = String(row.score)
+  const rankNumber = rank.querySelector<HTMLElement>('.score-rank-number') ?? text('score-rank-number', '')
+  if (!rankNumber.parentElement) rank.append(rankNumber)
+  const crown = rank.querySelector<SVGSVGElement>('[data-icon="crown"]')
+  if (row.rank === 1 && !crown) rank.insertBefore(icon('crown'), rankNumber)
+  else if (row.rank !== 1 && crown) crown.remove()
+  rankNumber.textContent = String(row.rank)
+  element.querySelector<HTMLElement>('.score-name')!.textContent = row.nick
+  element.querySelector<HTMLElement>('.score-value')!.textContent = String(row.score)
   const state = element.querySelector<HTMLElement>('.score-state')!
-  const stateText = scoreState(row, !!options.ended)
+  const stateText = scoreState({ ...row, dead: row.dead || row.status === 'dead' }, !!options.ended)
   state.textContent = stateText
   state.hidden = !stateText
+  const evidence = element.querySelector<HTMLElement>('.score-replay-evidence')!
+  const recorded = row.replayEvidence
+  evidence.hidden = !recorded
+  evidence.textContent = recorded ? `K${recorded.kill} H${recorded.hit} C${recorded.core} U${recorded.uplink} A${recorded.assist ?? 0}` : ''
+
+  const badges = element.querySelector<HTMLElement>('.score-titles')!
+  badges.hidden = !options.titles
   if (options.titles) {
-    const badges = element.querySelector<HTMLElement>('.score-titles')!
-    badges.replaceChildren()
-    for (const title of row.titles ?? []) {
-      const badge = titleBadge(title, row.score, row.replayEvidence)
-      if (badge) badges.append(badge)
+    const existing = titleBadges.get(element) ?? new Map<number, HTMLElement>()
+    const wanted = new Set((row.titles ?? []).filter(title => titleDetails(title, row.score, row.replayEvidence)))
+    for (const [title, badge] of existing) {
+      if (!wanted.has(title)) { badge.remove(); existing.delete(title) }
     }
-    if (!badges.childElementCount) badges.append(text('score-no-title', '暂无称号'))
+    for (const [index, title] of [...wanted].entries()) {
+      let badge = existing.get(title)
+      if (!badge) {
+        badge = titleBadge(title, row.score, row.replayEvidence)
+        if (!badge) continue
+        existing.set(title, badge)
+      } else updateTitleBadge(badge, title, row.score, row.replayEvidence)
+      const current = badges.children[index]
+      if (current !== badge) badges.insertBefore(badge, current ?? null)
+    }
+    if (!wanted.size) {
+      let empty = badges.querySelector<HTMLElement>('.score-no-title')
+      if (!empty) { empty = text('score-no-title', '暂无称号'); badges.append(empty) }
+    } else badges.querySelector('.score-no-title')?.remove()
+    titleBadges.set(element, existing)
   }
 }
 
@@ -209,32 +246,48 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titlesOrO
   const value = text('score-value', '')
   const state = text('score-state', '')
   const badges = document.createElement('div'); badges.className = 'score-titles'
-  element.append(rank, name, value, state)
-  if (options.titles) element.append(badges)
+  const evidence = text('score-replay-evidence', '')
+  evidence.hidden = true
+  element.append(rank, name, value, state, evidence, badges)
   fillScoreRow(element, row, options)
   return element
 }
 
-/** Keyed DOM renderer: updates row contents in place and moves existing nodes when rank changes. */
+/** Keyed DOM renderer: updates rows in place and moves existing nodes only when order changes. */
 export class ScoreRowRenderer {
   private readonly rows = new Map<number, HTMLElement>()
   private renderedOptions = ''
+  private created = 0
+  private moved = 0
+  private removed = 0
   update(parent: HTMLElement, values: readonly ScoreDisplay[], options: ScoreRowOptions = {}): void {
-    const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
-    if (key !== this.renderedOptions) { this.renderedOptions = key; for (const row of this.rows.values()) row.remove(); this.rows.clear() }
-    const fragment = document.createDocumentFragment()
-    for (const value of values) {
-        let element = this.rows.get(value.robot)
-      if (!element || element.tagName.toLowerCase() !== (parent.tagName.toLowerCase() === 'ol' ? 'li' : 'div')) {
-        element = scoreRow(value, parent.tagName.toLowerCase() === 'ol' ? 'li' : 'div', options)
-        this.rows.set(value.robot, element)
-      } else fillScoreRow(element, value, options)
-      fragment.append(element)
+    const tag = parent.tagName.toLowerCase() === 'ol' ? 'li' : 'div'
+    const wanted = new Set(values.map(value => value.robot))
+    for (const empty of [...parent.children]) if (empty.classList.contains('score-waiting')) empty.remove()
+    for (const [id, element] of this.rows) {
+      if (!wanted.has(id) || element.tagName.toLowerCase() !== tag) {
+        element.remove(); this.rows.delete(id); this.removed++
+      }
     }
-    parent.replaceChildren(fragment)
-    for (const id of this.rows.keys()) if (!values.some(row => row.robot === id)) this.rows.delete(id)
+    const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
+    this.renderedOptions = key
+    values.forEach((value, index) => {
+      let element = this.rows.get(value.robot)
+      if (!element) {
+        element = scoreRow(value, tag, options)
+        this.rows.set(value.robot, element)
+        this.created++
+      } else fillScoreRow(element, value, options)
+      if (parent.children[index] !== element) {
+        parent.insertBefore(element, parent.children[index] ?? null)
+        this.moved++
+      }
+    })
   }
   get nodeCount(): number { return this.rows.size }
+  get createdCount(): number { return this.created }
+  get movedCount(): number { return this.moved }
+  get removedCount(): number { return this.removed }
   clear(): void { this.rows.clear(); this.renderedOptions = '' }
 }
 

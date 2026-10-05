@@ -1,10 +1,23 @@
-.score-row { display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: baseline; gap: 4px 8px; padding: 6px 0; font: 12px/1.5 var(--pixel); }
-.score-rank, .score-state, .score-no-title { color: var(--fg-dim); }
-.score-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-row { display: grid; grid-template-columns: 3.5ch minmax(0, 1fr) auto; align-items: baseline; gap: 4px 8px; min-width: 0; padding: 6px 8px; border-left: 2px solid transparent; font: 12px/1.5 var(--pixel); }
+.score-rank { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.score-rank-number { min-width: 1ch; }
+.score-rank .pixel-icon { width: 12px; height: 12px; color: var(--amber); }
+.score-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .score-value { color: var(--accent); font-variant-numeric: tabular-nums; }
-.score-state, .score-titles { grid-column: 2 / -1; font-size: 11px; }
+.score-state, .score-titles, .score-replay-evidence { grid-column: 2 / -1; min-width: 0; font-size: 11px; }
+.score-state { color: var(--fg-dim); overflow-wrap: anywhere; }
+.score-replay-evidence { color: var(--fg-dim); font-family: ui-monospace, monospace; }
+.score-self { border-left-color: var(--accent); background: #12232c66; }
 .score-self .score-name { color: var(--accent); }
-.score-titles { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.score-first { border-top: 1px solid #fbbf2466; border-bottom: 1px solid #fbbf2433; background: #2a241033; }
+.score-first .score-rank, .score-first .score-name { color: var(--amber); }
+.score-second .score-rank { color: #c5d0d9; }
+.score-third .score-rank { color: #c99470; }
+.score-dead { border-left-color: var(--danger); opacity: .78; }
+.score-dead .score-state { color: var(--danger); }
+.score-respawn .score-state::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border: 1px solid currentColor; vertical-align: 1px; }
+.score-alive .score-state { color: var(--lime); }
+.score-unknown .score-state { color: var(--fg-dim); }
 .score-award { display: contents; }
 .score-title { display: block; min-height: 32px; border: 1px solid #46515f; border-radius: 0; padding: 5px 9px;
   background: var(--panel); color: var(--amber); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
@@ -19,7 +32,7 @@
 @media (pointer: coarse) { .score-title { min-height: 44px; padding: 10px 12px; } }
 #hud-self-score { display: flex; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--line); font: 14px/1.5 var(--pixel); }
 #hud-self-score strong { color: var(--accent); font-variant-numeric: tabular-nums; }
-#hud-score-rows { max-height: 27vh; overflow-y: auto; pointer-events: auto; }
+#hud-score-rows { max-height: 27vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; pointer-events: auto; }
 .score-waiting { color: var(--fg-dim); padding: 6px 0; font-size: 12px; }
 .end-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px;
   background: #0a0e14ed; pointer-events: auto; z-index: 5; }
@@ -61,4 +74,13 @@
 @media (prefers-reduced-motion: reduce) {
   .end-overlay *, .score-award * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-#live-scores .score-row { margin: 0; padding: 5px 0; border: 0; background: none; }
+#live-scores .score-row { margin: 0; padding: 5px 8px; border: 0; background: none; }
+#live-scores .score-first { border-block: 1px solid #fbbf2466; background: #2a241033; }
+#live-scores .score-self { border-left: 2px solid var(--accent); background: #12232c66; }
+#live-scores .score-dead { border-left-color: var(--danger); }
+#rp-score .score-row { padding-inline: 8px; }
+@media (max-width: 560px), (orientation: landscape) and (max-height: 560px) {
+  #hud-score-rows { max-height: 34vh; }
+  .score-row { grid-template-columns: 3ch minmax(0, 1fr) auto; gap-inline: 5px; padding-inline: 5px; }
+  .score-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+}

@@ -29,6 +29,7 @@
     "monaco-editor": "^0.57.0"
   },
   "devDependencies": {
+    "happy-dom": "^17.6.3",
     "playwright": "^1.63.0",
     "tsx": "^4.23.15",
     "typescript": "^5.8.0",

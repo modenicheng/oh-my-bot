@@ -399,21 +399,16 @@ export class ReplayPlayer {
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
       const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
-      const signature = `${frame.finalScores !== null}:${frame.tick}:${rows.map(row => `${row.robot},${row.score},${row.titles?.join('.') ?? ''}`).join(';')}`
+      const signature = `${frame.finalScores !== null}:${frame.tick}:${rows.map(row => {
+        const titles = 'titles' in row ? (row as { titles?: readonly number[] }).titles : undefined
+        return `${row.robot},${row.score},${titles?.join('.') ?? ''}`
+      }).join(';')}`
       if (signature !== this.scoreMarkup) {
         const displays = rows.map((row, i) => ({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
           self: false, dead: false, status: 'unknown' as const, replayEvidence: frame.scores.get(row.robot) }))
+        // Replay evidence is part of the keyed row structure, so seeking never
+        // appends another evidence node to an existing row.
         this.scoreRenderer.update(scoreEl, displays, { titles: frame.finalScores !== null, ended: frame.finalScores !== null })
-        for (const display of displays) {
-          const score = frame.scores.get(display.robot)
-          if (!score) continue
-          const element = scoreEl.querySelector<HTMLElement>(`[data-robot="${display.robot}"]`)
-          if (!element) continue
-          const detail = element.querySelector('.score-replay-evidence') ?? document.createElement('span')
-          detail.className = 'score-replay-evidence score-state'
-          detail.textContent = `K${score.kill} H${score.hit} C${score.core} U${score.uplink} A${score.assist}`
-          element.append(detail)
-        }
         scoreEl.setAttribute('aria-label', frame.finalScores ? '最终积分与称号' : '回放积分')
         this.scoreMarkup = signature
       }
