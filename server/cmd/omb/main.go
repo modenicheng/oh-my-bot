@@ -181,6 +181,46 @@ func envDefaultSoloBots() uint32 {
 	return uint32(n)
 }
 
+// envDuration 读取 Go duration 字符串环境变量（如 "15s"、"5m"；容忍首尾空白）。
+// 空/未设置返回 ok=false，调用方跳过——Hub 保留默认；解析失败打一条日志并按
+// 未设置处理：运维配置错误回退安全默认值，不阻止服务器启动。
+func envDuration(name string) (time.Duration, bool) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("invalid %s=%q: %v (using default)", name, raw, err)
+		return 0, false
+	}
+	return d, true
+}
+
+// applyJanitorEnv 把空房间清道夫阈值 env（审计 S-26 配置化）应用到 hub。
+// 未设置=默认；非法 duration 由 envDuration 回退默认（不应用）；解析成功的
+// 非正值被 Hub setter 拒绝（保留默认），这里补一条日志让配置意图可查。
+func applyJanitorEnv(hub *glue.Hub) {
+	for _, cfg := range []struct {
+		name  string
+		apply func(time.Duration)
+	}{
+		{"OMB_WARMUP_IDLE_STOP", hub.SetWarmupIdleStop},
+		{"OMB_ROOM_EVICT_AFTER", hub.SetRoomEvictAfter},
+	} {
+		d, ok := envDuration(cfg.name)
+		if !ok {
+			continue
+		}
+		if d <= 0 {
+			log.Printf("%s=%s is not positive; keeping default", cfg.name, d)
+			continue
+		}
+		cfg.apply(d)
+		log.Printf("empty-room janitor %s set to %s", cfg.name, d)
+	}
+}
+
 func main() {
 	addr := flag.String("addr", envAddr(), "listen address: host:port, :port (all interfaces), unix:/path/to.sock, or unix:@name (Linux abstract socket)")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -193,6 +233,10 @@ func main() {
 	}
 
 	hub := glue.NewHub()
+	// 空房间清道夫（审计 S-26）：空置停 warmup 对局、久置逐出房间；阈值经
+	// OMB_WARMUP_IDLE_STOP / OMB_ROOM_EVICT_AFTER 配置（未设置=默认）。
+	hub.StartJanitor(30 * time.Second)
+	applyJanitorEnv(hub)
 	if defaultBots := envDefaultSoloBots(); defaultBots > 0 {
 		hub.SetDefaultSoloBots(defaultBots)
 		log.Printf("new rooms default to %d solo bots (OMB_DEFAULT_SOLO_BOTS)", defaultBots)

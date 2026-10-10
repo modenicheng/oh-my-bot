@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
@@ -20,14 +21,33 @@ type Hub struct {
 	// aiNew 每房间派生 AIService（从同一 ServerConfig 构造；nil = 禁用）。
 	aiNew           func() *AIService
 	defaultSoloBots uint32
+
+	// 空房间清道夫阈值（审计 S-26）。warmupIdleStop：空置房间停掉 warmup
+	// 对局（覆盖页面刷新的断开→重连窗口）；roomEvictAfter：空置更久后关停
+	// 并从 rooms 逐出（期间同房码+昵称仍可恢复身份）。经 SetWarmupIdleStop/
+	// SetRoomEvictAfter 配置（env：OMB_WARMUP_IDLE_STOP/OMB_ROOM_EVICT_AFTER），
+	// 测试可改小。
+	warmupIdleStop time.Duration
+	roomEvictAfter time.Duration
 }
 
 // maxSpectators caps the read-only audience per room. Spectators are pure
 // consumers, so the cap protects publication bandwidth rather than gameplay.
 const maxSpectators = 64
 
+const (
+	defaultWarmupIdleStop = 15 * time.Second
+	defaultRoomEvictAfter = 5 * time.Minute
+)
+
 func NewHub() *Hub {
-	return &Hub{rooms: map[string]*RoomConn{}, player: map[uint64]*Session{}, nextID: 1000}
+	return &Hub{
+		rooms:          map[string]*RoomConn{},
+		player:         map[uint64]*Session{},
+		nextID:         1000,
+		warmupIdleStop: defaultWarmupIdleStop,
+		roomEvictAfter: defaultRoomEvictAfter,
+	}
 }
 
 // SetAIService 注入 AI 服务工厂（main 启动时调用；nil 或返回 nil = 禁用）。
@@ -43,6 +63,29 @@ func (h *Hub) SetDefaultSoloBots(count uint32) {
 		count = room.MaxSoloBots
 	}
 	h.defaultSoloBots = count
+}
+
+// SetWarmupIdleStop 配置空房间清道夫「空置停 warmup 对局」的空置阈值（main
+// 启动时从 OMB_WARMUP_IDLE_STOP 应用）。非正值拒绝并保留当前值——清道夫
+// 只允许调快慢，不允许被配置关闭（关闭等于放弃 S-26 的资源回收）。
+func (h *Hub) SetWarmupIdleStop(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if d <= 0 {
+		return
+	}
+	h.warmupIdleStop = d
+}
+
+// SetRoomEvictAfter 配置空房间清道夫「空置逐出房间」的空置阈值（main 启动
+// 时从 OMB_ROOM_EVICT_AFTER 应用）。非正值拒绝并保留当前值。
+func (h *Hub) SetRoomEvictAfter(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if d <= 0 {
+		return
+	}
+	h.roomEvictAfter = d
 }
 
 func (h *Hub) EnsureRoom(code string) *RoomConn {
@@ -101,6 +144,79 @@ func (h *Hub) Unregister(s *Session) {
 	}
 }
 
+// StartJanitor 启动空房间清道夫（进程生命周期；main 启动时调用一次）。
+func (h *Hub) StartJanitor(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.janitorSweep()
+		}
+	}()
+}
+
+// janitorSweep 单轮扫描（审计 S-26）：warmup 对局的终局条件带 !warmup，房间
+// 空置后永不自我终止（0 接收者仍 60Hz 满速步进）；h.rooms 此前无任何淘汰点，
+// 身份/脚本/版本状态随之无界累积。规则：房间空置（无玩家会话且无观战者）超过
+// warmupIdleStop 先停 warmup 对局（正式局有 MatchTicks 上界且空置重连要能回
+// 对局，不受影响）；空置超过 roomEvictAfter 关停房间（closed 拒绝新绑定、丢弃
+// 在途装配）并从 rooms 逐出。锁序：先在 h.mu 下拍快照再逐房拿 rc.mu——Bind 的
+// 既有顺序是 rc.mu → h.mu，禁止反向嵌套。
+func (h *Hub) janitorSweep() {
+	h.mu.Lock()
+	rooms := make([]*RoomConn, 0, len(h.rooms))
+	for _, rc := range h.rooms {
+		rooms = append(rooms, rc)
+	}
+	h.mu.Unlock()
+
+	var evict []*RoomConn
+	now := time.Now()
+	for _, rc := range rooms {
+		rc.mu.Lock()
+		if len(rc.sessions) > 0 || len(rc.spectators) > 0 {
+			rc.emptySince = time.Time{}
+			rc.mu.Unlock()
+			continue
+		}
+		if rc.emptySince.IsZero() {
+			rc.emptySince = now
+		}
+		idle := now.Sub(rc.emptySince)
+		if m := rc.match; m != nil && m.warmup && idle >= h.warmupIdleStop {
+			m.Stop()
+			rc.match = nil
+			// Room 转 Ended（幂等；Ended → WARMUP/START/RESTART 均合法，
+			// 回来的人可直接重开）。房间已空，广播是无接收者的状态收口。
+			// 注意必须走 EndWarmup：warmup 房间状态是 Warmup，EndMatch 只认
+			// Running，且 Warmup 态下发 WARMUP 本身是非法转移。
+			rc.Room.EndWarmup()
+			rc.broadcastRoomStateLocked()
+		}
+		if idle >= h.roomEvictAfter {
+			rc.closed = true
+			if rc.match != nil {
+				rc.match.Stop()
+				rc.match = nil
+			}
+			if a := rc.launch.Load(); a != nil {
+				a.Abort()
+			}
+			evict = append(evict, rc)
+		}
+		rc.mu.Unlock()
+	}
+	if len(evict) > 0 {
+		h.mu.Lock()
+		for _, rc := range evict {
+			if h.rooms[rc.Code] == rc {
+				delete(h.rooms, rc.Code)
+			}
+		}
+		h.mu.Unlock()
+	}
+}
+
 type RoomConn struct {
 	Code string
 	Room *room.Room
@@ -124,6 +240,12 @@ type RoomConn struct {
 	// ai is shared by warmup and its following scored match, so both consume
 	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
 	ai *AIService
+
+	// 空置追踪与关停标记（审计 S-26 清道夫；均由 mu 守护）。emptySince 是
+	// 最近一次「无玩家会话且无观战者」的起点；closed 置位后 Bind 拒绝新绑定、
+	// publish 丢弃在途装配。
+	emptySince time.Time
+	closed     bool
 }
 
 func newRoomConn(code string) *RoomConn {
@@ -161,6 +283,9 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	if s.rc != nil {
 		return fmt.Errorf("session already bound")
 	}
+	if rc.closed {
+		return fmt.Errorf("room closed")
+	}
 	info, restore := rc.identities[nick]
 	if !restore {
 		info = SessionInfo{PlayerID: s.playerID, Nick: nick, Color: color}
@@ -190,8 +315,13 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	rc.sessions[s.playerID] = s
 	// 版本链属房间身份：无对局的重连/接管也补发（AI 直填 + 回退的客户端基准）。
 	rc.sendScriptVersionsStateLocked(s.playerID)
+	// 审计 S-27：快照循环只认 NewMatch 装配时冻结的花名册（robotOf）。局中/
+	// 热身中新加入的身份不在花名册——发了 MapBootstrap 也永远等不到第一帧
+	// （客户端 awaitingFull 卡死到下一局发布），只留房间大厅，下一局发布自动入列。
 	if m := rc.match; m != nil && m.activeLocked() {
-		m.bootstrapLocked(s)
+		if _, inRoster := m.robotOf[s.playerID]; inRoster {
+			m.bootstrapLocked(s)
+		}
 	}
 	return nil
 }
@@ -207,6 +337,9 @@ func (rc *RoomConn) BindSpectator(s *Session) error {
 	defer rc.mu.Unlock()
 	if s.rc != nil {
 		return fmt.Errorf("session already bound")
+	}
+	if rc.closed {
+		return fmt.Errorf("room closed")
 	}
 	if len(rc.spectators) >= maxSpectators {
 		return fmt.Errorf("spectator room full (%d)", maxSpectators)
@@ -545,7 +678,8 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	a.match.Store(m)
-	if a.cancelled.Load() || rc.launch.Load() != a {
+	// 审计 S-26：房间被清道夫逐出后，在途装配不得再把对局发布到孤儿房间上。
+	if rc.closed || a.cancelled.Load() || rc.launch.Load() != a {
 		m.Stop()
 		m.start()
 		return

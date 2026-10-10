@@ -481,6 +481,24 @@ func (r *Room) EndMatch() {
 	}
 }
 
+// EndWarmup moves a Warmup room to Ended when its warmup instance was
+// terminated externally with no replacement (idle-room reclamation, audit
+// S-26). Warmup has no natural finish, so without this transition the room
+// would sit in Warmup forever — and WARMUP is an illegal transition from
+// Warmup, so returning players could never re-enter warmup. Idempotent;
+// no-op on any other state; never touches session scores.
+func (r *Room) EndWarmup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == Warmup {
+		if r.match != nil {
+			r.match.Abort()
+		}
+		r.state = Ended
+		r.match = nil
+	}
+}
+
 // AddMatchResult accumulates one match's scores into the Session board.
 // Players not currently seated still keep their accumulated points (they
 // may rejoin). Safe to call in any state.
