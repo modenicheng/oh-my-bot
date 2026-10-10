@@ -24,7 +24,7 @@ function records() {
   try {
     // The live writer can have one partial final line; inspect complete lines.
     const dir = join(work, 'data/matches')
-    const name = readdirSync(dir).find(name => /^SOLOBOT-\d+\.jsonl$/.test(name))
+    const name = readdirSync(dir).find(name => /^SLBTS-\d+\.jsonl$/.test(name))
     if (!name) return []
     return readFileSync(join(dir, name), 'utf8').split('\n').slice(0, -1).filter(Boolean).map(JSON.parse)
   } catch { return [] }
@@ -53,7 +53,7 @@ try {
   }))
   await page.goto(base)
   await startClient(page)
-  await page.fill('#in-room', 'SOLOBOT')
+  await page.fill('#in-room', 'SLBTS')
   await page.fill('#in-nick', 'solo-host')
   await page.click('#btn-join')
   await page.locator('#btn-solo-bots').waitFor({ state: 'visible' })
@@ -95,7 +95,7 @@ try {
         moved: old?.moved || !!old && Math.hypot(pos.x-old.first.x, pos.y-old.first.y) > 0.5 })
     }
   }))
-  await watch.goto(`${base}?view=live&room=SOLOBOT`)
+  await watch.goto(`${base}?view=live&room=SLBTS`)
   await startClient(watch)
   await until(() => seenBots.size === 63 && [...seenBots.values()].some(r => r.moved), 'spectator-observed bot movement', 30_000)
   await watch.close()

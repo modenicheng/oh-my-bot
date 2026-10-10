@@ -64,7 +64,7 @@ try {
   await page.goto(base)
   await startClient(page)
   await page.screenshot({ path: join(shots, 'join.png') })
-  await page.fill('#in-room', 'ROUND2')
+  await page.fill('#in-room', 'RND2')
   await page.fill('#in-nick', 'tester')
   await page.press('#in-nick', 'm')
   assert.equal(await page.locator('#view-manual').isHidden(), true, 'typing m must not open manual')
@@ -87,7 +87,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.keyboard.press('m')
   await page.locator('#btn-start').waitFor({ state: 'visible' })
-  assert.match(page.url(), /room=ROUND2/)
+  assert.match(page.url(), /room=RND2/)
   await page.screenshot({ path: join(shots, 'lobby.png') })
   await page.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
@@ -258,8 +258,8 @@ try {
   await page.locator('.workbench-tools [data-panel="docs"]').click()
   const editorOnly = await page.locator('#workbench-editor').boundingBox()
   assert.ok(editorOnly.height > editorHalf.height * 1.8, 'editor alone fills column')
-  const draftKey = `omb.bot.draft:${JSON.stringify(['ROUND2', 'tester'])}`
-  const tsDraftKey = `omb.bot.draft:${JSON.stringify(['ROUND2', 'tester', 'ts'])}`
+  const draftKey = `omb.bot.draft:${JSON.stringify(['RND2', 'tester'])}`
+  const tsDraftKey = `omb.bot.draft:${JSON.stringify(['RND2', 'tester', 'ts'])}`
   async function replaceSource(source, key = draftKey) {
     await editorInput.focus()
     await page.keyboard.press('ControlOrMeta+a')
@@ -465,7 +465,7 @@ try {
   other.on('pageerror', e => errors.push(String(e)))
   await other.goto(base)
   await startClient(other)
-  await other.fill('#in-room', 'LOGS2')
+  await other.fill('#in-room', 'LGS2')
   await other.fill('#in-nick', 'recorder')
   await other.click('#btn-join')
   await other.locator('#btn-start').waitFor({ state: 'visible' })
@@ -476,7 +476,7 @@ try {
   await other.mouse.down()
   await other.keyboard.down('w')
   const entries = await fetch(`${base}/api/matches`).then(r => r.json())
-  const replayId = entries.find(x => x.startsWith('LOGS2'))
+  const replayId = entries.find(x => x.startsWith('LGS2'))
   await until(async () => {
     const text = await fetch(`${base}/api/replay/${replayId}`).then(r => r.text())
     return text.split('\n').filter(Boolean).some(line => { try { return JSON.parse(line).tick >= 120 } catch { return false } })

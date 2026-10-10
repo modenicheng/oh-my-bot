@@ -76,7 +76,7 @@ try {
   })
   await page.goto(base)
   await startClient(page)
-  await page.fill('#in-room', 'RECON')
+  await page.fill('#in-room', 'RECN')
   await page.fill('#in-nick', 'driver')
   await page.click('#btn-join')
   await page.locator('#btn-warmup').waitFor({ state: 'visible' })

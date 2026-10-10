@@ -60,7 +60,7 @@ try {
   }))
   await host.goto(base)
   await startClient(host)
-  await host.fill('#in-room', 'LIVEBOT')
+  await host.fill('#in-room', 'WATCH2')
   await host.fill('#in-nick', 'live-host')
   await host.click('#btn-join')
   await host.locator('#btn-warmup').waitFor({ state: 'visible' })
@@ -70,7 +70,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   await context.addInitScript(() => {
     // A stale player profile must not turn a direct spectator URL into a player.
-    sessionStorage.setItem('omb.join', JSON.stringify({ roomCode: 'LIVEBOT', nick: 'not-a-player', color: '#00e5ff' }))
+    sessionStorage.setItem('omb.join', JSON.stringify({ roomCode: 'WATCH2', nick: 'not-a-player', color: '#00e5ff' }))
     const NativeWebSocket = window.WebSocket
     window.__liveSockets = []
     window.WebSocket = class extends NativeWebSocket {
@@ -115,7 +115,7 @@ try {
       }
     })
   })
-  await watch.goto(`${base}/?view=live&room=LIVEBOT`)
+  await watch.goto(`${base}/?view=live&room=WATCH2`)
   await startClient(watch)
   await watch.locator('#view-live').waitFor({ state: 'visible' })
   await until(() => room?.robotsOnline === 1, 'idle spectator room state')
@@ -281,7 +281,7 @@ try {
       }
     })
   })
-  await finalPage.goto(`${base}/?view=live&room=LIVEBOT`)
+  await finalPage.goto(`${base}/?view=live&room=WATCH2`)
   await startClient(finalPage)
   await until(() => finalPage.locator('#view-live').getAttribute('data-tick').then(tick => tick === '200'), 'controlled live frame')
   const target = fixtureRobots[0].base.id

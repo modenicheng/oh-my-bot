@@ -45,7 +45,7 @@ try {
     else if (message.case === 'event' && message.value.kind.case === 'scriptError') errors.push(JSON.stringify(message.value.kind.value))
   }))
   await page.goto(base); await startClient(page)
-  await page.fill('#in-room', 'TAKEOVER'); await page.fill('#in-nick', 'taker')
+  await page.fill('#in-room', 'TAKEVR'); await page.fill('#in-nick', 'taker')
   await page.click('#btn-join')
   await page.locator('#view-room').waitFor({ state: 'visible' })
   await until(() => page.locator('#room-state').textContent().then(text => text.includes('房主 taker')), 'authoritative room joined')
