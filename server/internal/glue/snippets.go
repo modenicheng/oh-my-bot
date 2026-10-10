@@ -238,18 +238,27 @@ func settingsToProto(cfg []snippet.Setting) []*ombv1.SnippetSetting {
 	return out
 }
 
-// snippetSourceViews catalog 全量官方模块的可查看源码（教材视角，
-// 默认参数渲染；每次请求现生成，与组合执行同一定稿）。
+// snippetSourceViews catalog 全量官方模块：目录元数据单源下发（审计 X-2，
+// 客户端 SNIPPET_ROWS 退化为离线兜底）+ 可查看源码（教材视角，默认参数渲染；
+// 每次请求现生成，与组合执行同一定稿）。
 func snippetSourceViews() []*ombv1.SnippetSourceView {
 	mods := snippet.Catalog()
 	out := make([]*ombv1.SnippetSourceView, 0, len(mods))
 	for _, mod := range mods {
 		out = append(out, &ombv1.SnippetSourceView{
-			Kind:      snippet.KindToProto(mod.Kind),
-			Title:     mod.Title,
-			Source:    mod.Source(mod.Default), // 默认参数下的定稿源码（教材视角）
-			DefaultP1: mod.Default.P1,
-			DefaultS1: mod.Default.S1,
+			Kind:           snippet.KindToProto(mod.Kind),
+			Title:          mod.Title,
+			Source:         mod.Source(mod.Default), // 默认参数下的定稿源码（教材视角）
+			DefaultP1:      mod.Default.P1,
+			DefaultS1:      mod.Default.S1,
+			Param:          uint32(mod.Param.Kind),
+			Min:            mod.Param.Min,
+			Max:            mod.Param.Max,
+			Step:           mod.Param.Step,
+			Unit:           mod.Param.Unit,
+			Hint:           mod.Hint,
+			Key:            mod.Key,
+			DefaultEnabled: mod.DefaultEnabled,
 		})
 	}
 	return out

@@ -401,3 +401,27 @@ func defaults() []Setting {
 	}
 	return out
 }
+
+// 审计 X-2：目录元数据（协议下发的单源）必须自洽——Param 控件形态与范围
+// 同 Validate 的边界一致，Key/Hint 非空，DefaultEnabled 与 Default 参数一致。
+func TestCatalogMetadataSelfConsistent(t *testing.T) {
+	for _, mod := range Catalog() {
+		if mod.Key == "" || mod.Title == "" || mod.Hint == "" {
+			t.Fatalf("module %v missing key/title/hint: %+v", mod.Kind, mod)
+		}
+		if mod.Param.Kind == ParamNumber {
+			if mod.Param.Step <= 0 || mod.Param.Min >= mod.Param.Max {
+				t.Fatalf("module %v invalid number param range: %+v", mod.Kind, mod.Param)
+			}
+			// 范围边界与 Validate 一致：下界/上界/默认值都能通过校验。
+			for _, v := range []float64{mod.Param.Min, mod.Param.Max, mod.Default.P1} {
+				if _, err := mod.Validate(Setting{Kind: mod.Kind, P1: v}); err != nil {
+					t.Fatalf("module %v param bound %v rejected by own Validate: %v", mod.Kind, v, err)
+				}
+			}
+		}
+		if mod.Param.Kind == ParamWaypoints && mod.Default.S1 == "" {
+			t.Fatalf("module %v waypoints param without default route", mod.Kind)
+		}
+	}
+}

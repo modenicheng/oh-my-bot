@@ -5,7 +5,7 @@ import type { EvSnippetResult, SnippetSourceView } from '@omb/protocol'
 import { icon, type IconName } from '../icons'
 import {
   SNIPPET_ROWS, clampSnippetNumber, defaultSnippetDraft, loadSnippetDraft, saveSnippetDraft,
-  snippetDraftMatchesApplied, snippetSettingsFor, validateWaypoints,
+  snippetDraftMatchesApplied, snippetRowsFromSources, snippetSettingsFor, validateWaypoints,
   type SnippetDraft, type SnippetRowDef, type SnippetRowState,
 } from './snippets'
 
@@ -43,6 +43,8 @@ export class SnippetPanelView {
   private applied?: ReturnType<typeof snippetSettingsFor>
   private appliedRev = 0
   private sources = new Map<number, SnippetSourceView>()
+  /** 行定义：初始用离线兜底（审计 X-2），服务器 catalog 回执后以服务器为准。 */
+  private rowDefs: readonly SnippetRowDef[] = SNIPPET_ROWS
   private identity = { roomCode: '', nick: '' }
   private status: SnippetApplyStatus = { phase: 'idle' }
   private pendingTimer?: ReturnType<typeof setTimeout>
@@ -82,8 +84,8 @@ export class SnippetPanelView {
           <h2>Snippet 驾驶辅助</h2>
         </div>
         <div class="snippet-heading-meta" aria-label="辅助模块状态">
-          <span class="snippet-enabled-count">0 / ${SNIPPET_ROWS.length} ONLINE</span>
-          <span class="snippet-source-count">源码 0 / ${SNIPPET_ROWS.length}</span>
+          <span class="snippet-enabled-count">0 / ${this.rowDefs.length} ONLINE</span>
+          <span class="snippet-source-count">源码 0 / ${this.rowDefs.length}</span>
         </div>
       </header>
       <div class="snippet-list" aria-label="官方 Snippet 模块"></div>
@@ -95,10 +97,16 @@ export class SnippetPanelView {
     this.enabledCountEl = root.querySelector<HTMLElement>('.snippet-enabled-count')!
     this.sourceCountEl = root.querySelector<HTMLElement>('.snippet-source-count')!
     this.applyButton = root.querySelector<HTMLButtonElement>('.snippet-apply')!
-    const list = root.querySelector<HTMLElement>('.snippet-list')!
-    for (const def of SNIPPET_ROWS) list.append(this.buildRow(def))
+    this.buildRows()
     this.applyButton.addEventListener('click', () => this.apply())
     this.render()
+  }
+
+  /** 按当前 rowDefs 重建行 DOM（服务器 catalog 与兜底表不一致时整体换血）。 */
+  private buildRows(): void {
+    const list = this.deps.root.querySelector<HTMLElement>('.snippet-list')!
+    this.rows.clear()
+    for (const def of this.rowDefs) list.append(this.buildRow(def))
   }
 
   private buildRow(def: SnippetRowDef): HTMLElement {
@@ -117,7 +125,8 @@ export class SnippetPanelView {
     toggle.setAttribute('aria-label', `启用${def.title}`)
     const iconBox = document.createElement('span')
     iconBox.className = 'snippet-module-icon'
-    iconBox.append(icon(SNIPPET_ICONS[def.key]))
+    // 服务器目录出现未知 key（版本偏差）时图标兜底，不因查表 miss 崩溃。
+    iconBox.append(icon(SNIPPET_ICONS[def.key] ?? 'target'))
     const copy = document.createElement('span')
     copy.className = 'snippet-module-copy'
     const name = document.createElement('strong')
@@ -270,7 +279,7 @@ export class SnippetPanelView {
     if (this.status.phase === 'pending') return
     const { online, inMatch } = this.deps.availability()
     if (!online || !inMatch) return
-    for (const def of SNIPPET_ROWS) {
+    for (const def of this.rowDefs) {
       if (def.param.type !== 'waypoints') continue
       const state = this.draft[def.key]
       if (!state.enabled) continue
@@ -281,7 +290,7 @@ export class SnippetPanelView {
         return
       }
     }
-    const sent = this.deps.send(snippetSettingsFor(this.draft))
+    const sent = this.deps.send(snippetSettingsFor(this.draft, this.rowDefs))
     if (!sent) {
       this.status = { phase: 'error', message: '请求未发送：连接正在切换，请稍后重试。' }
       this.render()
@@ -301,7 +310,8 @@ export class SnippetPanelView {
     if (this.identity.roomCode === roomCode && this.identity.nick === nick) return
     this.persistNow() // 身份切换前把旧草稿落盘
     this.identity = { roomCode, nick }
-    this.draft = roomCode ? loadSnippetDraft(roomCode, nick) : defaultSnippetDraft()
+    this.draft = roomCode ? loadSnippetDraft(roomCode, nick) : defaultSnippetDraft(this.rowDefs)
+    this.ensureDraftFor(this.rowDefs)
     this.applied = undefined
     this.appliedRev = 0
     this.clearPendingTimer()
@@ -312,6 +322,16 @@ export class SnippetPanelView {
   acceptResult(result: EvSnippetResult): void {
     this.clearPendingTimer()
     for (const view of result.sources) this.sources.set(view.kind, view)
+    // 审计 X-2：服务器 catalog 到达后行定义以服务器为准（key/title/hint/参数
+    // 控件/默认值），SNIPPET_ROWS 退化为离线兜底。仅在真正不一致时重建行 DOM。
+    if (result.sources.length > 0) {
+      const defs = snippetRowsFromSources(result.sources)
+      if (this.catalogDiffers(defs)) {
+        this.rowDefs = defs
+        this.ensureDraftFor(defs)
+        this.buildRows()
+      }
+    }
     if (result.ok) {
       this.applied = result.applied.map(setting => ({ ...setting }))
       this.appliedRev = result.scriptRev
@@ -341,6 +361,28 @@ export class SnippetPanelView {
   private clearPendingTimer(): void {
     if (this.pendingTimer) clearTimeout(this.pendingTimer)
     this.pendingTimer = undefined
+  }
+
+  /** 服务器目录与当前行定义是否有差异（key/文案/控件形态/默认值任一）。 */
+  private catalogDiffers(defs: readonly SnippetRowDef[]): boolean {
+    if (defs.length !== this.rowDefs.length) return true
+    return defs.some((def, i) => {
+      const cur = this.rowDefs[i]
+      if (!cur) return true
+      return cur.key !== def.key || cur.title !== def.title || cur.hint !== def.hint
+        || JSON.stringify(cur.param) !== JSON.stringify(def.param)
+        || cur.defaultEnabled !== def.defaultEnabled
+        || cur.defaultP1 !== def.defaultP1 || cur.defaultS1 !== def.defaultS1
+    })
+  }
+
+  /** 为服务器目录中出现而本地草稿缺失的行补默认态（版本偏差防御）。 */
+  private ensureDraftFor(defs: readonly SnippetRowDef[]): void {
+    for (const def of defs) {
+      if (!this.draft[def.key]) {
+        this.draft[def.key] = { enabled: def.defaultEnabled, p1: def.defaultP1, s1: def.defaultS1 }
+      }
+    }
   }
 
   private persist(): void {
@@ -389,10 +431,10 @@ export class SnippetPanelView {
       if (entry.textEl) entry.textEl.disabled = !state.enabled
       if (!entry.sourceBox.hidden) this.renderSource(entry.def, entry.sourcePre, entry.sourceNote)
     }
-    this.enabledCountEl.textContent = `${enabledCount} / ${SNIPPET_ROWS.length} ONLINE`
+    this.enabledCountEl.textContent = `${enabledCount} / ${this.rowDefs.length} ONLINE`
     this.enabledCountEl.dataset.active = String(enabledCount > 0)
-    this.sourceCountEl.textContent = `源码 ${this.sources.size} / ${SNIPPET_ROWS.length}`
-    this.sourceCountEl.dataset.ready = String(this.sources.size === SNIPPET_ROWS.length)
+    this.sourceCountEl.textContent = `源码 ${this.sources.size} / ${this.rowDefs.length}`
+    this.sourceCountEl.dataset.ready = String(this.sources.size === this.rowDefs.length)
 
     const { online, inMatch } = this.deps.availability()
     this.applyButton.disabled = !online || !inMatch || this.status.phase === 'pending'
@@ -416,7 +458,7 @@ export class SnippetPanelView {
   }
 
   private hasAnyEnabled(): boolean {
-    return SNIPPET_ROWS.some(row => this.draft[row.key].enabled)
+    return this.rowDefs.some(row => this.draft[row.key].enabled)
   }
 
   /** 已应用配置里含自瞄模块（服务器已回执生效）。用于瞄准 guard。 */

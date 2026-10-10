@@ -37,12 +37,15 @@ const (
 const (
 	emergencyShieldMin     = 0.0
 	emergencyShieldMax     = 100.0
+	emergencyShieldStep    = 5.0
 	emergencyShieldDefault = 30.0
 	dangerAvoidRadiusMin   = 2.0
 	dangerAvoidRadiusMax   = 20.0
+	dangerAvoidRadiusStep  = 1.0
 	dangerAvoidRadiusDflt  = 8.0
 	lowHpHealthPackMin     = 1.0
 	lowHpHealthPackMax     = 100.0
+	lowHpHealthPackStep    = 1.0
 	lowHpHealthPackDefault = 45.0
 	patrolMaxWaypoints     = 8
 	patrolArenaRadius      = 80.0 // 地图半径（±80 坐标域）
@@ -67,22 +70,24 @@ const (
 
 // Param 参数控件元数据（审计 X-2：目录由服务器单源下发）。
 type Param struct {
-	Kind  ParamKind
-	Min   float64
-	Max   float64
-	Step  float64
-	Unit  string
-	Hint  string
+	Kind ParamKind
+	Min  float64
+	Max  float64
+	Step float64
+	Unit string
 }
 
 // Module 一条官方 Snippet 的 catalog 条目。
 type Module struct {
-	Kind    Kind
-	Title   string // 展示名（协议下发）
-	Key     string // 客户端本地行键（草稿/控件接线，协议下发）
-	Param   Param  // 参数控件元数据（协议下发）
-	DefaultEnabled bool // 默认是否启用
-	Default Setting
+	Kind  Kind
+	Title string // 展示名（协议下发）
+	Key   string // 客户端本地行键（草稿/控件接线，协议下发）
+	Hint  string // 展示用说明（协议下发）
+	// Param 参数控件元数据（协议下发；ParamNone 时其余字段无意义）。
+	Param Param
+	// DefaultEnabled 默认是否启用（协议下发；当前目录全部默认关闭）。
+	DefaultEnabled bool
+	Default        Setting
 	// Validate 校验参数并返回规范化后的 Setting（越界/非法 → error）。
 	Validate func(s Setting) (Setting, error)
 	// Source 生成官方模块 JS 源码（cfg 已规范化；字符串为模块体，
@@ -97,6 +102,9 @@ var catalog = []Module{
 	{
 		Kind:    AutoAim,
 		Title:   "自动瞄准",
+		Key:     "autoAim",
+		Hint:    "炮塔持续直瞄最近敌人（不做提前量预判）",
+		Param:   Param{Kind: ParamNone},
 		Default: Setting{Kind: AutoAim},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = AutoAim
@@ -109,6 +117,9 @@ var catalog = []Module{
 	{
 		Kind:    EmergencyShield,
 		Title:   "紧急护盾",
+		Key:     "shield",
+		Hint:    "HP 低于阈值自动开盾（恢复后关闭）",
+		Param:   Param{Kind: ParamNumber, Min: emergencyShieldMin, Max: emergencyShieldMax, Step: emergencyShieldStep, Unit: "%"},
 		Default: Setting{Kind: EmergencyShield, P1: emergencyShieldDefault},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = EmergencyShield
@@ -124,6 +135,9 @@ var catalog = []Module{
 	{
 		Kind:    DangerAvoid,
 		Title:   "危险规避",
+		Key:     "avoid",
+		Hint:    "威胁半径内有敌人/弹丸时脱离",
+		Param:   Param{Kind: ParamNumber, Min: dangerAvoidRadiusMin, Max: dangerAvoidRadiusMax, Step: dangerAvoidRadiusStep, Unit: "m"},
 		Default: Setting{Kind: DangerAvoid, P1: dangerAvoidRadiusDflt},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = DangerAvoid
@@ -139,6 +153,9 @@ var catalog = []Module{
 	{
 		Kind:    Patrol,
 		Title:   "简单巡逻",
+		Key:     "patrol",
+		Hint:    "顺序巡逻路径点（x,y;… 最多 8 点，±80m）",
+		Param:   Param{Kind: ParamWaypoints},
 		Default: Setting{Kind: Patrol, S1: patrolDefaultS1},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = Patrol
@@ -160,6 +177,9 @@ var catalog = []Module{
 	{
 		Kind:    GlobalCore,
 		Title:   "全局 Core 拾取",
+		Key:     "globalCore",
+		Hint:    "朝全图最近的存活 Core 寻路移动（接触即拾取）",
+		Param:   Param{Kind: ParamNone},
 		Default: Setting{Kind: GlobalCore},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = GlobalCore
@@ -172,6 +192,9 @@ var catalog = []Module{
 	{
 		Kind:    LowHpHealthPack,
 		Title:   "低血量自动拾取血包",
+		Key:     "lowHpHealthPack",
+		Hint:    "HP 不高于阈值时朝最近可用血包寻路移动",
+		Param:   Param{Kind: ParamNumber, Min: lowHpHealthPackMin, Max: lowHpHealthPackMax, Step: lowHpHealthPackStep, Unit: "%"},
 		Default: Setting{Kind: LowHpHealthPack, P1: lowHpHealthPackDefault},
 		Validate: func(s Setting) (Setting, error) {
 			s.Kind = LowHpHealthPack

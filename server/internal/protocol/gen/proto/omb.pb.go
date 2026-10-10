@@ -3871,14 +3871,24 @@ func (x *EvScriptRollbackResult) GetLanguage() ScriptLanguage {
 }
 
 type SnippetSourceView struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          SnippetKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=omb.v1.SnippetKind" json:"kind,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // 官方模块源码（与服务器组合执行的同一定稿）
-	DefaultP1     float64                `protobuf:"fixed64,4,opt,name=default_p1,json=defaultP1,proto3" json:"default_p1,omitempty"`
-	DefaultS1     string                 `protobuf:"bytes,5,opt,name=default_s1,json=defaultS1,proto3" json:"default_s1,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Kind      SnippetKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=omb.v1.SnippetKind" json:"kind,omitempty"`
+	Title     string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Source    string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // 官方模块源码（与服务器组合执行的同一定稿）
+	DefaultP1 float64                `protobuf:"fixed64,4,opt,name=default_p1,json=defaultP1,proto3" json:"default_p1,omitempty"`
+	DefaultS1 string                 `protobuf:"bytes,5,opt,name=default_s1,json=defaultS1,proto3" json:"default_s1,omitempty"`
+	// 审计 X-2：目录元数据由服务器 catalog 单源下发，客户端不再手抄一份。
+	// param 描述控件形态：NONE=0 无参数 / NUMBER=1 数值范围 / WAYPOINTS=2 路径点。
+	Param          uint32  `protobuf:"varint,6,opt,name=param,proto3" json:"param,omitempty"`
+	Min            float64 `protobuf:"fixed64,7,opt,name=min,proto3" json:"min,omitempty"`                                             // NUMBER：下界（含）
+	Max            float64 `protobuf:"fixed64,8,opt,name=max,proto3" json:"max,omitempty"`                                             // NUMBER：上界（含）
+	Step           float64 `protobuf:"fixed64,9,opt,name=step,proto3" json:"step,omitempty"`                                           // NUMBER：步进
+	Unit           string  `protobuf:"bytes,10,opt,name=unit,proto3" json:"unit,omitempty"`                                            // NUMBER：单位（"%" / "m"，可为空）
+	Hint           string  `protobuf:"bytes,11,opt,name=hint,proto3" json:"hint,omitempty"`                                            // 展示用说明
+	Key            string  `protobuf:"bytes,12,opt,name=key,proto3" json:"key,omitempty"`                                              // 客户端本地行键（autoAim/shield/...；用于草稿与控件接线）
+	DefaultEnabled bool    `protobuf:"varint,13,opt,name=default_enabled,json=defaultEnabled,proto3" json:"default_enabled,omitempty"` // 默认是否启用
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SnippetSourceView) Reset() {
@@ -3944,6 +3954,62 @@ func (x *SnippetSourceView) GetDefaultS1() string {
 		return x.DefaultS1
 	}
 	return ""
+}
+
+func (x *SnippetSourceView) GetParam() uint32 {
+	if x != nil {
+		return x.Param
+	}
+	return 0
+}
+
+func (x *SnippetSourceView) GetMin() float64 {
+	if x != nil {
+		return x.Min
+	}
+	return 0
+}
+
+func (x *SnippetSourceView) GetMax() float64 {
+	if x != nil {
+		return x.Max
+	}
+	return 0
+}
+
+func (x *SnippetSourceView) GetStep() float64 {
+	if x != nil {
+		return x.Step
+	}
+	return 0
+}
+
+func (x *SnippetSourceView) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *SnippetSourceView) GetHint() string {
+	if x != nil {
+		return x.Hint
+	}
+	return ""
+}
+
+func (x *SnippetSourceView) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *SnippetSourceView) GetDefaultEnabled() bool {
+	if x != nil {
+		return x.DefaultEnabled
+	}
+	return false
 }
 
 type EvSnippetResult struct {
@@ -5714,7 +5780,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"script_rev\x18\x04 \x01(\rR\tscriptRev\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x127\n" +
 	"\blanguage\x18\x06 \x01(\x0e2\x16.omb.v1.ScriptLanguageH\x00R\blanguage\x88\x01\x01B\v\n" +
-	"\t_language\"\xa8\x01\n" +
+	"\t_language\"\xd9\x02\n" +
 	"\x11SnippetSourceView\x12'\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x13.omb.v1.SnippetKindR\x04kind\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
@@ -5722,7 +5788,16 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\n" +
 	"default_p1\x18\x04 \x01(\x01R\tdefaultP1\x12\x1d\n" +
 	"\n" +
-	"default_s1\x18\x05 \x01(\tR\tdefaultS1\"\xbd\x01\n" +
+	"default_s1\x18\x05 \x01(\tR\tdefaultS1\x12\x14\n" +
+	"\x05param\x18\x06 \x01(\rR\x05param\x12\x10\n" +
+	"\x03min\x18\a \x01(\x01R\x03min\x12\x10\n" +
+	"\x03max\x18\b \x01(\x01R\x03max\x12\x12\n" +
+	"\x04step\x18\t \x01(\x01R\x04step\x12\x12\n" +
+	"\x04unit\x18\n" +
+	" \x01(\tR\x04unit\x12\x12\n" +
+	"\x04hint\x18\v \x01(\tR\x04hint\x12\x10\n" +
+	"\x03key\x18\f \x01(\tR\x03key\x12'\n" +
+	"\x0fdefault_enabled\x18\r \x01(\bR\x0edefaultEnabled\"\xbd\x01\n" +
 	"\x0fEvSnippetResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x120\n" +

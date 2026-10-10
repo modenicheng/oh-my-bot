@@ -1,11 +1,14 @@
 // Snippet 驾驶辅助纯逻辑：storage 键约定、上行 payload、路径点预检、
 // 草稿与服务器 applied 确认态对比。上行用 create message 类型，
 // 与 workbench.ts 真实编码路径一致；范围以 SNIPPET_ROWS 常量为预期。
+import { create } from '@bufbuild/protobuf'
 import { describe, expect, it, vi } from 'vitest'
+import { SnippetSourceViewSchema, type SnippetKind, type SnippetSourceView } from '@omb/protocol'
 import {
   PATROL_ARENA_RADIUS, PATROL_MAX_WAYPOINTS, SNIPPET_ROWS, clampSnippetNumber,
   defaultSnippetDraft, loadSnippetDraft, saveSnippetDraft, snippetDraftKey,
-  snippetDraftMatchesApplied, snippetSettingsFor, validateWaypoints, type SnippetDraft,
+  snippetDraftMatchesApplied, snippetRowsFromSources, snippetSettingsFor,
+  validateWaypoints, type SnippetDraft, type SnippetRowDef,
 } from './snippets'
 
 function draftWith(key: 'autoAim' | 'shield' | 'avoid' | 'patrol' | 'globalCore' | 'lowHpHealthPack', patch: Partial<{ enabled: boolean; p1: number; s1: string }>): SnippetDraft {
@@ -171,5 +174,62 @@ describe('draft persistence', () => {
     stubStorage()
     expect(loadSnippetDraft('NOPE', 'none')).toEqual(defaultSnippetDraft())
     vi.unstubAllGlobals()
+  })
+})
+
+// 审计 X-2：目录元数据由服务器单源下发，SNIPPET_ROWS 只是离线兜底。
+// 本组用例把兜底表经「服务器下发形态」往返，钉住兜底与服务器 catalog 的语义一致：
+// 服务器侧改动 catalog 而不改兜底表时，这里会红（反向漂移的可见信号）。
+describe('snippetRowsFromSources', () => {
+  function viewOf(row: SnippetRowDef): SnippetSourceView {
+    return create(SnippetSourceViewSchema, {
+      kind: row.kind,
+      title: row.title,
+      source: `// ${row.key}`,
+      defaultP1: row.defaultP1,
+      defaultS1: row.defaultS1,
+      param: row.param.type === 'number' ? 1 : row.param.type === 'waypoints' ? 2 : 0,
+      min: row.param.type === 'number' ? row.param.min : 0,
+      max: row.param.type === 'number' ? row.param.max : 0,
+      step: row.param.type === 'number' ? row.param.step : 0,
+      unit: row.param.type === 'number' ? row.param.unit : '',
+      hint: row.hint,
+      key: row.key,
+      defaultEnabled: row.defaultEnabled,
+    })
+  }
+
+  it('NUMBER/WAYPOINTS/NONE 三种控件形态正确落地', () => {
+    const rows = snippetRowsFromSources([
+      viewOf(SNIPPET_ROWS.find(row => row.key === 'shield')!),
+      viewOf(SNIPPET_ROWS.find(row => row.key === 'patrol')!),
+      viewOf(SNIPPET_ROWS.find(row => row.key === 'autoAim')!),
+    ])
+    expect(rows[0]!.param).toEqual({ type: 'number', min: 0, max: 100, step: 5, unit: '%' })
+    expect(rows[1]!.param).toEqual({ type: 'waypoints' })
+    expect(rows[2]!.param).toEqual({ type: 'none' })
+    expect(rows[0]!.defaultEnabled).toBe(false)
+    expect(rows[0]!.defaultP1).toBe(30)
+  })
+
+  it('兜底表与服务器 catalog 往返一致（漂移钉死）', () => {
+    expect(snippetRowsFromSources(SNIPPET_ROWS.map(viewOf))).toEqual(SNIPPET_ROWS)
+  })
+
+  it('未知/缺省 key 合成 kind{n}，NUMBER 行 step 缺省 1', () => {
+    const rows = snippetRowsFromSources([
+      create(SnippetSourceViewSchema, { kind: 9 as SnippetKind, title: '未知模块', source: '', param: 1, min: 0, max: 10 }),
+    ])
+    expect(rows[0]!.key).toBe('kind9')
+    expect(rows[0]!.param).toEqual({ type: 'number', min: 0, max: 10, step: 1, unit: '' })
+    expect(rows[0]!.hint).toBe('')
+  })
+
+  it('defaultSnippetDraft 可按服务器行定义生成（含兜底表之外的新键）', () => {
+    const defs = snippetRowsFromSources([
+      create(SnippetSourceViewSchema, { kind: 9 as SnippetKind, title: '新模块', source: '', key: 'newModule', defaultP1: 7, defaultEnabled: true }),
+    ])
+    const draft = defaultSnippetDraft(defs)
+    expect(draft).toEqual({ newModule: { enabled: true, p1: 7, s1: '' } })
   })
 })

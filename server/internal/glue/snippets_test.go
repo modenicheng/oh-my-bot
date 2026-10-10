@@ -102,9 +102,18 @@ func TestConfigureSnippetsAppliesAndAcks(t *testing.T) {
 	if len(r.Sources) != len(snippet.Catalog()) {
 		t.Fatalf("official source views = %d, want %d", len(r.Sources), len(snippet.Catalog()))
 	}
-	for _, sv := range r.Sources {
-		if sv.Source == "" || sv.Title == "" {
+	for i, sv := range r.Sources {
+		// 审计 X-2：目录元数据单源下发——Key/Hint/Param/DefaultEnabled 不再零填充。
+		mod := snippet.Catalog()[i]
+		if sv.Source == "" || sv.Title == "" || sv.Key == "" || sv.Hint == "" {
 			t.Fatalf("source view incomplete: %+v", sv)
+		}
+		if sv.Key != mod.Key || sv.Title != mod.Title || sv.Hint != mod.Hint {
+			t.Fatalf("source view metadata mismatch: %+v vs module %+v", sv, mod)
+		}
+		if sv.Param != uint32(mod.Param.Kind) || sv.Min != mod.Param.Min || sv.Max != mod.Param.Max ||
+			sv.Step != mod.Param.Step || sv.Unit != mod.Param.Unit || sv.DefaultEnabled != mod.DefaultEnabled {
+			t.Fatalf("source view param metadata mismatch: %+v vs module param %+v", sv, mod.Param)
 		}
 	}
 

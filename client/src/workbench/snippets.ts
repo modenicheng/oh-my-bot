@@ -7,7 +7,7 @@
 // 无参数纯直瞄（提前量预判是玩家/Bot Script 的乐趣，官方模块不做）。
 
 import { create } from '@bufbuild/protobuf'
-import { SnippetSettingSchema, type SnippetKind, type SnippetSetting } from '@omb/protocol'
+import { SnippetSettingSchema, type SnippetKind, type SnippetSetting, type SnippetSourceView } from '@omb/protocol'
 
 /** 参数控件形态：无参数 / 数值范围 / 文本（路径点）。 */
 export type SnippetParam =
@@ -26,7 +26,8 @@ export interface SnippetRowDef {
   defaultS1: string
 }
 
-/** 与 server/internal/snippet/catalog.go 常量对齐（漂移由服务端回执兜底）。 */
+/** 与 server/internal/snippet/catalog.go 常量对齐（审计 X-2：目录元数据由
+ * 服务器单源下发，本表退化为离线兜底——服务器不可达/旧回执时渲染与预检用）。 */
 export const SNIPPET_ROWS: readonly SnippetRowDef[] = [
   {
     kind: 1, key: 'autoAim', title: '自动瞄准', hint: '炮塔持续直瞄最近敌人（不做提前量预判）',
@@ -65,9 +66,33 @@ export interface SnippetRowState {
 
 export type SnippetDraft = Record<SnippetRowDef['key'], SnippetRowState>
 
-export function defaultSnippetDraft(): SnippetDraft {
+/**
+ * 服务器 catalog（EvSnippetResult.sources）→ 行模型（审计 X-2 的客户端唯一
+ * 落地点：面板行定义以本函数输出为准，SNIPPET_ROWS 只兜底）。未知 key
+ * （版本偏差）合成 `kind{n}` 键；NUMBER 行 step 缺省为 1（range 控件不接受 0）。
+ */
+export function snippetRowsFromSources(sources: readonly SnippetSourceView[]): SnippetRowDef[] {
+  return sources.map(view => {
+    const param: SnippetParam =
+      view.param === 1 ? { type: 'number', min: view.min, max: view.max, step: view.step > 0 ? view.step : 1, unit: view.unit }
+      : view.param === 2 ? { type: 'waypoints' }
+      : { type: 'none' }
+    return {
+      kind: view.kind,
+      key: (view.key || `kind${view.kind}`) as SnippetRowDef['key'],
+      title: view.title,
+      hint: view.hint,
+      param,
+      defaultEnabled: view.defaultEnabled,
+      defaultP1: view.defaultP1,
+      defaultS1: view.defaultS1,
+    }
+  })
+}
+
+export function defaultSnippetDraft(defs: readonly SnippetRowDef[] = SNIPPET_ROWS): SnippetDraft {
   const draft = {} as SnippetDraft
-  for (const row of SNIPPET_ROWS) {
+  for (const row of defs) {
     draft[row.key] = { enabled: row.defaultEnabled, p1: row.defaultP1, s1: row.defaultS1 }
   }
   return draft
@@ -108,9 +133,9 @@ export function validateWaypoints(text: string): string | undefined {
 }
 
 /** 草稿 → 上行条目（仅启用行；数值经夹取，无参数行 p1 清零）。 */
-export function snippetSettingsFor(draft: SnippetDraft): SnippetSetting[] {
+export function snippetSettingsFor(draft: SnippetDraft, defs: readonly SnippetRowDef[] = SNIPPET_ROWS): SnippetSetting[] {
   const out: SnippetSetting[] = []
-  for (const row of SNIPPET_ROWS) {
+  for (const row of defs) {
     const state = draft[row.key]
     if (!state.enabled) continue
     const p1 = row.param.type === 'number' ? clampSnippetNumber(row, state.p1) : 0
@@ -126,8 +151,10 @@ export function snippetSettingsFor(draft: SnippetDraft): SnippetSetting[] {
 }
 
 /** 本地草稿是否与服务器 applied 确认态一致（不一致时提示“未应用的修改”）。 */
-export function snippetDraftMatchesApplied(draft: SnippetDraft, applied: SnippetSetting[]): boolean {
-  const mine = snippetSettingsFor(draft)
+export function snippetDraftMatchesApplied(
+  draft: SnippetDraft, applied: SnippetSetting[], defs: readonly SnippetRowDef[] = SNIPPET_ROWS,
+): boolean {
+  const mine = snippetSettingsFor(draft, defs)
   if (mine.length !== applied.length) return false
   const byKind = new Map(applied.map(setting => [setting.kind, setting]))
   for (const setting of mine) {
