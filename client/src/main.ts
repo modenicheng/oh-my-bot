@@ -440,6 +440,9 @@ function stopRttLoop(): void {
 window.addEventListener('keydown', (e) => {
   if (!viewLive.hidden) return
   if (gameOptions.handleGlobalKey(e)) return
+  // 选项层（aria-modal）打开期间其余全局快捷键一律短路（审计 C-32③）：
+  // M/C 会把焦点移出模态对话框，Tab 焦点圈随之失效。
+  if (gameOptions.isOpen) return
   if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return

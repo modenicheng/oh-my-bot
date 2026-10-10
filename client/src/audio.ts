@@ -280,6 +280,9 @@ class AudioEngine {
       master.gain.value = this.mute ? 0 : this.vol
       master.connect(comp); comp.connect(ctx.destination)
       this.ctx = ctx; this.master = master
+      // WebKit 即使在可信手势内新建 AudioContext 也起始 suspended（审计 C-43）：
+      // 创建分支必须像复用分支一样立即 resume，否则首手势后音效与 BGM 静默到下一次手势。
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
       bgm.setVisible(!document.hidden)
       bgm.attach(ctx)
       window.addEventListener('pagehide', () => bgm.setVisible(false))
