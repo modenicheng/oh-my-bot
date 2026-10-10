@@ -1,8 +1,10 @@
 // CanvasStage：canvas + DPR 后备缓冲 + rAF 宿主（审计 C-26）。
 // 三处手写循环（controls / live / replay-player）共用：同尺寸短路、DPR 漂移
 // 逐帧检测、ResizeObserver 与 rAF 生命周期集中在这里，绘制回调只管画。
-// 两种模式：start({ always: true }) 恒绘（游戏画面含时间驱动动效）；
-// 默认脏标记模式——requestDraw() 合帧重绘，空闲不重绘（live 的既有语义）。
+// 三种模式：start({ always: true }) 恒绘；默认脏标记模式——requestDraw()
+// 合帧重绘，空闲不重绘（live 的既有语义）；start({ awake }) 谓词模式——
+// 谓词为 true 期间逐帧重绘（时间驱动动效/指针预览在场），false 时退化为
+// 脏标记（controls：静默判定由 feedback.quiet 提供，快照/resize 仍即时出画）。
 import { createCanvas2d, resizeCanvas2d } from './art'
 
 export interface CanvasStageOpts {
@@ -24,6 +26,7 @@ export class CanvasStage {
   private sizeDirty = true
   private dirty = true
   private always = false
+  private awake: (() => boolean) | undefined
   private disposed = false
 
   constructor(private canvas: HTMLCanvasElement, private opts: CanvasStageOpts) {
@@ -39,14 +42,16 @@ export class CanvasStage {
   /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径可安全高频调用）。 */
   requestDraw(): void { this.dirty = true }
 
-  /** 启动 rAF 循环；已在运行则幂等。 */
-  start(opts?: { always?: boolean }): void {
+  /** 启动 rAF 循环；已在运行则幂等。awake 谓词为 true（或恒绘模式）时逐帧
+   *  绘制；否则仅脏标记（requestDraw/resize/DPR 漂移）触发重绘。 */
+  start(opts?: { always?: boolean; awake?: () => boolean }): void {
     if (this.disposed || this.raf) return
     this.always = !!opts?.always
+    this.awake = opts?.awake
     const gen = ++this.gen
     const loop = () => {
       if (this.disposed || gen !== this.gen) return
-      if (this.syncSize() || this.always || this.dirty) {
+      if (this.syncSize() || this.always || this.dirty || this.awake?.()) {
         this.dirty = false
         this.opts.draw()
       }

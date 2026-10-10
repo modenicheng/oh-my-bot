@@ -16,7 +16,7 @@ import { InputSampler, AXIS_AIM } from './input'
 import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
-import { GameFeedback } from './feedback'
+import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
 import { bgm } from '../music/bgm'
 
@@ -102,7 +102,8 @@ export class GameController {
     this.onExitToRoom = deps.onExitToRoom
     this.renderer = new Renderer(deps.canvas)
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage。游戏画面含时间驱动动效
-    // （飘字/震动/拖尾），保持恒绘模式；「空闲不重绘」需 feedback 静默判定，另行设计。
+    // （飘字/震动/拖尾）与指针瞄准预览，恒绘改为 awake 谓词：frameAwake 为
+    // true 期间逐帧重绘，全静默时仅脏标记重绘（快照到达/resize/DPR 即时出画）。
     this.stage = new CanvasStage(deps.canvas, { draw: () => this.drawFrame(), onResize: () => this.resizeCanvas() })
     this.hud = new Hud(deps.hudRoot)
     this.feedback = new GameFeedback(
@@ -150,6 +151,9 @@ export class GameController {
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)
     this.hud.setAssist(false)
     this.setupCanvas()
+    // 新地图首帧必画：awake 门下若开局即静默（无特效/指针/气泡），不能沿用
+    // 上一局的残帧（恒绘时代由 always 模式隐式保证）。
+    this.stage.requestDraw()
     if (this.active && this.inputEnabled) this.input.attach(this.canvas, this.cam)
     this.startLoops()
     return true
@@ -209,6 +213,8 @@ export class GameController {
         // 普通 full 只是状态重同步，不代表服务端释放了 HumanAxes；保留本地
         // held/mask，避免服务端继续旧值而客户端静默停止发送对应轴。
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
+        // 世界已推进：静默跳帧期间快照到达也必须出画（awake 门不感知世界变化）。
+        this.stage.requestDraw()
         if (snap.full) this.resyncAt = -Infinity
       }
       return
@@ -234,6 +240,7 @@ export class GameController {
       }
       case 'scoreboard':
         this.scores.accept(ev.kind.value.rows, ev.kind.value.tick)
+        this.stage.requestDraw()
         break
       case 'matchEnd': {
         if (this.endShown) break // 事件去重：服务器幂等重发时不再重复渲染
@@ -242,6 +249,7 @@ export class GameController {
         this.closeChat(false)
         this.endShown = true
         this.showEnd(ev.kind.value)
+        this.stage.requestDraw()
         break
       }
       default:
@@ -265,6 +273,8 @@ export class GameController {
         this.startCuePending = false
         audio.play('matchStart')
       }
+      // 恢复激活：观战期间世界可能已推进，静默跳帧也要立即出画一帧。
+      this.stage.requestDraw()
     }
   }
 
@@ -389,9 +399,21 @@ export class GameController {
   }
 
   private startLoops(): void {
-    // 渲染循环：rAF（恒绘）；输入采样：60Hz
-    this.stage.start({ always: true })
+    // 渲染循环：rAF（awake 谓词：动效/指针预览在场才逐帧，静默期跳帧省功耗）；
+    // 输入采样：60Hz
+    this.stage.start({ awake: () => this.frameAwake() })
     this.sendTimer = setInterval(() => this.sampleAndSend(), FRAME_MS)
+  }
+
+  /** C-26 收尾（空闲跳帧门）：指针瞄准预览（人持有炮塔轴且自机在场）或 say
+   *  气泡存活期间、或 feedback 时间动效未静默时必须逐帧重绘；全静默时允许
+   *  跳帧——脏标记路径（快照/resize/DPR 漂移）不受影响，恢复后下一帧立即出画。 */
+  private frameAwake(): boolean {
+    const self = this.world.robots.get(this.world.self?.robotId ?? 0)
+    return canvasAwake(this.feedback, this.world.tick, {
+      aimPreview: !!self?.base?.pos && this.input.holdsAim(),
+      bubbles: this.bubbles.length,
+    })
   }
 
   private stopLoops(): void {

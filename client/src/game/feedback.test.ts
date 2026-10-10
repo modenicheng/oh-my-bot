@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
 import { ServerEventSchema, SnapshotDeltaSchema, RobotStateSchema, SelfStateSchema, UplinkStateSchema, CoreStateSchema } from '@omb/protocol'
 import { emptyWorld, applySnapshot } from './world'
-import { GameFeedback } from './feedback'
+import { GameFeedback, canvasAwake } from './feedback'
 import type { MapDefParsed } from './mapdef'
 
 const sound = vi.hoisted(() => ({ play: vi.fn(), setUplink: vi.fn(), stopGame: vi.fn() }))
@@ -528,5 +528,106 @@ describe('projectile impact presentation', () => {
     f.world.robots.get(1)!.color = '#fbbf24'
     f.feedback.event(create(ServerEventSchema, { tick: 12, kind: { case: 'projectileImpact', value: { projectile: 100, owner: 1, at: { x: 42, y: 0 } } } }), f.world, map, true)
     expect(painted(f.feedback)).toEqual(Array(7).fill('#fbbf24'))
+  })
+})
+
+describe('canvas quiescence gate (C-26 idle skip)', () => {
+  beforeEach(() => {
+    stubFeedbackEnv()
+  })
+
+  it('is quiet on a fresh baseline, stays awake while an effect plays, then skips after expiry', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(); f.consume(snap(10, 0, true))
+      expect(f.feedback.quiet(10)).toBe(true)
+      f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'shot', value: { owner: 1, projectile: 11, at: { x: 41, y: 0 }, color: '#a78bfa', heading: 0 } } }), f.world, map, true)
+      expect(f.feedback.quiet(11)).toBe(false)
+      now += 111 // shot 特效 110ms 到期
+      expect(f.feedback.quiet(11)).toBe(true)
+    } finally { clock.mockRestore() }
+  })
+
+  it('stays awake while a damage popup and the delayed white-bar drain are in flight', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(); f.consume(snap(10, 0, true))
+      const hit = snap(11, 10); hit.robots[0]!.hpX10 = 800; f.consume(hit)
+      expect(f.feedback.quiet(11)).toBe(false) // 飘字(850ms) + 白条保持(420ms)
+      now += 500
+      expect(f.feedback.quiet(11)).toBe(false) // 飘字仍在
+      now += 400
+      expect(f.feedback.quiet(11)).toBe(false) // 飘字过期(900>850)，排空未完(480<620ms fade)
+      now += 200
+      expect(f.feedback.quiet(11)).toBe(true)  // hold 420 + fade 620 全部走完
+    } finally { clock.mockRestore() }
+  })
+
+  it('never skips while self is low and quiets after healing above the threshold', () => {
+    const f = fixture(), initial = snap(10, 0, true)
+    initial.robots[0]!.hpX10 = 200; f.consume(initial)
+    expect(f.feedback.quiet(10)).toBe(false) // 低血呼吸帧是持续动效
+    const heal = snap(11, 10); heal.robots[0]!.hpX10 = 1000; f.consume(heal)
+    expect(f.feedback.quiet(11)).toBe(true) // 回升后白条即刻贴齐实际值
+  })
+
+  it('stays awake through the dash trail tick window', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(); f.consume(snap(10, 0, true))
+      const dash = snap(11, 10); dash.robots[0]!.dashing = true; f.consume(dash)
+      now += 400 // 冲刺特效(320ms)先到期，剩余只有拖尾
+      expect(f.feedback.quiet(11)).toBe(false)
+      expect(f.feedback.quiet(11 + 15)).toBe(false) // age 15 仍在可见窗口内
+      expect(f.feedback.quiet(11 + 16)).toBe(true)  // 超窗后静默
+    } finally { clock.mockRestore() }
+  })
+
+  it('stays awake through the kill shake tick window', () => {
+    let now = 1_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      const f = fixture(); f.consume(snap(10, 0, true))
+      f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } } }), seenAt: 0 })
+      f.feedback.event(create(ServerEventSchema, { tick: 12, kind: { case: 'kill', value: { killer: 2, victim: 1, at: { x: 40, y: 0 } } } }), f.world, map, true)
+      now += 651 // 死亡特效(650ms)先到期
+      expect(f.feedback.quiet(12)).toBe(false)
+      expect(f.feedback.quiet(12 + 15)).toBe(false)
+      expect(f.feedback.quiet(12 + 16)).toBe(true)
+    } finally { clock.mockRestore() }
+  })
+
+  it('does not skip while camera zoom is easing and quiets once converged', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.feedback.cameraZoom(10, true)
+    expect(f.feedback.quiet(10)).toBe(false)
+    let converged = -1
+    for (let tick = 11; tick <= 60 && converged < 0; tick++) {
+      f.feedback.cameraZoom(tick, true)
+      if (f.feedback.quiet(tick)) converged = tick
+    }
+    expect(converged).toBeGreaterThan(0)
+    f.feedback.cameraZoom(converged + 1, false) // 目标切回 1：重新推进
+    expect(f.feedback.quiet(converged + 1)).toBe(false)
+  })
+
+  it('recovers from a quiet canvas immediately when a new effect appears', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    expect(f.feedback.quiet(10)).toBe(true)
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'corePickup', value: { by: 1, coreId: 20, value: 10 } } }), f.world, map, true)
+    expect(f.feedback.quiet(11)).toBe(false) // 静默被打破：下一帧不得跳过
+  })
+
+  it('canvasAwake keeps redrawing for the pointer aim preview or bubbles even when feedback is quiet', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    expect(f.feedback.quiet(10)).toBe(true)
+    expect(canvasAwake(f.feedback, 10, { aimPreview: false, bubbles: 0 })).toBe(false)
+    expect(canvasAwake(f.feedback, 10, { aimPreview: true, bubbles: 0 })).toBe(true)
+    expect(canvasAwake(f.feedback, 10, { aimPreview: false, bubbles: 2 })).toBe(true)
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'shot', value: { owner: 1, projectile: 11, at: { x: 41, y: 0 }, color: '#a78bfa', heading: 0 } } }), f.world, map, true)
+    expect(canvasAwake(f.feedback, 11, { aimPreview: false, bubbles: 0 })).toBe(true)
   })
 })
