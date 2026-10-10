@@ -13,5 +13,5 @@
     "gen": "node scripts/gen.mjs",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": { "typescript": "^5.8.0" }
+  "devDependencies": { "typescript": "^7.0.2" }
 }
