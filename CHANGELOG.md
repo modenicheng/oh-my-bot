@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-beta.2...v1.0.0-rc.1) (2026-10-10)
+
+
+### Features
+
+* polish HUD and improve assist takeover ([4f8f74d](https://github.com/modenicheng/oh-my-bot/commit/4f8f74d32874617c3466ad420d405c8590af7e83))
+* **snippet:** serve catalog metadata from the server (X-2/D8) ([81ce9dc](https://github.com/modenicheng/oh-my-bot/commit/81ce9dceabd317fd038c9e5e59af194afa393651))
+
+
+### Bug Fixes
+
+* **client:** escape layering and Safari audio unlock (C-32/C-43) ([2c070dc](https://github.com/modenicheng/oh-my-bot/commit/2c070dcf89ab5a0463554b8e4606682ca8b58be0))
+* **server:** idle-room janitor, mid-match bootstrap gating (S-26/S-27) ([1f36dc7](https://github.com/modenicheng/oh-my-bot/commit/1f36dc7051d3234f7d8214933645e27b970e13d3))
+
+
+### Performance Improvements
+
+* **render:** canvas stage host, hot-path allocation cuts, replay races (S-6/C-26/C-31/C-33/C-40) ([ce05ccf](https://github.com/modenicheng/oh-my-bot/commit/ce05ccfe23387cc61fd12696bff29a3344f97458))
+
 ## [1.0.0-beta.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-10-05)
 
 
