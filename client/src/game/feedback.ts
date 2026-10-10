@@ -121,7 +121,11 @@ export class GameFeedback {
         while (trail.length && trail[0]!.tick < snap.tick - TRAIL_TICKS) trail.shift()
         this.trails.set(id, trail)
       } else if (!transitions) this.trails.delete(id)
-      this.robots.set(id, { shield: r.shieldOn, dash: r.dashing, dead: r.dead, hpX10: r.hpX10 })
+      // 审计 C-40：prev 就是 map 内存储对象，原地改写——60Hz×64 人下每 tick
+      // 新建 4 字段对象是稳定 GC 饲料。
+      if (prev) { prev.shield = r.shieldOn; prev.dash = r.dashing; prev.dead = r.dead; prev.hpX10 = r.hpX10 } else {
+        this.robots.set(id, { shield: r.shieldOn, dash: r.dashing, dead: r.dead, hpX10: r.hpX10 })
+      }
     }
     this.selfLow = !!selfId && !!world.robots.get(selfId) && !world.robots.get(selfId)!.dead && world.robots.get(selfId)!.hpX10 <= LOW_HEALTH_X10
     for (const id of this.robots.keys()) if (!world.robots.has(id)) { this.robots.delete(id); this.health.delete(id); this.trails.delete(id) }
@@ -131,7 +135,10 @@ export class GameFeedback {
         this.sound('coreSpawn', core.base.pos, world)
       }
     }
-    this.cores = new Set(world.cores.keys())
+    // 审计 C-40：cores 集合原地增删，替代每快照重建 Set（spawn 检测已在
+    // 上面的循环里用旧集合完成，这里只做同步）。
+    for (const id of world.cores.keys()) if (!this.cores.has(id)) this.cores.add(id)
+    for (const id of this.cores) if (!world.cores.has(id)) this.cores.delete(id)
     for (const [id, u] of world.uplinks) {
       const prev = this.hackers.get(id) ?? 0
       if (transitions && selfId) {

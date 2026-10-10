@@ -129,8 +129,9 @@ export class ReplayLibrary {
     }
     const player = this.player
     writeRoute(this.deps.spectator ? 'spectator' : 'replay-player', readRoute().roomCode, { replay: matchId })
-    const ok = await player.load(matchId)
-    if (!ok && this.player === player && !this.disposed) this.backToList()
+    const result = await player.load(matchId)
+    // 'superseded'（审计 C-33）：用户已点了另一条录像，不得把人踢回列表。
+    if (result === 'failed' && this.player === player && !this.disposed) this.backToList()
   }
 
   private setError(msg: string): void {

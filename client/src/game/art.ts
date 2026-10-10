@@ -36,9 +36,10 @@ export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]
 }))).then(results => results.every(Boolean))
 export const artReady = Promise.all([fontReady, spritesReady])
 
-/** 取 2d 上下文；两个渲染器共用同一失败语义。 */
+/** 取 2d 上下文；两个渲染器共用同一失败语义。三块全屏画布每帧首操作都是
+ * 不透明 fillRect 全量覆盖（审计 C-40），关闭 alpha 让合成器走不透明加速路径。 */
 export function createCanvas2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('canvas 2d context unavailable')
   return ctx
 }

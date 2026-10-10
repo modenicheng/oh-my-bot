@@ -10,6 +10,7 @@ import { parseMapDef, type MapDefParsed } from './mapdef'
 import { resolveTuning } from './tuning'
 import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldState } from './world'
 import { Camera } from './camera'
+import { CanvasStage } from './canvas-stage'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
 import { InputSampler, AXIS_AIM } from './input'
 import { isAimUnderScript } from './axis-src'
@@ -43,7 +44,7 @@ export class GameController {
   /** 渲染循环每帧复用的 extras 容器，避免每帧对象字面量分配。 */
   private extras: RenderExtras = { bubbles: [] }
   private sayTicks = new Map<number, number>()
-  private raf = 0
+  private stage: CanvasStage
   private sendTimer: ReturnType<typeof setInterval> | undefined
   private ended = false
   private scores = new Scoreboard()
@@ -52,8 +53,6 @@ export class GameController {
   private hudRoot: HTMLElement
   private send: (data: Uint8Array) => void
   private onExitToRoom?: () => void
-  private resizeObserver?: ResizeObserver
-  private pixelRatio = 0
   private active = true
   private inputEnabled = true
   private resyncAt = -Infinity
@@ -102,6 +101,9 @@ export class GameController {
     this.send = deps.send
     this.onExitToRoom = deps.onExitToRoom
     this.renderer = new Renderer(deps.canvas)
+    // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage。游戏画面含时间驱动动效
+    // （飘字/震动/拖尾），保持恒绘模式；「空闲不重绘」需 feedback 静默判定，另行设计。
+    this.stage = new CanvasStage(deps.canvas, { draw: () => this.drawFrame(), onResize: () => this.resizeCanvas() })
     this.hud = new Hud(deps.hudRoot)
     this.feedback = new GameFeedback(
       (text, kind, source) => this.hud.flashMsg(text, kind, source),
@@ -374,40 +376,28 @@ export class GameController {
   private setupCanvas(): void {
     if (!this.map) return
     this.resizeCanvas()
-    this.resizeObserver?.disconnect()
-    this.resizeObserver = new ResizeObserver(() => this.resizeCanvas())
-    this.resizeObserver.observe(this.canvas)
+    // RO 由 CanvasStage 常驻持有；地图切换只需按新 extent 立即同步相机。
+    this.stage.syncSize()
   }
 
   private resizeCanvas(): void {
     if (!this.map) return
     const rect = this.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
-    this.pixelRatio = window.devicePixelRatio || 1
-    this.renderer.resize(rect.width, rect.height, this.pixelRatio)
+    this.renderer.resize(rect.width, rect.height, this.stage.dpr || window.devicePixelRatio || 1)
     this.cam.resize(rect.width, rect.height, this.map.extent)
   }
 
   private startLoops(): void {
-
-    // 渲染循环：rAF
-    const draw = () => {
-      this.drawFrame()
-      this.raf = requestAnimationFrame(draw)
-    }
-    this.raf = requestAnimationFrame(draw)
-
-    // 输入采样：60Hz
+    // 渲染循环：rAF（恒绘）；输入采样：60Hz
+    this.stage.start({ always: true })
     this.sendTimer = setInterval(() => this.sampleAndSend(), FRAME_MS)
   }
 
   private stopLoops(): void {
-    if (this.raf) cancelAnimationFrame(this.raf)
-    this.raf = 0
+    this.stage.stop()
     if (this.sendTimer) clearInterval(this.sendTimer)
     this.sendTimer = undefined
-    this.resizeObserver?.disconnect()
-    this.resizeObserver = undefined
   }
 
   private selfHacking(selfId: number): boolean {
@@ -419,7 +409,6 @@ export class GameController {
   private drawFrame(): void {
     if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
-    if (this.pixelRatio !== (window.devicePixelRatio || 1)) this.resizeCanvas()
     this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)

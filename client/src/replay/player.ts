@@ -7,6 +7,7 @@ import { rankedScores, ScoreRowRenderer } from '../game/scoreboard'
 import { bgm } from '../music/bgm'
 import { SpectatorCamera } from './spectator'
 import { artReady } from '../game/art'
+import { CanvasStage } from '../game/canvas-stage'
 import { iconButton } from '../icons'
 import { parseMapDef, type MapDefParsed } from '../game/mapdef'
 import { ReplayIndex, type ReplayFrame, phaseName, numOr } from './index'
@@ -36,7 +37,7 @@ export class ReplayPlayer {
   private cam = new Camera()
   private spectator: SpectatorCamera | null = null
   private disposeControls: (() => void) | null = null
-  private raf = 0
+  private stage: CanvasStage
   private disposed = false
 
   // 播放状态
@@ -49,11 +50,11 @@ export class ReplayPlayer {
   private lastFrameTime = 0
   private followRobotId: number | null = null
   private events = new AbortController()
-  private resizeObserver?: ResizeObserver
-  private pixelRatio = 0
   private scoreMarkup = ''
   private readonly scoreRenderer = new ScoreRowRenderer()
   private lastTimelineTick = -1
+  /** 载入代际号（审计 C-33）：并发 load 只认最新一代，慢回包不得覆盖新回放。 */
+  private loadGen = 0
 
   // DOM 引用
   private el: Record<string, HTMLElement> = {}
@@ -65,26 +66,31 @@ export class ReplayPlayer {
       this.spectator = new SpectatorCamera()
       this.cam = this.spectator.camera
     }
+    // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage；播放时钟推进在 pump()。
+    this.stage = new CanvasStage(deps.canvas, { draw: () => this.pump(), onResize: () => this.resize() })
     this.bindDom()
     this.bindEvents()
   }
 
-  /** 载入并播放指定对局。 */
-  async load(matchId: string): Promise<boolean> {
-    if (this.disposed) return false
+  /** 载入并播放指定对局。'superseded' 表示已被更新的 load 取代（非错误，调用方不应回列表）。 */
+  async load(matchId: string): Promise<'loaded' | 'failed' | 'superseded'> {
+    if (this.disposed) return 'failed'
+    const gen = ++this.loadGen
     this.setBusy(true)
     try {
       const [text] = await Promise.all([fetchReplayText(matchId), artReady])
-      if (this.disposed) return false
+      if (this.disposed) return 'failed'
+      if (gen !== this.loadGen) return 'superseded'
       // 分片异步解析：长录像不再冻结主线程（loading 提示保持动画、可取消）。
       const data = await parseReplayNDJSONAsync(text)
+      if (gen !== this.loadGen) return 'superseded'
       this.index = new ReplayIndex(data)
       // 地图来自 checkpoint.map（全量快照自带 MapDef）
       const mapJson = extractMapJson(data)
       this.map = mapJson ? parseMapDef(mapJson) : null
       if (!this.map) {
         this.deps.onError('回放数据缺少地图信息')
-        return false
+        return 'failed'
       }
       this.tick = 0
       this.tickF = 0
@@ -102,13 +108,14 @@ export class ReplayPlayer {
       this.updateSpeedUi()
       this.resize()
       this.play()
-      return true
+      return 'loaded'
     } catch (e) {
+      if (this.disposed || gen !== this.loadGen) return 'superseded'
       const msg = e instanceof ReplayApiError || e instanceof Error ? e.message : String(e)
-      if (!this.disposed) this.deps.onError(`回放载入失败: ${msg}`)
-      return false
+      this.deps.onError(`回放载入失败: ${msg}`)
+      return 'failed'
     } finally {
-      if (!this.disposed) this.setBusy(false)
+      if (!this.disposed && gen === this.loadGen) this.setBusy(false)
     }
   }
 
@@ -181,8 +188,6 @@ export class ReplayPlayer {
     })
 
     listen(window, 'resize', this.onResize)
-    this.resizeObserver = new ResizeObserver(this.onResize)
-    this.resizeObserver.observe(this.deps.canvas)
     this.onResize()
   }
 
@@ -227,7 +232,7 @@ export class ReplayPlayer {
 
   private pause(): void {
     this.playing = false
-    cancelAnimationFrame(this.raf)
+    this.stage.stop()
     const btn = this.el['rp-play']
     if (btn) iconButton(btn, 'play', '播放')
   }
@@ -326,23 +331,23 @@ export class ReplayPlayer {
   // ---- 渲染循环 -----------------------------------------------------------
 
   private startRaf(): void {
-    cancelAnimationFrame(this.raf)
-    const loop = (now: number) => {
-      if (this.disposed || !this.playing) return
-      const dt = Math.min(0.25, (now - this.lastFrameTime) / 1000)
-      this.lastFrameTime = now
-      if (this.index) {
-        this.tickF += dt * TICK_HZ * this.speed
-        if (this.tickF >= this.index.endTick) {
-          this.tickF = this.index.endTick
-          this.pause()
-        }
-        this.tick = Math.round(this.tickF)
-        this.drawFrame()
-      }
-      if (this.playing) this.raf = requestAnimationFrame(loop)
+    this.stage.start({ always: true })
+  }
+
+  /** 播放时钟推进 + 出画（仅恒绘路径；scrub/resize 走 drawFrame 直绘，不推进时间）。 */
+  private pump(): void {
+    if (this.disposed || !this.playing) return
+    const now = performance.now()
+    const dt = Math.min(0.25, (now - this.lastFrameTime) / 1000)
+    this.lastFrameTime = now
+    if (!this.index) return
+    this.tickF += dt * TICK_HZ * this.speed
+    if (this.tickF >= this.index.endTick) {
+      this.tickF = this.index.endTick
+      this.pause() // stage.stop()：本轮 draw 返回后循环即退役（代际号失效）
     }
-    this.raf = requestAnimationFrame(loop)
+    this.tick = Math.round(this.tickF)
+    this.drawFrame()
   }
 
   private drawFrame(): void {
@@ -351,7 +356,6 @@ export class ReplayPlayer {
     const frame = this.index.frameAt(this.tick)
     bgm.phase('replay', frame.phase)
     // 相机：跟随或全景（地图中心）
-    if (this.pixelRatio !== (window.devicePixelRatio || 1)) { this.resize(); return }
     if (this.spectator) {
       this.spectator.update(frame.robots)
       this.followRobotId = this.spectator.followId
@@ -381,8 +385,7 @@ export class ReplayPlayer {
     const canvas = this.deps.canvas
     const rect = canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
-    const dpr = window.devicePixelRatio || 1
-    this.pixelRatio = dpr
+    const dpr = this.stage.dpr || window.devicePixelRatio || 1
     this.bindRenderer()
     this.renderer?.resize(rect.width, rect.height, dpr)
     if (this.spectator) this.spectator.resize(rect.width, rect.height, this.map?.extent ?? 100)
@@ -399,7 +402,10 @@ export class ReplayPlayer {
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
       const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
-      const signature = `${frame.finalScores !== null}:${frame.tick}:${rows.map(row => {
+      // 签名只含 会发生变化的行内容（robot/score/titles）；不得混入 frame.tick——
+      // tick 每帧必变会让缓存失效，积分面板被 60Hz 全量重写（审计 C-31）。
+      // evidence 与 score 同源单调，行相同即 evidence 相同，不进签名。
+      const signature = `${frame.finalScores !== null}:${rows.map(row => {
         const titles = 'titles' in row ? (row as { titles?: readonly number[] }).titles : undefined
         return `${row.robot},${row.score},${titles?.join('.') ?? ''}`
       }).join(';')}`
@@ -463,10 +469,9 @@ export class ReplayPlayer {
   dispose(): void {
     this.disposed = true
     this.pause()
-    cancelAnimationFrame(this.raf)
     this.disposeControls?.()
     this.events.abort()
-    this.resizeObserver?.disconnect()
+    this.stage.dispose()
   }
 }
 

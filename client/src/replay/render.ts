@@ -31,8 +31,10 @@ export class ReplayRenderer {
       drawHealthPack(ctx, cam, pack.pos.x, pack.pos.y, pack.readyAt <= frame.tick, respawnInS, frame.tick)
     }
     drawCover(ctx, map, cam)
-    const colors = new Map(frame.robots.map(r => [r.id, r.color]))
-    for (const p of frame.projectiles) drawProjectile(ctx, cam, p.pos.x, p.pos.y, p.heading, colors.get(p.owner) || ink.cyan)
+    // 审计 C-40：一次建 id→robot 索引，弹丸取色与气泡定位共用，
+    // 替代「每帧 color Map + 逐气泡 robots.find 线性扫」。
+    const byId = new Map(frame.robots.map(r => [r.id, r]))
+    for (const p of frame.projectiles) drawProjectile(ctx, cam, p.pos.x, p.pos.y, p.heading, byId.get(p.owner)?.color || ink.cyan)
     for (const r of frame.robots) {
       if (!r.alive) {
         ctx.fillStyle = ink.dim; ctx.font = `11px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -45,14 +47,14 @@ export class ReplayRenderer {
       drawRobot(ctx, cam, r.pos.x, r.pos.y, r.heading, r.color || ink.cyan, follow, false, false, r.invulnerable, frame.tick)
       drawVitals(ctx, cam, r.pos.x, r.pos.y, r.hp, r.energy, r.nick, follow, r.invulnerable)
     }
-    this.drawBubbles(frame, cam)
+    this.drawBubbles(frame, cam, byId)
   }
 
   /** say 气泡：以 tick 龄淡出（暂停时保持，不依赖墙钟） */
-  private drawBubbles(frame: ReplayFrame, cam: Camera): void {
+  private drawBubbles(frame: ReplayFrame, cam: Camera, byId: Map<number, ReplayFrame['robots'][number]>): void {
     const { ctx } = this
     for (const bub of frame.bubbles) {
-      const r = frame.robots.find((x) => x.id === bub.robot)
+      const r = byId.get(bub.robot)
       if (!r || !r.alive) continue
       const x = cam.toPxX(r.pos.x)
       const y = cam.toPxY(r.pos.y) - ROBOT_R * cam.scale - 26

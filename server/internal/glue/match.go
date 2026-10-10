@@ -573,7 +573,13 @@ func (m *Match) step() {
 	m.persistAssistStateLocked()
 
 	wv := m.sim.WorldView()
-	m.runScripts(wv)
+	// 审计 S-6：每 tick 对同一机器人只构建一次 AOI，脚本池与快照循环共用
+	// 同一观测（此前各自构建一遍，SOLO 63 机下每 tick 128 次 LOS 计算）。
+	obsByRobot := make(map[uint32]sim.Observation, len(wv.Robots))
+	for _, rv := range wv.Robots {
+		obsByRobot[rv.ID] = snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+	}
+	m.runScripts(wv, obsByRobot)
 	_ = wv // 快照循环在下方使用
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
@@ -592,7 +598,7 @@ func (m *Match) step() {
 			enc.ForceFull()
 			m.encoders[rv.ID] = enc
 		}
-		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+		obs := obsByRobot[rv.ID]
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
 		robot, _ := m.sim.Robot(rv.ID)
@@ -728,7 +734,8 @@ func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 
 // runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
 // 遍历注册表（scriptPool 是运行时唯一权威）；id 升序保证 Submit 顺序确定化。
-func (m *Match) runScripts(wv sim.WorldView) {
+// obsByRobot 由 step() 统一构建（审计 S-6），脚本与快照共享同一观测。
+func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observation) {
 	ids := m.scriptPool.IDs()
 	if len(ids) == 0 {
 		return
@@ -739,7 +746,10 @@ func (m *Match) runScripts(wv sim.WorldView) {
 		if !ok {
 			continue
 		}
-		obs := snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rid, 0, wv.ScanRadius(rid))
+		obs, ok := obsByRobot[rid]
+		if !ok {
+			continue
+		}
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {

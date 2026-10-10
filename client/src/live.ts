@@ -3,6 +3,7 @@ import { RoomSession, type SessionState } from './net'
 import { SpectatorCamera } from './replay/spectator'
 import { bindSpectateControls } from './replay/spectate-controls'
 import { artReady } from './game/art'
+import { CanvasStage } from './game/canvas-stage'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
 import { resolveTuning } from './game/tuning'
 import { Renderer, phaseName, type SayBubble } from './game/render'
@@ -26,10 +27,8 @@ export class LiveSpectator {
   private renderer: Renderer
   private camera = new SpectatorCamera()
   private events = new AbortController()
-  private observer: ResizeObserver
+  private stage: CanvasStage
   private disposed = false
-  private raf = 0
-  private dpr = 0
   private roomCode = ''
   private needsFull = true
   private resyncSent = false
@@ -55,6 +54,16 @@ export class LiveSpectator {
 
   constructor(private deps: LiveSpectatorDeps) {
     this.renderer = new Renderer(deps.canvas)
+    // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage；本类保留脏标记语义
+    // （快照/事件/相机变化才整帧重绘，空闲观战不重绘）。
+    this.stage = new CanvasStage(deps.canvas, {
+      draw: () => {
+        // 气泡 4s 寿命：存在期间保持脏标记，让它自然淡出过期（原循环语义）。
+        if (this.bubbles.length) this.stage.requestDraw()
+        this.draw()
+      },
+      onResize: () => this.resize(),
+    })
     this.follow = this.el<HTMLSelectElement>('live-follow')
     this.status = this.el('live-status')
     this.retry = this.el<HTMLButtonElement>('live-retry')
@@ -65,21 +74,9 @@ export class LiveSpectator {
     this.resetMatchDisplay()
     this.el('live-online').textContent = '真人 0'
     this.bindEvents()
-    this.observer = new ResizeObserver(() => this.resize())
-    this.observer.observe(deps.canvas)
     this.resize()
     void artReady.then(() => { if (!this.disposed) this.requestDraw() })
-    const loop = () => {
-      if (this.disposed) return
-      if (this.bubbles.length) this.dirty = true // 气泡 4s 寿命，存在期间保持重绘以自然过期
-      if (!this.dirty && this.dpr !== (window.devicePixelRatio || 1)) this.dirty = true
-      if (this.dirty) {
-        this.dirty = false
-        this.draw()
-      }
-      this.raf = requestAnimationFrame(loop)
-    }
-    this.raf = requestAnimationFrame(loop)
+    this.stage.start()
   }
 
   async connect(roomCode: string): Promise<void> {
@@ -105,7 +102,7 @@ export class LiveSpectator {
 
   /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径都可安全高频调用）。 */
   private requestDraw(): void {
-    this.dirty = true
+    this.stage.requestDraw()
   }
 
   private onState(state: SessionState, delay = 0): void {
@@ -256,7 +253,6 @@ export class LiveSpectator {
   private draw(): void {
     if (!this.map || this.disposed) return
     bgm.phase('live', this.world.phase)
-    if (this.dpr !== (window.devicePixelRatio || 1)) { this.resize(); return }
     this.camera.updateFollow(this.world.robots.get(this.camera.followId ?? 0)?.base?.pos)
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
@@ -269,10 +265,10 @@ export class LiveSpectator {
     if (this.disposed) return
     const rect = this.deps.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
-    this.dpr = window.devicePixelRatio || 1
-    this.renderer.resize(rect.width, rect.height, this.dpr)
+    const dpr = this.stage.dpr || window.devicePixelRatio || 1
+    this.renderer.resize(rect.width, rect.height, dpr)
     this.camera.resize(rect.width, rect.height, this.map?.extent ?? 80)
-    this.draw()
+    this.stage.requestDraw()
   }
 
   private bindEvents(): void {
@@ -305,9 +301,8 @@ export class LiveSpectator {
   dispose(): void {
     this.disposed = true
     this.session.close()
-    cancelAnimationFrame(this.raf)
     this.disposeControls?.()
     this.events.abort()
-    this.observer.disconnect()
+    this.stage.dispose()
   }
 }
