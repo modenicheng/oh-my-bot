@@ -9,6 +9,22 @@ import (
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
+// checkpointPositionValid 复用装配入口（SetSpawn/SetWalls）与运行时物理共
+// 同维护的位置谓词：gen>=2 地图必须在竞技场圆盘内（与 insideArena 同条
+// 件），且不得与任何墙体重叠（overlapsWall 原函数）。死亡机器人保留阵亡
+// 时刻的合法位置，因此对所有机器人统一校验；gen<2 地图无圆盘边界，仅查墙。
+func checkpointPositionValid(cp Checkpoint, p Vec2) bool {
+	if cp.Map != nil && cp.Map.GeneratorVer >= 2 && p.Len() > arenaCenterRadius {
+		return false
+	}
+	for _, wall := range cp.Walls {
+		if overlapsWall(p, wall) {
+			return false
+		}
+	}
+	return true
+}
+
 // RestoreCheckpoint resumes exact simulation state, including pending controls.
 // It never regenerates the map, advances RNG, or starts a clock. The caller owns
 // Tick and must not run external scripts during deterministic replay.
@@ -38,7 +54,32 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 			robot.Sector >= 8 || (robot.State != Alive && robot.State != Dead) {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d", robot.ID)
 		}
+		// 装配入口与运行时物理共同维护的不变量（S-28）：位置永不进墙、
+		// gen>=2 时必在竞技场圆盘内，HP 始终落在 [0, MaxHP]。合法 checkpoint
+		// 不会违反；违反者只能来自被篡改/手工编辑的日志——例如卡墙位置会造
+		// 出 slideRobot 接触清速、sweepWall t=0 推不动、traceSolid 先挡射线
+		// 的不可交互机器人。
+		if !checkpointPositionValid(cp, robot.Position) {
+			return nil, fmt.Errorf("sim: invalid checkpoint robot %d position", robot.ID)
+		}
+		if robot.HP < 0 || robot.HP > MaxHP {
+			return nil, fmt.Errorf("sim: invalid checkpoint robot %d hp", robot.ID)
+		}
 		known[robot.ID], ids[i] = true, robot.ID
+	}
+	// DamageBy 的键在伤害结算时必为在场机器人 ID；未知键只可能来自手工编辑。
+	// 第二遍扫描：键可指向花名册中更靠后的机器人。
+	for _, robot := range cp.Robots {
+		for attacker := range robot.Combat.DamageBy {
+			if !known[attacker] {
+				return nil, fmt.Errorf("sim: invalid checkpoint damage attacker %d", attacker)
+			}
+		}
+	}
+	// 0 是「ID 耗尽」哨兵：恢复它会触发 fireProjectiles 的耗尽守卫，全员禁射
+	// 到局终。合法装配（NewSim/reserveID）保证 NextProjectile 恒 >= 1。
+	if cp.NextProjectile == 0 {
+		return nil, fmt.Errorf("sim: invalid checkpoint next_projectile")
 	}
 	for i, wall := range cp.Walls {
 		if wall.ID == 0 || (i > 0 && wall.ID <= cp.Walls[i-1].ID) || wall.Min.X >= wall.Max.X || wall.Min.Y >= wall.Max.Y {

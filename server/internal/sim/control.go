@@ -8,6 +8,13 @@ import (
 
 const allAxes = AxisMove | AxisAim | AxisFire | AxisAbility
 
+// MaxControlToggles 是单条 control 记录 Toggles 字段的合法上界。Toggles 记
+// 录本 tick 待消费的 AssistToggle 次数，每次来自一条上游切换消息；「整局
+// 每个 tick 都切换一次」（MatchTicks 次）已是物理上不可达的宽松天花板。
+// 回放消费循环（consumeInputs）按该计数逐次迭代，validateRecord 在写入/
+// 读取两侧以此封顶，防止篡改或损坏的分享录像把回放空转到 ~2^32 次（S-29）。
+const MaxControlToggles = MatchTicks
+
 // GameplayReplaySink adds controls absent from ClientInput without changing
 // ReplaySink or EventSink. Workers must submit results on the Sim owner thread.
 type GameplayReplaySink interface {

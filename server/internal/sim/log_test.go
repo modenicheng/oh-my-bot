@@ -413,6 +413,44 @@ func TestMatchEventLogWriterValidation(t *testing.T) {
 	}
 }
 
+// TestMatchEventLogBoundsControlToggles freezes the S-29 hardening: Toggles is
+// the replay consume loop's pure-CPU iteration count, so validateRecord bounds
+// it on both the write and the read path with the shared MaxControlToggles
+// ceiling. The exact ceiling stays writable/readable; anything above is
+// rejected whole instead of spinning the consumer ~2^32 times.
+func TestMatchEventLogBoundsControlToggles(t *testing.T) {
+	var buffer bytes.Buffer
+	log, err := NewMatchEventLogWriter(&buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.OnControl(1, 7, ControlRecord{Toggles: MaxControlToggles, Respawn: true})
+	if log.Err() != nil {
+		t.Fatal("legal toggle ceiling rejected on write:", log.Err())
+	}
+	if err := log.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	log.OnControl(2, 7, ControlRecord{Toggles: MaxControlToggles + 1})
+	if log.Err() == nil {
+		t.Fatal("over-bound toggles accepted on write")
+	}
+	if err := log.Close(); err == nil {
+		t.Fatal("write failure not propagated by Close")
+	}
+	records, err := ReadMatchEventLog(bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Control == nil || records[0].Control.Toggles != MaxControlToggles || !records[0].Control.Respawn {
+		t.Fatalf("legal ceiling record not preserved: %+v", records)
+	}
+	forged := fmt.Sprintf(`{"type":"control","tick":2,"robot_id":7,"control":{"toggles":%d}}`, uint32(MaxControlToggles)+1)
+	if _, err := ReadMatchEventLog(strings.NewReader("{\"schema_version\":1}\n" + forged + "\n")); err == nil {
+		t.Fatal("forged unbounded toggles accepted on read")
+	}
+}
+
 func TestMatchEventLogLargeCheckpoint(t *testing.T) {
 	ids := make([]uint32, 64)
 	for i := range ids {

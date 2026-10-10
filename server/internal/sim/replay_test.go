@@ -187,6 +187,56 @@ func TestRestoreCheckpointRejectsPhaseTickMismatch(t *testing.T) {
 	}
 }
 
+// TestRestoreCheckpointRejectsCombatFieldCorruption freezes the S-28 hardening:
+// restore reuses the assembly-time position predicates (insideArena arena clause
+// for gen>=2 maps, overlapsWall), the [0, MaxHP] HP range, a nonzero
+// NextProjectile and known DamageBy attackers. Checkpoints that merely carry
+// populated combat state stay loadable byte-for-byte.
+func TestRestoreCheckpointRejectsCombatFieldCorruption(t *testing.T) {
+	s := NewSim(5, []uint32{1, 2}, nil)
+	if err := s.SetWalls([]Wall{{ID: 1, Min: Vec2{1, -1}, Max: Vec2{2, 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove), MoveX: 1000})
+	stepTicks(s, 30)
+	legal := s.Snapshot()
+	legal.Robots[0].Combat.DamageBy = map[uint32]float64{2: 12}
+	if _, err := RestoreCheckpoint(legal, nil); err != nil {
+		t.Fatalf("legal populated combat state rejected: %v", err)
+	}
+
+	arena := NewSim(5, []uint32{1}, nil)
+	bounded := gameMap()
+	bounded.GeneratorVer = 2
+	if err := arena.SetMap(bounded); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]struct {
+		base    Checkpoint
+		corrupt func(*Checkpoint)
+	}{
+		"position inside wall": {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].Position = Vec2{1.5, 0} }},
+		"position outside arena": {arena.Snapshot(), func(c *Checkpoint) {
+			c.Robots[0].Position = Vec2{arenaCenterRadius + 1, 0}
+		}},
+		"hp above max":         {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].HP = MaxHP + 0.5 }},
+		"hp below zero":        {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].HP = -0.5 }},
+		"next projectile zero": {s.Snapshot(), func(c *Checkpoint) { c.NextProjectile = 0 }},
+		"unknown damage attacker": {s.Snapshot(), func(c *Checkpoint) {
+			c.Robots[0].Combat.DamageBy = map[uint32]float64{99: 12}
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cp := tc.base
+			tc.corrupt(&cp)
+			if _, err := RestoreCheckpoint(cp, nil); err == nil {
+				t.Fatal("corrupted combat field accepted")
+			}
+		})
+	}
+}
+
 func TestReplayToRejectsDiscontinuousCheckpointAndSkippedControls(t *testing.T) {
 	for name, corrupt := range map[string]func(*Checkpoint){
 		"seed":     func(cp *Checkpoint) { cp.Seed++ },

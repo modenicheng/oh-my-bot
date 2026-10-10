@@ -465,6 +465,11 @@ func validateRecord(r diskRecord) error {
 		if r.Control == nil || r.RobotID == 0 || r.Tick == 0 || r.State != nil || len(r.Event) != 0 || len(r.Input) != 0 {
 			return errors.New("sim: invalid control record")
 		}
+		// Toggles 是回放消费循环的迭代次数（纯算力字段，S-29）：不封顶的话
+		// 一条篡改记录即可把回放卡在 ~4.3e9 次空转。上界依据见 MaxControlToggles。
+		if r.Control.Toggles > MaxControlToggles {
+			return fmt.Errorf("sim: control toggles %d exceed %d", r.Control.Toggles, MaxControlToggles)
+		}
 	case RecordTypeDiskName(RecordEvent):
 		if len(r.Event) == 0 || r.State != nil || len(r.Input) != 0 || r.RobotID != 0 || r.Tick == 0 {
 			return errors.New("sim: invalid event record")
