@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **client:** chat/comms overlap, dark color-scheme, replay tail tolerance (C-36/C-37/C-45) ([56ddccb](https://github.com/modenicheng/oh-my-bot/commit/56ddccb9a082ce7bb74413a77c841bbfc26c195c))
+* **server:** replay checkpoint and log hardening (S-28/S-29) ([af01b8d](https://github.com/modenicheng/oh-my-bot/commit/af01b8d93431ab6f360cf604d779f085aae1aa87))
+* **server:** session hardening batch (S-30~S-34) ([4e0a842](https://github.com/modenicheng/oh-my-bot/commit/4e0a8423562749c3c635ef49d9bb56089c444b49))
+
+
+### Performance Improvements
+
+* **client:** split feedback module, idle frame skip on canvas stage (C-17/C-26) ([2e42be3](https://github.com/modenicheng/oh-my-bot/commit/2e42be32b01a1790cd30c0dbfe571d801723a2a1))
+
 ## [1.0.0-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-beta.2...v1.0.0-rc.1) (2026-10-10)
 
 
