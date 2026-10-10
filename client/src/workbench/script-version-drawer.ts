@@ -55,6 +55,22 @@ export class ScriptVersionDrawer {
     this.close()
     this.toggleButton.focus({ preventScroll: true })
   }
+  /**
+   * 捕获阶段兜底（审计 C-32①）：portal 不在 options 的 EDITING_TARGETS 内，
+   * 浮层内按钮获焦时按 Esc 会先落进 main.ts 的 handleGlobalKey——抽屉收起的
+   * 同时弹出游戏选项层（再按形成 Esc 循环）。故对「焦点不在编辑器/输入框」
+   * 的 Esc 在捕获段吞掉；焦点在 Monaco/输入框时仍走冒泡（编辑器先消费，
+   * 见 onWindowKeyDown）。
+   */
+  private readonly onWindowKeyDownCapture = (event: KeyboardEvent) => {
+    if (!this.open || event.key !== 'Escape') return
+    const target = event.target
+    if (target instanceof Element && target.closest('.monaco-editor, input, textarea, select, [contenteditable]')) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.close()
+    this.toggleButton.focus({ preventScroll: true })
+  }
 
   constructor(private readonly deps: VersionDrawerDeps) {
     this.deps.root.replaceChildren()
@@ -115,6 +131,7 @@ export class ScriptVersionDrawer {
     this.render()
     this.refreshPosition()
     document.addEventListener('pointerdown', this.onGlobalPointerDown, true)
+    window.addEventListener('keydown', this.onWindowKeyDownCapture, true)
     window.addEventListener('keydown', this.onWindowKeyDown)
     window.addEventListener('resize', this.onWindowResize)
     document.addEventListener('scroll', this.onDocScroll, { capture: true, passive: true })
@@ -126,6 +143,7 @@ export class ScriptVersionDrawer {
     this.panel.hidden = true
     this.toggleButton.setAttribute('aria-expanded', 'false')
     document.removeEventListener('pointerdown', this.onGlobalPointerDown, true)
+    window.removeEventListener('keydown', this.onWindowKeyDownCapture, true)
     window.removeEventListener('keydown', this.onWindowKeyDown)
     window.removeEventListener('resize', this.onWindowResize)
     document.removeEventListener('scroll', this.onDocScroll, { capture: true } as EventListenerOptions)

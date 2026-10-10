@@ -32,6 +32,7 @@ cd server
 | `server/` | Go 权威服务器：60Hz 模拟、房间管理、脚本沙箱、AI 改码代理 |
 | `client/` | TS + Canvas2D 网页客户端：房间页 / 游戏页 / 回放页 / 内置手册阅读器 |
 | `packages/bot-api/` | 玩家脚本 API 的 TS 类型定义（双受众：人写代码 + AI 语料） |
+| `bots/` | 官方 Bot 脚本（TS，经 goja 运行时执行；含 oracle 与其测试） |
 | `packages/protocol/` | 客户端与服务器的通信消息定义（protobuf 源 + 生成物 + 传输层） |
 | `protocol/` | protobuf schema 源与代码生成配置 |
 | `docs/` | 玩家手册（manual）、运行与部署指南（runbook / deploy）、设计文档与决策记录 |

@@ -5,7 +5,7 @@
 >
 > **如何追加**：在「追加记录」节添加新条目（日期 + HEAD + 变更范围 + 新发现/复核结论），并同步更新对应发现的「状态」与「位置」。
 > **如何修复**：修完一条就把状态改为 ✅ 并注明轮次，**不要删除条目**（保留追溯）；发现已过时改 ❌ 并写明原因。
-> **行号基准**：Round 8（HEAD `6f90d52`）。旧条目的历史行号仅供追溯；修复前一律按符号名重新定位。
+> **行号基准**：Round 9（HEAD `4f8f74d`）。旧条目的历史行号仅供追溯；修复前一律按符号名重新定位。
 >
 > 状态图例：☐ 待修 · 🔵 需产品/设计拍板 · ⚠️ 部分完成 · ✅ 已修 · ❌ 已过时
 > 编号规则：`X-` 跨端 · `S-` 后端 · `C-` 前端；括号内是历史轮次的旧编号，便于对照聊天记录。
@@ -24,6 +24,8 @@
 | R6 | 2026-10-04 | `1301cdc` → `71925db` | 六批原子修复：前端基础/玩法、脚手架、后端运行时/sim、跨端契约；34 文件 / 317 测试、typecheck/build、Go 全量通过 |
 | R7 | 2026-10-04 | `71925db` → `90d5819` | 关闭跨端单源、观战控制、接管/雾效/hash、后端去重；完成语言版本链/body portal、Monaco 开屏预取与真实资源加载器；45 文件 / 477 测试及 Go/race 全通过 |
 | R8 | 2026-10-05 | HEAD `6f90d52` + 工作树（X-2 半成品） | repo-steward 全库只读审计：复核 R7 后 88 文件/+3650 行增量（积分榜重设计、kill-feed/shadow/death、64 机填充、墙影、64KiB 帧上限、mapgen Gen7）+ 仓库卫生/文档层；结论：代码增量收敛，C-11 回退、S-6 恶化，新增卫生清理清单（移交 TODO.md 跟踪） |
+| R9 | 2026-10-10 | HEAD `4f8f74d`（工作树干净） | 六路并行只读子代理专项审计（渲染管线/交互输入/UI-CSS 设计/Go sim 逻辑/网络会话/周边系统），切换口径专查隐藏 bug·渲染效率·交互·设计（不查复制粘贴类）；新增 S-26~S-35、C-31~C-47 共 27 条，关键断言由主会话逐一实读复核后入库 |
+| R9+ | 2026-10-11 | HEAD `4f8f74d` + 工作树 | 实施批：R9 立即批修复（S-26/27、C-31/32/33/43）落地；X-2 收尾关闭（D8 同步）；S-6/C-40 关闭；C-26 部分落地（CanvasStage 三处迁移，行为保持）；S-26 阈值配置化 + 产品语义冻结测试；R8 卫生清单全部执行（含 10 个已并 worktree 清理）。验证：`go test -p 1 ./...`、vitest 555 项、typecheck 全绿 |
 
 R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以当前符号而非历史行号定位。
 
@@ -42,7 +44,7 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 | D5 | 客户端可见游戏数值（视野 / 开火 / HP/能量 / hack / 无敌 / tick rate） | `sim` 常量 → `SimTuning` → 客户端 `game/tuning.ts`；回放积分走权威 `EvMatchEnd.scores` | ✅ R7：高漂移集由服务器可靠下发，旧服务器兜底值以黄金字节互钉 |
 | D6 | join/只读观战错误路由 | proto `EvControlNotice.Code` → Go emit / TS 分流；旧 `EvSay` 仅过渡兼容 | ✅ R7：结构化 code 为主路由，新客户端去重兼容 say，前缀不再是契约 |
 | D7 | AI 状态/错误路由 | proto `EvControlNotice.Code` → `ai_bridge.go` / Workbench AI 面板 | ✅ R7：请求失败、禁用、编译失败、stale、说明与回退失败均按枚举分流 |
-| D8 | Snippet 目录元数据 | `server/internal/snippet/catalog.go` ↔ `client/src/workbench/snippets.ts:30-108` | 人肉对齐（客户端注释自认「漂移由服务端回执兜底」）；X-2 工作树推进中（R8：结构已加、填充为零） |
+| D8 | Snippet 目录元数据 | `server/internal/snippet/catalog.go`（单源）→ `EvSnippetResult.sources` 下发 | ✅ R9+：全字段单源下发，客户端 `SNIPPET_ROWS` 退化为离线兜底（往返钉死测试防反向漂移） |
 | D9 | WS 帧字节/心跳 | proto 权威常量 → TS `messages.ts`/`ws.ts` 与 Go `netws/handler.go` | ✅ R7：`ceb69bd` 将帧与心跳时序收敛为协议单源，并有双侧黄金/时序测试 |
 | D10 | axis_mask 位常量 | proto 注释 ↔ `sim/contract.go:212-217` ↔ `input.ts:15-18` ↔ `axis-src.ts:30`（魔法位 `& 2`） | ✅ R6：`axis-src.ts` 改用 `AXIS_AIM` 导入，删除魔法位 `& 2` |
 | D11 | 颜色字面量 | `art.ts` ink 调色板（规范处）vs 十余处散写 | ⚠️ R8：R6 收敛被回退（`#8cff66`/`#ffb066` ×4、scoreboard amber ×2），服务端 bot 色板扩至 8 色（`solo_bots.go:29`）；其余旁路仍待处理 |
@@ -61,9 +63,10 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 ### X-1 ✅ Bot Script API 四处平行定义（原 R1-P0.1）— R7 已修
 - **R7 结果**：`62d675b` 以 `packages/bot-api/src/index.ts` 为唯一源，生成 Monaco 补全/声明、AI provider prompt 与 Go runtime 合约；`bot_api_drift_test.go` / `script/bot_api_drift_test.go` 防止方法与常量重新分叉。
 
-### X-2 ⚠️ Snippet 目录双份（原 R1-P0.2；R8 工作树进行中）
+### X-2 ✅ Snippet 目录双份（原 R1-P0.2；R9+ 收尾关闭）
 - proto 已有 `EvSnippetResult.sources` 且 `snippet-panel.ts` 在消费；扩 `SnippetSourceView` 加 `min/max/step/unit/hint` 字段，面板改服务器驱动，`SNIPPET_ROWS` 退化为离线兜底。proto additive，旧客户端安全。
-- **R8 工作树现状（未提交）**：proto 字段 6–13 与 `catalog.go` 的 `ParamKind/Param/Module.Key/Param/DefaultEnabled` 已加，但唯一下发点 `glue/snippets.go` `snippetSourceViews()` **零填充**、catalog 条目零处写新字段、客户端未动——就此合入 wire 恒默认值（`param=0`/`key=""`），D8 现状不变；`catalog.go` 亦未过 gofmt（全库唯一命中，CI 会挂）。
+- ~~R8 工作树现状（未提交）~~：proto 字段与 catalog 结构已加但唯一下发点零填充、客户端未动。
+- **R9+ 收尾（2026-10-11）**：`buf generate` 补跑 TS/Go 双端生成物；catalog 六条目补齐 `Key/Hint/Param（含 Step）/DefaultEnabled`（数值行 Step 与 Hint 取自原客户端表，Param 边界与 Validate 边界由 `TestCatalogMetadataSelfConsistent` 互钉）；`snippetSourceViews()` 全字段下发；客户端 `snippetRowsFromSources` 为服务器元数据唯一落地，面板检测目录差异后重建行 DOM（未知 key 合成 `kind{n}`、图标兜底）；`snippets.test.ts` 增「兜底表 ↔ 服务器形态往返一致」漂移钉死；gofmt 通过。D8 同步关闭。
 
 ### X-3 ✅ 游戏数值：协议下发取代客户端复算（原 R1-P0.3 + R2）
 - R7：`dbd7c66` 在 `EvMapBootstrap` 可靠下发 `SimTuning`（tick/HP/能量/开火/hack/无敌/视野），客户端集中经 `game/tuning.ts` 消费；黄金字节与 sim 常量测试锁定，旧服务器仍有兼容兜底。
@@ -100,7 +103,11 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **S-3 ☐ 轴/命令五层逐字段样板**（原 R1-H3）：每个轴在 collector/merge/resolve/clone/arbitrate 五层各一段同构代码，散布 8 处（`sim/control.go:118-232,327-344`、`script/collector.go:52-146`、`script/goruntime.go:417-461`、`glue/solo_bots.go:38-55`）。提案：`sim.Axis` 描述表驱动 + `snippetCollector.guarded(axis, set)` 收敛 6 个 setter。-250~300 行；新增轴从「改 10 处」变「改 1 张表」。
 - **S-4 ⚠️ stats projector 双 switch**（原 R1-H4）：`projector.go:197-293` applyEvent 与 `:462-543` eventKey 必须成对维护，漏改 eventKey 该事件被静默去重丢弃（:161-163）；`titles.go:79-114` awardMax 双胞胎泛型合并。表驱动或 protojson 生成指纹，-120 行。
 - **S-5 ☐ 三个回放驱动循环**（原 R1-H5，R2 复核仍成立）：`sim/replay.go:104-149` / `sim/replay_visual.go:37-79` / `stats/replay.go:37-100` 同一「读→校验→恢复→跳过→逐 tick」骨架；错误文案已分叉（replay.go:113 vs replay_visual.go:46）；stats 的 seq 分配（:56-58,:87-89）镜像 glue `eventSeq`（match.go:225-226）。提案：`sim.ReplayCursor` + 统一 sentinel `ErrReplayMissingStart` + projector 自持序号。-80 行。
-- **S-6 ☐ 每帧 AOI 算两遍**（原 R1-H6）：`match.go` step() 中 `runScripts`（:743-750）与快照循环（:584-591）对同一机器人以相同参数各调一次 `BuildObservation`。提案：step 开头构建 `obsByRobot` 共用。-20 行 + 64 机 60Hz 下省一半 LOS 计算（对 12ms 帧预算实质让利）。R8 恶化：`2e5e74f` 将 SOLO 默认提到 63 机（`room.go:98,350`），两处调用点未变（match.go 快照循环/runScripts），64→128 次 LOS/tick 成为常态而非理论。
+- **S-6 ✅ 每帧 AOI 算两遍**（原 R1-H6）：`match.go` step 开头构建 `obsByRobot` 共用（R9+ 2026-10-11 落地：脚本池与快照循环共享同一观测，`runScripts` 签名收 `obsByRobot`；64 机 60Hz 下 LOS 计算减半）。R8 恶化背景：`2e5e74f` 将 SOLO 默认提到 63 机（`room.go:98,350`）。
+- **S-26 ✅ 空房间 warmup 对局 60Hz 永动、房间永不回收（R9，P1）**：`glue/match.go:626,658` 终止条件 `m.tick >= sim.MatchTicks && !m.warmup`——warmup 永不自我终止；`hub.go:59` 建房后全仓无任何 `delete(h.rooms)`（Unregister 只 `releaseHumanLocked`）。任意 Join→发 WARMUP→断开即留下永久 60Hz tick goroutine + goja runtime + sim 全量步进（0 接收者照跑，单房间可耗 ~0.7 核），`rooms/identities/scriptVersions` 无界增长，脚本化循环建房可 DoS。修法：空房（sessions+spectators=0）超阈值 `match.Stop()` 并逐出，或 warmup 设 tick 上限。**R9 当轮修复**：hub 增加清道夫（`StartJanitor`/`janitorSweep`，main 30s 一拍）——空置 >15s 停 warmup 并经新增的 `room.Room.EndWarmup()` 转 Ended（Warmup 此前无终局转换，从 Warmup 发 WARMUP 本就是非法转移）；空置 >5min 关停房间（`closed` 门卫拒 Bind/BindSpectator、publish 丢弃在途装配防孤儿对局）并从 `h.rooms` 逐出；`hub_janitor_test.go` 4 用例冻结。**R9+ 配置化（2026-10-11，语义由产品确认）**：`OMB_WARMUP_IDLE_STOP`/`OMB_ROOM_EVICT_AFTER`（duration 字符串，解析失败回退默认并打日志）；`Hub.SetWarmupIdleStop/SetRoomEvictAfter` 拒绝非正值——清道夫可调快慢、不可被配置关闭。冻结语义：正式局终局后只要房间有人（含观战者）等多久都不逐出/不踢人、模拟保持停止、RESTART/WARMUP 重开新模拟且新对局期间房间同样免疫；非空房间（含 idle warmup 有人在场）清道夫完全不碰。`hub_idle_policy_test.go`（5 用例）+ `janitor_config_test.go`（env 解析）冻结。
+- **S-27 ✅ 局中/热身中新身份加入收 bootstrap 却永不进快照花名册（R9，P1）**：`hub.go:193-195` 对激活对局无条件 `bootstrapLocked(s)` 下发 MapBootstrap，但快照循环（`match.go:580-584`）按 `NewMatch` 装配时冻结的 `playerOf` 花名册驱动，`forceResyncLocked`（:309-316）对无 robotOf 的 pid 置位后无人消费；room.Join 允许 Running 加入（room.go:264-267）。新昵称局中加入 → 客户端 `awaitingFull=true` 卡「正在同步对局」直到下一局 publish（正式局最长 8 分钟；纯 warmup 房见 S-26 无限期）。修法：bootstrap 前查 `m.robotOf`，不在花名册只留大厅不发 bootstrap。**R9 当轮修复**：`Bind` 对激活对局先查 `m.robotOf` 再 bootstrap；`TestBindMidMatchNonRosterGetsNoBootstrap` 以花名册成员路径作对照冻结。
+- **S-28 ☐ RestoreCheckpoint 不校验机器人位置/战斗字段与 NextProjectile（R9，P1）**：`sim/replay.go:36-47` 机器人循环只查 ID/sector/State；Position/HP/Energy、`cp.NextProjectile`、DamageBy 键全未校验（对比装配入口 `SetSpawn` 强制 insideArena+非 overlapsWall）。篡改的 checkpoint 可造出「卡墙且弹道被墙拦截的不可击杀机器人」（slideRobot 接触清速 / sweepWall t=0 推不动 / traceSolid 先挡射线）或 `NextProjectile=0` 触发耗尽守卫全员禁射到局终。live/回放同错不破坏确定性，但破坏 sim 核心不变量；回放分享属功能，日志可被手工编辑。修法：恢复时复用 insideArena/overlapsWall/HP 范围谓词 + NextProjectile 非零。
+- **S-29 ☐ ControlRecord.Toggles 无上界，恶意记录令消费循环空转至 2^32（R9，P1）**：`sim/control.go:271` `for i := uint32(0); i < c.ToggleCount; i++`；写侧 uint32 无约束，`log.go validateRecord` 对 control 记录恰漏这个纯算力字段。`omb replay` / 可视化回放处理损坏或篡改的分享录像时，单条记录卡 ~4.3e9 次迭代（秒到分钟级 DoS）。修法：validateRecord 对 Toggles 设上限（≤ 机器人数×常数），越界拒整条日志。
 
 ### 中影响
 - **S-7 ✅ `snapshot.World{...}` 字面量 ×5**（原 R1-H7）：match.go ×4 + ai_bridge.go:121-124 → 加 `WorldOf(wv sim.WorldView)` 转换。-35 行。
@@ -113,6 +120,11 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **S-14 ☐ sim 事件发射样板**（原 R1-M7，R2 复核 15 处未增）：`s.events = append(...)` ×15（combat×7 / sim×4 / objectives×3 / control×1）+ `index[id]`/`ended` 守卫 ×7-8 → `s.emit(kind)` + `robotForWrite(id)`。**下一批事件改动前做掉最便宜**（R2 新增 decay 未加事件，暂未增重）。-40 行。
 - **S-15 ☐ sim 双 Phase 类型**（原 R1-M8）：`Sim.phase` 存 `ombv1.Phase` 又到处转回 `sim.Phase`（5+ 处转换）→ 内部存 `sim.Phase`，仅 emit/publish 转 proto。
 - **S-24 🔵 uplink decay 机制复查（R2/R3）**：实现干净（无复制状态机、三个重置点统一清 `DecayAt`、SimulationVersion 3 门用法正确、checkpoint 往返有测试；R6 已将 `DecayAt == Tick` 判为非法）。仍需产品决定两点：① **decay 无事件**——「中断清零」与「缓慢衰减」在事件流不可区分，回放也不渲染 uplink 进度；若需要「进度流失」反馈，应加事件 kind 或 proto stall 标记；② **busy 横跳绕过**——机器人可在两桩间逐 tick 交替躲衰减（非正确性 bug，但会削弱资源压力语义）。
+- **S-30 ☐ 非激活窗口 ScriptSubmit/ScriptRollback/AiPrompt 静默丢弃零回执（R9，P2）**：`hub.go:317-320,345-349,357-361` `m == nil || !m.activeLocked() → return`；对照 `snippets.go:26-44` 自注「任何合法玩家请求都有 EvSnippetResult，不得静默悬空」。热身→开局的装配窗口（旧 warmup handle 已 Abort、新 match 未 publish，几十~几百 ms）与 Ended 态内提交全部无响应，客户端只能等 10s 超时提示「结果未知」，脚本实际未入库。修法：非激活分支回结构化 nack（对齐 D6/D7 路由单源做法）。
+- **S-31 ☐ 上行 Join 参数零校验（R9，P2）**：`main.go:509-527` 直接 `EnsureRoom(join.GetRoomCode())`+`Bind`，无非空/字符集校验；客户端 lobby 仅 trim 昵称。空房码使互不相干用户共享 `""` 房；空昵称使身份碰撞从「需知道对方昵称」降为默认碰撞，第二连接静默接管并夺走第一人控制轴（hub.go:185-189）且旧端无提示（见 S-33）。修法：room_code 限 GenerateCode 字母表、nick trim 后非空，失败走 `sendJoinFailedReliable`。
+- **S-32 ☐ AI 流式增量逐 SSE chunk 走可靠通道，可撑爆 1024 帧队列（R9，P2）**：`ai_bridge.go:257-264` 每个 StreamDelta 一次 SendReliable；deepseek provider 每 SSE chunk 至少一条 delta，长回答数千帧 ×~100B。弱网 + 长回答 → `netws/handler.go:122-126` reliableCh（容量 1024）满即 kill 断连（玩家掉线重连、AI pending 作废、回答不可恢复）。AI 增量属可丢可补数据却是压垮一致性通道的最大单源。修法：50ms/512B 聚合 flush，或移独立可丢低优先队列（同 scriptLog 模式带 gap 提示）。
+- **S-33 ☐ 同身份接管后旧连接成永默僵尸（R9，P2）**：`hub.go:185-195` 接管只处理新会话，被替换旧 Session 不通知不关闭；`withRoom` 被 `rc.sessions[pid]==s` 屏障挡住、broadcast 不再遍历，但旧 WS 未关、心跳照常。旧标签页保持「connected · rtt」而世界永久冻结、输入静默失效，直至手动关闭（同用户重开或被同昵称者顶掉均可触发）。修法：检测替换时向旧会话定向发 takeover notice 并关闭其连接（复用 Unregister 链路）。
+- **S-34 ☐ 玩家终局帧走 lossy、观战者强制 reliable 不对称（R9，P2）**：`match.go:613-620` 玩家帧无 ended 特判，`:636-638` 观战者 `ForceFull+SendReliable`（自注「No next tick can repair a dropped final frame」）。终局帧被丢时该玩家世界定格倒数第二帧（分数走 reliable 不受影响，表现层缺口）。修法：ended 时玩家帧与观战者同样 ForceFull+reliable。
 
 ### 低影响
 - **S-16 ✅ x10 定点换算散布 6 处**（原 R1-L1）→ `sim.HPToX10/HPFromX10`。
@@ -124,6 +136,7 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **S-22 ☐ 上行消息路由三处维护**（原 R1-L8）：`main.go:395-474` 观战拒绝列表 + 玩家 switch + glue Session 方法 → glue `UpstreamRouter` 注册表。
 - **S-23 ☐ main.go 职责混合**（原 R1-L9）：GC 调优 + HTTP 路由 + 关停 + 协议路由 → HTTP 路由抽 `serverapi`，GC 移 `ai`。
 - **S-25 ☐ R8 小件杂项**：`mapgen/generator.go:124` `targetAlive = 4 + (participants-1+1)/2` 的 `-1+1` 恒等死算术（读者会误读为 ceiling/偏移意图）；solo bot 数量 clamp 三连（`cmd/omb/main.go:167-181` / `glue/hub.go:37-45` / `room/room.go:234-243`）同一不变量三份平行实现（防御性冗余，收敛属可选）。
+- **S-35 ☐ R9 sim 小件（两处 FP/扫掠边界，理论隐患）**：① `objectives.go:386-397` spawnCore 加权采样「先求和再按组序连减、仅 `pick < 0` 命中」，末组 1ulp 浮点残差可使 pick 恰不小于 0 → 本周期静默少刷一个 Core（~2^-53 量级，确定性不受影响）——循环耗尽兜底取末组或以 `pick <= 0` 判末组；② `objectives.go:279-288` + `collision.go:92-96` 机器人贴墙收尾 tick 的 `sweepWallNormal` t=0 退化接触把 sweptReach 中段拾取检测整体裁掉，物品落在距 PathStart [0.95,1.22]m 环带且本 tick 撞墙收尾时漏捡，违背 :259-263「dash/knockback 不得跳过身体触到的物品」注释承诺——t=0 退化接触不裁剪，仅 t>0 真实偏转处截断。
 
 ---
 
@@ -168,9 +181,26 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 - **C-28 ✅ aim 归属判定的客户端双投影**（R5）：`5087ce8` 抽出 `axis-src.isAimUnderScript`，HUD 文案与 controls guard 共用同一真值表，并覆盖 assist/能力/权威 turret source/手操轴组合。
 - **C-29 ☐ titleBadge 第 3 份浮层定位实现**（R8）：`scoreboard.ts:123-137` `positionTitleDetail` 手写 anchor 钳制/上下翻转/body portal（`:216`），而 `workbench/script-version-placement.ts:40` 已有可复用 `computePanelPlacement`（同为 body portal 形态）。
 - **C-30 ☐ kill-feed 行数双写**（R8）：`kill-feed.ts:4` `KILL_FEED_ROWS = 6` ↔ `kill-feed.css:6` `calc(6 * var(--feed-row))`，改行数需两处同步。
+- **C-31 ✅ 回放积分板缓存签名混入 `frame.tick`，播放期每帧全量重写积分 DOM（R9，P1 效率）**：`replay/player.ts:402` 签名含 tick → 每帧必失配 → 每帧 `scoreRenderer.update` + aria-label 重写，`displays` 逐行展开重建；下游 `fillScoreRow`（scoreboard.ts:239-245）每行无条件 textContent 多次写，titles=false 时还每行 `badges.replaceChildren()`。8 分钟局 60Hz × N 人的 DOM mutation 风暴，与 live 侧 `Scoreboard.display` 引用缓存 + 等值守卫纪律相悖。修法：签名去 tick（rows 内容已覆盖变化）或建引用级缓存。**R9 当轮修复**：签名去掉 `frame.tick`——evidence 与 score 同源单调，行相同即 evidence 相同，不进签名（代码注释已记）。
+- **C-32 ✅ Esc/全局快捷键层级三连（R9，P1 交互）**：① `script-version-drawer.ts:117-118` 版本浮层（body portal）内按钮获焦按 Esc：`main.ts:441` 的 `gameOptions.handleGlobalKey` 先触发（window 上先注册且不 stopPropagation），portal 不在 `options.ts:3` EDITING_TARGETS → 先开选项层，drawer 自己的 window keydown 才关抽屉——一按 Esc 双浮层联动，关掉选项层后再按又弹，形成 Esc 循环；② `help-toggle.ts:29` Esc 处理绑在 panel 元素上，焦点移回画布后面板残留，Esc 反而开选项层（与 C-25 的语义问题正交，是监听器作用域缺陷，C-25 拍板后依然存在）；③ 选项层（aria-modal）打开时 M/C 全局快捷键仍生效（main.ts:445-451 不检查 options.isOpen，排除表也不含 button）→ 焦点被移出模态对话框、Tab 焦点圈失效。修法：浮层类统一「开窗期挂 window 级 Esc（capture）+ 关窗摘除」，handleGlobalKey 在 options.isOpen 时短路。**R9 当轮修复**：① drawer 增加捕获段 Esc 监听（焦点在 Monaco/输入框时仍走冒泡，保留「编辑器先消费 Esc」的既有语义）；② help-toggle 开窗期挂 window 级捕获 Esc、关窗摘除（焦点原本就在面板内才把焦点还给 ? 按钮）；③ main.ts 在 `gameOptions.isOpen`（本就是公开 getter）处短路其余全局快捷键。
+- **C-33 ✅ 回放库并发 load 无在途守卫（R9，P2）**：`replay/library.ts:114-133` 快速双击两个条目 → 两次 `player.load` 并发 fetch+parse 各自整体覆盖 index/map，慢回包覆盖新回放，路由/标签与画面错配（低速网可复现）。修法：load 加代际号，或 library 记在途 matchId 重复点击直接返回。**R9 当轮修复**：`ReplayPlayer.load` 加 `loadGen` 代际号并改返回 `'loaded'|'failed'|'superseded'`——superseded 静默返回且不触发 onError/setBusy 回写，library 按返回值分流（只有 failed 才回列表）。
+- **C-34 ☐ 震屏 translate 后视野雾矩形仍按 (0,0) 起画（R9，P2）**：`render.ts:55` 震屏 `ctx.translate(shake.x, shake.y)`（振幅 ±8/±6px）后，`drawVisionMask` 的 `ctx.rect(0, 0, cam.cw, cam.ch)`（:144）随坐标系偏移——自机阵亡 ~267ms 内震屏反向侧边缘留 1–8px 未压暗亮缝。修法：雾罩矩形外扩 |shake| 或遮罩前还原屏幕坐标。验证：实战阵亡瞬间逐帧看画面边缘。
+- **C-35 ☐ visual 回放插值恒置 respawnAt:null（R9，P2）**：`replay/index.ts:294,310` 两个插值分支都写死 `respawnAt: null`，事件叠加关键帧分支（:380）才有 `ev.tick+180`；`replay/render.ts:39-41` 的倒计时文本分支对带 visual 行的新格式录像不可达——同一局实况显示「2.3s」、新格式回放只有骷髅图标。修法：插值结果携带工作态 respawnAt，或渲染侧按 alive=false 固定估算。
+- **C-36 ☐ #game-chat 与 kill-feed 通讯栏同位重叠（R9，P1 视觉/交互）**：`app.css:366` chat `bottom:280px` 只避让 hud-left 本体（实高 ~148px），未算挂到 hud-left 顶上的通讯栏（kill-feed.css:2 `inset: auto auto calc(100% + 12px) -2px`，顶边 ~365px）；chat 占 280–395px 带、x 20–440，不透明背景 + z-index:8 压住 feed 底部最新 2–3 条击毁记录，打字时不可见。CSS 值与结构已核实，精确重叠带建议实机确认。修法：chat 锚点计入 comms 实高，或 chat 打开时 feed 下沉。
+- **C-37 ☐ 全站未声明 color-scheme:dark（R9，P1 设计）**：全 src 与 index.html 零 `color-scheme`/`scrollbar-color`/`::-webkit-scrollbar`/`::selection`；深色滚动容器遍布（`#replay-list` app.css:194、manual 双栏、`#hud-score-rows` scoreboard.css:35、`.end-list`、`.ai-feed`、`.script-console-list`），`<select>`（#live-follow/#sp-follow）下拉弹层与滑轨走 UA 亮色 scheme——深底像素风被成排系统亮条打破，全站一致性破绽。修法：`:root{color-scheme:dark}` + meta，按需补暗色 scrollbar/selection token。
+- **C-38 ☐ 动效健康度：workbench.css 全文无 prefers-reduced-motion + AI 无限动画动 layout 属性（R9）**：`workbench.css:221-223` `.snippet-apply[data-dirty]` 无限 box-shadow 脉冲（开启 snippet 未点应用即常驻闪烁）——其余 6 个 CSS 都有 reduced-motion 块，app.css:497 全局兜底只禁 transition 不禁 animation，违反 STYLE.md:56 自定规则；另 `ai-panel.css:100,113` 扫描线动 `left`、meter 5 根动 `height`（:145-146），生成横幅可见期间每帧 layout+paint。修法：workbench 补 reduced-motion 块（dirty 态改静态 amber 描边）；scan/meter 改 transform（对齐 snippet-switch::before 做法）。
+- **C-39 ☐ 窄容器布局三处（R9，P2）**：① `workbench.css:141` ≤560px 编辑器控制行 4 轨网格装 5 个子项（版本 drawer 的 span 未计入轨），Console 开关跌落第二行与 lang-switch 同列叠行；② `app.css:399,402,403` ≤420px 下 Uplink 面板 min-content（nowrap 文案 + 90px bar + padding）超出 `.hud-right` 46vw 上限，向左越界压进战场画面（已声明支持的 320 档在列）；③ `app.css:241-244` `.rp-mark-tip` nowrap 无 max-width，窄屏长 detail 文本伸出视口/控制条。
+- **C-40 ✅ 渲染热路径小分配群（R9，P2 效率）**：① `art.ts:41` 三块全屏不透明画布 getContext 未传 `{alpha:false}`（每帧首操作都是不透明全量 fillRect），合成器走不了不透明加速路径；② `feedback.ts:124,134` 快照热路径每机器人每 tick 新建 4 字段对象 + 每快照重建 cores Set（60Hz×64 ≈ 3840 对象/s，与 world.ts:77 已修的同类纪律相悖）——prev 只读可原地复用；③ `replay/render.ts:34,55` 回放每帧重建 owner→color Map + 逐气泡 `robots.find` 线性扫（live 侧同逻辑走 Map 直查）。**R9+ 修复（2026-10-11）**：三处全落——`createCanvas2d` 传 `alpha:false`；feedback prev 原地改写 + cores 集合原地增删（spawn 检测仍用旧集合语义不变）；回放一次建 id→robot 索引供弹丸取色与气泡定位共用。
+- **C-41 ☐ 回放时间轴标记 6×6px 纯 hover，无键盘/触摸可达（R9，P2）**：`app.css:231-233` + `player.ts:285-290` 生成 div 非 button、无 tabindex/aria，tip 仅 PointerEvent 驱动——触屏点不中 6px 目标、键盘完全触达不了事件标记。修法：透明扩大热区 + role/aria-label + 触摸即显 tip。
+- **C-42 ☐ workbench 微字 8–9px 配 ~3:1 低对比（R9，P2）**：`workbench.css:205-206`（snippet-range-scale 8px `#49616d`、format 9px `#4d6875`）、`ai-panel.css:29,161`（ai-model-mode、窄容器 8px 状态行）对深底 3.0–3.4:1（<4.5:1），8px 亦低于可读下限；全 px 体系浏览器 zoom 不缓解。修法：微字下限 10px、颜色提一档（--fg-dim 档）。
+- **C-43 ✅ audio.ts ensure() 创建分支不 resume()（R9，P2）**：`audio.ts:268-293` 新建 AudioContext 分支无 resume，仅复用分支有 `state==='suspended' → resume()`；WebKit 即使可信手势内 new 也起始 suspended，且 `installUI` 的 wake 捕获监听在当前事件派发过程中注册、按 DOM 规范不被本次事件触发——PRESS TO START 后 Safari 音效+BGM 全静默直至下次手势。修法：创建分支补 `void ctx.resume()`（与复用分支一致）。**R9 当轮修复**：创建分支补 `if (ctx.state === 'suspended') void ctx.resume().catch(...)`。
+- **C-44 ☐ ai-markdown 链接不过滤 scheme（R9，P2）**：`ai-markdown.ts:50-61` renderer.link 仅加 target/rel，`javascript:` href 原样经 innerHTML 注入（ai-panel.ts:315,320,432,440）；原始 HTML token 已被 `renderer.html = escapeHtml` 挡住但链接漏网。`target="_blank"+noopener` 把执行压到隔离新上下文，危害有限，属应修打磨。修法：href scheme 白名单（http/https/mailto/相对路径），其余替换 `#`。
+- **C-45 ☐ 回放 NDJSON 任意一行损坏即整局不可播（R9，P2）**：`replay/model.ts:172-175` 逐行 JSON.parse 失败即 throw → player onError 整局放弃；NDJSON 是服务器增量写盘，进程被杀/磁盘满最常见的产物是尾部截断行。存档类数据丢整局代价远大于丢最后一秒。修法：容忍末行解析失败（跳过并照常 finish），中间行维持显式报错；未知 schema/类型严格拒绝保持不变。
+- **C-46 ☐ bots/oracle.ts 站桩宽限 45 tick 超服务器 30 且 gap 整段计入进度（R9，P2）**：`bots/oracle.ts:47` 常量注释自认服务器 0.5s 宽限（=30 tick）却写 45；`maintainHack` 把 2–45 tick 的中断 gap 整段按站桩进度累加（:595-604），记忆衰减估算同源高估——服务器跳 tick/站桩被打断场景下本地进度虚高，提前停止 interact 并错误拉黑该桩 30s（服务器侧桩仍可用）。修法：宽限 ≤30；gap>1 只计 1 tick。
+- **C-47 ☐ #audio-settings 与 .game-tools 工具栏形态不统一（R9，P2 设计）**：`app.css:153-154` 工具栏按钮是「无边框+底边线」tab 形态，`:348-349` audio-settings 是「四边描边+异底色」浮盒，main.ts:90 将其 append 进同一行——同行两种视觉语言，`#btn-game-help[aria-expanded]` 的激活态样式也不作用于它。修法：补 `.game-tools > #audio-settings` 形态对齐规则（浮层不变）。
 
 ### 架构建议
-- **C-26 ☐ CanvasStage**（原 R1 架构-1）：三处手写 canvas+DPR+rAF 循环（controls.ts / live.ts / replay/player.ts）→ 统一宿主，把「同尺寸短路」「空闲不重绘」变默认。C-4 的 bug 正是双循环耦合的代价；R4 又一笔实证：cameraZoom 调用行（含 dashing 谓词）在 drawFrame 与 sampleAndSend 间逐字复制（controls.ts:411/440）。**等 game-feel 波次合入后做**。
+- **C-26 ⚠️ CanvasStage**（原 R1 架构-1）：**R9+ 部分落地（2026-10-11）**：新增 `game/canvas-stage.ts`（canvas+DPR 后备缓冲+RO+逐帧 DPR 漂移检测+rAF 宿主，代际号保证 draw 内 stop 安全），controls（恒绘）/live（脏标记，气泡保活语义保留）/replay-player（播放时钟 pump + 恒绘）三处循环全部迁移，行为保持；同尺寸短路单源化。**未做**：controls 的「空闲不重绘」——画面含指针瞄准预览，朴素跳帧不正确，需 feedback 暴露静默判定后另行设计。原描述：三处手写 canvas+DPR+rAF 循环 → 统一宿主，把「同尺寸短路」「空闲不重绘」变默认。C-4 的 bug 正是双循环耦合的代价。
 - **C-27 ❌ 事件总线**（原 R1 架构-2）：明确不做——main.ts 消息分发单点且时序敏感（awaitingFull 状态机），总线会掩盖时序。
 
 ---
@@ -221,10 +251,27 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 
 > R7 已移除完成项；部分完成项保留在上述后续范围中。
 > R8：落地顺序不变；X-2 已开工（工作树半成品，见条目）；R8 新增项（D18/C-29/C-30/S-25）并入第 2/3/4 节对应优先级；可执行的清理与在办清单移至根 `TODO.md` 跟踪。
+> R9：正确性/健壮性批次优先级——**立即**：S-26（资源泄漏/DoS 面）、S-27（局中玩家卡死）、C-32①（Esc 双浮层联动）、C-31、C-36/C-37；**硬化批次**：S-28/S-29/S-30/S-31/S-32/S-33/S-34；**打磨批次**：C-33~C-35、C-38~C-47、S-35。既有落地顺序不变。R9 立即批中的 S-26/S-27/C-31/C-32 与打磨批中的 C-33/C-43 已于当轮修复（✅，含 `hub_janitor_test.go` 4 用例与 `TestBindMidMatchNonRosterGetsNoBootstrap`）；余项待修。
 
 ---
 
 ## 8. 追加记录
+
+### Round 9 补充（2026-10-11，HEAD `4f8f74d` + 工作树，实施批）
+- **R9 立即批修复**：S-26（清道夫 + `EndWarmup` 新 room API + closed 门卫）、S-27（花名册门卫）、C-31（回放积分签名去 tick）、C-32 三连（浮层捕获段 Esc / 帮助面板 window 级 Esc / 选项层打开短路快捷键）、C-33（回放 load 代际号，返回值改 `'loaded'|'failed'|'superseded'`）、C-43（AudioContext 创建分支补 resume）。
+- **X-2 收尾关闭**（D8 同步）：双端代码生成补跑；catalog 六条目补齐元数据（Step/Hint 取自原客户端表，边界与 Validate 由新测试互钉）；`snippetSourceViews()` 全字段下发；面板改服务器驱动 + 兜底往返钉死测试。
+- **S-6 关闭**：`match.go` step 单次构建 `obsByRobot`，脚本池与快照循环共用。**C-40 关闭**：`alpha:false`、feedback 原地改写 + cores 原地增删、回放 byId 索引复用。**C-26 部分落地**：`canvas-stage.ts`（恒绘/脏标记双模式、代际号防 draw 内 stop 泄漏）三处循环迁移，行为保持；controls 空闲不重绘待 feedback 静默判定设计。
+- **S-26 阈值配置化**（语义由产品确认）：env `OMB_WARMUP_IDLE_STOP`/`OMB_ROOM_EVICT_AFTER`；setter 拒绝非正值（清道夫不可被配置关闭）；冻结语义：终局后房间有人（含观战者）永不逐出不踢人、模拟停止、RESTART/WARMUP 重开新模拟；非空房间（含有人 idle warmup）完全免疫。新增 `hub_idle_policy_test.go`（5 用例）、`janitor_config_test.go`（env 解析）。
+- **R8 卫生清单全部执行**：package-lock/artifacts png 删除并入 gitignore、三份 plan 归档 `docs/plans/archive/`、oracle-bot worktree 删除（另清 10 个「已并入 main 且干净」的 Temp/D 盘 worktree；6 个 dirty/未并的保留）、本地 ~105MB 旧二进制/日志删除、runbook 两处 `pnpm -r typecheck` 修正、README 补 `bots/` 行。遗留一项待产品确认：根/client package.json 版本 `0.1.0` 是否刻意。
+- **验证**：`go vet ./server/...`、`go test -p 1 ./...`（与 CI 串行 timing 门一致；并行全量下 `TestScanWalls64WithinRuntimeBudget` 有既有计时抖动，单独/串行均稳过）、vitest 50 文件 555 项、`pnpm typecheck` 全绿；gofmt 干净。
+- **台账动作**：X-2 ✅、S-6 ✅、C-40 ✅、C-26 ☐→⚠️、S-26 ✅ 补配置化注、D8 ✅；轮次日志 +R9+ 行；TODO.md 重写（已完成/待办分区）。
+
+### Round 9（2026-10-10，HEAD `4f8f74d`，工作树干净，六路并行子代理专项审计）
+- **范围与方法**：R8 后仅 `4f8f74d` 一个提交（HUD 打磨/接管改进/X-2 推进）。本轮应用户要求切换审计口径：不再查复制粘贴/单源类（第 1、2、5 节框架照旧），专查**隐藏正确性 bug、渲染效率、交互、视觉设计**。六路 Explore 只读子代理并行（渲染管线/交互输入/UI-CSS/Go sim/网络会话/周边系统），各路带既有台账去重；高影响断言由主会话逐一实读复核（S-26/27/28/29、C-31/32/36 的 CSS 值/37/38/43 均复核成立）后才入库，原始 31 条归并为 27 条。
+- **headline**：服务端两条 P1——空房间 warmup 60Hz 永动不回收（S-26，可脚本化 DoS）与局中新身份 bootstrap 死等（S-27，客户端卡「正在同步」最长 8 分钟）；回放/交互链路 P1——积分 DOM 每帧重写（C-31）、Esc 双浮层联动循环（C-32①）、恶意 checkpoint/ToggleCount 两个硬化缺口（S-28/S-29）、chat 压 kill-feed（C-36）。前端视觉层首次系统性过 CSS：color-scheme 缺失（C-37）与 reduced-motion 缺口（C-38）是全站级而非单点。
+- **复核后排除的集中疑点**（各路子代理已查证，汇总留档）：输入 blur/visibility 清理、rAF/timer 生命周期与双循环、canvas save/restore 状态泄漏、DPR/resize 失配、相机围绕点缩放数学、拖尾/飘字/气泡数组界、墙影几何、锁区遮罩互补性、心跳边界、锁序、并发 map、弹丸 tunneling、同 tick 双碰撞、无敌帧边界、uplink 争抢确定性、启动加载卡死/双击、Monaco 生命周期与浮层 portal 清理、AI pending 终态、awaitingFull 正常重连恢复、房码路径穿越、快照 NaN——均排除无新发现。
+- **台账动作**：轮次日志 +R9；行号基准更新至 `4f8f74d`；新增 S-26~S-35（高影响 4/中影响 5/低影响 1）、C-31~C-47；第 7 节补 R9 优先级注。
+- **未验证**：静态只读审计，未运行测试/构建；C-36 的精确重叠带、C-34 的震屏亮缝、C-43 的 Safari 行为建议实机/真机确认（验证方法已写入条目）。
 
 ### Round 8（2026-10-05，HEAD `6f90d52` + 工作树，repo-steward 全库只读审计）
 - **范围**：R7 基线 `90d5819..6f90d52` 共 88 文件/+3650−559（积分榜重设计、kill-feed/shadow/death 新模块、ScoreRowRenderer 三端统一、64 机填充、墙影投影、64KiB 帧上限、mapgen Gen7/coreSupply、invuln 下发、beta.2 发布链）+ 未提交 X-2 半成品 + 仓库卫生/文档层；三路并行评审，关键断言（颜色回退、零填充、死字段）逐一实锤。

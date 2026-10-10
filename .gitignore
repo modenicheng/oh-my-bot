@@ -39,3 +39,6 @@ server/tmp/
 
 # git worktrees（隔离工作区，见 .worktrees/）
 .worktrees/
+
+# 评审证据截图（R8 卫生清单：不入库）
+client/artifacts/

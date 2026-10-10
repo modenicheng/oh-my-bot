@@ -31,7 +31,7 @@ cd server
 
 `build.sh` 按依赖顺序做了五件事：
 
-1. `pnpm -r typecheck` —— 全部前端包做类型检查，先抓低级错误
+1. `pnpm typecheck` —— 全部前端包做类型检查，先抓低级错误
 2. `pnpm --filter client build` —— 把客户端源码打包成浏览器可用的静态文件（产出 `client/dist/`）
 3. 拷贝 `client/dist/*` → `server/cmd/omb/web/` —— 前端产物放进服务器要内嵌的位置
 4. 拷贝 `docs/manual/*` → `server/cmd/omb/manual/` —— 手册放进要内嵌的位置
@@ -103,7 +103,7 @@ go test ./server/internal/glue/ -run TestFrameBudget -count=1 -v  # 64 脚本 <1
 
 ```bash
 (cd protocol && npx buf generate) # 重新生成 TS + Go 双语言的协议代码
-pnpm -r typecheck                 # 两侧类型立即校验
+pnpm typecheck                 # 两侧类型立即校验
 ```
 
 新增表现信息一律用**向后兼容字段**：`SelfState` 携带辅助开关与开火/冲刺的绝对冷却 tick；`shot`、`projectile_impact` 记录已发生的攻击和接触点。客户端不从弹丸离开视野推断命中。原地炮塔旋转和技能结束也参与快照差异检测。
