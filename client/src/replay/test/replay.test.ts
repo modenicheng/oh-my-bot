@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { parseReplayNDJSON, ReplayParseError } from '../model'
+import { parseReplayNDJSON, parseReplayNDJSONAsync, ReplayParseError } from '../model'
 import { ReplayIndex } from '../index'
 import { Title, ReplayRecordType, replayRecordDiskName, replayRecordTypeFromDisk } from '@omb/protocol'
 
@@ -66,8 +66,69 @@ describe('parseReplayNDJSON', () => {
     expect(ok.records).toHaveLength(1)
   })
 
-  it('非法 JSON 行报行号', () => {
-    expect(() => parseReplayNDJSON('{"schema_version":1}\nnot json\n')).toThrow(/第 2 行/)
+  it('中间坏行整局拒绝并报行号', () => {
+    const lines = [
+      '{"schema_version":1}',
+      'not json',
+      JSON.stringify({ type: 'input', tick: 1 }),
+    ].join('\n')
+    expect(() => parseReplayNDJSON(lines)).toThrow(ReplayParseError)
+    expect(() => parseReplayNDJSON(lines)).toThrow(/第 2 行/)
+  })
+})
+
+// C-45：NDJSON 尾部截断容忍——末个非空行的语法失败跳过并照常 finish；
+// 中间行与语义错误（未知版本/坏记录）严格语义不变。
+describe('回放尾部截断容忍（C-45）', () => {
+  const head = JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } })
+
+  it('尾部截断半行（无换行）跳过并照常 finish', () => {
+    const data = parseReplayNDJSON([
+      head,
+      JSON.stringify({ type: 'event', tick: 60, event: { kill: { killer: 1, victim: 2 } } }),
+      '{"type":"event","tick":120,"event":{"ki',
+    ].join('\n'))
+    expect(data.records).toHaveLength(2) // match_start + 截断前的 kill 事件
+    expect(data.endTick).toBe(60) // 截断行不进时间轴
+  })
+
+  it('尾部坏行后随空行仍按末个非空行容忍', () => {
+    const data = parseReplayNDJSON([head, 'not json', '', '  '].join('\n'))
+    expect(data.records).toHaveLength(1)
+    expect(data.endTick).toBe(0)
+  })
+
+  it('末行是合法 JSON 时语义错误仍拒绝（容忍仅限语法失败）', () => {
+    // 未知 schema 版本落在末行：不得因尾行容忍被吞掉
+    expect(() => parseReplayNDJSON([head, '{"schema_version":99}'].join('\n'))).toThrow(/schema_version=99/)
+    // 未知 visual 版本同理会显式拒绝
+    const badVisual = [
+      head,
+      JSON.stringify({ type: 'visual', v: 3, tick: 0, robots: [] }),
+    ].join('\n')
+    expect(() => parseReplayNDJSON(badVisual)).toThrow(ReplayParseError)
+    expect(() => parseReplayNDJSON(badVisual)).toThrow(/v=3/)
+  })
+
+  it('分片异步解析：尾部截断容忍，分片边界不破坏行', async () => {
+    // >1MB 强制多片；未知类型 padding 行走向前兼容忽略路径。
+    const padding = Array.from({ length: 45000 }, (_, i) =>
+      JSON.stringify({ type: 'input', tick: i + 1, pad: 'x'.repeat(20) }))
+    const text = [
+      head,
+      ...padding,
+      '{"type":"event","tick":999',
+    ].join('\n')
+    expect(text.length).toBeGreaterThan(1 << 20)
+    const data = await parseReplayNDJSONAsync(text)
+    expect(data.endTick).toBe(45000) // 截断尾行（tick 999 语法失败）被跳过
+  })
+
+  it('分片异步解析：中间坏行仍整局拒绝', async () => {
+    const padding = Array.from({ length: 45000 }, () =>
+      JSON.stringify({ type: 'input', tick: 1, pad: 'x'.repeat(20) }))
+    const text = [head, 'not json', ...padding].join('\n')
+    await expect(parseReplayNDJSONAsync(text)).rejects.toThrow(ReplayParseError)
   })
 })
 

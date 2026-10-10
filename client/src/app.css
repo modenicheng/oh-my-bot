@@ -8,6 +8,9 @@
 }
 /* tokens: client/STYLE.md — 暗底 #0a0e14/#10141a、1px #1f2733 描边、radius 0、荧光只做状态高亮 */
 :root {
+  /* C-37：深色方案声明——UA 滚动条（含 scrollbar-width:thin 的积分行）、<select> 下拉弹层、
+     range 滑轨与表单默认态全部随暗色渲染，深底像素风不再被成排系统亮条打断。 */
+  color-scheme: dark;
   --bg: #0a0e14; --panel: #10141a; --line: #1f2733;
   --fg: #d8dee9; --fg-dim: #8b98a9;
   --accent: #22d3ee; --danger: #ff5c5c; --lime: #a3e635; --amber: #fbbf24;
@@ -78,6 +81,9 @@ button.danger:hover:not(:disabled) { box-shadow: 0 0 12px #ff5c5c40; }
 #view-join, #view-room, #view-replays, #hud, #game-options { user-select: none; }
 input, textarea { user-select: text; }
 .error-line, #room-code { user-select: text; }
+/* 选中态（C-37）：UA 深色 scheme 的默认高亮仍是亮蓝，与荧光纪律不符；STYLE.md
+   neon-cyan 语义本就含「选中态」，统一走既有 token，不引入新色字面量。 */
+::selection { background: var(--accent); color: var(--bg); }
 #view-join, #view-room { display: flex; flex-direction: column; gap: 14px; }
 .robot-mark { width: 72px; height: 72px; align-self: center; margin: 0 0 8px; }
 #btn-join, #btn-start { background: var(--accent); color: #09151e; font-weight: 600; }

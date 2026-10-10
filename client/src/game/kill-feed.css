@@ -1,5 +1,12 @@
 /* One communications rail, with a dedicated status lane unaffected by kill traffic. */
 .hud-comms { position: absolute; inset: auto auto calc(100% + 12px) -2px; width: calc(100% + 2px); display: grid; gap: 6px; pointer-events: none; }
+/* C-36：发言表单（app.css #game-chat，bottom:280px 带、不透明底、z-index:8）与本栏同位——
+   其顶边(~395px)高于本栏顶边(~365px)，打字期间必然压住击毁记录与状态横幅；
+   「feed 下沉」在几何上无解（栏高 ~181px > hud-left 顶到 chat 底的 ~108px 空带，任何平移
+   都会压 HP 面板），而把栏高硬编码进 chat 锚点会复制本文件的高度公式（C-30 型双写）。
+   故选「chat 打开时通讯栏让位」：打字是瞬时专注态，visibility 不触发布局，收起即恢复；
+   焦点离开/发送/Esc 由 controls.closeChat 摘除 [hidden] 后自动复原。 */
+#hud:has(#game-chat:not([hidden])) .hud-comms { visibility: hidden; }
 .kill-feed { --feed-row: 26px; min-width: 0; border-left: 2px solid #36505f; background: #10141ae8; }
 .kill-feed[hidden] { display: none; }
 .kill-feed-heading { padding: 5px 9px; border-bottom: 1px solid var(--line); color: var(--fg-dim); font: 10px/1.4 var(--mono, monospace); letter-spacing: .08em; }

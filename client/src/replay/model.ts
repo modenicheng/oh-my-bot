@@ -154,6 +154,13 @@ const TIMEKEEPING_TYPES = new Set<string>([DISK_MATCH_START, DISK_CHECKPOINT, DI
 
 export interface ReplayParser {
   pushLine(line: string, lineNo: number): void
+  /**
+   * 文件末个非空行的推送（C-45）：NDJSON 由服务器增量写盘，进程被杀/磁盘满的
+   * 典型产物是尾部截断的半行（非法 JSON）——丢最后一秒远好于丢整局存档。
+   * 仅末行、仅语法失败时跳过；该行若是合法 JSON 仍走严格路径（未知版本/坏记录
+   * 语义与中间行完全一致）。
+   */
+  pushTailLine(line: string, lineNo: number): void
   finish(): ReplayData
 }
 
@@ -163,47 +170,61 @@ export function createReplayParser(): ReplayParser {
   const visualFrames: ReplayVisualFrame[] = []
   let initCheckpoint: ReplayCheckpoint | null = null
   let endTick = 0
+  const pushLine = (line: string, lineNo: number): void => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    let obj: any
+    try {
+      obj = JSON.parse(trimmed)
+    } catch (e) {
+      throw new ReplayParseError(`第 ${lineNo + 1} 行不是合法 JSON: ${(e as Error).message}`)
+    }
+    if (obj && typeof obj.schema_version === 'number') {
+      // 头行：只认已知版本，未知版本显式报错（插位/改形态会全错，不能静默跳过）。
+      // 缺头行保持旧宽容行为——历史文件与测试的行内片段仍可解析。
+      if (obj.schema_version !== REPLAY_SCHEMA_VERSION_UI) {
+        throw new ReplayParseError(
+          `不支持的回放版本 schema_version=${obj.schema_version}（支持 ${REPLAY_SCHEMA_VERSION_UI}），请升级客户端`)
+      }
+      return
+    }
+    if (!obj || typeof obj.type !== 'string') return
+    // 权威枚举校验：未知记录类型（未来 schema）不静默吞掉时间轴语义。
+    if (TIMEKEEPING_TYPES.has(obj.type)) {
+      endTick = Math.max(endTick, goNum(obj.tick, 0))
+    }
+    if (obj.type === DISK_MATCH_START || obj.type === DISK_CHECKPOINT) {
+      const st = normalizeCheckpoint(obj.state)
+      const type: ReplayRecordTypeUi = obj.type === DISK_MATCH_START ? 'match_start' : 'checkpoint'
+      records.push({ type, tick: st.tick, state: st })
+      if (obj.type === DISK_MATCH_START && !initCheckpoint) initCheckpoint = st
+      return
+    }
+    if (obj.type === DISK_EVENT) {
+      const ev = normalizeEvent(obj)
+      records.push({ type: 'event', tick: ev.tick, event: ev })
+      return
+    }
+    if (obj.type === DISK_VISUAL) {
+      visualFrames.push(normalizeVisualFrame(obj, lineNo))
+      return
+    }
+    // input/control 与未知类型向前兼容，忽略
+  }
+  const tailSyntaxOk = (line: string): boolean => {
+    try {
+      JSON.parse(line.trim())
+      return true
+    } catch {
+      return false
+    }
+  }
   return {
-    pushLine(line: string, lineNo: number): void {
-      const trimmed = line.trim()
-      if (!trimmed) return
-      let obj: any
-      try {
-        obj = JSON.parse(trimmed)
-      } catch (e) {
-        throw new ReplayParseError(`第 ${lineNo + 1} 行不是合法 JSON: ${(e as Error).message}`)
-      }
-      if (obj && typeof obj.schema_version === 'number') {
-        // 头行：只认已知版本，未知版本显式报错（插位/改形态会全错，不能静默跳过）。
-        // 缺头行保持旧宽容行为——历史文件与测试的行内片段仍可解析。
-        if (obj.schema_version !== REPLAY_SCHEMA_VERSION_UI) {
-          throw new ReplayParseError(
-            `不支持的回放版本 schema_version=${obj.schema_version}（支持 ${REPLAY_SCHEMA_VERSION_UI}），请升级客户端`)
-        }
-        return
-      }
-      if (!obj || typeof obj.type !== 'string') return
-      // 权威枚举校验：未知记录类型（未来 schema）不静默吞掉时间轴语义。
-      if (TIMEKEEPING_TYPES.has(obj.type)) {
-        endTick = Math.max(endTick, goNum(obj.tick, 0))
-      }
-      if (obj.type === DISK_MATCH_START || obj.type === DISK_CHECKPOINT) {
-        const st = normalizeCheckpoint(obj.state)
-        const type: ReplayRecordTypeUi = obj.type === DISK_MATCH_START ? 'match_start' : 'checkpoint'
-        records.push({ type, tick: st.tick, state: st })
-        if (obj.type === DISK_MATCH_START && !initCheckpoint) initCheckpoint = st
-        return
-      }
-      if (obj.type === DISK_EVENT) {
-        const ev = normalizeEvent(obj)
-        records.push({ type: 'event', tick: ev.tick, event: ev })
-        return
-      }
-      if (obj.type === DISK_VISUAL) {
-        visualFrames.push(normalizeVisualFrame(obj, lineNo))
-        return
-      }
-      // input/control 与未知类型向前兼容，忽略
+    pushLine,
+    pushTailLine(line: string, lineNo: number): void {
+      // 只放宽语法失败：截断只会产生非法 JSON（外层对象未闭合）；合法 JSON 行的
+      // 语义错误（未知 schema/visual 版本、坏 checkpoint）在任何位置都显式报错。
+      if (tailSyntaxOk(line)) pushLine(line, lineNo)
     },
     finish(): ReplayData {
       if (!initCheckpoint) {
@@ -226,17 +247,32 @@ export function createReplayParser(): ReplayParser {
   }
 }
 
-/** 解析完整 NDJSON 文本。头行（schema_version，未知版本拒绝）跳过；空行容错。 */
+/** 末个非空行的下标（可能不存在则 -1）：唯一允许「截断尾行」语义的位置。 */
+function tailLineIndex(lines: string[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if ((lines[i] ?? '').trim()) return i
+  }
+  return -1
+}
+
+/** 解析完整 NDJSON 文本。头行（schema_version，未知版本拒绝）跳过；空行容错；
+ *  末个非空行按截断尾行容忍（C-45）。 */
 export function parseReplayNDJSON(text: string): ReplayData {
   const parser = createReplayParser()
   const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i++) parser.pushLine(lines[i] ?? '', i)
+  const tail = tailLineIndex(lines)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    if (i === tail) parser.pushTailLine(line, i)
+    else parser.pushLine(line, i)
+  }
   return parser.finish()
 }
 
 /**
  * 分片异步解析：整段同步 parse 在长录像（数十万行）下会冻结主线程数秒。
- * 按 ~1MB 文本切片逐片推进，片间让出事件循环；行号与同步版完全一致。
+ * 按 ~1MB 文本切片逐片推进，片间让出事件循环；行号与同步版完全一致；
+ * 末片末个非空行按截断尾行容忍（C-45）。
  */
 export async function parseReplayNDJSONAsync(text: string): Promise<ReplayData> {
   const parser = createReplayParser()
@@ -254,7 +290,15 @@ export async function parseReplayNDJSONAsync(text: string): Promise<ReplayData> 
         end = hard === -1 ? text.length : hard + 1
       }
     }
-    for (const line of text.slice(start, end).split('\n')) parser.pushLine(line, lineNo++)
+    const piece = text.slice(start, end).split('\n')
+    // 最后一片（end 已到文本末尾）的末个非空行即整文件的截断尾行。
+    const tailLocal = end >= text.length ? tailLineIndex(piece) : -1
+    for (let i = 0; i < piece.length; i++) {
+      const line = piece[i] ?? ''
+      if (i === tailLocal) parser.pushTailLine(line, lineNo + i)
+      else parser.pushLine(line, lineNo + i)
+    }
+    lineNo += piece.length
     start = end
     await new Promise<void>(resolve => setTimeout(resolve))
   }
