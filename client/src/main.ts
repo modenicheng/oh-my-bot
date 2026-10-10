@@ -137,6 +137,24 @@ function handleJoinRejected(reason: string): void {
   lobby.setJoining(false)
 }
 
+/** 同身份接管（S-33）：服务器已把本身份交给新连接并关闭本连接——终态关闭
+ * 会话（避免自动重连把身份抢回来形成接管乒乓），回大厅展示服务器原因。 */
+function handleTakeoverNotice(text: string): void {
+  connectionNotice.hidden = true
+  awaitingFull = false
+  stopRttLoop()
+  session?.close()
+  session = null
+  game?.exit()
+  game = null
+  workbench.resetMatch()
+  syncWorkbench()
+  setStatus('down', '连接被接管')
+  showView('join')
+  lobby.showError(text)
+  lobby.setJoining(false)
+}
+
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   if (session?.state === 'connecting') return
   lobby.beginJoin(roomCode)
@@ -302,6 +320,12 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (notice) {
       if (notice.code === EvControlNotice_Code.CN_JOIN_FAILED) {
         handleJoinRejected(notice.text)
+        return
+      }
+      // S-33：同身份被新连接接管（终态）。记住 notice 以去重紧随的成对兼容 say。
+      if (notice.code === EvControlNotice_Code.CN_TAKEOVER) {
+        lastControlNotice = notice
+        handleTakeoverNotice(notice.text)
         return
       }
       // 仅记住已消费的 notice：未知 code 不吞兼容 say（文案仍对用户可见）

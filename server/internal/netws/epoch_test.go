@@ -13,7 +13,7 @@ import (
 // Fill both queues before the writer starts. An old delta must not follow the
 // new bootstrap/full even when its tick is greater than every new-match tick.
 func TestBootstrapDiscardsQueuedPreviousMatchScriptLog(t *testing.T) {
-	h := Handler(func(reliable, lossy func(*ombv1.ServerMsg)) func(*ombv1.ClientMsg) {
+	h := Handler(func(reliable, lossy func(*ombv1.ServerMsg), _ func()) func(*ombv1.ClientMsg) {
 		reliable(scriptLogMessage(900, "old-epoch"))
 		reliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: "{}"}}}}})
 		reliable(scriptLogMessage(1, "new-epoch"))
@@ -45,7 +45,7 @@ func scriptLogMessage(tick uint32, text string) *ombv1.ServerMsg {
 }
 
 func TestBootstrapDiscardsQueuedPreviousMatchDelta(t *testing.T) {
-	h := Handler(func(reliable, lossy func(*ombv1.ServerMsg)) func(*ombv1.ClientMsg) {
+	h := Handler(func(reliable, lossy func(*ombv1.ServerMsg), _ func()) func(*ombv1.ClientMsg) {
 		lossy(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: &ombv1.SnapshotDelta{Tick: 900, BaseTick: 899}}})
 		reliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: "{}"}}}}})
 		reliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: &ombv1.SnapshotDelta{Tick: 1, Full: true}}})

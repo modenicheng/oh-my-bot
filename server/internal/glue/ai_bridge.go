@@ -228,9 +228,14 @@ func (m *Match) runAiPrompt(_ *Session, pid uint64, text string, svc *AIService,
 	agent := ai.NewAgent(svc.quota, svc.provider, snapshotScripts{snap: snap})
 	agent.SetManual(svc.manual)
 	agent.SetPerception(snap.perception)
-	outcome, err := agent.HandlePromptStream(context.Background(), pid, text, func(delta ai.StreamDelta) {
+	// 审计 S-32：SSE 增量按 50ms/512B 聚合 flush（见 ai_stream.go），不再
+	// 逐 delta 直灌可靠通道。agg.close() 必须在取 rc.mu 落地结果之前——
+	// 完整流文本先于 ScriptResult/错误 notice 到达（客户端面板顺序依赖）。
+	agg := newAIStreamAggregator(func(delta ai.StreamDelta) {
 		m.sendAIStream(pid, svc, matchSeq, delta)
 	})
+	outcome, err := agent.HandlePromptStream(context.Background(), pid, text, agg.push)
+	agg.close()
 
 	m.rc.mu.Lock()
 	defer m.rc.mu.Unlock()

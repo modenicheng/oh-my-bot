@@ -693,6 +693,8 @@ const (
 	// ---- join/spectate 拒绝（终态：客户端停止重试并展示原因） ----
 	EvControlNotice_CN_JOIN_FAILED        EvControlNotice_Code = 1 // 进房/观战被拒（房间满/码无效/身份冲突等，text = 服务器原因）
 	EvControlNotice_CN_READONLY_SPECTATOR EvControlNotice_Code = 2 // 观战连接试图执行玩家操作（只读契约）
+	EvControlNotice_CN_TAKEOVER           EvControlNotice_Code = 3 // 同房码+昵称的新连接接管了本身份：旧连接收到本通知后
+	// 被服务器优雅关闭（审计 S-33；终态，客户端不应自动重连抢回）
 	// ---- AI 改码状态（定向，仅 owner 可见；错误类终结面板 pending） ----
 	EvControlNotice_CN_AI_REQUEST_FAILED      EvControlNotice_Code = 10 // 请求失败/配额拒绝
 	EvControlNotice_CN_AI_DISABLED            EvControlNotice_Code = 11 // 服务器未启用 AI
@@ -708,6 +710,7 @@ var (
 		0:  "CN_UNSPECIFIED",
 		1:  "CN_JOIN_FAILED",
 		2:  "CN_READONLY_SPECTATOR",
+		3:  "CN_TAKEOVER",
 		10: "CN_AI_REQUEST_FAILED",
 		11: "CN_AI_DISABLED",
 		12: "CN_AI_COMPILE_FAILED",
@@ -719,6 +722,7 @@ var (
 		"CN_UNSPECIFIED":            0,
 		"CN_JOIN_FAILED":            1,
 		"CN_READONLY_SPECTATOR":     2,
+		"CN_TAKEOVER":               3,
 		"CN_AI_REQUEST_FAILED":      10,
 		"CN_AI_DISABLED":            11,
 		"CN_AI_COMPILE_FAILED":      12,
@@ -5818,14 +5822,15 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\tfire_cost\x18\x04 \x01(\x01R\bfireCost\x12.\n" +
 	"\x13hack_duration_ticks\x18\x05 \x01(\rR\x11hackDurationTicks\x122\n" +
 	"\x15invuln_duration_ticks\x18\x06 \x01(\rR\x13invulnDurationTicks\x12#\n" +
-	"\rvision_radius\x18\a \x01(\x01R\fvisionRadius\"\xb5\x02\n" +
+	"\rvision_radius\x18\a \x01(\x01R\fvisionRadius\"\xc6\x02\n" +
 	"\x0fEvControlNotice\x120\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x1c.omb.v1.EvControlNotice.CodeR\x04code\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"\xdb\x01\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\xec\x01\n" +
 	"\x04Code\x12\x12\n" +
 	"\x0eCN_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eCN_JOIN_FAILED\x10\x01\x12\x19\n" +
-	"\x15CN_READONLY_SPECTATOR\x10\x02\x12\x18\n" +
+	"\x15CN_READONLY_SPECTATOR\x10\x02\x12\x0f\n" +
+	"\vCN_TAKEOVER\x10\x03\x12\x18\n" +
 	"\x14CN_AI_REQUEST_FAILED\x10\n" +
 	"\x12\x12\n" +
 	"\x0eCN_AI_DISABLED\x10\v\x12\x18\n" +

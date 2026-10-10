@@ -259,3 +259,37 @@ func TestSpectatorCapEnforcedAndLeaveReleasesSlot(t *testing.T) {
 		t.Fatal("spectator allocated a player")
 	}
 }
+
+// TestEndedPlayerFinalFrameReliableFull（审计 S-34）：终局 tick 玩家帧与观战者
+// 同样 ForceFull + 可靠发送——没有下一个 tick 可以修复丢失的末帧；局中普通
+// tick 仍走 lossy（对照组）。
+func TestEndedPlayerFinalFrameReliableFull(t *testing.T) {
+	_, _, _, plog, m := spectatorMatch(t, false) // 内部已 step 到 tick 1（bootstrap 后首帧 reliable full）
+	m.step()                                     // tick 2：普通帧
+	mid := lastSnapshot(t, plog.take())
+	if mid.Full || mid.Tick != 2 {
+		t.Fatalf("mid-match frame should be a lossy delta: full=%v tick=%d", mid.Full, mid.Tick)
+	}
+	for m.sim.WorldView().Frame.Tick < sim.MatchTicks-1 {
+		m.sim.Tick()
+	}
+	m.tick = sim.MatchTicks - 1
+	plog.take()
+	m.step() // tick = MatchTicks：终局帧
+
+	msgs := plog.take()
+	var final *sentMessage
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if snap := msgs[i].msg.GetSnapshot(); snap != nil && snap.Tick == sim.MatchTicks {
+			final = &msgs[i]
+			break
+		}
+	}
+	if final == nil {
+		t.Fatal("no final player frame at MatchTicks")
+	}
+	if !final.reliable || !final.msg.GetSnapshot().Full {
+		t.Fatalf("final player frame must be reliable+full (S-34): reliable=%v full=%v",
+			final.reliable, final.msg.GetSnapshot().Full)
+	}
+}

@@ -41,9 +41,20 @@ func TestAIStreamTargetsCurrentOwnerSession(t *testing.T) {
 
 	replacement, replacementLog := bindLogged(t, h, rc, "owner")
 	replacementLog.take() // takeover bootstrap
+	// S-33：接管本身给旧会话定向发 takeover notice + 同文兼容 say（成对）。
+	superseded := ownerLog.take()
+	if len(superseded) != 2 {
+		t.Fatalf("superseded session should see exactly the takeover notice pair: %+v", superseded)
+	}
+	if n := superseded[0].msg.GetEvent().GetControlNotice(); n == nil || n.GetCode() != ombv1.EvControlNotice_CN_TAKEOVER {
+		t.Fatalf("first superseded message is not a takeover notice: %+v", superseded[0].msg)
+	}
+	if s := superseded[1].msg.GetEvent().GetSay(); s == nil || s.GetRobot() != 0 || s.GetText() != superseded[0].msg.GetEvent().GetControlNotice().GetText() {
+		t.Fatalf("second superseded message is not the same-text robot-0 say: %+v", superseded[1].msg)
+	}
 	m.sendAIStream(replacement.playerID, svc, quota.CurrentMatchSeq(), ai.StreamDelta{Kind: ai.StreamAnswer, Text: "second"})
 	if got := ownerLog.take(); len(got) != 0 {
-		t.Fatalf("superseded session received AI stream: %+v", got)
+		t.Fatalf("superseded session received AI stream after takeover: %+v", got)
 	}
 	replacementMsgs := replacementLog.take()
 	if len(replacementMsgs) != 1 || replacementMsgs[0].msg.GetEvent().GetAiStream().GetDelta() != "second" || replacementMsgs[0].msg.GetEvent().GetAiStream().GetKind() != ombv1.EvAiStream_ANSWER {

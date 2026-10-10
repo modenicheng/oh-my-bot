@@ -266,10 +266,26 @@ type Session struct {
 	spectator    bool // read-only observer; never joins Room/identities/match players
 	SendReliable func(*ombv1.ServerMsg)
 	SendLossy    func(*ombv1.ServerMsg)
+	// closeConn（审计 S-33）：请求优雅关闭本会话底层连接（排队帧先发完）。
+	// atomic 而非 mu 守护——CloseConn 会在 Bind 持 rc.mu 时调用，不能在
+	// rc.mu 下再取 s.mu（锁序只允许 s.mu → rc.mu）。未注入时为无操作。
+	closeConn atomic.Value // func()
 }
 
 func NewSession(reliable, lossy func(*ombv1.ServerMsg)) *Session {
 	return &Session{SendReliable: reliable, SendLossy: lossy}
+}
+
+// SetCloser 注入连接关闭钩子（连接所有者在会话可达前调用一次；重复调用
+// 覆盖旧值——测试可替换）。
+func (s *Session) SetCloser(f func()) { s.closeConn.Store(f) }
+
+// CloseConn 请求优雅关闭本会话的底层连接：已排队帧（含紧邻下发的接管
+// 通知）先发完再断开。nil-safe；未注入 closer 的会话为无操作。
+func (s *Session) CloseConn() {
+	if f, ok := s.closeConn.Load().(func()); ok && f != nil {
+		f()
+	}
 }
 
 // Bind uses exact room+nickname as the internal-deployment recovery identity.
@@ -307,10 +323,18 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 		s.playerID = info.PlayerID
 	}
 	s.nick, s.color, s.rc = info.Nick, info.Color, rc
-	if rc.sessions[s.playerID] != nil {
+	if old := rc.sessions[s.playerID]; old != nil {
 		if m := rc.match; m != nil && m.activeLocked() {
 			m.releaseHumanLocked(s.playerID)
 		}
+		// 审计 S-33：同身份接管——旧连接此前既不通知也不关闭，withRoom 屏障
+		// 挡住其一切上行、broadcast 不再遍历它，但心跳照常，旧标签页表现为
+		// 「connected 而世界永久冻结」的永默僵尸。此处定向发接管 notice
+		// （复用 X-4 notice 通道：结构化 code + 同文兼容 say）并优雅关闭其
+		// 连接（排队帧先发完，通知本身保证送达）。旧会话此刻已被替换出
+		// sessions/hub.player，其连接关闭后经 Unregister 链路为安全 no-op。
+		sendNotice(old, ombv1.EvControlNotice_CN_TAKEOVER, takeoverNoticeText)
+		old.CloseConn()
 	}
 	rc.sessions[s.playerID] = s
 	// 版本链属房间身份：无对局的重连/接管也补发（AI 直填 + 回退的客户端基准）。
@@ -443,6 +467,24 @@ func normalizeScriptEditorSource(sub *ombv1.ScriptSubmit) (string, ombv1.ScriptL
 	return editorSource, ombv1.ScriptLanguage_SCRIPT_LANGUAGE_TS
 }
 
+// matchInactiveText（审计 S-30）：非激活窗口——无对局，或对局已结束/正在
+// 切换装配（旧 handle 已 Abort、新 match 未 publish）——统一 nack 文案。
+const matchInactiveText = "对局未在运行（已结束或正在切换），请稍后重试"
+
+// takeoverNoticeText（审计 S-33）：被同身份新连接替换的旧连接收到的定向通知。
+const takeoverNoticeText = "本连接已被同房码同昵称的新连接接管，即将关闭；如非本人操作，请更换昵称后重新加入"
+
+// scriptResultNack 构造 ScriptSubmit 的失败回执（非激活窗口 nack，审计 S-30；
+// 对齐 snippets.go「任何合法玩家请求都有 EvSnippetResult」的纪律——任何合法
+// 提交都有 EvScriptResult，不得静默悬空）。
+func scriptResultNack(clientScriptID uint32, errMsg string) *ombv1.ServerMsg {
+	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+		Kind: &ombv1.ServerEvent_ScriptResult{ScriptResult: &ombv1.EvScriptResult{
+			ClientScriptId: clientScriptID, Ok: false, Error: errMsg,
+		}},
+	}}}
+}
+
 func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 	if sub == nil {
 		return
@@ -450,6 +492,10 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 	s.withRoom(func(rc *RoomConn) {
 		m := rc.match
 		if m == nil || !m.activeLocked() {
+			// 审计 S-30：热身→开局装配窗口与 Ended 态内提交此前静默丢弃，
+			// 客户端只能等 10s 超时提示「结果未知」。回结构化 nack，复用
+			// 客户端既有 ScriptResult 渲染路径（editor pending 即刻终结）。
+			s.SendReliable(scriptResultNack(sub.GetClientScriptId(), matchInactiveText))
 			return
 		}
 		runtimeSource := sub.GetSource()
@@ -478,6 +524,9 @@ func (s *Session) ScriptRollback(rb *ombv1.ScriptRollback) {
 	s.withRoom(func(rc *RoomConn) {
 		m := rc.match
 		if m == nil || !m.activeLocked() {
+			// 审计 S-30：非激活窗口回退此前静默丢弃；回 EvScriptRollbackResult
+			// nack（客户端既有渲染路径，回退抽屉 pending 即刻终结）。
+			sendRollbackResult(s, false, matchInactiveText, 0, 0, "", nil)
 			return
 		}
 		m.rollbackScriptLocked(s.playerID, rb.GetVersionId())
@@ -490,7 +539,12 @@ func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
 	s.withRoom(func(rc *RoomConn) {
 		if m := rc.match; m != nil && m.activeLocked() {
 			m.handleAiPromptLocked(s.playerID, p.GetText())
+			return
 		}
+		// 审计 S-30：非激活窗口的 AI 请求此前静默丢弃，面板 pending 只能等
+		// 超时；回 CN_AI_REQUEST_FAILED notice（客户端 AI 面板既有错误路径，
+		// pending 即刻终结并展示原因）。
+		aiNotice(s, ombv1.EvControlNotice_CN_AI_REQUEST_FAILED, "AI 请求失败："+matchInactiveText)
 	})
 }
 func (s *Session) Resync() {

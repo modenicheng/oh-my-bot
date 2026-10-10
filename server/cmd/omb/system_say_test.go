@@ -35,7 +35,7 @@ func TestUpstreamRejectionsUseSystemSay(t *testing.T) {
 	var session *glue.Session
 	var received []*ombv1.ServerMsg
 	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Spectate{Spectate: &ombv1.SpectateRoom{RoomCode: "SYSAY"}}}, send, send, &session)
+	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Spectate{Spectate: &ombv1.SpectateRoom{RoomCode: "SYSAY"}}}, send, send, nil, &session)
 	if session == nil || !session.IsSpectator() {
 		t.Fatal("spectator not bound")
 	}
@@ -45,7 +45,7 @@ func TestUpstreamRejectionsUseSystemSay(t *testing.T) {
 		{Payload: &ombv1.ClientMsg_AiPrompt{AiPrompt: &ombv1.AiPrompt{Text: "prompt"}}},
 	} {
 		received = nil
-		handleUpstream(h, cmd, send, send, &session)
+		handleUpstream(h, cmd, send, send, nil, &session)
 		if len(received) != 2 {
 			t.Fatalf("command %T: got %d messages, want 2", cmd.Payload, len(received))
 		}

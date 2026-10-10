@@ -13,7 +13,7 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 	var session *glue.Session
 	var received []*ombv1.ServerMsg
 	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Spectate{Spectate: &ombv1.SpectateRoom{RoomCode: "SPEC"}}}, send, send, &session)
+	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Spectate{Spectate: &ombv1.SpectateRoom{RoomCode: "SPEC"}}}, send, send, nil, &session)
 	if session == nil || !session.IsSpectator() {
 		t.Fatal("spectator not bound")
 	}
@@ -34,7 +34,7 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 	}
 	for _, cmd := range commands {
 		received = nil
-		handleUpstream(h, cmd, send, send, &session)
+		handleUpstream(h, cmd, send, send, nil, &session)
 		if session != original || !session.IsSpectator() || rc.Room.MemberCount() != 0 || rc.Room.HostID() != 0 {
 			t.Fatalf("command %T changed spectator identity or room", cmd.Payload)
 		}
@@ -51,11 +51,11 @@ func TestSpectatorUpstreamRoleCannotPromoteOrControl(t *testing.T) {
 		}
 	}
 	received = nil
-	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_ResyncRequest{ResyncRequest: &ombv1.ResyncRequest{}}}, send, send, &session)
+	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_ResyncRequest{ResyncRequest: &ombv1.ResyncRequest{}}}, send, send, nil, &session)
 	if session != original || len(received) != 0 {
 		t.Fatal("idle spectator resync changed role")
 	}
-	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Leave{Leave: &ombv1.LeaveRoom{}}}, send, send, &session)
+	handleUpstream(h, &ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Leave{Leave: &ombv1.LeaveRoom{}}}, send, send, nil, &session)
 	if session != nil || rc.Room.MemberCount() != 0 {
 		t.Fatal("leave did not detach spectator")
 	}

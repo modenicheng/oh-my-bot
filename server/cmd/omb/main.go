@@ -451,12 +451,12 @@ func sessionHandler(hub *glue.Hub) http.Handler {
 				hub.Unregister(sess)
 			}
 		}()
-		netws.Handler(func(reliable, lossy func(*ombv1.ServerMsg)) func(*ombv1.ClientMsg) {
+		netws.Handler(func(reliable, lossy func(*ombv1.ServerMsg), closeConn func()) func(*ombv1.ClientMsg) {
 			return func(up *ombv1.ClientMsg) {
 				mu.Lock()
 				defer mu.Unlock()
 				if !closed {
-					handleUpstream(hub, up, reliable, lossy, &sess)
+					handleUpstream(hub, up, reliable, lossy, closeConn, &sess)
 				}
 			}
 		}).ServeHTTP(w, r)
@@ -464,7 +464,9 @@ func sessionHandler(hub *glue.Hub) http.Handler {
 }
 
 // handleUpstream 全量上行路由（Phase D glue：join/leave/room_action/input/…）。
-func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), sess **glue.Session) {
+// closeConn 请求优雅关闭本连接（排队帧先发完）：注入到玩家会话，供同身份
+// 接管时关闭被替换的旧连接（审计 S-33）。
+func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sess **glue.Session) {
 	if up == nil {
 		return
 	}
@@ -496,7 +498,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	}
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
-		handleJoin(hub, p.Join, sendReliable, sendLossy, sess)
+		handleJoin(hub, p.Join, sendReliable, sendLossy, closeConn, sess)
 	case *ombv1.ClientMsg_Spectate:
 		handleSpectate(hub, p.Spectate, sendReliable, sendLossy, sess)
 	case *ombv1.ClientMsg_Input:
@@ -550,15 +552,38 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	}
 }
 
-func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
+// joinInvalidCodeReason / joinEmptyNickReason（审计 S-31）：上行 Join 参数
+// 校验失败的拒绝文案。走 sendJoinFailedReliable（结构化 notice + 兼容 say），
+// 与其他 join 拒绝同一条终态路径。
+const (
+	joinInvalidCodeReason = "房码无效：仅限大写字母与数字（不含易混字符 0/O/1/I），长度 1-8"
+	joinEmptyNickReason   = "昵称不能为空"
+)
+
+func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sessOut **glue.Session) {
 	if join == nil {
 		return
 	}
-	rc := hub.EnsureRoom(join.GetRoomCode())
+	// 审计 S-31：此前 room_code/昵称零校验直达 EnsureRoom/Bind——空房码使互不
+	// 相干的用户共享 "" 房，空昵称把身份碰撞降为默认碰撞。房码限 GenerateCode
+	// 字母表（room.ValidCode 与其同源，不另抄一份）；昵称 trim 后非空，绑定
+	// 统一使用 trim 后的值（与客户端表单行为一致）。
+	code := join.GetRoomCode()
+	nick := strings.TrimSpace(join.GetNick())
+	if !room.ValidCode(code) {
+		sendJoinFailedReliable(sendReliable, joinInvalidCodeReason)
+		return
+	}
+	if nick == "" {
+		sendJoinFailedReliable(sendReliable, joinEmptyNickReason)
+		return
+	}
+	rc := hub.EnsureRoom(code)
 	rc.EnsureLauncher()
 	sess := glue.NewSession(sendReliable, sendLossy)
+	sess.SetCloser(closeConn) // 同身份接管时由 glue 关闭本连接（S-33）
 	hub.Register(sess)
-	if err := rc.Bind(sess, join.GetNick(), join.GetColor()); err != nil {
+	if err := rc.Bind(sess, nick, join.GetColor()); err != nil {
 		hub.Unregister(sess)
 		sendJoinFailedReliable(sendReliable, err.Error())
 		return
@@ -583,6 +608,11 @@ func sendJoinFailedReliable(send func(*ombv1.ServerMsg), reason string) {
 // exactly like a rejected player join.
 func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
 	if spec == nil {
+		return
+	}
+	// 与 handleJoin 同一房码门（审计 S-31）：否则空房码可建共享 "" 观战房。
+	if !room.ValidCode(spec.GetRoomCode()) {
+		sendJoinFailedReliable(sendReliable, joinInvalidCodeReason)
 		return
 	}
 	rc := hub.EnsureRoom(spec.GetRoomCode())

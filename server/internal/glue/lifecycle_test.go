@@ -220,6 +220,10 @@ func TestReconnectPreservesRobotAndConsumedSequence(t *testing.T) {
 	initial := lastSnapshot(t, oldLog.take())
 	old.RouteInput(&ombv1.ClientInput{Seq: 400}) // deliberately still pending when takeover occurs
 	current, currentLog := bindLogged(t, h, rc, "host")
+	// S-33：接管本身向旧会话定向发 takeover notice 对（终态通知，非广播）。
+	if msgs := oldLog.take(); len(msgs) != 2 || msgs[0].msg.GetEvent().GetControlNotice() == nil {
+		t.Fatalf("takeover must notify the superseded session exactly once: %+v", msgs)
+	}
 	old.RouteInput(&ombv1.ClientInput{Seq: 900})
 	old.HostCommand(ombv1.RoomAction_WARMUP)
 	if rc.Room.State() != room.Idle {

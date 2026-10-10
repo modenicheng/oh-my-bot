@@ -65,8 +65,11 @@ type queuedFrame struct {
 
 // Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
 // 专属的 onUp（闭包可捕获每连接状态）；sendReliable/sendLossy 为该连接的下行通道。
-// 后续上行 ClientMsg 帧路由到返回的 onUp。
-func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg)) (onUp func(up *ombv1.ClientMsg))) http.Handler {
+// closeConn 请求优雅关闭：已排队帧（reliable/lossy/script log）全部写完后连接
+// 才关闭——closeConn 调用前入队的可靠帧保证送达（审计 S-33：同身份接管时旧连接
+// 的接管通知先入队、再 closeConn，不能被直接 kill 截断）。后续上行 ClientMsg 帧
+// 路由到返回的 onUp。
+func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func()) (onUp func(up *ombv1.ClientMsg))) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
 		if err != nil {
@@ -87,6 +90,12 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 		dead := make(chan struct{})
 		var deadOnce sync.Once
 		kill := func() { deadOnce.Do(func() { close(dead) }) }
+		// graceful（审计 S-33）：排空后关闭。与 kill 的区别：kill 是一致性
+		// 破坏时的立即断连，graceful 等待三条队列清空——写入循环顶部的
+		// 优先级 select 每轮各取一帧，直到阻塞 select 里观察到三队皆空。
+		graceful := make(chan struct{})
+		var gracefulOnce sync.Once
+		closeGracefully := func() { gracefulOnce.Do(func() { close(graceful) }) }
 
 		encode := func(msg *ombv1.ServerMsg) []byte {
 			body, err := proto.Marshal(msg)
@@ -136,7 +145,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 			}
 		}
 
-		connOnUp := sessionFactory(sendReliable, sendLossy)
+		connOnUp := sessionFactory(sendReliable, sendLossy, closeGracefully)
 
 		readerErr := make(chan error, 1)
 		go func() {
@@ -250,6 +259,13 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg))
 				return
 			case <-dead:
 				return
+			case <-graceful:
+				// 优雅关闭：三队皆空才返回；否则回到循环顶部按既有优先级排空。
+				// closeConn 之后新入队的帧不保证送达（调用方语义：先发完、
+				// 后 close，不再发新帧）。
+				if len(reliableCh) == 0 && len(lossyCh) == 0 && len(scriptLogCh) == 0 {
+					return
+				}
 			case err := <-readerErr:
 				_ = err
 				return

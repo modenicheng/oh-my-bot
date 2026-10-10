@@ -2,6 +2,7 @@ package netws
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,12 +40,110 @@ func dialAndKick(t *testing.T, ctx context.Context, s *testserverT) *websocket.C
 	return c
 }
 
+// TestGracefulCloseDrainsQueuedFrames（审计 S-33）：closeConn 前入队的可靠帧
+// 必须全部送达，随后连接关闭（同身份接管时旧连接的 takeover 通知依赖此
+// 语义——不能像 reliableCh 满 kill 那样立即断连截断队列）。
+func TestGracefulCloseDrainsQueuedFrames(t *testing.T) {
+	var sendReliable func(*ombv1.ServerMsg)
+	var closeConn func()
+	ready := make(chan struct{})
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), cc func()) func(up *ombv1.ClientMsg) {
+		sendReliable, closeConn = sr, cc
+		close(ready)
+		return func(*ombv1.ClientMsg) {}
+	})
+	s := newTestServer(h)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	c := dialAndKick(t, ctx, s)
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onUp never fired")
+	}
+
+	sayMsg := func(text string) *ombv1.ServerMsg {
+		return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
+			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 0, Text: text}}}}}
+	}
+	const frames = 8
+	for i := 0; i < frames; i++ {
+		sendReliable(sayMsg(fmt.Sprintf("takeover-%02d", i)))
+	}
+	closeConn()
+
+	got := map[string]bool{}
+	deadline := time.Now().Add(4 * time.Second)
+	for len(got) < frames {
+		rctx, rcancel := context.WithDeadline(ctx, deadline)
+		msg := readServerMsg(t, c, rctx)
+		rcancel()
+		if text := msg.GetEvent().GetSay().GetText(); text != "" {
+			got[text] = true
+		}
+	}
+	for i := 0; i < frames; i++ {
+		if !got[fmt.Sprintf("takeover-%02d", i)] {
+			t.Fatalf("graceful close dropped a frame queued before closeConn: %v", got)
+		}
+	}
+	// 全部送达后连接必须关闭（优雅关闭不是永生）。
+	for {
+		rc, rcancel := context.WithDeadline(ctx, deadline)
+		_, _, err := c.Read(rc)
+		rcancel()
+		if err != nil {
+			return // 连接已关闭 = 通过
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("graceful close never closed the connection")
+		}
+	}
+}
+
+// TestGracefulCloseWithEmptyQueues：空队列时 closeConn 立即关闭（无帧可等）。
+func TestGracefulCloseWithEmptyQueues(t *testing.T) {
+	var closeConn func()
+	ready := make(chan struct{})
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), cc func()) func(up *ombv1.ClientMsg) {
+		closeConn = cc
+		close(ready)
+		return func(*ombv1.ClientMsg) {}
+	})
+	s := newTestServer(h)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	c := dialAndKick(t, ctx, s)
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onUp never fired")
+	}
+	closeConn()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		rc, rcancel := context.WithDeadline(ctx, deadline)
+		_, _, err := c.Read(rc)
+		rcancel()
+		if err != nil {
+			return // 连接已关闭 = 通过
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("graceful close never closed the connection")
+		}
+	}
+}
+
 // 双通道投递：reliable 不丢、lossy 可到；优先级（同时排队时 reliable 先出）
 // 由两级 select 实现，跨入队时序不保证，故此处断言集合而非顺序。
 func TestDualChannelDelivery(t *testing.T) {
 	var sendReliable, sendLossy func(*ombv1.ServerMsg)
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
 		sendReliable, sendLossy = sr, sl
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -84,7 +183,7 @@ func TestDualChannelDelivery(t *testing.T) {
 func TestScriptLogFloodDoesNotDisconnectOrBlockReliable(t *testing.T) {
 	var sendReliable func(*ombv1.ServerMsg)
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
 		sendReliable = sr
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -145,7 +244,7 @@ func TestScriptLogFloodDoesNotDisconnectOrBlockReliable(t *testing.T) {
 // StatusMessageTooBig 默默断连。上限与客户端预检同源 TransportTiming。
 func TestReadLimitAllows64KiBScriptSubmit(t *testing.T) {
 	var got atomic.Int32
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
 		return func(up *ombv1.ClientMsg) {
 			if sub := up.GetScriptSubmit(); sub != nil {
 				got.Add(int32(len(sub.GetSource())))
@@ -195,7 +294,7 @@ func TestReadLimitAllows64KiBScriptSubmit(t *testing.T) {
 
 func TestReliableOverflowDisconnects(t *testing.T) {
 	big := strings.Repeat("x", 4096)
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg)) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
 		ev := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 1, Text: big}}}}}
 		go func() {

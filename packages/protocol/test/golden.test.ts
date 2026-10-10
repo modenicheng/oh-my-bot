@@ -210,6 +210,7 @@ describe('EvControlNotice (X-4)', () => {
     // Go 侧 simtuning_notice_test.go 断言同一组值。
     expect(EvControlNotice_Code.CN_JOIN_FAILED).toBe(1)
     expect(EvControlNotice_Code.CN_READONLY_SPECTATOR).toBe(2)
+    expect(EvControlNotice_Code.CN_TAKEOVER).toBe(3)
     expect(EvControlNotice_Code.CN_AI_REQUEST_FAILED).toBe(10)
     expect(EvControlNotice_Code.CN_AI_DISABLED).toBe(11)
     expect(EvControlNotice_Code.CN_AI_COMPILE_FAILED).toBe(12)

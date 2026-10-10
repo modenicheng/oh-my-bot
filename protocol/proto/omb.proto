@@ -381,6 +381,8 @@ message EvControlNotice {
     // ---- join/spectate 拒绝（终态：客户端停止重试并展示原因） ----
     CN_JOIN_FAILED = 1;        // 进房/观战被拒（房间满/码无效/身份冲突等，text = 服务器原因）
     CN_READONLY_SPECTATOR = 2; // 观战连接试图执行玩家操作（只读契约）
+    CN_TAKEOVER = 3;           // 同房码+昵称的新连接接管了本身份：旧连接收到本通知后
+                               // 被服务器优雅关闭（审计 S-33；终态，客户端不应自动重连抢回）
     // ---- AI 改码状态（定向，仅 owner 可见；错误类终结面板 pending） ----
     CN_AI_REQUEST_FAILED = 10;  // 请求失败/配额拒绝
     CN_AI_DISABLED = 11;        // 服务器未启用 AI

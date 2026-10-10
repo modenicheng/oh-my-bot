@@ -172,7 +172,15 @@ func (m *Match) rollbackScriptLocked(pid uint64, versionID uint32) {
 	m.pushScriptVersionsLocked(pid)
 }
 
+// sendRollbackResultLocked 定向下发版本回退回执（owner-only；调用方持
+// rc.mu）。非激活窗口的 nack（审计 S-30）不经 Match，直接用 sendRollbackResult。
 func (m *Match) sendRollbackResultLocked(sess *Session, ok bool, errMsg string, versionID, rev uint32, source string, language *ombv1.ScriptLanguage) {
+	sendRollbackResult(sess, ok, errMsg, versionID, rev, source, language)
+}
+
+// sendRollbackResult 会话级回退回执下发（不依赖 Match；无对局/Ended 态的
+// ScriptRollback nack 用，见 hub.go S-30 分支）。
+func sendRollbackResult(sess *Session, ok bool, errMsg string, versionID, rev uint32, source string, language *ombv1.ScriptLanguage) {
 	sess.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 		Kind: &ombv1.ServerEvent_ScriptRollbackResult{ScriptRollbackResult: &ombv1.EvScriptRollbackResult{
 			Ok: ok, Error: errMsg, VersionId: versionID, ScriptRev: rev, Source: source, Language: language,

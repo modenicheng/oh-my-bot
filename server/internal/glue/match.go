@@ -583,6 +583,10 @@ func (m *Match) step() {
 	_ = wv // 快照循环在下方使用
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
+	// ended：终局帧（审计 S-34）——没有下一个 tick 可以修复丢失的末帧，
+	// 玩家与观战者同样 ForceFull + 可靠下发（此前玩家走 lossy，终局帧被
+	// 丢时该玩家世界定格在倒数第二帧，仅分数可靠不受影响）。
+	ended := m.tick >= sim.MatchTicks && !m.warmup
 	for _, rv := range wv.Robots {
 		pid, ok := m.playerOf[rv.ID]
 		if !ok {
@@ -616,6 +620,13 @@ func (m *Match) step() {
 		if m.ai != nil && m.ai.quota != nil {
 			self.AiRounds, self.AiTokensK, _ = m.ai.quota.Snapshot(pid)
 		}
+		if ended {
+			enc.ForceFull()
+			delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
+			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+			delete(m.reliableFull, pid)
+			continue
+		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
 		msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}
 		if m.reliableFull[pid] {
@@ -629,7 +640,6 @@ func (m *Match) step() {
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
-	ended := m.tick >= sim.MatchTicks && !m.warmup
 	if len(m.rc.spectators) > 0 {
 		obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
 		for pid, s := range m.rc.spectators {
@@ -661,7 +671,7 @@ func (m *Match) step() {
 		}
 	}
 
-	if m.tick >= sim.MatchTicks && !m.warmup {
+	if ended {
 		m.finish(wv)
 		m.Stop()
 		return

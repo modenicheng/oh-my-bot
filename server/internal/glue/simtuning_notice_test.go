@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -135,6 +136,32 @@ func TestAiNoticeCodes(t *testing.T) {
 		say := msgs[i*2+1].msg.GetEvent().GetSay()
 		if say == nil || say.GetText() != c.text {
 			t.Fatalf("pair %d: compatible say text mismatch: %+v", i, msgs[i*2+1].msg)
+		}
+	}
+}
+
+// TestControlNoticeCodeNumbersPinned：EvControlNotice.Code 编号与 proto 权威源
+// 互钉（与 packages/protocol/test/golden.test.ts 的「notice 枚举值」用例成对；
+// additive 编号一旦发布即不可挪动——旧客户端按数值分流）。
+func TestControlNoticeCodeNumbersPinned(t *testing.T) {
+	cases := []struct {
+		code ombv1.EvControlNotice_Code
+		want protoreflect.EnumNumber
+	}{
+		{ombv1.EvControlNotice_CN_UNSPECIFIED, 0},
+		{ombv1.EvControlNotice_CN_JOIN_FAILED, 1},
+		{ombv1.EvControlNotice_CN_READONLY_SPECTATOR, 2},
+		{ombv1.EvControlNotice_CN_TAKEOVER, 3},
+		{ombv1.EvControlNotice_CN_AI_REQUEST_FAILED, 10},
+		{ombv1.EvControlNotice_CN_AI_DISABLED, 11},
+		{ombv1.EvControlNotice_CN_AI_COMPILE_FAILED, 12},
+		{ombv1.EvControlNotice_CN_AI_STALE_SCRIPT, 13},
+		{ombv1.EvControlNotice_CN_AI_EXPLAIN, 14},
+		{ombv1.EvControlNotice_CN_SCRIPT_ROLLBACK_FAILED, 15},
+	}
+	for _, c := range cases {
+		if got := c.code.Number(); got != c.want {
+			t.Fatalf("code %s = %d, want %d", c.code.String(), got, c.want)
 		}
 	}
 }
