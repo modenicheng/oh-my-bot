@@ -193,8 +193,10 @@ jobs:
           if-no-files-found: error
 
   # 镜像构建推送（与 build-binaries 并行）：双架构在 Dockerfile 内交叉编译，无 QEMU。
-  # tag 契约由 metadata-action 的 semver 语义保证：预发布（rc/beta/alpha）只打完整版本号、
-  # 不生成 latest；稳定版得 x.y.z + x.y + x + latest（latest=auto 默认行为）。
+  # tag 契约显式计算：预发布（rc/beta/alpha）只打完整版本号、不生成 latest；稳定版得
+  # x.y.z + x.y + x（0.x 不打裸 major）+ latest。不用 metadata-action 的 semver 类型：
+  # 本工作流经 workflow_dispatch 触发时（GITHUB_TOKEN 打 tag 不触发工作流的既有限制）
+  # GITHUB_REF 是 main 而非 tag ref，semver 解析会落空导致推送无 tag。
   docker:
     needs: [resolve, build-web]
     runs-on: ubuntu-latest
@@ -216,14 +218,30 @@ jobs:
 
       - name: image tags (ghcr.io/<repo>)
         id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            # 官方不建议 0.x 打裸 major tag，major=0 时禁用
-            type=semver,pattern={{major}},enable=${{ !startsWith(needs.resolve.outputs.tag, 'v0.') }}
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          COMMIT: ${{ needs.resolve.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+          tags="${image}:${version}"
+          if [[ "${version}" != *-* ]]; then
+            major="${version%%.*}"
+            minor="$(cut -d. -f2 <<<"${version}")"
+            [ "${major}" = "0" ] || tags="${tags} ${image}:${major}.${minor} ${image}:${major}"
+            tags="${tags} ${image}:latest"
+          fi
+          {
+            echo "tags=${tags}"
+            echo "labels<<LABELS_EOF"
+            echo "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+            echo "org.opencontainers.image.version=${version}"
+            echo "org.opencontainers.image.revision=${COMMIT}"
+            echo "LABELS_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "image tags: ${tags}"
 
       - name: build & push (linux/amd64 + linux/arm64)
         uses: docker/build-push-action@v7
