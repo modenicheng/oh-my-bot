@@ -11,6 +11,21 @@ quota:
   global_tokens: 2000000
   max_concurrency: 20
 
+# OIDC 登录认证（详见 docs/oidc-auth.md）。默认开启：issuer/client_id/
+# client_secret 配齐即生效（WS 升级前验 token、进房昵称强制取认证身份防冒名）；
+# 配置残缺时自动降级不装配（日志说明，行为与未接入认证一致）；显式关闭用
+# enabled: false。回放/手册等只读 HTTP API 始终公开，不受影响。
+# 秘密段放 .env：OIDC_CLIENT_SECRET=…（必填）、OMB_AUTH_SECRET=…（HMAC 签名
+# 密钥，未设置时进程内随机生成——重启即全员掉登录，生产建议显式设置）。
+auth:
+  # enabled: false              # 显式关闭（默认 true：配齐下方三项即启用）
+  # issuer: https://sso.example/realms/omb     # OIDC discovery 基地址
+  # client_id: omb                             # confidential client
+  # redirect_url: https://omb.example/auth/callback  # 缺省按请求 Host 推导
+  # display_name_claim: preferred_username     # 进房昵称 claim，回退 name→email→sub
+  # token_ttl: 168h                            # 自签 token 有效期（"168h" 或纯秒数）
+  # bypass_proxy: true                         # OIDC 出站强制直连（本机代理到 IdP 不可达/EOF 时用）
+
 # Go runtime GC tuning (see server/internal/ai/config.go GCConfig for rationale:
 # 64-script 60Hz matches produce ~9MB/tick short-lived goja objects; default
 # GOGC=100 burns ~40% of frame budget on GC assist. Measured on the 8-core

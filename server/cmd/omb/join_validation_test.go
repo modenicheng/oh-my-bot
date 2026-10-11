@@ -38,7 +38,7 @@ func TestJoinRejectsInvalidParams(t *testing.T) {
 			var session *glue.Session
 			var received []*ombv1.ServerMsg
 			send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-			handleUpstream(h, joinCase(tc.roomCode, tc.nick), send, send, nil, &session)
+			handleUpstream(h, joinCase(tc.roomCode, tc.nick), send, send, nil, &session, "")
 			if session != nil {
 				t.Fatalf("invalid join (%q,%q) bound a session", tc.roomCode, tc.nick)
 			}
@@ -72,7 +72,7 @@ func TestSpectateRejectsInvalidRoomCode(t *testing.T) {
 			var session *glue.Session
 			var received []*ombv1.ServerMsg
 			send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-			handleUpstream(h, spectateCase(code), send, send, nil, &session)
+			handleUpstream(h, spectateCase(code), send, send, nil, &session, "")
 			if session != nil {
 				t.Fatalf("invalid spectate (%q) bound a session", code)
 			}
@@ -97,7 +97,7 @@ func TestJoinAcceptsValidParams(t *testing.T) {
 	var session *glue.Session
 	var received []*ombv1.ServerMsg
 	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-	handleUpstream(h, joinCase("HEALTH", "  alice  "), send, send, nil, &session)
+	handleUpstream(h, joinCase("HEALTH", "  alice  "), send, send, nil, &session, "")
 	if session == nil {
 		t.Fatal("valid join did not bind a session")
 	}

@@ -6,6 +6,7 @@ import { WsTransport, decodeServer, encodeClient,
          JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinRejection,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
+import { wsAuthQuery } from './auth'
 
 export interface JoinOptions {
   roomCode: string
@@ -331,7 +332,8 @@ export class RoomSession {
 }
 
 function wsUrl(): string {
-  // 同源端口（服务器 embed 前端，HTTP/WS 同端口）；vite dev 由 proxy 转发
+  // 同源端口（服务器 embed 前端，HTTP/WS 同端口）；vite dev 由 proxy 转发。
+  // 认证开启时附 ?token=（服务端 internal/auth 升级门禁；浏览器 WS 无自定义头）。
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws`
+  return `${proto}://${location.host}/ws${wsAuthQuery()}`
 }

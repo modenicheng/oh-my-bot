@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
+	"github.com/modenicheng/oh-my-bot/server/internal/auth"
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
 	"github.com/modenicheng/oh-my-bot/server/internal/listen"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
@@ -259,6 +260,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+
+	// OIDC 认证（config.yaml auth.* 段，默认关闭）：装配成功时挂 /auth/* 路由，
+	// 并对 /ws 升级做 token 门禁；返回 nil 时一切行为与未接入认证的版本一致。
+	verifier := setupAuth(serverCfg)
+	if verifier != nil {
+		registerAuthRoutes(mux, verifier)
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -350,7 +358,7 @@ func main() {
 			log.Printf("replay %s: %v", id, exportErr)
 		}
 	})
-	mux.Handle("/ws", sessionHandler(hub))
+	mux.Handle("/ws", sessionHandler(hub, verifier))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 引导页：embed 里只有占位文件（未跑 build.sh 的开发二进制）时，
 		// 别返回白屏/404，直接告诉开发者怎么把前端跑起来。
@@ -438,8 +446,21 @@ func copyCompleteRecords(w io.Writer, r io.Reader) error {
 
 // sessionHandler owns close cleanup without changing netws's transport contract.
 // The reader can outlive ServeHTTP briefly; fence late upstream calls as well.
-func sessionHandler(hub *glue.Hub) http.Handler {
+// verifier 非 nil 时（OIDC 认证开启）升级前强制验 ?token= 查询参数——浏览器
+// WebSocket API 无法自定义请求头，只能走 query；验出的认证名随之注入会话，
+// join 时强制覆盖昵称（防冒名，与 S-33 同身份接管语义衔接）。
+func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authName := ""
+		if verifier != nil {
+			_, name, err := verifier.VerifyToken(r.URL.Query().Get("token"))
+			if err != nil {
+				w.Header().Set("Cache-Control", "no-store")
+				http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+				return
+			}
+			authName = name
+		}
 		var mu sync.Mutex
 		var sess *glue.Session
 		closed := false
@@ -456,7 +477,7 @@ func sessionHandler(hub *glue.Hub) http.Handler {
 				mu.Lock()
 				defer mu.Unlock()
 				if !closed {
-					handleUpstream(hub, up, reliable, lossy, closeConn, &sess)
+					handleUpstream(hub, up, reliable, lossy, closeConn, &sess, authName)
 				}
 			}
 		}).ServeHTTP(w, r)
@@ -465,8 +486,9 @@ func sessionHandler(hub *glue.Hub) http.Handler {
 
 // handleUpstream 全量上行路由（Phase D glue：join/leave/room_action/input/…）。
 // closeConn 请求优雅关闭本连接（排队帧先发完）：注入到玩家会话，供同身份
-// 接管时关闭被替换的旧连接（审计 S-33）。
-func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sess **glue.Session) {
+// 接管时关闭被替换的旧连接（审计 S-33）。authName 为 /ws 门禁验出的认证名
+// （未启用认证时恒空），join 时强制覆盖客户端自报昵称。
+func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sess **glue.Session, authName string) {
 	if up == nil {
 		return
 	}
@@ -498,7 +520,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	}
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
-		handleJoin(hub, p.Join, sendReliable, sendLossy, closeConn, sess)
+		handleJoin(hub, p.Join, sendReliable, sendLossy, closeConn, sess, authName)
 	case *ombv1.ClientMsg_Spectate:
 		handleSpectate(hub, p.Spectate, sendReliable, sendLossy, sess)
 	case *ombv1.ClientMsg_Input:
@@ -560,7 +582,10 @@ const (
 	joinEmptyNickReason   = "昵称不能为空"
 )
 
-func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sessOut **glue.Session) {
+// handleJoin 进房：房码/昵称校验 + 会话绑定。authName 非空（认证开启）时昵称
+// 以认证名为准——客户端自报昵称仅作认证关闭时的输入，杜绝冒名；认证名来自
+// IdP 昵称回退链，trim 后恒非空，但仍保留空昵称检查兜底。
+func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sessOut **glue.Session, authName string) {
 	if join == nil {
 		return
 	}
@@ -570,6 +595,9 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	// 统一使用 trim 后的值（与客户端表单行为一致）。
 	code := join.GetRoomCode()
 	nick := strings.TrimSpace(join.GetNick())
+	if authName != "" {
+		nick = strings.TrimSpace(authName)
+	}
 	if !room.ValidCode(code) {
 		sendJoinFailedReliable(sendReliable, joinInvalidCodeReason)
 		return

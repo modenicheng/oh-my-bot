@@ -17,7 +17,40 @@ type ServerConfig struct {
 	AI     AIConfig
 	Quota  QuotaConfig
 	GC     GCConfig
+	Auth   AuthConfig
 	APIKey string // DeepSeek key（.env/环境变量 DEEPSEEK_API_KEY；不写日志）
+}
+
+// AuthDefaultTokenTTL 自签 token 默认有效期（auth.token_ttl 未配置时）。
+const AuthDefaultTokenTTL = 168 * time.Hour
+
+// AuthConfig OIDC 登录参数（config.yaml auth.* 段 + .env 秘密段）。
+// 总开关关闭时其余字段全部忽略，行为与未接入认证的历史版本一致。
+type AuthConfig struct {
+	// Enabled 总开关，默认 true：issuer/client_id/client_secret 配齐即启用；
+	// 显式 false 可在配置齐备时也关掉。配置残缺时按降级路径不装配（/auth/*
+	// 不注册、/ws 无门禁，行为与未接入认证一致），只在日志说明。
+	Enabled bool
+	// Issuer OIDC issuer URL（discovery 基地址，如 https://sso.example/realms/omb）。
+	Issuer string
+	// ClientID OIDC 客户端 ID（confidential client）。
+	ClientID string
+	// ClientSecret OIDC 客户端密钥（.env/环境变量 OIDC_CLIENT_SECRET；不写日志）。
+	ClientSecret string
+	// RedirectURL 回调地址（默认 https://<host>/auth/callback）；空 = 按请求
+	// Host + X-Forwarded-Proto 推导（多入口部署免配置）。
+	RedirectURL string
+	// DisplayNameClaim 进房昵称优先取的 claim（默认 preferred_username，
+	// 依次回退 name → email → sub）。
+	DisplayNameClaim string
+	// TokenTTL 自签 token 有效期（默认 168h；auth.token_ttl 支持 "168h" 或纯秒数）。
+	TokenTTL time.Duration
+	// HMACSecret token/state 签名密钥（.env/环境变量 OMB_AUTH_SECRET）。
+	// 空 = 启动时随机生成临时密钥：功能可用，但每次重启全员掉登录（打日志）。
+	HMACSecret string
+	// BypassProxy OIDC 出站请求（discovery/token/JWKS）强制直连，忽略
+	// HTTP(S)_PROXY 环境变量。本地代理对 IdP 不可达时的开关，默认 false。
+	BypassProxy bool
 }
 
 // GCConfig Go 运行时垃圾回收参数（config.yaml gc.* 段）。
@@ -72,6 +105,9 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 			Timeout:  DeepSeekDefaultTimeout,
 		},
 		Quota: DefaultQuotaConfig(),
+		// auth 默认开启：配齐 issuer/client_id/client_secret 即生效；残缺时
+		// setupAuth 降级并打日志。显式关闭用 auth.enabled: false / AUTH_ENABLED=false。
+		Auth: AuthConfig{Enabled: true, TokenTTL: AuthDefaultTokenTTL},
 	}
 
 	if raw, err := os.ReadFile(filepath.Join(dir, "config.yaml")); err == nil {
@@ -101,6 +137,10 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 		if v, err := parseSecondsKV(kv, "AI_TIMEOUT_SECONDS", 0); err == nil && v > 0 {
 			cfg.AI.Timeout = v
 		}
+		cfg.Auth.ClientSecret = firstNonEmpty(kv["OIDC_CLIENT_SECRET"], cfg.Auth.ClientSecret)
+		cfg.Auth.HMACSecret = firstNonEmpty(kv["OMB_AUTH_SECRET"], cfg.Auth.HMACSecret)
+		cfg.Auth.Enabled = parseBoolKV(kv, "AUTH_ENABLED", cfg.Auth.Enabled)
+		cfg.Auth.BypassProxy = parseBoolKV(kv, "AUTH_BYPASS_PROXY", cfg.Auth.BypassProxy)
 	} else if !os.IsNotExist(err) {
 		return ServerConfig{}, fmt.Errorf(".env: %w", err)
 	}
@@ -143,6 +183,14 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 	if v := os.Getenv("OMB_GC_MEMORY_LIMIT"); v != "" {
 		cfg.GC.MemoryLimit = v
 	}
+	// auth.*：秘密段（client_secret/hmac secret）+ 非秘密段均支持进程环境覆盖。
+	if v := os.Getenv("OIDC_CLIENT_SECRET"); v != "" {
+		cfg.Auth.ClientSecret = v
+	}
+	if v := os.Getenv("OMB_AUTH_SECRET"); v != "" {
+		cfg.Auth.HMACSecret = v
+	}
+	applyAuthEnv(&cfg.Auth)
 
 	if cfg.AI.Model == "" {
 		cfg.AI.Model = DeepSeekDefaultModel
@@ -187,6 +235,57 @@ func (c *ServerConfig) applyYAML(kv map[string]string) {
 	}
 	if v := firstNonEmpty(kv["GC_MEMORY_LIMIT"], kv["GC.MEMORY_LIMIT"]); v != "" {
 		c.GC.MemoryLimit = v
+	}
+	// auth.* 段：秘密项（client_secret / hmac secret）只从 .env / 环境变量来，
+	// yaml 只放非秘密项。
+	c.Auth.Enabled = parseBoolKV(kv, "AUTH_ENABLED", c.Auth.Enabled)
+	if v := firstNonEmpty(kv["AUTH_ISSUER"], kv["AUTH.ISSUER"]); v != "" {
+		c.Auth.Issuer = v
+	}
+	if v := firstNonEmpty(kv["AUTH_CLIENT_ID"], kv["AUTH.CLIENT_ID"]); v != "" {
+		c.Auth.ClientID = v
+	}
+	if v := firstNonEmpty(kv["AUTH_REDIRECT_URL"], kv["AUTH.REDIRECT_URL"]); v != "" {
+		c.Auth.RedirectURL = v
+	}
+	if v := firstNonEmpty(kv["AUTH_DISPLAY_NAME_CLAIM"], kv["AUTH.DISPLAY_NAME_CLAIM"]); v != "" {
+		c.Auth.DisplayNameClaim = v
+	}
+	c.Auth.BypassProxy = parseBoolKV(kv, "AUTH_BYPASS_PROXY", c.Auth.BypassProxy)
+	if v, err := parseSecondsKV(kv, "AUTH_TOKEN_TTL", 0); err == nil && v > 0 {
+		c.Auth.TokenTTL = v
+	}
+}
+
+// applyAuthEnv 应用 auth.* 非秘密键的进程环境覆盖（秘密键已在 LoadServerConfig
+// 主流程单独处理）。与 AI_* 一致：非法值忽略，保留既有取值。
+func applyAuthEnv(c *AuthConfig) {
+	if v := os.Getenv("AUTH_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Enabled = b
+		}
+	}
+	if v := os.Getenv("AUTH_ISSUER"); v != "" {
+		c.Issuer = v
+	}
+	if v := os.Getenv("AUTH_CLIENT_ID"); v != "" {
+		c.ClientID = v
+	}
+	if v := os.Getenv("AUTH_REDIRECT_URL"); v != "" {
+		c.RedirectURL = v
+	}
+	if v := os.Getenv("AUTH_DISPLAY_NAME_CLAIM"); v != "" {
+		c.DisplayNameClaim = v
+	}
+	if v := os.Getenv("AUTH_BYPASS_PROXY"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.BypassProxy = b
+		}
+	}
+	if v := os.Getenv("AUTH_TOKEN_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.TokenTTL = d
+		}
 	}
 }
 

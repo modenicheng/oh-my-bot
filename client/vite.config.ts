@@ -38,6 +38,11 @@ export default defineConfig({
         changeOrigin: true,
         rewriteWsOrigin: true,
       },
+      // OIDC 认证路由（/auth/login、/auth/callback、/auth/status、/auth/me）
+      '/auth': {
+        target: proxyTarget,
+        changeOrigin: true,
+      },
     },
   },
 })

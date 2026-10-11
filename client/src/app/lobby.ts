@@ -1,5 +1,6 @@
 import { EvRoomState_State, RoomAction_Kind } from '@omb/protocol'
 import type { JoinProfile } from '../route'
+import { clearToken, loginHref, type AuthClaims } from '../auth'
 import { $ } from '../ui/dom'
 
 const COLORS = ['#22d3ee', '#a3e635', '#f472b6', '#ff5c5c', '#fbbf24', '#a78bfa', '#34d399', '#f97316']
@@ -20,6 +21,11 @@ export class Lobby {
   private robotsOnline = 0
   private soloBots = 0
   private color = COLORS[0]!
+  // OIDC 认证态（服务端 auth.* 开启时）：未登录阻止进房，已登录昵称锁定为
+  // 认证名——服务端门禁（cmd/omb sessionHandler）与昵称接管（handleJoin）
+  // 是权威，这里只是提前给出可读的错误与 UI 状态。
+  private authEnabled = false
+  private authClaims: AuthClaims | null = null
   private roomInput = $<HTMLInputElement>('in-room')
   private nickInput = $<HTMLInputElement>('in-nick')
   private swatches = $('swatches')
@@ -45,6 +51,15 @@ export class Lobby {
       input.addEventListener('keydown', e => { if (e.key === 'Enter') this.join() })
     }
     this.joinButton.addEventListener('click', () => this.join())
+    $('auth-login').addEventListener('click', e => {
+      // 点击时带上当前房码：IdP 往返回来后表单自动恢复。
+      e.preventDefault()
+      location.href = loginHref(this.roomInput.value)
+    })
+    $('auth-logout').addEventListener('click', () => {
+      clearToken()
+      this.setAuth(this.authEnabled, null)
+    })
     this.startButton.addEventListener('click', () => deps.roomAction(RoomAction_Kind.START))
     this.warmupButton.addEventListener('click', () => deps.roomAction(RoomAction_Kind.WARMUP))
     this.botsButton.addEventListener('click', () => deps.roomAction(RoomAction_Kind.SOLO_BOTS))
@@ -69,12 +84,34 @@ export class Lobby {
     if (!ROOM_CODE_RE.test(this.roomInput.value)) return this.showError('房间码需为 4–8 位字母/数字')
     const nick = this.nickInput.value.trim()
     if (!/^.{1,16}$/.test(nick)) return this.showError('昵称需为 1-16 个字符')
+    if (this.authEnabled && !this.authClaims) return this.showError('需要先通过 OIDC 登录（认证后昵称自动取认证身份）')
     this.deps.join({ roomCode: this.roomInput.value, nick, color: this.color })
   }
 
   setRoomCode(value: string): void { this.roomInput.value = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }
   showError(message: string): void { $('form-error').textContent = message }
   setJoining(joining: boolean): void { this.joinButton.disabled = joining }
+
+  /** 同步认证徽章与昵称输入：已登录锁昵称（服务端会强制覆盖），未登录给出登录入口。 */
+  setAuth(enabled: boolean, claims: AuthClaims | null): void {
+    this.authEnabled = enabled
+    this.authClaims = claims
+    $('auth-row').hidden = !enabled
+    if (!enabled) return
+    const login = $<HTMLAnchorElement>('auth-login')
+    const logout = $<HTMLButtonElement>('auth-logout')
+    $('auth-state').textContent = claims ? `已登录：${claims.name}` : '未登录'
+    if (claims) {
+      this.nickInput.value = claims.name.slice(0, 16)
+      this.nickInput.disabled = true
+      login.hidden = true
+      logout.hidden = false
+    } else {
+      this.nickInput.disabled = false
+      login.hidden = false
+      logout.hidden = true
+    }
+  }
 
   restore(profile: JoinProfile): void {
     this.roomInput.value = profile.roomCode

@@ -49,6 +49,10 @@ button.act:disabled { opacity: .45; cursor: default; }
 button.danger { border-color: var(--danger); color: var(--danger); }
 button.danger:hover:not(:disabled) { box-shadow: 0 0 12px #ff5c5c40; }
 .error-line { font-size: 12px; color: var(--danger); min-height: 1.2em; }
+/* OIDC 登录徽章（服务端 auth.* 关闭时整行隐藏）；not([hidden]) 防 display 压过 UA 隐藏 */
+#auth-row:not([hidden]) { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-dim); }
+#auth-row a, #auth-logout { font: inherit; font-size: 12px; color: var(--accent); background: none;
+                            border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 /* 大厅 */
 #room-code { font-family: var(--pixel); font-size: 36px; letter-spacing: .3em; color: var(--accent);
              padding: 6px 0 2px; border-bottom: 1px solid var(--line); background: transparent;

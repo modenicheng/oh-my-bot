@@ -173,3 +173,72 @@ func TestLoadServerConfigQuotaEnvOverride(t *testing.T) {
 		t.Fatalf("env quota override: %+v", cfg.Quota)
 	}
 }
+
+// TestLoadServerConfigAuthYAMLEnv：auth.* 段 yaml 非秘密键 + .env/环境变量
+// 秘密键的组合装配；未配置时 TokenTTL 落默认 168h。
+func TestLoadServerConfigAuthYAMLEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, map[string]string{
+		"config.yaml": `auth:
+  enabled: true
+  issuer: https://sso.example/realms/omb
+  client_id: omb
+  redirect_url: https://omb.example/auth/callback
+  display_name_claim: email
+  token_ttl: 24h
+  bypass_proxy: true
+`,
+		".env": "OIDC_CLIENT_SECRET=oidc-secret\nOMB_AUTH_SECRET=hmac-secret\n",
+	})
+	// 隔离进程环境同名键：本机若导出过这些变量会污染断言。
+	for _, key := range []string{"OIDC_CLIENT_SECRET", "OMB_AUTH_SECRET", "AUTH_ENABLED", "AUTH_ISSUER", "AUTH_CLIENT_ID", "AUTH_BYPASS_PROXY"} {
+		t.Setenv(key, "")
+	}
+	cfg, err := LoadServerConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Auth
+	if !a.Enabled || a.Issuer != "https://sso.example/realms/omb" || a.ClientID != "omb" ||
+		a.RedirectURL != "https://omb.example/auth/callback" || a.DisplayNameClaim != "email" || !a.BypassProxy {
+		t.Fatalf("auth yaml = %+v", a)
+	}
+	if a.TokenTTL != 24*time.Hour {
+		t.Fatalf("token_ttl = %v, want 24h", a.TokenTTL)
+	}
+	if a.ClientSecret != "oidc-secret" || a.HMACSecret != "hmac-secret" {
+		t.Fatalf("secrets = %q/%q", a.ClientSecret, a.HMACSecret)
+	}
+
+	// 未配置时 Enabled 默认 true（配齐 issuer 等即生效），TTL 落默认值。
+	cfg2, err := LoadServerConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg2.Auth.Enabled || cfg2.Auth.TokenTTL != AuthDefaultTokenTTL {
+		t.Fatalf("auth defaults = %+v", cfg2.Auth)
+	}
+}
+
+// TestLoadServerConfigAuthDisableViaEnv：默认开启的前提下，.env 显式
+// AUTH_ENABLED=false 可在配置齐备时关掉认证（显式关闭优先，且不丢其余配置）。
+func TestLoadServerConfigAuthDisableViaEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, map[string]string{
+		"config.yaml": "auth:\n  issuer: https://sso.example/realms/omb\n  client_id: omb\n",
+		".env":        "OIDC_CLIENT_SECRET=s\nAUTH_ENABLED=false\n",
+	})
+	// 隔离宿主机可能存在的同名环境变量（空串按未设置处理）。
+	t.Setenv("AUTH_ENABLED", "")
+	t.Setenv("OIDC_CLIENT_SECRET", "")
+	cfg, err := LoadServerConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.Enabled {
+		t.Fatalf("explicit AUTH_ENABLED=false must disable auth: %+v", cfg.Auth)
+	}
+	if cfg.Auth.Issuer == "" || cfg.Auth.ClientSecret != "s" {
+		t.Fatalf("disabled switch must not discard the rest of the config: %+v", cfg.Auth)
+	}
+}

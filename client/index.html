@@ -55,6 +55,11 @@
         <input type="text" id="in-nick" maxlength="16" spellcheck="false" autocomplete="off"
                placeholder="1-16 个字符">
       </label>
+      <div id="auth-row" hidden>
+        <span id="auth-state"></span>
+        <a id="auth-login" href="/auth/login">OIDC 登录</a>
+        <button type="button" id="auth-logout" hidden>退出登录</button>
+      </div>
       <div class="field-label">颜色</div>
       <div id="swatches"></div>
       <button type="button" class="act" id="btn-join"><span data-icon="forward"></span><span>进入房间</span></button>

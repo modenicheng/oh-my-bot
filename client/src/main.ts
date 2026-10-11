@@ -14,6 +14,7 @@ import { Workbench } from './workbench/workbench'
 import { battleKeyAction } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
+import { consumeTokenFromURL, fetchAuthEnabled, validClaims } from './auth'
 import { mountIcons } from './icons'
 import { audio } from './audio'
 import { bgm } from './music/bgm'
@@ -25,6 +26,8 @@ import { startupReady } from './startup-resources'
 export const ready = startupReady
 
 mountIcons(document)
+// 登录回跳的 ?token= 必须在任何 writeRoute 快照 URL 之前落入存储并清洗。
+consumeTokenFromURL()
 
 // ---- DOM ---------------------------------------------------------------
 
@@ -63,6 +66,11 @@ const lobby = new Lobby({
   roomAction: sendRoomAction,
   watchLive: roomCode => screens.openLive(roomCode),
 })
+
+// OIDC 认证（服务端 auth.* 开启时）：探测开关驱动登录徽章；进房前统一门禁
+// （joinWith 内），服务端 /ws 门禁仍是权威，这里只提前拦截给出可读错误。
+const authEnabledPromise = fetchAuthEnabled()
+void authEnabledPromise.then(enabled => lobby.setAuth(enabled, enabled ? validClaims() : null))
 
 const screens = new AuxiliaryViews({
   show: showView,
@@ -157,6 +165,14 @@ function handleTakeoverNotice(text: string): void {
 
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   if (session?.state === 'connecting') return
+  if ((await authEnabledPromise) && !validClaims()) {
+    // 认证开启但本地无有效登录（未登录/token 过期）：不拨号，回大厅给登录提示。
+    showView('join')
+    lobby.setJoining(false)
+    lobby.setAuth(true, null)
+    lobby.showError('登录已过期或尚未登录：请先通过 OIDC 登录')
+    return
+  }
   lobby.beginJoin(roomCode)
   lastJoin = { roomCode, nick, color }
   saveProfile(lastJoin)
