@@ -1,0 +1,42 @@
+# 构建上下文对齐 git 仓库语义：镜像内自行构建全部产物，禁止本地状态泄漏进镜像层。
+
+# 版本控制 / CI 配置
+.git
+.github
+
+# 依赖与产物：镜像内自行构建（pnpm install + pnpm build + go build）
+**/node_modules
+client/dist
+packages/protocol/gen
+server/cmd/omb/web
+server/cmd/omb/manual
+server/tmp
+server/omb
+server/omb.exe
+omb.exe*
+*.tsbuildinfo
+
+# 运行时数据与本地配置（secrets 不得进入镜像层，见 docs/deploy.md）
+data
+*.log
+*.pid
+config.yaml
+.env
+server/config.yaml
+server/.env
+
+# 本地工作区杂物（与 .gitignore 卫生清单对齐）
+.artifacts
+.worktrees
+.v2c
+.zcode*
+.agents
+.claude
+.pi
+skills
+client/artifacts
+
+# 不参与镜像构建的源码树（manual 除外：go 阶段内嵌）
+docs/*
+!docs/manual
+bots

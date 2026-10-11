@@ -57,3 +57,38 @@ jobs:
 
       - name: unit tests (vitest run, no e2e)
         run: pnpm test
+
+  # Dockerfile 防腐化：仅构建 linux/amd64 不推送，起容器冒烟 /healthz。
+  # GHA 层缓存与 release.yml 的镜像 job 共享；多架构推送只在 release 发生。
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: omb-ci:smoke
+          build-args: VERSION=dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: smoke (/healthz)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name omb-smoke -p 18099:27182 omb-ci:smoke
+          trap 'docker rm -f omb-smoke >/dev/null 2>&1 || true' EXIT
+          code=""
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18099/healthz || true)"
+            [ "${code}" = "200" ] && break
+            sleep 0.5
+          done
+          [ "${code}" = "200" ] || { echo "healthz did not return 200"; exit 1; }
+          echo "healthz OK"
