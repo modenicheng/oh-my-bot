@@ -226,22 +226,27 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           version="${TAG#v}"
-          tags="${image}:${version}"
-          if [[ "${version}" != *-* ]]; then
-            major="${version%%.*}"
-            minor="$(cut -d. -f2 <<<"${version}")"
-            [ "${major}" = "0" ] || tags="${tags} ${image}:${major}.${minor} ${image}:${major}"
-            tags="${tags} ${image}:latest"
-          fi
+          # build-push-action 的 tags 输入按换行分隔，必须逐行写入 output
           {
-            echo "tags=${tags}"
+            echo "tags<<TAGS_EOF"
+            echo "${image}:${version}"
+            if [[ "${version}" != *-* ]]; then
+              major="${version%%.*}"
+              minor="$(cut -d. -f2 <<<"${version}")"
+              if [ "${major}" != "0" ]; then
+                echo "${image}:${major}.${minor}"
+                echo "${image}:${major}"
+              fi
+              echo "${image}:latest"
+            fi
+            echo "TAGS_EOF"
             echo "labels<<LABELS_EOF"
             echo "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
             echo "org.opencontainers.image.version=${version}"
             echo "org.opencontainers.image.revision=${COMMIT}"
             echo "LABELS_EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "image tags: ${tags}"
+          echo "image tags pushed as separate refs: ${image}:${version} (+x.y/x/latest if stable)"
 
       - name: build & push (linux/amd64 + linux/arm64)
         uses: docker/build-push-action@v7
