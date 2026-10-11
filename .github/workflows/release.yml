@@ -1,7 +1,8 @@
 name: Release
 
 # push v* tag 或 workflow_dispatch（tag 输入：用于 release-please 用 GITHUB_TOKEN
-# 打 tag 后不触发本工作流时手动补产物）。产物：五平台二进制 + SHA256SUMS。
+# 打 tag 后不触发本工作流时手动补产物）。产物：五平台二进制 + SHA256SUMS
+# + GHCR 镜像（linux/amd64 + linux/arm64，仓库根 Dockerfile）。
 # resolve job 统一选择/校验 tag（严格 SemVer，绝不以 main 分支头当版本），
 # 并要求 tag commit 的 VERSION 与 tag 一致；各 build job 精确 checkout 该 commit，
 # 全链 -ldflags version 一致。历史 v0.1.0 tag 不含版本链路，因此不会被回填。
@@ -191,6 +192,76 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+  # 镜像构建推送（与 build-binaries 并行）：双架构在 Dockerfile 内交叉编译，无 QEMU。
+  # tag 契约由 metadata-action 的 semver 语义保证：预发布（rc/beta/alpha）只打完整版本号、
+  # 不生成 latest；稳定版得 x.y.z + x.y + x + latest（latest=auto 默认行为）。
+  docker:
+    needs: [resolve, build-web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: image tags (ghcr.io/<repo>)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # 官方不建议 0.x 打裸 major tag，major=0 时禁用
+            type=semver,pattern={{major}},enable=${{ !startsWith(needs.resolve.outputs.tag, 'v0.') }}
+
+      - name: build & push (linux/amd64 + linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ needs.resolve.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 与 build-binaries 的 smoke 同纪律：拉回刚推送的镜像验证 -version 严格等于 tag、/healthz 200。
+      - name: smoke (pull amd64, -version strict + /healthz)
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${IMAGE}:${TAG#v}"
+          docker pull --platform linux/amd64 "${REF}"
+          got="$(docker run --rm "${REF}" -version)"
+          echo "-version output: ${got}"
+          [ "${got}" = "${TAG}" ] || { echo "version mismatch: want ${TAG}"; exit 1; }
+          docker run -d --name omb-smoke -p 18099:27182 "${REF}"
+          trap 'docker rm -f omb-smoke >/dev/null 2>&1 || true' EXIT
+          code=""
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18099/healthz || true)"
+            [ "${code}" = "200" ] && break
+            sleep 0.5
+          done
+          [ "${code}" = "200" ] || { echo "healthz did not return 200"; exit 1; }
+          echo "healthz OK"
+
   gather:
     needs: [resolve, build-binaries]
     runs-on: ubuntu-latest
@@ -237,7 +308,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [resolve, gather]
+    # 依赖 docker：镜像未成功不发布资产（全有或全无，与 gather 的"不发半套"一致）。
+    needs: [resolve, gather, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write

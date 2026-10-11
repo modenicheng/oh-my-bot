@@ -133,29 +133,47 @@ omb.example.internal {
 
 验证：`curl --unix-socket /run/omb/omb.sock http://localhost/healthz` → 200，再经代理域名进房。
 
-## Docker（备选）
+## Docker
 
-项目暂无官方镜像；需要时可将以下 Dockerfile 保存到仓库根目录。先运行 `pnpm install` 和 `bash build.sh`，准备好 `server/cmd/omb/web/`、`server/cmd/omb/manual/` 内嵌目录，再以仓库根目录作为构建上下文：
+官方镜像发布在 GHCR，由 Release 工作流在每次 `v*` tag 发布时构建推送（linux/amd64 + linux/arm64；仓库根 `Dockerfile` 多阶段全自动完成 web 构建与 web/manual 内嵌，无需本地预构建）。
 
-```dockerfile
-FROM golang:1.25 AS build
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY server/ ./server/
-RUN CGO_ENABLED=0 go build -o /omb ./server/cmd/omb
-FROM gcr.io/distroless/static
-COPY --from=build /omb /omb
-# 日志落 /app/data/matches（挂卷持久化）
-WORKDIR /app
-# 容器内必须显式绑定所有网卡：默认 127.0.0.1 是容器自己的回环，-p 发布不进去
-ENTRYPOINT ["/omb", "-addr", ":27182"]
-```
+镜像 tag 规则随 git tag：
+
+| git tag | 镜像 tag |
+|---|---|
+| `v1.2.3`（稳定版） | `1.2.3`、`1.2`、`1`、`latest` |
+| `v1.2.3-rc.2`（预发布） | 仅 `1.2.3-rc.2` |
+
+GHCR 首次推送后包默认私有，需在 Packages 页设置中改为 Public（一次性操作）。
 
 ```bash
-docker build -t omb:latest .
-docker run -d -p 127.0.0.1:27182:27182 -v omb-data:/app/data omb:latest   # 仅宿主机本机可访问
-docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发布到所有网卡，局域网可访问
+docker run -d -p 127.0.0.1:27182:27182 -v omb-data:/app/data ghcr.io/modenicheng/oh-my-bot:latest   # 仅宿主机本机可访问
+docker run -d -p 27182:27182 -v omb-data:/app/data ghcr.io/modenicheng/oh-my-bot:latest             # 发布到所有网卡，局域网可访问
+```
+
+- 日志落 `/app/data/matches`（挂卷持久化）；镜像以非 root 用户（65532）运行，该目录已预置为可写挂载点。
+- 容器默认 `OMB_ADDR=:27182` 绑所有网卡；`-addr` flag 可覆盖。
+
+### 容器配置与认证（OIDC）
+
+server 在**可执行文件目录**和**工作目录**查找 `config.yaml` / `.env`（容器 cwd 为 `/app`，`OMB_CONFIG_DIR` 可显式覆盖；优先级：进程环境 > `.env` > `config.yaml`）。secrets 不打进镜像层，运行时挂载或传环境变量：
+
+```bash
+# 方式一：挂载文件（与裸机部署的文件布局一致）
+-v ./config.yaml:/app/config.yaml:ro -v ./.env:/app/.env:ro
+# 方式二：环境变量（OIDC_CLIENT_SECRET、OMB_AUTH_SECRET、AUTH_ISSUER 等，优先级与 AI 段一致）
+```
+
+OIDC 登录认证详见 [oidc-auth.md](oidc-auth.md)（issuer/client_id/client_secret 三项配齐默认启用，`AUTH_ENABLED=false` 整体关闭）；容器化部署额外注意：
+
+- `OMB_AUTH_SECRET` 必须显式设置且跨容器重建保持不变——未设置时进程内随机生成，每次重启容器全员掉登录。
+- `redirect_url` 缺省按请求推导（`scheme://Host/auth/callback`）：直接发布端口时，对外地址是宿主机映射后的地址；经反代时须透传 `X-Forwarded-Proto`；unix socket + nginx 方案天然满足（见下）。
+- 容器需能出网访问 IdP（issuer discovery）。
+
+本地/自建镜像（podman 与 docker 等价）：
+
+```bash
+podman build -t omb:local .
 ```
 
 容器里的 unix socket 也能用：`-addr unix:/run/omb/omb.sock` 并把 `/run/omb` 挂成共享卷，宿主机 nginx 或 sidecar 反代容器直接连卷里的 socket。
@@ -168,15 +186,15 @@ docker run -d -p 27182:27182 -v omb-data:/app/data omb:latest             # 发�
 
 | 工作流 | 触发 | 作用 |
 |---|---|---|
-| CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ 包级串行的完整 `go test -p 1`（避免严格墙钟门受跨包 CPU 争用干扰）+ `go test -race -short`（排除 race 下无意义的严格墙钟性能门）；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e） |
+| CI (`.github/workflows/ci.yml`) | push main、所有 PR、手动 | `go` job：golangci-lint（v2 配置 `.golangci.yml`）+ 包级串行的完整 `go test -p 1`（避免严格墙钟门受跨包 CPU 争用干扰）+ `go test -race -short`（排除 race 下无意义的严格墙钟性能门）；`web` job：`pnpm install --frozen-lockfile` + `pnpm typecheck` + `pnpm test`（vitest 单测，不含 e2e）；`docker` job：仓库根 Dockerfile 构建（linux/amd64，不推送，GHA 层缓存）+ 起容器 `/healthz` 冒烟 |
 | Release Please (`.github/workflows/release-please.yml`) | push main、手动 | 自动维护 `chore: release` PR（由 conventional commits 汇总）；手动可填高于最新 tag 的 `release_as`（如 `v1.0.0-beta.1`）产指定 release PR；merge 后打 tag + 建 GitHub release |
-| Release (`.github/workflows/release.yml`) | push `v*` tag、手动（tag 必填，须为已存在的 `vX.Y.Z[-pre]` tag） | resolve 校验 tag 并输出 tag+commit，五平台构建（linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64）精确 checkout 该 commit + linux/amd64 smoke（`-version` 严格等于 tag、`/healthz` 200）+ SHA256SUMS + 幂等上传到 GitHub release；五平台产物缺一不发 |
+| Release (`.github/workflows/release.yml`) | push `v*` tag、手动（tag 必填，须为已存在的 `vX.Y.Z[-pre]` tag） | resolve 校验 tag 并输出 tag+commit，五平台构建（linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64）精确 checkout 该 commit + linux/amd64 smoke（`-version` 严格等于 tag、`/healthz` 200）+ SHA256SUMS + 幂等上传到 GitHub release；并行 `docker` job 构建推送 GHCR 镜像（linux/amd64+linux/arm64，预发布只打完整版本号 tag、不动 `latest`）+ 镜像 smoke；publish 依赖镜像成功，产物与镜像缺一不发 |
 | Dependabot (`.github/dependabot.yml`) | 每周 | github-actions / gomod（根 go.mod）/ npm（根 pnpm workspace）更新 PR |
 
 ### 正式发版
 
 1. push 到 main 后 Release Please 自动开/更新 `chore: release` PR（版本号由 conventional commits 推导：`feat:` 进 minor、`fix:`/`perf:` 进 patch、`feat!:`/`BREAKING CHANGE:` 进 major）。
-2. 人工核对 CHANGELOG 后 merge 该 PR → 自动打 `vX.Y.Z` tag 并创建 GitHub release，触发 Release 工作流出五平台产物。
+2. 人工核对 CHANGELOG 后 merge 该 PR → 自动打 `vX.Y.Z` tag 并创建 GitHub release，触发 Release 工作流出五平台产物与 GHCR 镜像。
 
 ### beta（预发布）发版
 
