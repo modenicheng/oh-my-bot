@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-rc.2...v1.0.0) (2026-10-11)
+
+
+### Features
+
+* **auth:** add OIDC login authentication ([6694b0a](https://github.com/modenicheng/oh-my-bot/commit/6694b0a1241e0b2824dd90b023abedde635ce554))
+* **ci:** add GHCR image build ([#19](https://github.com/modenicheng/oh-my-bot/issues/19)) ([e6b6408](https://github.com/modenicheng/oh-my-bot/commit/e6b6408d4ac1a0a44259750edaf1eac7fe245833))
+
 ## [1.0.0-rc.2](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-10-10)
 
 
