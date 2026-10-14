@@ -34,6 +34,7 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
+	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
 // version 由 release 构建注入：-ldflags '-X main.version=<tag>'；开发构建保持 "dev"。
@@ -691,6 +692,17 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 		return
 	}
 	rc := hub.EnsureRoom(code)
+	// 房主建房时长设置（JoinRoom.match_minutes/core_open_minutes）：仅创建
+	// 窗口（房间空闲且无人入座）生效，后进房者携带的值被静默忽略；非法
+	// 组合（越界/核心区不早于终局）按 join 拒绝处理，给出可读原因。
+	if matchTicks, coreTicks, err := sim.ValidateDurations(
+		uint32(join.GetMatchMinutes())*60*uint32(sim.TickRate),
+		uint32(join.GetCoreOpenMinutes())*60*uint32(sim.TickRate)); err != nil {
+		sendJoinFailedReliable(sendReliable, "时长设置无效：游玩时长需为 1-30 分钟，且核心区开放时间须早于游玩时长")
+		return
+	} else if matchTicks != sim.MatchTicks || coreTicks != sim.CoreOpenTick {
+		rc.Room.SetDurationConfig(matchTicks, coreTicks)
+	}
 	rc.EnsureLauncher()
 	sess := glue.NewSession(sendReliable, sendLossy, sendReliableFrame)
 	sess.SetCloser(closeConn) // 同身份接管时由 glue 关闭本连接（S-33）
