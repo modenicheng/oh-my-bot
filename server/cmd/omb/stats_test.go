@@ -72,7 +72,7 @@ func TestPprofGated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("pprof without OMB_PPROF = %d, want 404", resp.StatusCode)
 	}

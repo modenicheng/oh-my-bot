@@ -108,7 +108,7 @@ func runClient(ctx context.Context, addr, room string, idx int, withScript bool,
 		log.Printf("client %d: dial: %v", idx, err)
 		return
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 	c.SetReadLimit(1 << 20)
 
 	send := func(msg *ombv1.ClientMsg) {
@@ -214,7 +214,7 @@ func fetchStats(addr, phase string) {
 		log.Printf("stats[%s]: %v", phase, err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	log.Printf("stats[%s]: %s", phase, body)
 }
