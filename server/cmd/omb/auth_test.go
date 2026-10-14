@@ -132,8 +132,47 @@ func readRoomState(t *testing.T, ctx context.Context, c *websocket.Conn) *ombv1.
 	}
 }
 
-// TestWSGate（OIDC 门禁 + 昵称接管）：认证开启时 /ws 无 token/过期 token 在
-// 升级前 401；合法 token 放行且 join 昵称强制取认证名（客户端自报仅作参照）。
+// readControlNotice 读到第一条指定 code 的 EvControlNotice（跳过中间帧）。
+func readControlNotice(t *testing.T, ctx context.Context, c *websocket.Conn, want ombv1.EvControlNotice_Code) *ombv1.EvControlNotice {
+	t.Helper()
+	for {
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if len(data) == 0 || data[0] != byte(ombv1.TransportTiming_FRAME_DOWN) {
+			continue
+		}
+		msg := &ombv1.ServerMsg{}
+		if err := proto.Unmarshal(data[1:], msg); err != nil {
+			continue
+		}
+		if n := msg.GetEvent().GetControlNotice(); n != nil && n.GetCode() == want {
+			return n
+		}
+	}
+}
+
+// assertGateRejected：升级成功 → 首条下行业务帧为门禁拒绝通知（文案互钉）→
+// 通知对写完后连接被优雅关闭（有限帧内必然出错）。
+func assertGateRejected(t *testing.T, ctx context.Context, c *websocket.Conn) {
+	t.Helper()
+	notice := readControlNotice(t, ctx, c, ombv1.EvControlNotice_CN_JOIN_FAILED)
+	if notice.GetText() != authRejectedReason {
+		t.Fatalf("gate rejection text = %q, want %q", notice.GetText(), authRejectedReason)
+	}
+	for i := 0; i < 8; i++ {
+		if _, _, err := c.Read(ctx); err != nil {
+			return // 连接已断：终态成立
+		}
+	}
+	t.Fatal("connection must close after gate rejection")
+}
+
+// TestWSGate（OIDC 门禁 + 昵称接管）：认证开启时 /ws 无 token/过期 token 的
+// 连接升级成功后立即被终态拒绝（join-failed 双形态通知 + 优雅关闭——浏览器
+// WebSocket API 拿不到 401 状态码，升级前拒绝只会让客户端无限退避重连）；
+// 合法 token 放行且 join 昵称强制取认证名（客户端自报仅作参照）。
 func TestWSGate(t *testing.T) {
 	a := setupAuth(ai.ServerConfig{Auth: testAuthConfig()})
 	srv := httptest.NewServer(sessionHandler(glue.NewHub(), a))
@@ -142,13 +181,20 @@ func TestWSGate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, _, err := websocket.Dial(ctx, wsURL+"/ws", nil); err == nil {
-		t.Fatal("dial without token must fail")
+	noTok, _, err := websocket.Dial(ctx, wsURL+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial without token must upgrade (rejection is post-upgrade): %v", err)
 	}
+	defer func() { _ = noTok.CloseNow() }()
+	assertGateRejected(t, ctx, noTok)
+
 	expired := a.Issue("sub-1", "alice", time.Now().Add(-2*time.Hour))
-	if _, _, err := websocket.Dial(ctx, wsURL+"/ws?token="+expired, nil); err == nil {
-		t.Fatal("dial with expired token must fail")
+	expTok, _, err := websocket.Dial(ctx, wsURL+"/ws?token="+expired, nil)
+	if err != nil {
+		t.Fatalf("dial with expired token must upgrade: %v", err)
 	}
+	defer func() { _ = expTok.CloseNow() }()
+	assertGateRejected(t, ctx, expTok)
 
 	valid := a.Issue("sub-1", "alice", time.Now())
 	c, _, err := websocket.Dial(ctx, wsURL+"/ws?token="+valid, nil)
@@ -182,5 +228,23 @@ func TestWSGateDisabled(t *testing.T) {
 	}
 	if rs := readRoomState(t, ctx, c); rs.GetHostNick() != "legacy" {
 		t.Fatalf("bound nick = %q, want client-provided %q", rs.GetHostNick(), "legacy")
+	}
+}
+
+// TestJoinAuthNickTruncation：认证名超长时按 rune 截断到 16（与客户端
+// claims.name.slice(0,16) 同值同界），客户端自报昵称被整体替换。
+func TestJoinAuthNickTruncation(t *testing.T) {
+	h := glue.NewHub()
+	var session *glue.Session
+	var received []*ombv1.ServerMsg
+	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
+	longName := "这是一个超过十六个字符的认证昵称名称"
+	handleUpstream(h, joinCase("HEAL", "attacker"), send, send, nil, &session, longName)
+	if session == nil {
+		t.Fatal("valid join did not bind a session")
+	}
+	want := string([]rune(longName)[:16])
+	if state := h.EnsureRoom("HEAL").Room.StateBroadcast(); state.GetHostNick() != want {
+		t.Fatalf("bound nick = %q, want truncated %q", state.GetHostNick(), want)
 	}
 }

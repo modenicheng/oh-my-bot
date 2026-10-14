@@ -96,3 +96,13 @@ export async function fetchAuthEnabled(): Promise<boolean> {
 export function loginHref(roomCode = ''): string {
   return roomCode ? `/auth/login?room=${encodeURIComponent(roomCode)}` : '/auth/login'
 }
+
+/** 服务端 /ws 门禁拒绝文案前缀；与 server/cmd/omb 的 authRejectedReason 互钉
+ *（两侧测试以对方完整文案钉住漂移）。token 本地看似有效但服务端已失效
+ *（密钥轮换/时钟偏移）时走这条路：客户端清登录态、复位徽章后引导重登。 */
+const AUTH_REJECTED_PREFIX = '登录已过期或无效'
+
+/** join 拒绝原因是否为认证门禁（服务端已判定 token 无效）。 */
+export function isAuthRejection(reason: string): boolean {
+  return reason.startsWith(AUTH_REJECTED_PREFIX)
+}

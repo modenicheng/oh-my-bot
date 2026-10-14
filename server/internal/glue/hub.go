@@ -472,7 +472,8 @@ func normalizeScriptEditorSource(sub *ombv1.ScriptSubmit) (string, ombv1.ScriptL
 const matchInactiveText = "对局未在运行（已结束或正在切换），请稍后重试"
 
 // takeoverNoticeText（审计 S-33）：被同身份新连接替换的旧连接收到的定向通知。
-const takeoverNoticeText = "本连接已被同房码同昵称的新连接接管，即将关闭；如非本人操作，请更换昵称后重新加入"
+// OIDC 接入后昵称由认证身份决定、不可自行更换，提示语只引导退出多余会话。
+const takeoverNoticeText = "本连接已被同房码同昵称的新连接接管，即将关闭；如非本人操作，请退出多余的标签页后重新加入"
 
 // scriptResultNack 构造 ScriptSubmit 的失败回执（非激活窗口 nack，审计 S-30；
 // 对齐 snippets.go「任何合法玩家请求都有 EvSnippetResult」的纪律——任何合法

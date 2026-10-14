@@ -38,10 +38,12 @@ export default defineConfig({
         changeOrigin: true,
         rewriteWsOrigin: true,
       },
-      // OIDC 认证路由（/auth/login、/auth/callback、/auth/status、/auth/me）
+      // OIDC 认证路由（/auth/login、/auth/callback、/auth/status、/auth/me）。
+      // 绝不能 changeOrigin：服务端从请求 Host 推导 OIDC 回调地址（auth.RedirectFor），
+      // Host 被改写成上游会让登录回跳落到 omb 源（27182）而非 5173——token 进错
+      // localStorage（按源隔离），应用侧永远读不到登录态。
       '/auth': {
         target: proxyTarget,
-        changeOrigin: true,
       },
     },
   },

@@ -115,16 +115,18 @@ export class Lobby {
 
   restore(profile: JoinProfile): void {
     this.roomInput.value = profile.roomCode
-    this.nickInput.value = profile.nick
+    // 认证锁定昵称时保持认证名：存量 profile 可能是接入认证前的旧昵称。
+    if (!this.nickInput.disabled) this.nickInput.value = profile.nick
     this.color = profile.color
     this.renderColor()
   }
 
   clearIdentity(): void {
-    this.nickInput.value = ''
+    // 认证锁定时昵称恒定：清空会让禁用输入框过不了进房校验（死锁）。
+    this.nickInput.value = this.authClaims ? this.authClaims.name.slice(0, 16) : ''
     this.showError('')
     this.setJoining(false)
-    this.nickInput.focus({ preventScroll: true })
+    if (!this.nickInput.disabled) this.nickInput.focus({ preventScroll: true })
   }
 
   private renderColor(): void {

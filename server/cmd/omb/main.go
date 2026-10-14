@@ -182,6 +182,7 @@ func envDefaultSoloBots() uint32 {
 	return uint32(n)
 }
 
+
 // envDuration 读取 Go duration 字符串环境变量（如 "15s"、"5m"；容忍首尾空白）。
 // 空/未设置返回 ok=false，调用方跳过——Hub 保留默认；解析失败打一条日志并按
 // 未设置处理：运维配置错误回退安全默认值，不阻止服务器启动。
@@ -446,17 +447,19 @@ func copyCompleteRecords(w io.Writer, r io.Reader) error {
 
 // sessionHandler owns close cleanup without changing netws's transport contract.
 // The reader can outlive ServeHTTP briefly; fence late upstream calls as well.
-// verifier 非 nil 时（OIDC 认证开启）升级前强制验 ?token= 查询参数——浏览器
-// WebSocket API 无法自定义请求头，只能走 query；验出的认证名随之注入会话，
-// join 时强制覆盖昵称（防冒名，与 S-33 同身份接管语义衔接）。
+// verifier 非 nil 时（OIDC 认证开启）验 ?token= 查询参数（浏览器 WebSocket
+// API 无法自定义请求头，只能走 query）。token 无效不回 401——浏览器 WS 拿不到
+// HTTP 状态码，客户端只会无限退避重连；改为完成升级后立即下发终态 join-failed
+// 通知对并优雅关闭（serveAuthRejectedWS），新旧客户端都停在可读错误上。
+// 验出的认证名随之注入会话，join 时强制覆盖昵称（防冒名，与 S-33 同身份
+// 接管语义衔接）。
 func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authName := ""
 		if verifier != nil {
 			_, name, err := verifier.VerifyToken(r.URL.Query().Get("token"))
 			if err != nil {
-				w.Header().Set("Cache-Control", "no-store")
-				http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+				serveAuthRejectedWS(w, r)
 				return
 			}
 			authName = name
@@ -482,6 +485,22 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 			}
 		}).ServeHTTP(w, r)
 	})
+}
+
+// authRejectedReason 门禁拒绝的终态文案。前缀「登录已过期或无效」与客户端
+// auth.ts 的 isAuthRejection 互钉：客户端据此清登录态、把徽章复位为未登录。
+const authRejectedReason = "登录已过期或无效：请重新完成 OIDC 登录"
+
+// serveAuthRejectedWS 拒绝 token 无效的连接：升级成功即在可靠通道入队
+// join-failed 双形态通知（X-4）并请求优雅关闭——排队帧写完才断，通知保证
+// 送达；此后一切上行经 no-op 丢弃，连接不可能进房/观战。不区分具体失败原因
+// （缺 token/坏签名/过期），避免给伪造者当 oracle。
+func serveAuthRejectedWS(w http.ResponseWriter, r *http.Request) {
+	netws.Handler(func(sendReliable, _ func(*ombv1.ServerMsg), closeConn func()) func(*ombv1.ClientMsg) {
+		sendJoinFailedReliable(sendReliable, authRejectedReason)
+		closeConn()
+		return func(*ombv1.ClientMsg) {}
+	}).ServeHTTP(w, r)
 }
 
 // handleUpstream 全量上行路由（Phase D glue：join/leave/room_action/input/…）。
@@ -596,7 +615,9 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	code := join.GetRoomCode()
 	nick := strings.TrimSpace(join.GetNick())
 	if authName != "" {
-		nick = strings.TrimSpace(authName)
+		// 认证名替换自报昵称；按 rune 截断到 16，与客户端表单上限/上行值一致
+		//（客户端 joinWith 发 claims.name.slice(0,16)，两侧必须同值同界）。
+		nick = truncateNick(strings.TrimSpace(authName))
 	}
 	if !room.ValidCode(code) {
 		sendJoinFailedReliable(sendReliable, joinInvalidCodeReason)
@@ -621,6 +642,16 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	*sessOut = sess
 	rc.BroadcastRoomState()
+}
+
+// truncateNick 按 rune 截断昵称到客户端表单上限（16）；rune 计数与 JS 的
+// UTF-16 slice 在 BMP 上一致，超长 emoji 名两侧可能差一个字符（可接受边缘）。
+func truncateNick(s string) string {
+	runes := []rune(s)
+	if len(runes) > 16 {
+		return string(runes[:16])
+	}
+	return s
 }
 
 // sendJoinFailedReliable 双形态下发 join 拒绝（X-4）：结构化 controlNotice 在前、

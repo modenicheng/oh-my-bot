@@ -18,8 +18,9 @@ oh-my-bot 的 OIDC 接入移植自 [BITNP/wordle-competition](https://github.com
   │                           │  校验签名/nonce → sub/name    │
   │  302 /?token=<HMAC>&room= <│  签发自签 token               │
   │                           │                              │
-  │  GET /ws?token=<HMAC>     │  升级前验 token（401 拒绝）    │
-  │ ─────────────────────────>│  join 昵称强制取认证名         │
+  │  GET /ws?token=<HMAC>     │  升级后验 token，无效即终态    │
+  │ ─────────────────────────>│  join-failed 通知并优雅关闭    │
+  │                           │  join 昵称强制取认证名         │
 ```
 
 - token 只在重定向 query 出现一次：前端落入 `localStorage` 后立即清洗地址栏，
@@ -73,8 +74,11 @@ OMB_AUTH_SECRET=<32 字节以上随机串>   # openssl rand -hex 32
 
 认证开启后：
 
-1. `/ws` 升级前必须带合法 `?token=`（浏览器 WebSocket 无法自定义请求头），
-   否则 401，客户端不会建立会话。
+1. `/ws` 连接必须带合法 `?token=`（浏览器 WebSocket 无法自定义请求头）。token
+   无效时不回 401——浏览器 WS API 读不到 HTTP 状态码，升级前拒绝只会让客户端
+   无限退避重连（表象即"认证后无法进房"）；改为完成升级后立即下发终态
+   join-failed 双形态通知并优雅关闭，客户端停止重试、清除失效登录态并提示
+   重新登录（文案前缀两侧互钉，见 `authRejectedReason` / `isAuthRejection`）。
 2. join 的昵称**强制取认证名**（`display_name_claim` → `preferred_username`
    → `name` → `email` → `sub` 回退链），客户端自报昵称被忽略——杜绝冒名，
    且与"同身份接管"（同一昵称重进踢掉旧连接）自然衔接。
@@ -83,8 +87,17 @@ OMB_AUTH_SECRET=<32 字节以上随机串>   # openssl rand -hex 32
 ## 客户端
 
 `client/src/auth.ts` 管理 token 存取/解码与 `/auth/status` 探测；`net.ts` 拨号
-自动附 `?token=`；大厅表单渲染登录徽章。开发模式（vite）已把 `/auth` 加入
-代理，无需额外配置。
+自动附 `?token=`；大厅表单渲染登录徽章。
+
+开发模式（vite）要点：
+
+- `/auth` 代理**不改写 Host**（无 changeOrigin）：服务端从请求 Host 推导
+  回调地址，改写会让登录回跳落到 omb 源而非 5173——token 进错 localStorage
+  （按源隔离），应用侧永远读不到登录态（昵称框绑不上认证名就是这个）。
+- `pnpm dev:server` 以 `OMB_WEB_DIR=../client/dist` 启动：即使直接访问 omb
+  端口也是当前前端，避免 embed 快照过期造成"两个源行为不一致"。
+- Keycloak 的 Valid redirect URIs 记得同时登记开发源
+  （`http://127.0.0.1:5173/auth/callback`）。
 
 ## 与 Keycloak 的对接示例
 
@@ -107,7 +120,8 @@ OMB_AUTH_SECRET=<32 字节以上随机串>   # openssl rand -hex 32
 
 ## 已知边界
 
-- token 过期发生在对局中时，重连会被门禁拒绝，客户端会持续退避重连——刷新
-  页面重新登录即可（默认 TTL 7 天，属低频事件）。
+- token 过期（或服务端密钥轮换后失效）发生在对局中时：重连会被门禁以终态
+  join-failed 通知拒绝——客户端停止退避重连、清除登录态并回大厅提示重新
+  登录（重新登录即恢复，默认 TTL 7 天，属低频事件）。
 - 公共 client（PKCE、无 client secret）暂不支持，需要时再扩展。
 - `/auth/login` 走的 IdP 不可用时返回 502，重试即可；不影响已登录用户。

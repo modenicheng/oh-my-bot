@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeToken, extractTokenFromSearch } from './auth'
+import { decodeToken, extractTokenFromSearch, isAuthRejection } from './auth'
 
 // b64url(JSON) 手工构造 token（签名段不参与客户端解码，任意非空即可）。
 function fakeToken(payload: Record<string, unknown>): string {
@@ -32,5 +32,19 @@ describe('extractTokenFromSearch', () => {
     expect(extractTokenFromSearch('?token=a.b&room=HEAL')).toBe('a.b')
     expect(extractTokenFromSearch('?room=HEAL')).toBeNull()
     expect(extractTokenFromSearch('?token=plain')).toBeNull() // 无签名段：非登录回跳
+  })
+})
+
+describe('isAuthRejection', () => {
+  // 字面量为 server/cmd/omb main.go 的 authRejectedReason 完整文案：
+  // 双侧互钉，任一侧改文案都会被对方测试拦下。
+  it('matches the server gate rejection reason', () => {
+    expect(isAuthRejection('登录已过期或无效：请重新完成 OIDC 登录')).toBe(true)
+  })
+
+  it('does not match other join rejections', () => {
+    expect(isAuthRejection('房码无效：仅限大写字母与数字')).toBe(false)
+    expect(isAuthRejection('昵称不能为空')).toBe(false)
+    expect(isAuthRejection('readonly spectator connection')).toBe(false)
   })
 })

@@ -14,7 +14,7 @@ import { Workbench } from './workbench/workbench'
 import { battleKeyAction } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
-import { consumeTokenFromURL, fetchAuthEnabled, validClaims } from './auth'
+import { consumeTokenFromURL, fetchAuthEnabled, validClaims, clearToken, isAuthRejection } from './auth'
 import { mountIcons } from './icons'
 import { audio } from './audio'
 import { bgm } from './music/bgm'
@@ -141,6 +141,12 @@ function handleJoinRejected(reason: string): void {
   syncWorkbench()
   setStatus('down', '进房失败')
   showView('join')
+  // 认证门禁拒绝（服务端已判 token 无效）：本地登录态作废，清掉并复位
+  // 徽章露出登录入口——否则徽章仍显示"已登录"，用户被引导去点退出再登录。
+  if (isAuthRejection(reason)) {
+    clearToken()
+    lobby.setAuth(true, null)
+  }
   lobby.showError(`无法加入房间：${reason}`)
   lobby.setJoining(false)
 }
@@ -165,18 +171,25 @@ function handleTakeoverNotice(text: string): void {
 
 async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
   if (session?.state === 'connecting') return
-  if ((await authEnabledPromise) && !validClaims()) {
-    // 认证开启但本地无有效登录（未登录/token 过期）：不拨号，回大厅给登录提示。
-    showView('join')
-    lobby.setJoining(false)
-    lobby.setAuth(true, null)
-    lobby.showError('登录已过期或尚未登录：请先通过 OIDC 登录')
-    return
+  // 认证开启时进房昵称以认证名为准：服务端 handleJoin 同规则强制覆盖，这里
+  // 对齐上行值——否则成员列表显示"你：旧昵称"的假象，且用户按显示昵称重进
+  // 会触发同身份接管（被踢）。截断与表单上限（16）一致。
+  let effectiveNick = nick
+  if (await authEnabledPromise) {
+    const claims = validClaims()
+    if (!claims) {
+      showView('join')
+      lobby.setJoining(false)
+      lobby.setAuth(true, null)
+      lobby.showError('登录已过期或尚未登录：请先通过 OIDC 登录')
+      return
+    }
+    effectiveNick = claims.name.slice(0, 16)
   }
   lobby.beginJoin(roomCode)
-  lastJoin = { roomCode, nick, color }
+  lastJoin = { roomCode, nick: effectiveNick, color }
   saveProfile(lastJoin)
-  workbench.setIdentity(roomCode, nick)
+  workbench.setIdentity(roomCode, effectiveNick)
   showView('room')
   setStatus('off', '连接中…')
 
@@ -187,7 +200,7 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
   try {
     await s.connect({
       roomCode,
-      nick,
+      nick: effectiveNick,
       color,
       onMessage: (msg) => { if (session === s) onServerMsg(roomCode, msg) },
       onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
