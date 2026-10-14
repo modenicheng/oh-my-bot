@@ -13,6 +13,9 @@ export interface JoinOptions {
   nick: string
   color: string
   spectator?: boolean
+  /** 建房时长设置（分钟；仅创建房间时生效，重连沿用同一会话参数）。 */
+  matchMinutes?: number
+  coreOpenMinutes?: number
   onMessage: (msg: ServerMsg) => void
   /** 已建立的连接断开（socket close / 心跳超时）时回调，每次掉线恰好一次 */
   onDisconnect: (reason: string) => void
@@ -153,6 +156,7 @@ export class RoomSession {
             ? create(ClientMsgSchema, { payload: { case: 'spectate', value: create(SpectateRoomSchema, { roomCode: opts.roomCode }) } })
             : create(ClientMsgSchema, { payload: { case: 'join', value: create(JoinRoomSchema, {
               roomCode: opts.roomCode, nick: opts.nick, color: opts.color,
+              matchMinutes: opts.matchMinutes ?? 0, coreOpenMinutes: opts.coreOpenMinutes ?? 0,
             }) } })
           t.send(encodeClient(message))
         } catch {

@@ -42,6 +42,12 @@ input[type=text]:focus { border-color: var(--accent); }
           cursor: pointer; background: var(--sw); }
 .swatch:hover { border-color: var(--sw); }
 .swatch.sel { outline: 1px solid var(--sw); box-shadow: 0 0 6px color-mix(in srgb, var(--sw) 35%, transparent); }
+/* 建房时长设置：仅创建窗口生效，两列下拉 */
+.field-note { letter-spacing: 0; font-size: 10px; opacity: .75; }
+.join-durations { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.join-durations select { border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+                         padding: 8px 10px; font: inherit; outline: none; cursor: pointer; }
+.join-durations select:focus { border-color: var(--accent); }
 button.act { border: 1px solid var(--accent); background: transparent; color: var(--accent);
              padding: 9px 0; font: inherit; letter-spacing: .04em; cursor: pointer; }
 button.act:hover:not(:disabled) { background: #22d3ee16; }
@@ -191,6 +197,17 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .game-options-audio input { min-width: 0; width: 100%; accent-color: var(--accent); }
 .game-options-audio output { text-align: right; color: var(--accent); }
 .game-options-session { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.game-options-host { margin: 12px 0 0; padding: 10px 12px 12px; border: 1px solid var(--line); }
+.game-options-host legend { padding: 0 6px; color: var(--fg-dim); font-size: 11px; }
+.game-options-host .game-options-action + .game-options-action { margin-top: 8px; }
+/* 房主暂停的全端覆盖层：服务器停推快照，世界冻结，此层只做呈现 */
+.game-paused { position: absolute; inset: 0; z-index: 70; display: grid; place-items: center;
+  pointer-events: none; background: #05090e99; font-family: var(--mono); }
+.game-paused[hidden] { display: none; }
+.game-paused-card { border: 1px solid #416779; border-top: 3px solid var(--amber);
+  background: #0a0e14f2; box-shadow: 8px 8px 0 #05080c; padding: 22px 34px; text-align: center; }
+.game-paused-title { margin: 0; font: 26px/1.4 var(--pixel); color: var(--amber); letter-spacing: .2em; }
+.game-paused-note { margin: 10px 0 0; font-size: 12px; color: var(--fg-dim); }
 .game-options :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 480px) {
   .game-options { padding: 12px; align-items: end; }

@@ -20,6 +20,7 @@ export class Lobby {
   private hostNick = ''
   private robotsOnline = 0
   private soloBots = 0
+  private pausedState = false
   private color = COLORS[0]!
   // OIDC 认证态（服务端 auth.* 开启时）：未登录阻止进房，已登录昵称锁定为
   // 认证名——服务端门禁（cmd/omb sessionHandler）与昵称接管（handleJoin）
@@ -28,6 +29,8 @@ export class Lobby {
   private authClaims: AuthClaims | null = null
   private roomInput = $<HTMLInputElement>('in-room')
   private nickInput = $<HTMLInputElement>('in-nick')
+  private matchInput = $<HTMLSelectElement>('in-match-min')
+  private coreInput = $<HTMLSelectElement>('in-core-min')
   private swatches = $('swatches')
   private joinButton = $<HTMLButtonElement>('btn-join')
   private startButton = $<HTMLButtonElement>('btn-start')
@@ -50,6 +53,9 @@ export class Lobby {
       input.addEventListener('input', () => { this.normalize(); this.showError('') })
       input.addEventListener('keydown', e => { if (e.key === 'Enter') this.join() })
     }
+    // 游玩时长变化时收紧核心区开放的可选项（必须早于终局）。
+    this.matchInput.addEventListener('change', () => this.constrainCoreOptions())
+    this.constrainCoreOptions()
     this.joinButton.addEventListener('click', () => this.join())
     $('auth-login').addEventListener('click', e => {
       // 点击时带上当前房码：IdP 往返回来后表单自动恢复。
@@ -85,7 +91,28 @@ export class Lobby {
     const nick = this.nickInput.value.trim()
     if (!/^.{1,16}$/.test(nick)) return this.showError('昵称需为 1-16 个字符')
     if (this.authEnabled && !this.authClaims) return this.showError('需要先通过 OIDC 登录（认证后昵称自动取认证身份）')
-    this.deps.join({ roomCode: this.roomInput.value, nick, color: this.color })
+    const { matchMinutes, coreOpenMinutes } = this.selectedDurations()
+    if (coreOpenMinutes >= matchMinutes) return this.showError('核心区开放时间需早于游玩时长')
+    this.deps.join({ roomCode: this.roomInput.value, nick, color: this.color, matchMinutes, coreOpenMinutes })
+  }
+
+  /** 当前表单时长（分钟）。 */
+  selectedDurations(): { matchMinutes: number; coreOpenMinutes: number } {
+    return {
+      matchMinutes: Number(this.matchInput.value),
+      coreOpenMinutes: Number(this.coreInput.value),
+    }
+  }
+
+  /** 核心区开放选项必须早于终局：隐藏越界项，当前选中越界时回退到最大合法项。 */
+  private constrainCoreOptions(): void {
+    const match = Number(this.matchInput.value)
+    const options = Array.from(this.coreInput.options)
+    for (const option of options) option.hidden = Number(option.value) >= match
+    if (Number(this.coreInput.value) >= match) {
+      const fallback = options.filter(o => !o.hidden).at(-1)
+      if (fallback) this.coreInput.value = fallback.value
+    }
   }
 
   setRoomCode(value: string): void { this.roomInput.value = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }
@@ -118,6 +145,13 @@ export class Lobby {
     // 认证锁定昵称时保持认证名：存量 profile 可能是接入认证前的旧昵称。
     if (!this.nickInput.disabled) this.nickInput.value = profile.nick
     this.color = profile.color
+    if (profile.matchMinutes && [...this.matchInput.options].some(o => o.value === String(profile.matchMinutes))) {
+      this.matchInput.value = String(profile.matchMinutes)
+    }
+    this.constrainCoreOptions()
+    if (profile.coreOpenMinutes && [...this.coreInput.options].some(o => o.value === String(profile.coreOpenMinutes))) {
+      this.coreInput.value = String(profile.coreOpenMinutes)
+    }
     this.renderColor()
   }
 
@@ -139,33 +173,44 @@ export class Lobby {
     this.setJoining(true)
     $('room-code').textContent = roomCode
     $<HTMLAnchorElement>('room-live').href = `?view=live&room=${encodeURIComponent(roomCode)}`
-    this.hostNick = ''; this.robotsOnline = 0; this.state = -1; this.soloBots = 0
+    this.hostNick = ''; this.robotsOnline = 0; this.state = -1; this.soloBots = 0; this.pausedState = false
     $('members').replaceChildren()
     this.startButton.hidden = this.warmupButton.hidden = this.botsButton.hidden = true
     $('room-notice').hidden = true
     $('room-state').textContent = '已发送进房请求，等待服务器…'
   }
 
-  update(state: number, hostNick: string, robotsOnline: number, soloBots: number): void {
+  update(state: number, hostNick: string, robotsOnline: number, soloBots: number, paused: boolean): void {
     this.state = state; this.hostNick = hostNick; this.robotsOnline = robotsOnline; this.soloBots = soloBots
+    this.pausedState = paused
     this.refresh()
   }
 
+  /** 本机是否房主（由房间状态广播的 host_nick 与本机昵称对齐判定）。 */
+  get isHost(): boolean { return this.hostNick !== '' && this.hostNick === this.deps.selfNick() }
+
+  /** 房主是否已暂停正式对局（EvRoomState.paused）。 */
+  get paused(): boolean { return this.pausedState }
+
   refresh(): void {
     const { state, hostNick, robotsOnline } = this
-    const stateName = ['空闲', '热身中', '对局中', '已结束'][state] ?? `状态${state}`
+    const stateName = ['空闲', '热身中', this.pausedState ? '对局中（已暂停）' : '对局中', '已结束'][state] ?? `状态${state}`
     $('room-state').textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (this.soloBots ? ` · 自动 Bot 上限 ${this.soloBots}（开场补满空位）` : '')
-    const isHost = hostNick !== '' && hostNick === this.deps.selfNick()
-    const idleLike = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP
-    $('btn-game-start').hidden = !(isHost && state === EvRoomState_State.R_WARMUP)
-    this.startButton.hidden = !(isHost && idleLike && !this.deps.inGame())
+    const isHost = this.isHost
+    // 正式局可直接从 Ended 连开（不必先回热身）：canStart 与服务端
+    // room.HostCommand 的 START 合法集（Idle/Warmup/Ended）一致。
+    const canStart = state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_WARMUP || state === EvRoomState_State.R_ENDED
+    $('btn-game-start').hidden = !(isHost && (state === EvRoomState_State.R_WARMUP || state === EvRoomState_State.R_ENDED))
+    this.startButton.hidden = !(isHost && canStart && !this.deps.inGame())
     this.warmupButton.hidden = !(isHost && (state === EvRoomState_State.R_IDLE || state === EvRoomState_State.R_ENDED) && !this.deps.inGame())
-    this.botsButton.hidden = !(isHost && (idleLike || state === EvRoomState_State.R_ENDED) && !this.deps.inGame())
+    this.botsButton.hidden = !(isHost && canStart && !this.deps.inGame())
+    if (!this.startButton.hidden) this.startButton.querySelector('span:last-child')!.textContent = state === EvRoomState_State.R_ENDED ? '开始下一局' : '开始对局'
     $('solo-bots-label').textContent = this.soloBots ? '关闭自动 Bot（下次开场）' : '自动补满空位'
     this.botsButton.setAttribute('aria-pressed', String(this.soloBots > 0))
     const notice = $('room-notice')
     notice.hidden = !(this.startButton.hidden && this.warmupButton.hidden && this.botsButton.hidden)
-    if (!notice.hidden) notice.textContent = state === EvRoomState_State.R_RUNNING ? '对局进行中' : (isHost ? '等待开始' : '等待房主开始')
+    if (!notice.hidden) notice.textContent = this.pausedState ? '对局已暂停，等待房主继续'
+      : state === EvRoomState_State.R_RUNNING ? '对局进行中' : (isHost ? '等待开始' : '等待房主开始')
     this.renderMembers()
   }
 

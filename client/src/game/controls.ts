@@ -53,6 +53,8 @@ export class GameController {
   private hudRoot: HTMLElement
   private send: (data: Uint8Array) => void
   private onExitToRoom?: () => void
+  private pausedOverlay = document.getElementById('game-paused') as HTMLElement
+  private pausedNote = document.getElementById('game-paused-note') as HTMLElement
   private active = true
   private inputEnabled = true
   private resyncAt = -Infinity
@@ -139,6 +141,7 @@ export class GameController {
     this.resyncAt = -Infinity
     this.startCuePending = false
     this.endShown = false
+    this.setPaused(false, false)
     this.scores.reset()
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
@@ -176,12 +179,22 @@ export class GameController {
     this.map = null
     this.world = emptyWorld()
     this.endShown = false
+    this.setPaused(false, false)
     hideMatchEnd(this.hudRoot)
   }
 
   /** 结算覆盖层是否在场（main.ts 据此决定 roomState 回大厅时不抢切视图） */
   isMatchEndShown(): boolean {
     return this.endShown && this.map !== null
+  }
+
+  /**
+   * 房主暂停态的服务器回显（EvRoomState.paused）：全端展示暂停覆盖层。
+   * 世界本身因服务器停推快照而冻结，这里只负责呈现与提示文案。
+   */
+  setPaused(paused: boolean, isHost: boolean): void {
+    this.pausedOverlay.hidden = !paused
+    if (paused) this.pausedNote.textContent = isHost ? '按 ESC 打开选项可继续对局' : '等待房主继续'
   }
 
   /** 「回到房间」：本地关闭结算层并退回大厅视图；不发 RoomAction，

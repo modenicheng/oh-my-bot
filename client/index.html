@@ -62,6 +62,34 @@
       </div>
       <div class="field-label">颜色</div>
       <div id="swatches"></div>
+      <div class="field-label">对局设置 <span class="field-note">仅创建房间时生效</span></div>
+      <div class="join-durations">
+        <label>游玩时长
+          <select id="in-match-min" autocomplete="off">
+            <option value="4">4 分钟</option>
+            <option value="5">5 分钟</option>
+            <option value="6">6 分钟</option>
+            <option value="8" selected>8 分钟</option>
+            <option value="10">10 分钟</option>
+            <option value="12">12 分钟</option>
+            <option value="15">15 分钟</option>
+            <option value="20">20 分钟</option>
+            <option value="30">30 分钟</option>
+          </select>
+        </label>
+        <label>核心区开放 <span class="field-note">开局后第几分钟</span>
+          <select id="in-core-min" autocomplete="off">
+            <option value="1">1 分钟</option>
+            <option value="2">2 分钟</option>
+            <option value="3">3 分钟</option>
+            <option value="4" selected>4 分钟</option>
+            <option value="5">5 分钟</option>
+            <option value="6">6 分钟</option>
+            <option value="8">8 分钟</option>
+            <option value="10">10 分钟</option>
+          </select>
+        </label>
+      </div>
       <button type="button" class="act" id="btn-join"><span data-icon="forward"></span><span>进入房间</span></button>
       <div class="error-line" id="form-error"></div>
       <button type="button" class="live-entry" id="btn-live"><span data-icon="spectator"></span><span>实时观战</span></button>
@@ -184,6 +212,12 @@
           </div>
         </div>
       </div>
+      <div id="game-paused" class="game-paused" role="status" aria-live="polite" hidden>
+        <div class="game-paused-card">
+          <p class="game-paused-title">对局暂停</p>
+          <p class="game-paused-note" id="game-paused-note">等待房主继续</p>
+        </div>
+      </div>
       </div>
       <aside id="workbench" aria-label="文档与脚本工作栏" hidden></aside>
       <section id="game-options" class="game-options" role="dialog" aria-modal="true" aria-labelledby="options-title" hidden>
@@ -203,6 +237,11 @@
               <input type="range" id="options-audio-volume" min="0" max="100" value="45">
               <output id="options-volume-value" for="options-audio-volume">45%</output>
             </div>
+          </fieldset>
+          <fieldset class="game-options-host" id="options-host" hidden>
+            <legend>房主控制</legend>
+            <button type="button" id="options-pause" class="game-options-action" aria-pressed="false">暂停对局</button>
+            <button type="button" id="options-finish" class="game-options-action danger" title="按当前比分立即结束本局并结算">提前结算</button>
           </fieldset>
           <div class="game-options-session">
             <button type="button" id="options-leave" class="game-options-action">离开房间</button>

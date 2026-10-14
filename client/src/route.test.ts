@@ -32,4 +32,18 @@ describe('spectator routes', () => {
     clearProfile()
     expect(loadProfile('LEAVE1')).toBeNull()
   })
+
+  it('round-trips creation-time duration settings through the stored profile', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    })
+    saveProfile({ roomCode: 'DURA1', nick: 'pilot', color: '#22d3ee', matchMinutes: 12, coreOpenMinutes: 3 })
+    expect(loadProfile('DURA1')).toMatchObject({ matchMinutes: 12, coreOpenMinutes: 3 })
+    // 旧 profile / 手改 storage 的非正整数时长：剔除而不是拒绝整个身份。
+    values.set('omb.join', JSON.stringify({ roomCode: 'DURA1', nick: 'pilot', color: '#22d3ee', matchMinutes: -2, coreOpenMinutes: 'x' }))
+    expect(loadProfile('DURA1')).toEqual({ roomCode: 'DURA1', nick: 'pilot', color: '#22d3ee' })
+  })
 })

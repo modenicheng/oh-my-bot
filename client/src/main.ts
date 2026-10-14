@@ -13,7 +13,7 @@ import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
 import { battleKeyAction } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
-import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra } from './route'
+import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra, type JoinProfile } from './route'
 import { consumeTokenFromURL, fetchAuthEnabled, validClaims, clearToken, isAuthRejection } from './auth'
 import { mountIcons } from './icons'
 import { audio } from './audio'
@@ -62,7 +62,7 @@ const initialRoute = readRoute()
 const lobby = new Lobby({
   selfNick: () => lastJoin?.nick ?? '',
   inGame: isInGame,
-  join: profile => { void joinWith(profile.roomCode, profile.nick, profile.color) },
+  join: profile => { void joinWith(profile) },
   roomAction: sendRoomAction,
   watchLive: roomCode => screens.openLive(roomCode),
 })
@@ -123,7 +123,7 @@ function sendRoomAction(kind: RoomAction_Kind): void {
 }
 
 let session: RoomSession | null = null
-let lastJoin: { roomCode: string; nick: string; color: string } | null = null
+let lastJoin: JoinProfile | null = null
 let awaitingFull = false
 /** 最近一条结构化控制通知（X-4）：用于成对下发旧 say 的去重。 */
 let lastControlNotice: EvControlNotice | undefined
@@ -169,12 +169,12 @@ function handleTakeoverNotice(text: string): void {
   lobby.setJoining(false)
 }
 
-async function joinWith(roomCode: string, nick: string, color: string): Promise<void> {
+async function joinWith(profile: JoinProfile): Promise<void> {
   if (session?.state === 'connecting') return
   // 认证开启时进房昵称以认证名为准：服务端 handleJoin 同规则强制覆盖，这里
   // 对齐上行值——否则成员列表显示"你：旧昵称"的假象，且用户按显示昵称重进
   // 会触发同身份接管（被踢）。截断与表单上限（16）一致。
-  let effectiveNick = nick
+  let effectiveNick = profile.nick
   if (await authEnabledPromise) {
     const claims = validClaims()
     if (!claims) {
@@ -186,10 +186,11 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
     }
     effectiveNick = claims.name.slice(0, 16)
   }
-  lobby.beginJoin(roomCode)
-  lastJoin = { roomCode, nick: effectiveNick, color }
+  lobby.beginJoin(profile.roomCode)
+  lastJoin = { roomCode: profile.roomCode, nick: effectiveNick, color: profile.color,
+    matchMinutes: profile.matchMinutes, coreOpenMinutes: profile.coreOpenMinutes }
   saveProfile(lastJoin)
-  workbench.setIdentity(roomCode, effectiveNick)
+  workbench.setIdentity(profile.roomCode, effectiveNick)
   showView('room')
   setStatus('off', '连接中…')
 
@@ -199,10 +200,12 @@ async function joinWith(roomCode: string, nick: string, color: string): Promise<
 
   try {
     await s.connect({
-      roomCode,
+      roomCode: profile.roomCode,
       nick: effectiveNick,
-      color,
-      onMessage: (msg) => { if (session === s) onServerMsg(roomCode, msg) },
+      color: profile.color,
+      matchMinutes: profile.matchMinutes,
+      coreOpenMinutes: profile.coreOpenMinutes,
+      onMessage: (msg) => { if (session === s) onServerMsg(profile.roomCode, msg) },
       onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
       onStateChange: (state, retryInMs) => { if (session === s) onConnectionState(state, retryInMs) },
     })
@@ -287,7 +290,14 @@ const gameOptions = new GameOptions({
   onClose: syncGameInput,
   onLeave: () => leaveRoom(false),
   onLogout: () => leaveRoom(true),
+  onPauseToggle: () => sendRoomAction(lobby.paused ? RoomAction_Kind.RESUME : RoomAction_Kind.PAUSE),
+  onFinish: () => sendRoomAction(RoomAction_Kind.FINISH),
 })
+
+/** ESC 面板房主控制区：房主且正式对局进行中（含暂停中）才可见。 */
+function syncHostControls(): void {
+  gameOptions.setHostState(lobby.isHost && lobby.state === EvRoomState_State.R_RUNNING, lobby.paused)
+}
 
 /** 面板可以并排打开，只有战场获得焦点时才接收手操。 */
 function syncGameInput(): void {
@@ -328,7 +338,7 @@ function exitGame(): void {
   workbench.resetMatch()
   showView('room')
   // 用缓存状态立即刷新操作栏，下一次 roomState 会覆盖
-  lobby.refresh(); syncWorkbench()
+  lobby.refresh(); syncWorkbench(); syncHostControls()
 }
 
 function onServerMsg(roomCode: string, msg: ServerMsg): void {
@@ -402,7 +412,10 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
           else { game.exit(); game = null; workbench.resetMatch() }
         }
       }
-      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots)
+      const paused = rs.paused === true && rs.state === EvRoomState_State.R_RUNNING
+      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots, paused)
+      game?.setPaused(paused && !game.isMatchEndShown(), lobby.isHost)
+      syncHostControls()
       syncWorkbench()
       if (!restoredView) {
         restoredView = true
@@ -440,7 +453,7 @@ btnReconnect.addEventListener('click', () => {
   }
   // 用上次成功参数直接重试：重连是恢复动作，不该让用户重新填表
   setStatus('off', '重连中…')
-  void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
+  void joinWith(lastJoin)
 })
 
 $('btn-leave').addEventListener('click', () => leaveRoom(false))
@@ -523,7 +536,7 @@ window.addEventListener('pagehide', () => {
 window.addEventListener('pageshow', e => {
   if (!e.persisted) return
   if (!viewLive.hidden && screens.liveRoom) screens.openLive(screens.liveRoom)
-  else if (lastJoin) void joinWith(lastJoin.roomCode, lastJoin.nick, lastJoin.color)
+  else if (lastJoin) void joinWith(lastJoin)
 })
 
 let started = false
@@ -547,7 +560,7 @@ function restoreInitialRoute(): void {
     screens.openReplays(initialRoute.replay, true)
   } else if (profile) {
     lobby.restore(profile)
-    void joinWith(profile.roomCode, profile.nick, profile.color)
+    void joinWith(profile)
   } else if (initialRoute.view === 'manual') {
     screens.openManual(initialRoute.doc)
   } else if (initialRoute.view === 'replays' || initialRoute.view === 'replay-player') {
