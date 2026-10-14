@@ -123,7 +123,7 @@ function discFills(ops: Op[]): { x: number; y: number; r: number }[] {
 const map = (unlockPhase: number, walls: MapWall[] = []): MapDefParsed => ({
   version: 1, generatorVer: 1, seed: 1, mapHash: '', extent: 80,
   walls, sectors: [], uplinks: [], corePads: [], healthPacks: [],
-  coreZone: { radius: 28, unlockPhase },
+  coreZone: { radius: 28, unlockPhase }, arenaRadius: 80,
 })
 
 function worldAt(phase: number, x = 40, y = 0): WorldState {

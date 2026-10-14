@@ -522,14 +522,14 @@ func (m *Match) StatSnapshot() MatchStats {
 	sort.Slice(window, func(i, j int) bool { return window[i] < window[j] })
 	out := MatchStats{Tick: m.tick, Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
 	if len(window) > 0 {
-		var total time.Duration
+		// 纳秒分辨率：小房单机 warmup 的 tick 可为亚微秒级，µs 取整会归零。
+		var total int64
 		for _, d := range window {
-			total += d
+			total += int64(d)
 		}
-		out.TickAvgMs = float64(total.Microseconds()) / float64(len(window)) / 1000
+		out.TickAvgMs = float64(total) / float64(len(window)) / 1e6
 		// nearest-rank p95：第 ceil(0.95·n) 个次序统计量（下标从 0）。
-		p95 := window[(95*len(window)+99)/100-1]
-		out.TickP95Ms = float64(p95.Microseconds()) / 1000
+		out.TickP95Ms = float64(window[(95*len(window)+99)/100-1]) / 1e6
 	}
 	return out
 }

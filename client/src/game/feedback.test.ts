@@ -18,7 +18,7 @@ function stubFeedbackEnv(): void {
 const map: MapDefParsed = { version: 1, generatorVer: 2, seed: 1, mapHash: '', extent: 80,
   walls: [], sectors: [], corePads: [{ id: 20, pos: { x: 43, y: 0 }, group: 0, value: 10 }],
   healthPacks: [{ id: 1, pos: { x: 4, y: 5 } }],
-  coreZone: { radius: 30, unlockPhase: 2 }, uplinks: [{ id: 10, pos: { x: 40, y: 0 }, main: false, activePhase: 1, interactR: 2.5 }] }
+  coreZone: { radius: 30, unlockPhase: 2 }, arenaRadius: 80, uplinks: [{ id: 10, pos: { x: 40, y: 0 }, main: false, activePhase: 1, interactR: 2.5 }] }
 function snap(tick: number, baseTick: number, full = false, hackingId = 0, cd = 0) {
   return create(SnapshotDeltaSchema, { tick, baseTick, full, phase: 1, timeLeftS: 480,
     self: create(SelfStateSchema, { robotId: 1, assistOn: false }),
