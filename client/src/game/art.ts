@@ -74,32 +74,38 @@ function visible(cam: Camera, x: number, y: number, margin = 80): boolean {
 
 export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam: Camera, phase: number): void {
   const x = cam.toPxX(0), y = cam.toPxY(0), s = cam.scale
+  // 竞技场骨架按 arenaRadius 等比绘制（人数自适应地图会下发更大的圆盘；
+  // 环线/服务车道半径取与原版 80m 图相同的占比）。
+  const R = map.arenaRadius
+  const laneOuter = R * (78.5 / 80)
+  const ringMid = R * (55 / 80)
+  const laneInner = R * (30 / 80)
   ctx.save()
-  circle(ctx, x, y, 80 * s)
+  circle(ctx, x, y, R * s)
   ctx.fillStyle = ink.floor; ctx.fill(); ctx.clip()
   // Eight equal sectors and concentric service lanes give orientation at both zoom levels.
   for (let i = 0; i < 8; i++) {
     const a = (i - 0.5) * tau / 8
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 80 * s, a, a + tau / 8); ctx.closePath()
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, R * s, a, a + tau / 8); ctx.closePath()
     ctx.fillStyle = i % 2 ? '#13212b' : ink.floor; ctx.fill()
   }
   ctx.lineWidth = 1; ctx.strokeStyle = '#263b4760'
-  const left = Math.max(-80, Math.floor(cam.toWorldX(0) / 4) * 4)
-  const top = Math.max(-80, Math.floor(cam.toWorldY(0) / 4) * 4)
-  const right = Math.min(80, cam.toWorldX(cam.cw)), bottom = Math.min(80, cam.toWorldY(cam.ch))
+  const left = Math.max(-R, Math.floor(cam.toWorldX(0) / 4) * 4)
+  const top = Math.max(-R, Math.floor(cam.toWorldY(0) / 4) * 4)
+  const right = Math.min(R, cam.toWorldX(cam.cw)), bottom = Math.min(R, cam.toWorldY(cam.ch))
   ctx.beginPath()
-  for (let gx = left; gx <= right; gx += 4) { ctx.moveTo(cam.toPxX(gx), cam.toPxY(-80)); ctx.lineTo(cam.toPxX(gx), cam.toPxY(80)) }
-  for (let gy = top; gy <= bottom; gy += 4) { ctx.moveTo(cam.toPxX(-80), cam.toPxY(gy)); ctx.lineTo(cam.toPxX(80), cam.toPxY(gy)) }
+  for (let gx = left; gx <= right; gx += 4) { ctx.moveTo(cam.toPxX(gx), cam.toPxY(-R)); ctx.lineTo(cam.toPxX(gx), cam.toPxY(R)) }
+  for (let gy = top; gy <= bottom; gy += 4) { ctx.moveTo(cam.toPxX(-R), cam.toPxY(gy)); ctx.lineTo(cam.toPxX(R), cam.toPxY(gy)) }
   ctx.stroke()
-  for (const r of [55, 78.5]) {
+  for (const r of [ringMid, laneOuter]) {
     circle(ctx, x, y, r * s); ctx.strokeStyle = '#0a131d'; ctx.lineWidth = Math.max(2, s * 0.65); ctx.stroke()
     ctx.strokeStyle = '#3c5564'; ctx.lineWidth = 1; ctx.stroke()
   }
   for (let i = 0; i < 8; i++) {
     const a = (i + 0.5) * tau / 8
     ctx.strokeStyle = '#3c55647a'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 30 * s, y + Math.sin(a) * 30 * s)
-    ctx.lineTo(x + Math.cos(a) * 78.5 * s, y + Math.sin(a) * 78.5 * s); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * laneInner * s, y + Math.sin(a) * laneInner * s)
+    ctx.lineTo(x + Math.cos(a) * laneOuter * s, y + Math.sin(a) * laneOuter * s); ctx.stroke()
   }
   // Spawn plates use the exact authored spawn rectangle; brackets do not imply collision.
   for (const sector of map.sectors) {
@@ -128,14 +134,14 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
     ctx.fillText(unlocked ? '核心区 · 已开放' : '核心区 · 待开放', x, y + Math.max(28, 5 * s))
   }
   ctx.restore()
-  // Solid outer fence corresponds to the authoritative 80m boundary.
+  // Solid outer fence corresponds to the authoritative arena boundary.
   ctx.save()
-  circle(ctx, x, y, 80 * s); ctx.strokeStyle = '#3b6878'; ctx.lineWidth = 3; ctx.stroke()
-  circle(ctx, x, y, 80 * s); ctx.strokeStyle = '#6dd1db'; ctx.lineWidth = 1; ctx.stroke()
+  circle(ctx, x, y, R * s); ctx.strokeStyle = '#3b6878'; ctx.lineWidth = 3; ctx.stroke()
+  circle(ctx, x, y, R * s); ctx.strokeStyle = '#6dd1db'; ctx.lineWidth = 1; ctx.stroke()
   ctx.strokeStyle = '#87c9d3'; ctx.lineWidth = Math.max(1, s * 0.08); ctx.beginPath()
   for (let i = 0; i < 128; i++) {
     const a = i * tau / 128, c = Math.cos(a), sn = Math.sin(a)
-    ctx.moveTo(x + c * 79.3 * s, y + sn * 79.3 * s); ctx.lineTo(x + c * 80 * s, y + sn * 80 * s)
+    ctx.moveTo(x + c * (R - 0.7) * s, y + sn * (R - 0.7) * s); ctx.lineTo(x + c * R * s, y + sn * R * s)
   }
   ctx.stroke(); ctx.restore()
 }

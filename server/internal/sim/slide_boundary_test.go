@@ -14,7 +14,7 @@ func TestArenaTangentRetainsTickDisplacement(t *testing.T) {
 	for _, speed := range []float64{MaxSpeed, DashSpeed} {
 		s := arenaSim(t, 2, 1)
 		r := &s.robots[0]
-		r.Position = Vec2{0, arenaCenterRadius}
+		r.Position = Vec2{0, s.arenaCenterRadius()}
 		travel := 0.0
 		for i := 0; i < 120; i++ {
 			before := r.Position
@@ -24,7 +24,7 @@ func TestArenaTangentRetainsTickDisplacement(t *testing.T) {
 			if distance < speed*DT*.999 || distance > speed*DT+1e-9 {
 				t.Fatalf("speed %g tick %d lost tangent displacement: %.12f", speed, i, distance)
 			}
-			if radius := r.Position.Len(); radius > arenaCenterRadius+1e-9 || radius < arenaCenterRadius-1e-8 {
+			if radius := r.Position.Len(); radius > s.arenaCenterRadius()+1e-9 || radius < s.arenaCenterRadius()-1e-8 {
 				t.Fatalf("speed %g tick %d drifted from boundary: %.12f", speed, i, radius)
 			}
 			travel += distance

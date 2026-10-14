@@ -50,6 +50,7 @@ func TestResourceAngularCoverage(t *testing.T) {
 }
 
 func TestStrataClearanceAndSpawns(t *testing.T) {
+	l := layoutFor(1)
 	for seed := uint64(0); seed < 256; seed++ {
 		def, err := Generate(seed)
 		if err != nil {
@@ -59,9 +60,9 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 		for i, w := range def.Walls {
 			center := w.Min.Add(w.Max).Scale(0.5)
 			band := 0
-			if center.Len() >= 55 {
+			if center.Len() >= l.outerMinR {
 				band = 2
-			} else if center.Len() >= coreZoneR {
+			} else if center.Len() >= l.coreZoneR {
 				band = 1
 			}
 			counts[int(angleDeg(center.X, center.Y)/45)][band]++
@@ -71,7 +72,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 				t.Fatalf("seed %d invalid grid cover size %.2fx%.2f", seed, width, height)
 			}
 			for _, p := range []sim.Vec2{w.Min, w.Max, {X: w.Min.X, Y: w.Max.Y}, {X: w.Max.X, Y: w.Min.Y}} {
-				if p.Len() > 79.4 {
+				if p.Len() > l.outerMaxR-sim.RobotRadius+1e-9 {
 					t.Fatalf("seed %d wall outside arena", seed)
 				}
 			}
@@ -123,7 +124,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 			t.Fatalf("seed %d SetMap: %v", seed, err)
 		}
 		for _, r := range s.Snapshot().Robots {
-			if r.Position.Len() > 79.4 {
+			if r.Position.Len() > l.outerMaxR-sim.RobotRadius+1e-9 {
 				t.Fatalf("seed %d initial spawn outside", seed)
 			}
 		}
@@ -132,7 +133,7 @@ func TestStrataClearanceAndSpawns(t *testing.T) {
 		}
 		s.Tick()
 		for _, r := range s.Snapshot().Robots {
-			if r.Position.Len() > 79.4 {
+			if r.Position.Len() > l.outerMaxR-sim.RobotRadius+1e-9 {
 				t.Fatalf("seed %d respawn outside", seed)
 			}
 		}
@@ -185,13 +186,15 @@ func TestLClearanceChecksOtherGroups(t *testing.T) {
 }
 
 func TestPlayableGridIsCircular(t *testing.T) {
-	blocked, n := gridFor(nil, true)
-	for _, p := range [][2]float64{{79.9, 0}, {70, 70}, {-70, -70}} {
-		if !blocked[gridIndex(p[1])*n+gridIndex(p[0])] {
+	l := layoutFor(64)
+	ext := l.outerMaxR
+	blocked, n := gridFor(l, nil, true)
+	for _, p := range [][2]float64{{ext - 0.1, 0}, {0.875 * ext, 0.875 * ext}, {-0.875 * ext, -0.875 * ext}} {
+		if !blocked[gridIndex(p[1], ext)*n+gridIndex(p[0], ext)] {
 			t.Errorf("outside arena grid cell %v is free", p)
 		}
 	}
-	if blocked[gridIndex(0)*n+gridIndex(0)] {
+	if blocked[gridIndex(0, ext)*n+gridIndex(0, ext)] {
 		t.Fatal("open center blocked")
 	}
 	if math.Abs(agentR-0.6) > 1e-12 {

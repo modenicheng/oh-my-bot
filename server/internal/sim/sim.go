@@ -409,7 +409,7 @@ func (s *Sim) slideRobot(r *Robot) {
 			r.Velocity.X -= into * normal.X
 			r.Velocity.Y -= into * normal.Y
 		}
-		if s.boundedArena() && r.Position.Len() >= arenaCenterRadius-collisionEpsilon {
+		if s.boundedArena() && r.Position.Len() >= s.arenaCenterRadius()-collisionEpsilon {
 			// A straight tangent immediately exits a disk. Project its destination
 			// into the disk, then sweep that interior chord against ALL obstacles.
 			// The correction never moves the robot without a collision check.

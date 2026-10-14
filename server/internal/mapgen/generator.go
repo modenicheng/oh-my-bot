@@ -24,34 +24,170 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
 
-// ---- 环带与锁区常量（v0.3 §3；单位米）----
+// ---- 环带与锁区（单位米）----
+//
+// GeneratorVer 8 起这些不再是常量而是人数推导值（见 layoutFor）：场地线性
+// 尺度 scale = max(1, sqrt(n/64))，n≤64 时恰为下列原版数值。
 
 const (
-	outerMinR = 55.0 // 外环内边界
-	outerMaxR = 80.0 // 外环外边界（160×160m 参考的半宽）
-	midMinR   = 30.0 // 中环内边界
-	midMaxR   = 55.0 // 中环外边界（= outerMinR）
-	coreZoneR = 28.0 // 中央锁区半径（<30m；CORE_OPEN 解锁）
-
-	spawnRadius = 67.5 // 出生方块中心半径（外环带中段）
-	spawnHalf   = 6.5  // 出生方块半边长（13×13m，四角半径 58.3–76.7 全在 [55,80]）
-
-	uplinkRLo      = 40.0 // 普通 Uplink 半径抖动下界（中环带内）
-	uplinkRHi      = 45.0 // 普通 Uplink 半径抖动上界
-	normInteractR  = 2.5  // 普通 Uplink 交互半径（v0.3 §6）
-	mainInteractR  = 3.0  // 主 Uplink 交互半径
-	corePeriodTick = 1200 // Core 刷新周期：20s @ 60Hz，降低单人空场等待
+	uplinkNormSteps = 6    // 22.5° 偏移族基础对数（n<96）
+	uplinkDenseN    = 96   // n≥96 追加第 4 对径对（族在 7.5° 格点上恰好 4 对）
+	packDenseN      = 96   // n≥96 血包加一圈外环带
+	packWidestN     = 160  // n≥160 再加一圈
+	corePeriodTick  = 1200 // Core 刷新周期下限：20s @ 60Hz，降低单人空场等待
 )
 
-// CorePad 数量（Group 0=outer / 1=mid / 2=center）。
-const (
-	padOuterN  = 16
-	padMidN    = 12
-	padCenterN = 6
-)
+// layout 承载一次生成所需的全部骨架参数，唯一入参是参赛机器人数。
+// 设计原则（v0.3 §3 骨架的规模化推广）：
+//   - 密度恒定：面积 ∝ 人数（线性尺度 ∝ √人数），视野内邻居数、AOI 规模、
+//     单玩家快照体积与出生密度不随房间规模变化——这同时保住服务端感知/
+//     编码的线性扩展与客户端渲染负载；
+//   - 资源随档位增长：Pad 数按面积配额（偶数化保持对径对），血包按同心环
+//     加圈，Uplink 追加对径对至格点上限 8 只（吞吐缺口由 v4 的 4s 引导
+//     时间补齐）；
+//   - 八辐 45° 对称、90° 旋转多重集不变、确定性生成等契约一概不动。
+type layout struct {
+	scale                                  float64
+	outerMinR, outerMaxR, midMinR, midMaxR float64
+	coreZoneR, spawnRadius, spawnHalf      float64
+	uplinkRLo, uplinkRHi                   float64
+	uplinkPairs                            int // 普通桩对径对数（3 或 4）
+	padOuterN, padMidN, padCenterN         int
+	packRadii                              []float64
+}
+
+// layoutFor 把参赛人数翻译成骨架参数。纯函数：同 participants 必产出同
+// layout，配合分段盐保持「同 seed 同产出」契约。
+func layoutFor(participants int) layout {
+	if participants < 1 {
+		participants = 1
+	}
+	s := math.Sqrt(float64(participants) / 64)
+	if s < 1 {
+		s = 1
+	}
+	l := layout{
+		scale:       s,
+		outerMinR:   55 * s,
+		outerMaxR:   80 * s,
+		midMinR:     30 * s,
+		midMaxR:     55 * s,
+		coreZoneR:   28 * s,
+		spawnRadius: 67.5 * s,
+		spawnHalf:   6.5 * s,
+		uplinkRLo:   40 * s,
+		uplinkRHi:   45 * s,
+		uplinkPairs: uplinkNormSteps / 2,
+		padOuterN:   evenPadCount(16, s),
+		padMidN:     evenPadCount(12, s),
+		padCenterN:  evenPadCount(6, s),
+		packRadii:   []float64{43 * s},
+	}
+	if participants >= uplinkDenseN {
+		l.uplinkPairs = 4
+		l.packRadii = append(l.packRadii, 57.5*s)
+	}
+	if participants >= packWidestN {
+		l.packRadii = append(l.packRadii, 69*s)
+	}
+	return l
+}
+
+// evenPadCount 面积配额取整并偶数化（Pad 以对径对放置，奇数会丢一只）。
+func evenPadCount(base int, s float64) int {
+	n := int(math.Round(float64(base) * s * s))
+	if n < base {
+		n = base
+	}
+	if n%2 == 1 {
+		n++
+	}
+	return n
+}
+
+// extraCoverCells 大房追加掩体层的预缩放原型（半径/角度选在既有层空档）：
+// 每 +0.25 线性尺度启用一层，近似保持掩体面密度（体验调参而非严格面积
+// 配额——净空由 genWalls 的候选搜索保证，合法性由 golden 断点钉死）。
+var extraCoverCells = []coverCell{
+	{radius: 30, angle: 15, halfLen: 2.0, halfThick: coverThick / 2},
+	{radius: 43, angle: 15, halfLen: 2.0, halfThick: coverThick / 2, lShape: true},
+	{radius: 67, angle: 15, halfLen: 2.0, halfThick: coverThick / 2},
+	{radius: 55, angle: 0, halfLen: 2.5, halfThick: coverThick / 2},
+	{radius: 31, angle: 37, halfLen: 2.0, halfThick: coverThick / 2, lShape: true},
+	{radius: 55, angle: 37, halfLen: 2.0, halfThick: coverThick / 2},
+}
+
+// coverCells 返回本次生成的掩体层集合：8 层基础层整体乘 scale，再按尺度
+// 追加 extraCoverCells 的前 int((scale-1)/0.25) 层。追加层全部位于基础层
+// 之后——innerCoverCells 索引语义（前两层允许触核）不受影响。
+//
+// 角向避让：Pad 径向带与掩体层天然重叠，共存靠角度错位（原版 12/16 只
+// Pad 的半槽角 ~11°）。Pad 数量随面积增长后槽角收窄、会压到掩体角度族，
+// 因此超基础档时把中/外环掩体角度吸附到「相邻 Pad 组的槽边界」——即两
+// 只 Pad 的正中间，恢复半槽错位。同径向组内还须互相错开（mod 45 ≥ 半槽
+// 角，防止两族吸附到同一槽边界跨 45° 接缝相撞），候选取原角度两侧最近
+// 的两个槽边界、择组内间隔更大者。n≤64（基础档位）不吸附，几何冻结。
+func (l layout) coverCells() []coverCell {
+	s := l.scale
+	midSlot, outSlot := 360.0/float64(l.padMidN), 360.0/float64(l.padOuterN)
+	snapMid, snapOut := l.padMidN > 12, l.padOuterN > 16
+	var midChosen, outChosen []float64
+	snap := func(angle, slot float64, enabled bool, chosen *[]float64) float64 {
+		if !enabled {
+			return angle
+		}
+		wedgeDist := func(a, b float64) float64 {
+			d := math.Mod(math.Abs(a-b), 45)
+			if d > 22.5 {
+				d = 45 - d
+			}
+			return d
+		}
+		floor := math.Floor(angle / slot)
+		best, bestScore := angle, -1.0
+		for _, k := range [2]float64{floor, floor + 1} {
+			cand := math.Mod(k*slot, 360)
+			score := 22.5
+			for _, c := range *chosen {
+				if d := wedgeDist(cand, c); d < score {
+					score = d
+				}
+			}
+			// 先比组内间隔；同分取更贴近原角度者（确定性）。
+			if score > bestScore+1e-9 || (math.Abs(score-bestScore) <= 1e-9 && bestScore >= 0 && math.Abs(cand-angle) < math.Abs(best-angle)) {
+				best, bestScore = cand, score
+			}
+		}
+		*chosen = append(*chosen, best)
+		return best
+	}
+	base := []coverCell{
+		{radius: 19.5 * s, angle: 0, halfLen: 2.5, halfThick: coverThick / 2},    // inner ring: 5m cover, axis-aligned per wedge family
+		{radius: 24.0 * s, angle: 22.5, halfLen: 3.0, halfThick: coverThick / 2}, // inner ring: 6m offset cover near the lock boundary
+		{radius: 36 * s, angle: snap(8, midSlot, snapMid, &midChosen), halfLen: 2.0, halfThick: coverThick / 2},
+		{radius: 36 * s, angle: snap(37, midSlot, snapMid, &midChosen), halfLen: 2.0, halfThick: coverThick / 2, lShape: true}, // inner-mid L stratum
+		{radius: 49 * s, angle: snap(8, midSlot, snapMid, &midChosen), halfLen: 2.0, halfThick: coverThick / 2, lShape: true},  // outer-mid L stratum
+		{radius: 49 * s, angle: snap(37, midSlot, snapMid, &midChosen), halfLen: 2.0, halfThick: coverThick / 2},
+		{radius: 60 * s, angle: snap(22.5, outSlot, snapOut, &outChosen), halfLen: 2.0, halfThick: coverThick / 2},
+		{radius: 75 * s, angle: snap(22.5, outSlot, snapOut, &outChosen), halfLen: 2.0, halfThick: coverThick / 2},
+	}
+	for i := 0; i < int((s-1)/0.25) && i < len(extraCoverCells); i++ {
+		e := extraCoverCells[i]
+		e.radius *= s
+		// 30–49m 的追加层贴中环 Pad 带，52m+ 贴外环 Pad 带。
+		if e.radius < 52*s {
+			e.angle = snap(e.angle, midSlot, snapMid, &midChosen)
+		} else {
+			e.angle = snap(e.angle, outSlot, snapOut, &outChosen)
+		}
+		base = append(base, e)
+	}
+	return base
+}
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
-const GeneratorVer = 7
+// 8：人数自适应骨架（场地/资源随 participants 缩放，MapDef.ArenaRadius 进图）。
+const GeneratorVer = 8
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
@@ -60,33 +196,41 @@ const (
 	saltWalls   uint64 = 0x9F03C2D15E47A8B0
 )
 
+// Uplink 交互半径是玩家尺度，不随场地缩放。
+const (
+	normInteractR = 2.5 // 普通 Uplink 交互半径（v0.3 §6）
+	mainInteractR = 3.0 // 主 Uplink 交互半径
+)
+
 // Generate 为单人/工具调用生成地图；真实对局用 GenerateForPlayers 将场上
-// 人数编码进 Core 供给规则。两者都只依赖显式参数，保持可回放确定性。
+// 人数编码进骨架与 Core 供给规则。两者都只依赖显式参数，保持可回放确定性。
 func Generate(seed uint64) (*sim.MapDef, error) { return GenerateForPlayers(seed, 1) }
 
-// GenerateForPlayers 按 seed 与完整参赛机器人数量生成确定性 MapDef：固定骨架
-// + 人数自适应 Core 供给 + seed 驱动布局。产出前经双模式 BFS 连通验证。
+// GenerateForPlayers 按 seed 与完整参赛机器人数量生成确定性 MapDef：人数自
+// 适应骨架 + Core 供给 + seed 驱动布局。产出前经双模式 BFS 连通验证。
 func GenerateForPlayers(seed uint64, participants int) (*sim.MapDef, error) {
-	uplinks := genUplinks(newRng(seed ^ saltUplinks))
-	pads := genCorePads(newRng(seed ^ saltPads))
-	healthPacks := genHealthPacks()
-	walls, err := genWalls(newRng(seed^saltWalls), uplinks, pads, healthPacks)
+	l := layoutFor(participants)
+	uplinks := genUplinks(newRng(seed^saltUplinks), l)
+	pads := genCorePads(newRng(seed^saltPads), l)
+	healthPacks := genHealthPacks(l)
+	walls, err := genWalls(newRng(seed^saltWalls), l, uplinks, pads, healthPacks)
 	if err != nil {
 		return nil, fmt.Errorf("mapgen: walls: %w", err)
 	}
 
-	period, target := coreSupply(participants)
+	period, target := coreSupply(participants, l.padOuterN, l.padMidN)
 	def := &sim.MapDef{
 		Version:      1,
 		GeneratorVer: GeneratorVer,
 		Seed:         seed,
+		ArenaRadius:  l.outerMaxR,
 		Walls:        walls,
-		Sectors:      genSectors(),
+		Sectors:      l.genSectors(),
 		Uplinks:      uplinks,
-		CorePads:     pads,
 		HealthPacks:  healthPacks,
+		CorePads:     pads,
 		CoreZone: sim.CoreZoneDef{
-			Radius:      coreZoneR,
+			Radius:      l.coreZoneR,
 			UnlockPhase: sim.PhaseCoreOpen,
 		},
 		CoreRules: sim.CoreRulesDef{
@@ -107,16 +251,16 @@ func GenerateForPlayers(seed uint64, participants int) (*sim.MapDef, error) {
 }
 
 // coreSupply 保持单人也有 4 个目标可选；之后约每 2 名机器人增加 1 个
-// 常驻 Core，最多 28 个（锁区关闭时外/中环全部 Pad）。高人数房间缩短
-// 补货周期，但不使用墙钟或在线状态：
+// 常驻 Core，封顶 = 锁区关闭时可用的外/中环 Pad 总数（随人数缩放）。
+// 高人数房间缩短补货周期，但不使用墙钟或在线状态：
 // 参数被写入 MapDef/回放，重放时完全复现。
-func coreSupply(participants int) (periodTicks, targetAlive int) {
+func coreSupply(participants, padsOuter, padsMid int) (periodTicks, targetAlive int) {
 	if participants < 1 {
 		participants = 1
 	}
 	targetAlive = 4 + (participants-1+1)/2
-	if targetAlive > 28 {
-		targetAlive = 28
+	if cap := padsOuter + padsMid; targetAlive > cap {
+		targetAlive = cap
 	}
 	switch {
 	case participants >= 40:
@@ -148,26 +292,27 @@ func hashDef(def *sim.MapDef) (string, error) {
 }
 
 // sectorCenter 返回第 k 扇区轴线（k*45°）上 spawnRadius 处的中心点。
-func sectorCenter(k int) sim.Vec2 { return dirAt(6 * k).Scale(spawnRadius) }
+func (l layout) sectorCenter(k int) sim.Vec2 { return dirAt(6 * k).Scale(l.spawnRadius) }
 
-// spawnAreaOf 返回第 k 扇区的出生方块（轴对齐 13×13m，四角全部落在外环带
-// 内且不越出相邻扇区界）。AABB 世界无法精确表达 45° 弧段；方块是"外环 +
-// 扇区内 + 8 重旋转一致"的保守逼近。
-func spawnAreaOf(k int) rect {
-	c := sectorCenter(k)
-	return rect{MinX: c.X - spawnHalf, MinY: c.Y - spawnHalf, MaxX: c.X + spawnHalf, MaxY: c.Y + spawnHalf}
+// spawnArea 返回第 k 扇区的出生方块（轴对齐，四角全部落在外环带内且不越出
+// 相邻扇区界；等比缩放下该不变式保持成立——半径与半边长同乘 scale）。
+// AABB 世界无法精确表达 45° 弧段；方块是"外环 + 扇区内 + 8 重旋转一致"的
+// 保守逼近。
+func (l layout) spawnArea(k int) rect {
+	c := l.sectorCenter(k)
+	return rect{MinX: c.X - l.spawnHalf, MinY: c.Y - l.spawnHalf, MaxX: c.X + l.spawnHalf, MaxY: c.Y + l.spawnHalf}
 }
 
 // genSectors 生成 8 个出生扇区：中心角 = k*45°，SpawnArea 为外环内方块。
-func genSectors() [8]sim.Sector {
+func (l layout) genSectors() [8]sim.Sector {
 	var out [8]sim.Sector
 	for k := 0; k < 8; k++ {
-		c := sectorCenter(k)
+		c := l.sectorCenter(k)
 		out[k] = sim.Sector{
 			ID: uint32(k),
 			SpawnArea: sim.Rect{
-				Min: sim.Vec2{X: c.X - spawnHalf, Y: c.Y - spawnHalf},
-				Max: sim.Vec2{X: c.X + spawnHalf, Y: c.Y + spawnHalf},
+				Min: sim.Vec2{X: c.X - l.spawnHalf, Y: c.Y - l.spawnHalf},
+				Max: sim.Vec2{X: c.X + l.spawnHalf, Y: c.Y + l.spawnHalf},
 			},
 			Center: c,
 		}
@@ -175,27 +320,47 @@ func genSectors() [8]sim.Sector {
 	return out
 }
 
-// uplinkSteps 为 6 个普通 Uplink 的方向表步进（7.5°/步）：22.5°、67.5°、
-// 112.5°、202.5°、247.5°、292.5°——全部错位扇区轴 22.5°，且三对直径对
-// （22.5↔202.5、67.5↔247.5、112.5↔292.5）构成中心对称集合。
-var uplinkSteps = [6]int{3, 9, 15, 27, 33, 39}
+// uplinkStepPairs 为普通 Uplink 的对径对（7.5°/步）：22.5° 偏移族在 48 格
+// 点上恰有 4 对。基础 3 对（n<96，与旧算法逐位一致）；n≥96 启用第 4 对。
+// 同一对共享半径，集合保持中心对称；ID 按角度升序编号。
+var uplinkStepPairs = [4][2]int{{3, 27}, {9, 33}, {15, 39}, {21, 45}}
 
-// genUplinks 生成 6 个普通 Uplink（中环 40–45m；同一直径对共享半径，使
-// 集合保持中心对称）与 1 个中央主 Uplink（原点，CORE_OPEN 激活）。
-// ID：普通桩按角度升序 1–6，主桩 7。
-func genUplinks(r *rng) []sim.UplinkDef {
-	radii := [3]float64{r.rangeF(uplinkRLo, uplinkRHi), r.rangeF(uplinkRLo, uplinkRHi), r.rangeF(uplinkRLo, uplinkRHi)}
-	out := make([]sim.UplinkDef, 0, len(uplinkSteps)+1)
-	for i, step := range uplinkSteps {
+// uplinkStepsFor 展开前 pairs 个对径对并按角度升序排序（n 小于 6 只时与
+// 旧版 {3,9,15,27,33,39} 逐位一致）。
+func uplinkStepsFor(pairs int) []int {
+	steps := make([]int, 0, pairs*2)
+	for p := 0; p < pairs; p++ {
+		steps = append(steps, uplinkStepPairs[p][0], uplinkStepPairs[p][1])
+	}
+	for i := 1; i < len(steps); i++ {
+		for j := i; j > 0 && steps[j] < steps[j-1]; j-- {
+			steps[j], steps[j-1] = steps[j-1], steps[j]
+		}
+	}
+	return steps
+}
+
+// genUplinks 生成普通 Uplink（中环 40–45m·s；同一直径对共享半径，使集合
+// 保持中心对称）与 1 个中央主 Uplink（原点，CORE_OPEN 激活）。
+// ID：普通桩按角度升序，主桩最后。
+func genUplinks(r *rng, l layout) []sim.UplinkDef {
+	steps := uplinkStepsFor(l.uplinkPairs)
+	count := len(steps)
+	radii := make([]float64, l.uplinkPairs)
+	for i := range radii {
+		radii[i] = r.rangeF(l.uplinkRLo, l.uplinkRHi)
+	}
+	out := make([]sim.UplinkDef, 0, count+1)
+	for i, step := range steps {
 		out = append(out, sim.UplinkDef{
 			ID:          uint32(i + 1),
-			Pos:         dirAt(step).Scale(radii[i%3]),
+			Pos:         dirAt(step).Scale(radii[i%l.uplinkPairs]),
 			InteractR:   normInteractR,
 			ActivePhase: sim.PhaseOuterRing,
 		})
 	}
 	out = append(out, sim.UplinkDef{
-		ID:          uint32(len(uplinkSteps) + 1),
+		ID:          uint32(count + 1),
 		Pos:         sim.Vec2{},
 		Main:        true,
 		InteractR:   mainInteractR,
@@ -204,27 +369,35 @@ func genUplinks(r *rng) []sim.UplinkDef {
 	return out
 }
 
+// genHealthPacks 在对角族（45°+90k）上按同心环放置血包：基础 1 圈 4 只，
+// n≥96 两圈 8 只，n≥160 三圈 12 只。环半径选在中环/外环的资源空档带上，
+// 与 Pad 带、Uplink 带（角度差 22.5°）保持净空。
+func genHealthPacks(l layout) []sim.HealthPackDef {
+	out := make([]sim.HealthPackDef, 0, 4*len(l.packRadii))
+	id := 1
+	for _, radius := range l.packRadii {
+		diag := radius / math.Sqrt2
+		for _, pos := range [4]sim.Vec2{{X: diag, Y: diag}, {X: -diag, Y: diag}, {X: -diag, Y: -diag}, {X: diag, Y: -diag}} {
+			out = append(out, sim.HealthPackDef{ID: uint32(id), Pos: pos})
+			id++
+		}
+	}
+	return out
+}
+
 // genCorePads fills every angular slot, with bounded jitter of ±10% of its
 // width. Outer/mid slots alternate inner and outer radial tracks. Antipodal
 // pairs share jitter, preserving central fairness without rejection holes.
-// Track separation also keeps pads at least 3m from the 40–45m Uplink band.
-func genHealthPacks() []sim.HealthPackDef {
-	const radius = 43.0
-	const diagonal = radius / math.Sqrt2
-	return []sim.HealthPackDef{
-		{ID: 1, Pos: sim.Vec2{X: diagonal, Y: diagonal}},
-		{ID: 2, Pos: sim.Vec2{X: -diagonal, Y: diagonal}},
-		{ID: 3, Pos: sim.Vec2{X: -diagonal, Y: -diagonal}},
-		{ID: 4, Pos: sim.Vec2{X: diagonal, Y: -diagonal}},
-	}
-}
-
-func genCorePads(r *rng) []sim.CorePadDef {
-	pads := make([]sim.CorePadDef, 0, padOuterN+padMidN+padCenterN)
-	for group, count := range []int{padOuterN, padMidN, padCenterN} {
+// Track separation also keeps pads at least 3m from the uplink band; counts
+// scale with the room size (area quota, even for antipodal pairing).
+func genCorePads(r *rng, l layout) []sim.CorePadDef {
+	counts := [3]int{l.padOuterN, l.padMidN, l.padCenterN}
+	s := l.scale
+	bands := [3][2][2]float64{{{60 * s, 63 * s}, {72 * s, 75 * s}}, {{33 * s, 36 * s}, {49 * s, 52 * s}}, {{10 * s, 14 * s}, {10 * s, 14 * s}}}
+	pads := make([]sim.CorePadDef, 0, counts[0]+counts[1]+counts[2])
+	for group, count := range counts {
 		placed := make([]sim.Vec2, 0, count)
 		for i := 0; i < count/2; i++ {
-			bands := [3][2][2]float64{{{60, 63}, {72, 75}}, {{33, 36}, {49, 52}}, {{10, 14}, {10, 14}}}
 			band := bands[group][i%2]
 			step := (float64(i) + 0.5 + r.rangeF(-0.1, 0.1)) * dirCount / float64(count)
 			p := slotDirection(step).Scale(r.rangeF(band[0], band[1]))
@@ -235,8 +408,8 @@ func genCorePads(r *rng) []sim.CorePadDef {
 			pads = append(pads, sim.CorePadDef{ID: uint32(len(pads) + 1), Pos: p, Group: group, Value: 10})
 		}
 	}
-	pads[len(pads)-padCenterN].Value = 25
-	pads[len(pads)-padCenterN+1].Value = 25
+	pads[len(pads)-l.padCenterN].Value = 25
+	pads[len(pads)-l.padCenterN+1].Value = 25
 	return pads
 }
 

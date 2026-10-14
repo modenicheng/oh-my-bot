@@ -50,6 +50,9 @@ type MapDef struct {
 	CorePads     []CorePadDef    `json:"core_pads"`  // 确定性刷新点
 	CoreZone     CoreZoneDef     `json:"core_zone"`  // 中央锁区
 	CoreRules    CoreRulesDef    `json:"core_rules"` // 刷新规则唯一 owner
+	// ArenaRadius 竞技场圆盘半径（GeneratorVer>=8 的地图必填；此前版本
+	// 无此字段，物理沿用历史 80m 圆盘）。0 = 沿用历史值。
+	ArenaRadius float64 `json:"arena_radius,omitempty"`
 }
 
 // Wall 复用 collision.go 的定义（ID + Min + Max，AABB 语义与 Rect 同构）。

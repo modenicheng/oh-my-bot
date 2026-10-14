@@ -48,6 +48,10 @@ func (s *Sim) SetMap(def *MapDef) error {
 	if !finite(m.CoreZone.Radius) || m.CoreZone.Radius < 0 || (m.CoreZone.Radius > 0 && !validPhase(m.CoreZone.UnlockPhase)) {
 		return fmt.Errorf("sim: invalid core zone")
 	}
+	// gen>=8 的地图必须携带覆盖全场的竞技场半径（人数自适应骨架的契约）。
+	if m.GeneratorVer >= 8 && (!finite(m.ArenaRadius) || m.ArenaRadius < m.CoreZone.Radius) {
+		return fmt.Errorf("sim: invalid arena radius")
+	}
 	for _, sector := range m.Sectors {
 		r := sector.SpawnArea
 		if !r.Min.finite() || !r.Max.finite() || !sector.Center.finite() || r.Min.X > r.Max.X || r.Min.Y > r.Max.Y {
@@ -65,7 +69,7 @@ func (s *Sim) SetMap(def *MapDef) error {
 		}
 	}
 	for i, h := range m.HealthPacks {
-		outsideArena := m.GeneratorVer >= 2 && h.Pos.Len() > arenaCenterRadius
+		outsideArena := m.GeneratorVer >= 2 && h.Pos.Len() > arenaCenterRadiusOf(m)
 		if h.ID == 0 || (i > 0 && m.HealthPacks[i-1].ID == h.ID) || !h.Pos.finite() || outsideArena || h.Pos.Len() < m.CoreZone.Radius+RobotRadius {
 			return fmt.Errorf("sim: invalid health pack %d", h.ID)
 		}

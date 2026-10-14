@@ -10,14 +10,21 @@ import (
 
 const (
 	cellSize      = 1.0
-	boundedMin    = -80.0
-	boundedMax    = 80.0
 	legacyMin     = -96.0
 	legacyMax     = 96.0
-	arenaRadius   = 80.0 - sim.RobotRadius
 	arrivalRadius = 0.05
 	maxExpansions = 8192
 )
+
+// arenaBounds 返回 gen>=2 地图的网格边界与中心可达半径。gen>=8 的地图带
+// ArenaRadius（随人数缩放）；此前版本沿用历史 80m 圆盘。
+func arenaBounds(m *sim.MapDef) (gridBound, centerRadius float64) {
+	r := 80.0
+	if m != nil && m.ArenaRadius > 0 {
+		r = m.ArenaRadius
+	}
+	return r, r - sim.RobotRadius
+}
 
 type wallSig struct {
 	id       uint32
@@ -210,8 +217,10 @@ func signatureMatches(s signature, m *sim.MapDef, locked bool) bool {
 
 func buildGrid(m *sim.MapDef, sig signature) *grid {
 	gridMin, gridMax := legacyMin, legacyMax
+	arenaR := 80.0 - sim.RobotRadius
 	if m != nil && m.GeneratorVer >= 2 {
-		gridMin, gridMax = boundedMin, boundedMax
+		bound, center := arenaBounds(m)
+		gridMin, gridMax, arenaR = -bound, bound, center
 	}
 	w := int(math.Round((gridMax-gridMin)/cellSize)) + 1
 	g := &grid{sig: sig, min: gridMin, w: w, h: w, valid: make([]bool, w*w), neighbors: make([]int32, w*w*4)}
@@ -222,7 +231,7 @@ func buildGrid(m *sim.MapDef, sig signature) *grid {
 	for id := range g.valid {
 		p := g.point(id)
 		free := true
-		if m != nil && m.GeneratorVer >= 2 && p.Len() > arenaRadius-cellSize*math.Sqrt2/2-1e-9 {
+		if m != nil && m.GeneratorVer >= 2 && p.Len() > arenaR-cellSize*math.Sqrt2/2-1e-9 {
 			free = false
 		}
 		if free && sig.locked && p.Len() < m.CoreZone.Radius+clearance+1e-9 {
@@ -425,8 +434,10 @@ func pointFree(m *sim.MapDef, locked bool, p sim.Vec2) bool {
 	if !finiteVec(p) {
 		return false
 	}
-	if m != nil && m.GeneratorVer >= 2 && p.Len() > arenaRadius-1e-9 {
-		return false
+	if m != nil && m.GeneratorVer >= 2 {
+		if _, centerR := arenaBounds(m); p.Len() > centerR-1e-9 {
+			return false
+		}
 	}
 	if locked && p.Len() < m.CoreZone.Radius+sim.RobotRadius+1e-9 {
 		return false

@@ -149,32 +149,20 @@ func overlapDims(a, b rect) (float64, float64) {
 // Candidates are a seeded cyclic traversal of a bounded 7×7 local lattice,
 // with small shared radial/angular jitter. Rejection only relocates cover
 // inside its assigned cell, never into an already crowded part of the ring.
-func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPacks []sim.HealthPackDef) ([]sim.Wall, error) {
-	walls := make([]sim.Wall, 0, 8*(innerCoverCells+midCoverCells+outerCoverCells)*2)
-	// Every cell is snapped to a 7.5-degree direction slot and a half-meter
-	// radial lattice. The lShape stratum additionally stamps a perpendicular
-	// stub over the base bar so the union forms an L-shaped cover.
-	cells := []coverCell{
-		{radius: 19.5, angle: 0, halfLen: 2.5, halfThick: coverThick / 2},    // inner ring: 5m cover, axis-aligned per wedge family
-		{radius: 24.0, angle: 22.5, halfLen: 3.0, halfThick: coverThick / 2}, // inner ring: 6m offset cover near the lock boundary
-		{radius: 36, angle: 8, halfLen: 2.0, halfThick: coverThick / 2},
-		{radius: 36, angle: 37, halfLen: 2.0, halfThick: coverThick / 2, lShape: true}, // inner-mid L stratum
-		{radius: 49, angle: 8, halfLen: 2.0, halfThick: coverThick / 2, lShape: true},  // outer-mid L stratum
-		{radius: 49, angle: 37, halfLen: 2.0, halfThick: coverThick / 2},
-		{radius: 60, angle: 22.5, halfLen: 2.0, halfThick: coverThick / 2},
-		{radius: 75, angle: 22.5, halfLen: 2.0, halfThick: coverThick / 2},
-	}
+func genWalls(r *rng, l layout, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPacks []sim.HealthPackDef) ([]sim.Wall, error) {
+	cells := l.coverCells()
+	walls := make([]sim.Wall, 0, len(cells)*8*2)
 	clear := func(q rect, allowCore bool) int {
 		for _, p := range []sim.Vec2{{X: q.MinX, Y: q.MinY}, {X: q.MinX, Y: q.MaxY}, {X: q.MaxX, Y: q.MinY}, {X: q.MaxX, Y: q.MaxY}} {
-			if p.Len() > outerMaxR-agentR {
+			if p.Len() > l.outerMaxR-agentR {
 				return 1
 			}
 		}
-		if !allowCore && nearestDist2(q, sim.Vec2{}) < (coreZoneR+wallClearance)*(coreZoneR+wallClearance) {
+		if !allowCore && nearestDist2(q, sim.Vec2{}) < (l.coreZoneR+wallClearance)*(l.coreZoneR+wallClearance) {
 			return 2
 		}
 		for k := 0; k < 8; k++ {
-			if gap2(q, spawnAreaOf(k)) < poiClearance*poiClearance {
+			if gap2(q, l.spawnArea(k)) < poiClearance*poiClearance {
 				return 3
 			}
 		}
@@ -243,7 +231,7 @@ func genWalls(r *rng, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPack
 					batch = append(batch, rectToWall(uint32(len(walls)+len(batch)+1), pc.r))
 				}
 			}
-			if valid && connectivityOK(append(walls, batch...)) {
+			if valid && connectivityOK(l, append(walls, batch...)) {
 				walls = append(walls, batch...)
 				accepted = true
 				break

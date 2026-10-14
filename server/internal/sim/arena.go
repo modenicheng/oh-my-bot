@@ -2,14 +2,28 @@ package sim
 
 import "math"
 
-const arenaCenterRadius = 80.0 - RobotRadius
+// legacyArenaDiskR 是 gen<8 地图的历史竞技场半径（80m 圆盘）。
+const legacyArenaDiskR = 80.0
+
+// arenaDiskRadiusOf 返回地图的竞技场圆盘半径（外边界，非中心可达半径）。
+// gen>=8 的地图显式携带 ArenaRadius；更早的定义没有该字段，沿用 80m。
+func arenaDiskRadiusOf(m *MapDef) float64 {
+	if m != nil && m.ArenaRadius > 0 {
+		return m.ArenaRadius
+	}
+	return legacyArenaDiskR
+}
+
+// arenaCenterRadius 是机器人中心可达半径：圆盘半径减机器人半径。
+func arenaCenterRadiusOf(m *MapDef) float64 { return arenaDiskRadiusOf(m) - RobotRadius }
+func (s *Sim) arenaCenterRadius() float64   { return arenaCenterRadiusOf(s.mapDef) }
 
 // MapDef is persisted in initial states and checkpoints. Gen1 (including old
 // definitions without a generator version) keeps its unbounded replay physics.
 func (s *Sim) boundedArena() bool { return s.mapDef != nil && s.mapDef.GeneratorVer >= 2 }
 
 func (s *Sim) insideArena(p Vec2) bool {
-	return !s.boundedArena() || p.Len() <= arenaCenterRadius
+	return !s.boundedArena() || p.Len() <= s.arenaCenterRadius()
 }
 
 // sweepArena returns the exit from the playable disk, the opposite root from
@@ -20,7 +34,7 @@ func (s *Sim) sweepArena(p, d Vec2) (float64, bool) {
 		return 0, false
 	}
 	end := p.Add(d)
-	if end.Len() <= arenaCenterRadius {
+	if end.Len() <= s.arenaCenterRadius() {
 		return 0, false
 	}
 	a := d.X*d.X + d.Y*d.Y
@@ -28,7 +42,8 @@ func (s *Sim) sweepArena(p, d Vec2) (float64, bool) {
 		return 0, false
 	}
 	dot := p.X*d.X + p.Y*d.Y
-	c := p.X*p.X + p.Y*p.Y - arenaCenterRadius*arenaCenterRadius
+	r := s.arenaCenterRadius()
+	c := p.X*p.X + p.Y*p.Y - r*r
 	root := math.Sqrt(math.Max(0, dot*dot-a*c))
 	var t float64
 	if dot >= 0 {
@@ -47,8 +62,8 @@ func (s *Sim) sweepArena(p, d Vec2) (float64, bool) {
 // rounding overshoot after that sweep.
 func (s *Sim) containInArena(p Vec2) Vec2 {
 	if s.boundedArena() {
-		if n := p.Len(); n > arenaCenterRadius {
-			return p.Scale(math.Nextafter(arenaCenterRadius, 0) / n)
+		if n := p.Len(); n > s.arenaCenterRadius() {
+			return p.Scale(math.Nextafter(s.arenaCenterRadius(), 0) / n)
 		}
 	}
 	return p

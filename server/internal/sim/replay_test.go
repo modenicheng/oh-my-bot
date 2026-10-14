@@ -218,7 +218,7 @@ func TestRestoreCheckpointRejectsCombatFieldCorruption(t *testing.T) {
 	}{
 		"position inside wall": {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].Position = Vec2{1.5, 0} }},
 		"position outside arena": {arena.Snapshot(), func(c *Checkpoint) {
-			c.Robots[0].Position = Vec2{arenaCenterRadius + 1, 0}
+			c.Robots[0].Position = Vec2{arenaCenterRadiusOf(nil) + 1, 0}
 		}},
 		"hp above max":         {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].HP = MaxHP + 0.5 }},
 		"hp below zero":        {s.Snapshot(), func(c *Checkpoint) { c.Robots[0].HP = -0.5 }},

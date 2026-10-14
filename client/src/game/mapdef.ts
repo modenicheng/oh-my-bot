@@ -25,6 +25,8 @@ export interface MapDefParsed {
   corePads: MapCorePad[]
   healthPacks: MapHealthPack[]
   coreZone: { radius: number; unlockPhase: number }
+  /** 竞技场圆盘半径（米）：gen>=8 地图随人数缩放下发；旧图无此字段回退 80 */
+  arenaRadius: number
   /** 地图外接半径（米）：相机钳制与全局参照用 */
   extent: number
 }
@@ -95,12 +97,13 @@ export function parseMapDef(json: string): MapDefParsed {
   })
   const cz = asRaw(r['core_zone'])
   const coreZone = { radius: goNum(cz['radius'], RING_CORE), unlockPhase: goNum(cz['unlock_phase'], 2) }
+  const arenaRadius = goNum(r['arena_radius'], RING_OUTER)
 
   if (walls.length === 0) throw new Error('地图缺少墙体数据')
   if (uplinks.length === 0) throw new Error('地图缺少 Uplink 数据')
 
-  // 外接半径：三环 80m 与所有实体坐标的最大值
-  let maxC = RING_OUTER
+  // 外接半径：竞技场圆盘与所有实体坐标的最大值
+  let maxC = arenaRadius
   for (const w of walls) {
     maxC = Math.max(maxC, Math.abs(w.min.x), Math.abs(w.min.y), Math.abs(w.max.x), Math.abs(w.max.y))
   }
@@ -119,6 +122,7 @@ export function parseMapDef(json: string): MapDefParsed {
     corePads,
     healthPacks,
     coreZone,
+    arenaRadius,
     extent: maxC,
   }
 }

@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 7 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 8 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -127,7 +127,7 @@ func TestTopologyInvariants(t *testing.T) {
 				}
 			} else {
 				normals++
-				if d := u.Pos.Len(); d < uplinkRLo-1e-9 || d > uplinkRHi+1e-9 {
+				if d := u.Pos.Len(); d < 40-1e-9 || d > 45+1e-9 {
 					t.Fatalf("seed %d: uplink %d radius %.3f outside [40,45]", seed, u.ID, d)
 				}
 				if m := mod45(angleDeg(u.Pos.X, u.Pos.Y)); math.Abs(m-22.5) > 0.6 {
@@ -170,7 +170,7 @@ func TestTopologyInvariants(t *testing.T) {
 			}
 		}
 		// CorePad：16/12/6，分组带内，值 10/25。
-		if len(def.CorePads) != padOuterN+padMidN+padCenterN {
+		if len(def.CorePads) != 16+12+6 {
 			t.Fatalf("seed %d: pads = %d, want 34", seed, len(def.CorePads))
 		}
 		counts := [3]int{}
@@ -230,7 +230,7 @@ func TestCoreSupplyScalesWithParticipants(t *testing.T) {
 		{1, 1200, 4}, {5, 900, 6}, {12, 720, 10}, {24, 600, 16}, {40, 480, 24}, {50, 480, 28},
 	}
 	for _, tc := range cases {
-		period, target := coreSupply(tc.players)
+		period, target := coreSupply(tc.players, 16, 12)
 		if period != tc.period || target != tc.target {
 			t.Fatalf("players %d: period/target = %d/%d, want %d/%d", tc.players, period, target, tc.period, tc.target)
 		}
@@ -306,25 +306,27 @@ func TestDeterminismHundredSeeds(t *testing.T) {
 // TestConnectivityBFS：两种阶段模式（锁区封闭/开放）全图自由格 4-邻接连通，
 // 且出生点/Uplink/CorePad 所在格为自由格。
 func TestConnectivityBFS(t *testing.T) {
+	l := layoutFor(1)
 	for _, seed := range testSeeds {
 		def, err := Generate(seed)
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
-		if !connectedGrid(def.Walls, false) {
+		if !connectedGrid(l, def.Walls, false) {
 			t.Fatalf("seed %d: OUTER_RING mode not connected", seed)
 		}
-		if !connectedGrid(def.Walls, true) {
+		if !connectedGrid(l, def.Walls, true) {
 			t.Fatalf("seed %d: CORE_OPEN mode not connected", seed)
 		}
 		// POI 格自由性。
-		open, n := gridFor(def.Walls, true)
+		open, n := gridFor(l, def.Walls, true)
+		ext := l.outerMaxR
 		cellFree := func(p sim.Vec2) bool {
-			gx, gy := gridIndex(p.X), gridIndex(p.Y)
+			gx, gy := gridIndex(p.X, ext), gridIndex(p.Y, ext)
 			return gx >= 0 && gx < n && gy >= 0 && gy < n && !open[gy*n+gx]
 		}
 		for k := 0; k < 8; k++ {
-			if !cellFree(sectorCenter(k)) {
+			if !cellFree(l.sectorCenter(k)) {
 				t.Fatalf("seed %d: spawn center %d blocked", seed, k)
 			}
 		}
@@ -349,8 +351,9 @@ func TestSpawnLegality(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
+		l := layoutFor(1)
 		for k := 0; k < 8; k++ {
-			sq := spawnAreaOf(k)
+			sq := l.spawnArea(k)
 			for _, w := range def.Walls {
 				g := gap2(wallRect(w), sq)
 				if g < 0 {
@@ -600,5 +603,85 @@ func TestUplinkCenterSymmetry(t *testing.T) {
 				t.Fatalf("seed %d: uplink %d has no antipodal partner", seed, normals[i].ID)
 			}
 		}
+	}
+}
+
+// TestLargeRoomLayoutBreakpoints（GeneratorVer 8 人数自适应骨架的断点 golden）：
+// 1 / 64 / 65 / 96 / 100 / 150 / 200 / 256 人各生成一张图，断言：
+//   - 生成成功（含 genWalls 候选搜索与双模式 BFS 连通验证）；
+//   - ArenaRadius / Uplink / Pad / 血包数量符合 layout 档位表；
+//   - sim.SetMap 以满员机器人装配成功（初始出生全部合法）；
+//   - MapBootstrap JSON 体积在 48KiB 传输帧预算内（含余量，netws 上限 64KiB）。
+//
+// 档位表任何调整都会在此暴露，是"人数 → 全部参数"自动化的验收门。
+func TestLargeRoomLayoutBreakpoints(t *testing.T) {
+	for _, tc := range []struct {
+		n, uplinks, pads, packs int
+	}{
+		{1, 6, 34, 4},
+		{64, 6, 34, 4},
+		{65, 6, 34, 4}, // 65 人：scale>1 但 pad 面积配额四舍五入后未过阈值
+		{96, 8, 52, 8}, // s²=1.5：24+18+10
+		{100, 8, 56, 8},
+		{150, 8, 80, 8},
+		{200, 8, 108, 12},
+		{256, 8, 136, 12},
+	} {
+		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
+			def, err := GenerateForPlayers(42, tc.n)
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			l := layoutFor(tc.n)
+			if math.Abs(def.ArenaRadius-l.outerMaxR) > 1e-9 {
+				t.Fatalf("arena radius %.3f, want %.3f", def.ArenaRadius, l.outerMaxR)
+			}
+			if got := len(def.Uplinks); got != tc.uplinks+1 {
+				t.Fatalf("uplinks = %d, want %d+main", got, tc.uplinks)
+			}
+			if got := len(def.CorePads); got != tc.pads {
+				t.Fatalf("pads = %d, want %d", got, tc.pads)
+			}
+			if got := len(def.HealthPacks); got != tc.packs {
+				t.Fatalf("health packs = %d, want %d", got, tc.packs)
+			}
+			// 满员装配：全部机器人落位其扇区出生块（重叠兜底允许，硬错误拒绝）。
+			ids := make([]uint32, tc.n)
+			for i := range ids {
+				ids[i] = uint32(i + 1)
+			}
+			s := sim.NewSim(42, ids, nil)
+			if err := s.SetMap(def); err != nil {
+				t.Fatalf("SetMap with %d robots: %v", tc.n, err)
+			}
+			// bootstrap 传输体积（glue 会把整图 JSON 塞进单帧可靠消息）。
+			b, err := json.Marshal(def)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(b) > 48*1024 {
+				t.Fatalf("map JSON %d bytes exceeds 48KiB transport budget", len(b))
+			}
+			t.Logf("n=%d: walls=%d pads=%d packs=%d json=%dB", tc.n, len(def.Walls), tc.pads, tc.packs, len(b))
+		})
+	}
+}
+
+// TestGeometryStableBelowCapacityFloor：n≤64 骨架冻结——同 seed 下 1 人与
+// 64 人产出除 CoreRules（供给曲线）外完全一致的几何。这是"小房不变"的
+// 回归锚：任何波及小图布局的改动都会在此失败。
+func TestGeometryStableBelowCapacityFloor(t *testing.T) {
+	one, err := GenerateForPlayers(42, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := GenerateForPlayers(42, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one.CoreRules, full.CoreRules = sim.CoreRulesDef{}, sim.CoreRulesDef{}
+	one.MapHash, full.MapHash = "", ""
+	if !reflect.DeepEqual(one, full) {
+		t.Fatal("n=1 and n=64 maps diverge outside CoreRules; capacity-floor geometry is not frozen")
 	}
 }

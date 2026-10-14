@@ -14,7 +14,7 @@ import (
 // 件），且不得与任何墙体重叠（overlapsWall 原函数）。死亡机器人保留阵亡
 // 时刻的合法位置，因此对所有机器人统一校验；gen<2 地图无圆盘边界，仅查墙。
 func checkpointPositionValid(cp Checkpoint, p Vec2) bool {
-	if cp.Map != nil && cp.Map.GeneratorVer >= 2 && p.Len() > arenaCenterRadius {
+	if cp.Map != nil && cp.Map.GeneratorVer >= 2 && p.Len() > arenaCenterRadiusOf(cp.Map) {
 		return false
 	}
 	for _, wall := range cp.Walls {
