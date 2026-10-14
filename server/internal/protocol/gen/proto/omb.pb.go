@@ -632,11 +632,14 @@ type RoomAction_Kind int32
 
 const (
 	RoomAction_NONE      RoomAction_Kind = 0
-	RoomAction_START     RoomAction_Kind = 1
-	RoomAction_ABORT     RoomAction_Kind = 2
-	RoomAction_RESTART   RoomAction_Kind = 3
-	RoomAction_WARMUP    RoomAction_Kind = 4
-	RoomAction_SOLO_BOTS RoomAction_Kind = 5
+	RoomAction_START     RoomAction_Kind = 1 // 开始正式对局（Warmup/Idle/Ended → Running）
+	RoomAction_ABORT     RoomAction_Kind = 2 // 放弃当前对局（不结算）
+	RoomAction_RESTART   RoomAction_Kind = 3 // 结束态回热身场
+	RoomAction_WARMUP    RoomAction_Kind = 4 // 进入热身场
+	RoomAction_SOLO_BOTS RoomAction_Kind = 5 // 切换确定性测试对手
+	RoomAction_PAUSE     RoomAction_Kind = 6 // 房主暂停正式对局（服务器停推 tick，全员显示暂停）
+	RoomAction_RESUME    RoomAction_Kind = 7 // 房主继续已暂停的对局
+	RoomAction_FINISH    RoomAction_Kind = 8 // 房主提前结算：按当前比分走正常结算流（计分/称号/回放）
 )
 
 // Enum value maps for RoomAction_Kind.
@@ -648,6 +651,9 @@ var (
 		3: "RESTART",
 		4: "WARMUP",
 		5: "SOLO_BOTS",
+		6: "PAUSE",
+		7: "RESUME",
+		8: "FINISH",
 	}
 	RoomAction_Kind_value = map[string]int32{
 		"NONE":      0,
@@ -656,6 +662,9 @@ var (
 		"RESTART":   3,
 		"WARMUP":    4,
 		"SOLO_BOTS": 5,
+		"PAUSE":     6,
+		"RESUME":    7,
+		"FINISH":    8,
 	}
 )
 
@@ -1019,13 +1028,18 @@ func (x *ClientInput) GetAxisMask() uint32 {
 	return 0
 }
 
+// match_minutes / core_open_minutes：对局时长与核心区开放时点（开局后第几分钟），
+// 0 = 服务器默认（8 / 4）。仅创建房间时（房间尚无成员且空闲）由首个进房者生效，
+// 之后进房携带的值被忽略；非法组合（越界或 core >= match）整条 join 被拒。
 type JoinRoom struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RoomCode      string                 `protobuf:"bytes,1,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
-	Nick          string                 `protobuf:"bytes,2,opt,name=nick,proto3" json:"nick,omitempty"`
-	Color         string                 `protobuf:"bytes,3,opt,name=color,proto3" json:"color,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RoomCode        string                 `protobuf:"bytes,1,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	Nick            string                 `protobuf:"bytes,2,opt,name=nick,proto3" json:"nick,omitempty"`
+	Color           string                 `protobuf:"bytes,3,opt,name=color,proto3" json:"color,omitempty"`
+	MatchMinutes    uint32                 `protobuf:"varint,4,opt,name=match_minutes,json=matchMinutes,proto3" json:"match_minutes,omitempty"`
+	CoreOpenMinutes uint32                 `protobuf:"varint,5,opt,name=core_open_minutes,json=coreOpenMinutes,proto3" json:"core_open_minutes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *JoinRoom) Reset() {
@@ -1077,6 +1091,20 @@ func (x *JoinRoom) GetColor() string {
 		return x.Color
 	}
 	return ""
+}
+
+func (x *JoinRoom) GetMatchMinutes() uint32 {
+	if x != nil {
+		return x.MatchMinutes
+	}
+	return 0
+}
+
+func (x *JoinRoom) GetCoreOpenMinutes() uint32 {
+	if x != nil {
+		return x.CoreOpenMinutes
+	}
+	return 0
 }
 
 // Read-only full-world connection; never allocates a player or robot.
@@ -4387,6 +4415,7 @@ type EvRoomState struct {
 	RobotsOnline  uint32                 `protobuf:"varint,2,opt,name=robots_online,json=robotsOnline,proto3" json:"robots_online,omitempty"`
 	HostNick      string                 `protobuf:"bytes,3,opt,name=host_nick,json=hostNick,proto3" json:"host_nick,omitempty"`
 	SoloBots      uint32                 `protobuf:"varint,4,opt,name=solo_bots,json=soloBots,proto3" json:"solo_bots,omitempty"` // room-scoped deterministic test opponents; zero when disabled
+	Paused        bool                   `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`                     // 房主已暂停正式对局（仅 state=R_RUNNING 时有意义）；缺失 = 旧服务器未暂停
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4447,6 +4476,13 @@ func (x *EvRoomState) GetSoloBots() uint32 {
 		return x.SoloBots
 	}
 	return 0
+}
+
+func (x *EvRoomState) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
 }
 
 type EvAiQuota struct {
@@ -5535,18 +5571,20 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x04dash\x18\x06 \x01(\bR\x04dash\x12\x16\n" +
 	"\x06shield\x18\a \x01(\bR\x06shield\x12\x1a\n" +
 	"\binteract\x18\b \x01(\bR\binteract\x12\x1b\n" +
-	"\taxis_mask\x18\t \x01(\rR\baxisMask\"Q\n" +
+	"\taxis_mask\x18\t \x01(\rR\baxisMask\"\xa2\x01\n" +
 	"\bJoinRoom\x12\x1b\n" +
 	"\troom_code\x18\x01 \x01(\tR\broomCode\x12\x12\n" +
 	"\x04nick\x18\x02 \x01(\tR\x04nick\x12\x14\n" +
-	"\x05color\x18\x03 \x01(\tR\x05color\"+\n" +
+	"\x05color\x18\x03 \x01(\tR\x05color\x12#\n" +
+	"\rmatch_minutes\x18\x04 \x01(\rR\fmatchMinutes\x12*\n" +
+	"\x11core_open_minutes\x18\x05 \x01(\rR\x0fcoreOpenMinutes\"+\n" +
 	"\fSpectateRoom\x12\x1b\n" +
 	"\troom_code\x18\x01 \x01(\tR\broomCode\"\v\n" +
 	"\tLeaveRoom\"\x0e\n" +
-	"\fAssistToggle\"\x89\x01\n" +
+	"\fAssistToggle\"\xac\x01\n" +
 	"\n" +
 	"RoomAction\x12+\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x17.omb.v1.RoomAction.KindR\x04kind\"N\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x17.omb.v1.RoomAction.KindR\x04kind\"q\n" +
 	"\x04Kind\x12\b\n" +
 	"\x04NONE\x10\x00\x12\t\n" +
 	"\x05START\x10\x01\x12\t\n" +
@@ -5554,7 +5592,12 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\aRESTART\x10\x03\x12\n" +
 	"\n" +
 	"\x06WARMUP\x10\x04\x12\r\n" +
-	"\tSOLO_BOTS\x10\x05\"\xd2\x01\n" +
+	"\tSOLO_BOTS\x10\x05\x12\t\n" +
+	"\x05PAUSE\x10\x06\x12\n" +
+	"\n" +
+	"\x06RESUME\x10\a\x12\n" +
+	"\n" +
+	"\x06FINISH\x10\b\"\xd2\x01\n" +
 	"\fScriptSubmit\x12(\n" +
 	"\x10client_script_id\x18\x01 \x01(\rR\x0eclientScriptId\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12(\n" +
@@ -5842,12 +5885,13 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05robot\x18\x01 \x01(\rR\x05robot\x12!\n" +
 	"\frounds_delta\x18\x02 \x01(\rR\vroundsDelta\x12!\n" +
 	"\ftokens_delta\x18\x03 \x01(\rR\vtokensDelta\x12\"\n" +
-	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\xdc\x01\n" +
+	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\xf4\x01\n" +
 	"\vEvRoomState\x12/\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.omb.v1.EvRoomState.StateR\x05state\x12#\n" +
 	"\rrobots_online\x18\x02 \x01(\rR\frobotsOnline\x12\x1b\n" +
 	"\thost_nick\x18\x03 \x01(\tR\bhostNick\x12\x1b\n" +
-	"\tsolo_bots\x18\x04 \x01(\rR\bsoloBots\"=\n" +
+	"\tsolo_bots\x18\x04 \x01(\rR\bsoloBots\x12\x16\n" +
+	"\x06paused\x18\x05 \x01(\bR\x06paused\"=\n" +
 	"\x05State\x12\n" +
 	"\n" +
 	"\x06R_IDLE\x10\x00\x12\f\n" +

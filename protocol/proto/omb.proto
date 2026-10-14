@@ -79,13 +79,32 @@ message ClientInput {
   uint32 axis_mask = 9;
 }
 
-message JoinRoom { string room_code = 1; string nick = 2; string color = 3; }
+// match_minutes / core_open_minutes：对局时长与核心区开放时点（开局后第几分钟），
+// 0 = 服务器默认（8 / 4）。仅创建房间时（房间尚无成员且空闲）由首个进房者生效，
+// 之后进房携带的值被忽略；非法组合（越界或 core >= match）整条 join 被拒。
+message JoinRoom {
+  string room_code = 1;
+  string nick = 2;
+  string color = 3;
+  uint32 match_minutes = 4;
+  uint32 core_open_minutes = 5;
+}
 // Read-only full-world connection; never allocates a player or robot.
 message SpectateRoom { string room_code = 1; }
 message LeaveRoom {}
 message AssistToggle {} // Space 按下：服务端权威三分支——辅助关→开启并清除人工接管；辅助开且任一轴被人工接管→仅将这些轴交回脚本（辅助保持开）；辅助开且全部脚本控制→关闭。事件语义，非状态
 message RoomAction {
-  enum Kind { NONE = 0; START = 1; ABORT = 2; RESTART = 3; WARMUP = 4; SOLO_BOTS = 5; }
+  enum Kind {
+    NONE = 0;
+    START = 1;     // 开始正式对局（Warmup/Idle/Ended → Running）
+    ABORT = 2;     // 放弃当前对局（不结算）
+    RESTART = 3;   // 结束态回热身场
+    WARMUP = 4;    // 进入热身场
+    SOLO_BOTS = 5; // 切换确定性测试对手
+    PAUSE = 6;     // 房主暂停正式对局（服务器停推 tick，全员显示暂停）
+    RESUME = 7;    // 房主继续已暂停的对局
+    FINISH = 8;    // 房主提前结算：按当前比分走正常结算流（计分/称号/回放）
+  }
   Kind kind = 1;
 }
 // source 恒为服务器可执行的 JavaScript 运行源码（旧字段，兼容旧服务器）。
@@ -408,6 +427,7 @@ message EvRoomState { // 房间生命周期广播（含 Session 榜）
   uint32 robots_online = 2;
   string host_nick = 3;
   uint32 solo_bots = 4; // room-scoped deterministic test opponents; zero when disabled
+  bool paused = 5;      // 房主已暂停正式对局（仅 state=R_RUNNING 时有意义）；缺失 = 旧服务器未暂停
 }
 
 message EvAiQuota {
