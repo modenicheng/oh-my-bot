@@ -188,22 +188,30 @@ func genWalls(r *rng, l layout, uplinks []sim.UplinkDef, pads []sim.CorePadDef, 
 		}
 		return 0
 	}
+	// 候选格点边长：基础 7×7（n≤64 与历史几何逐位一致）；缩放布局加宽到
+	// 11×11——资源密度增长后邻域更挤，7×7 的净空拒绝会耗尽候选（实测
+	// n=96 有 ~5% 种子整层放置失败，对局装配直接报错）。
+	lattice := 7
+	if l.scale > 1 {
+		lattice = 11
+	}
+	center := (lattice - 1) / 2
 	for cell, c := range cells {
-		start := r.intn(49)
+		start := r.intn(lattice * lattice)
 		radialJitter, angularJitter := r.rangeF(-0.25, 0.25), r.rangeF(-0.25, 0.25)
 		accepted := false
 		clearReject, batchReject, shapeReject, connectivityReject := 0, 0, 0, 0
-		for attempt := 0; attempt < 49; attempt++ {
-			index := (start + attempt) % 49
+		for attempt := 0; attempt < lattice*lattice; attempt++ {
+			index := (start + attempt) % (lattice * lattice)
 			var radius, angle float64
 			if cell < innerCoverCells {
 				// Inner strata are inaccessible while locked and become meaningful
 				// cover after CORE_OPEN. Each searches its own bounded local lattice.
-				radius = c.radius + float64(index/7-3)*0.5 + radialJitter
-				angle = c.angle + float64(index%7-3)*1.2 + angularJitter
+				radius = c.radius + float64(index/lattice-center)*0.5 + radialJitter
+				angle = c.angle + float64(index%lattice-center)*1.2 + angularJitter
 			} else {
-				radius = c.radius + float64(index/7-3)*0.8 + radialJitter
-				angle = c.angle + float64(index%7-3)*1.2 + angularJitter
+				radius = c.radius + float64(index/lattice-center)*0.8 + radialJitter
+				angle = c.angle + float64(index%lattice-center)*1.2 + angularJitter
 			}
 			proto := slotDirection(angle / 7.5).Scale(radius)
 			batch := make([]sim.Wall, 0, 16)

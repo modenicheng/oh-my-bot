@@ -685,3 +685,16 @@ func TestGeometryStableBelowCapacityFloor(t *testing.T) {
 		t.Fatal("n=1 and n=64 maps diverge outside CoreRules; capacity-floor geometry is not frozen")
 	}
 }
+
+// TestScaledLayoutsGenerateAcrossSeeds：缩放档位对随机种子的健壮性门。
+// 候选格点加宽（7×7→11×7×11）前，n=96 有 ~5% 种子整层掩体放置失败、
+// 对局装配报错——大房开图是随机种子，这是必须为零的失败率。
+func TestScaledLayoutsGenerateAcrossSeeds(t *testing.T) {
+	for _, n := range []int{96, 150, 200, 256} {
+		for seed := uint64(0); seed < 20; seed++ {
+			if _, err := GenerateForPlayers(seed, n); err != nil {
+				t.Fatalf("n=%d seed=%d: %v", n, seed, err)
+			}
+		}
+	}
+}
