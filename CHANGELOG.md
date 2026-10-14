@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0...v1.0.1-rc.1) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sim:** v4 gameplay rebalance with acceleration-limited dash
+* **mapgen:** player-adaptive map skeleton (GeneratorVer 8) with ArenaRadius in MapDef
+
+### Features
+
+* **mapgen:** player-adaptive map skeleton (GeneratorVer 8) with ArenaRadius in MapDef ([85b9074](https://github.com/modenicheng/oh-my-bot/commit/85b907407dbf68f8c2187c25ac4d8975acf24f28))
+* **omb:** /api/stats observability endpoint and gated pprof ([7b1f0cb](https://github.com/modenicheng/oh-my-bot/commit/7b1f0cb5f4057d991cf0d64aaa130a84339912a7))
+* **room:** configurable seat cap via OMB_MAX_PLAYERS ([4808174](https://github.com/modenicheng/oh-my-bot/commit/48081746bbc1e4f8eb332483a26d77229d8d231d))
+* **sim:** v4 gameplay rebalance with acceleration-limited dash ([6d9c035](https://github.com/modenicheng/oh-my-bot/commit/6d9c0356a3d5a28bff2a0709f78e15c71659f298))
+* **tools:** omb-load single-room WS load driver ([3fd892c](https://github.com/modenicheng/oh-my-bot/commit/3fd892cc19fc88f07abc7d47b734a8e9a2ddadb9))
+
+
+### Bug Fixes
+
+* **auth:** replace WS 401 gate with terminal join-failed notice to stop reconnect loops ([e388da8](https://github.com/modenicheng/oh-my-bot/commit/e388da89d62e3da92161dbfaee8405be1e6be395))
+* **ci:** compute image tags explicitly for workflow_dispatch releases ([922ca1b](https://github.com/modenicheng/oh-my-bot/commit/922ca1b226a46718d5d7b7fa8d01269e9fb2d301))
+* **ci:** emit image tags newline-separated for build-push-action ([0142fc2](https://github.com/modenicheng/oh-my-bot/commit/0142fc2ddf92d24708c3433c4fe07b115a4272c1))
+* **glue:** nanosecond tick stats resolution and stable stats test ([d7c7970](https://github.com/modenicheng/oh-my-bot/commit/d7c7970377968a3affd2de12476ca39125a4d289))
+* **mapgen:** widen cover candidate lattice for scaled layouts ([26279a2](https://github.com/modenicheng/oh-my-bot/commit/26279a20c98e5a1e21085fca017b630afb069393))
+* **snapshot:** sort delta tombstones by entity id ([0724afe](https://github.com/modenicheng/oh-my-bot/commit/0724afeb9499da9b84b4fa4ffadc6c67b41a0c00))
+
+
+### Performance Improvements
+
+* **glue:** parallelize per-observer AOI and delta encoding for large rooms ([35ebd97](https://github.com/modenicheng/oh-my-bot/commit/35ebd97a4529d0b5f74a4d2fc665b4430a08c798))
+* **glue:** pre-marshal room broadcasts, share one frame across connections ([3c63eb7](https://github.com/modenicheng/oh-my-bot/commit/3c63eb752781ec64fa7ba6d0bf934c1e814986d9))
+* **glue:** scale per-script tick quota with roster size ([b76dfb7](https://github.com/modenicheng/oh-my-bot/commit/b76dfb79a68134dc89fd35e09884f86362b3a5c0))
+* **sim:** uniform wall grid index for collision sweeps ([2a5e4c5](https://github.com/modenicheng/oh-my-bot/commit/2a5e4c57e32d413e41d73c9e49a98f7ccb242536))
+
 ## [1.0.0](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0-rc.2...v1.0.0) (2026-10-11)
 
 
