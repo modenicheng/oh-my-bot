@@ -54,6 +54,12 @@ COPY --from=build --chown=65532:65532 /out/empty /app/data
 WORKDIR /app
 # 容器内必须绑全网卡：镜像默认 127.0.0.1 是容器自己的回环，-p 发布不进去（ADR-0014）
 ENV OMB_ADDR=:27182
+# 大房默认（见 docs/deploy.md「大房间」）：单房席位 200 + GC 调优。两者都是
+# 运行期可覆盖的默认值——docker run -e OMB_MAX_PLAYERS=64 即可回退小房。
+# OMB_GC_PERCENT=400 为压测结论：200 人房 tick 墙钟减半，代价是堆峰值变高
+# （容器建议内存 ≥2GiB，紧可加 OMB_GC_MEMORY_LIMIT 兜底）。
+ENV OMB_MAX_PLAYERS=200
+ENV OMB_GC_PERCENT=400
 EXPOSE 27182
 USER nonroot:nonroot
 ENTRYPOINT ["/omb"]

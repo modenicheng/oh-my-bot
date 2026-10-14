@@ -1,0 +1,23 @@
+# 单房 200 人活动的容器化部署（docs/deploy.md「大房间」节）：
+#
+#   docker compose up -d        # 或 podman compose up -d
+#   curl http://127.0.0.1:27182/api/stats   # 运行观测：tick avg/p95、丢帧计数
+#
+# 两个大房参数经 environment 运行期注入——对已发布镜像（含 v1.0.1-rc.1，
+# 早于 Dockerfile 固化默认值的版本）同样生效；下一个起镜像自带同名默认值，
+# 此处显式写出保持双保险与自文档。对外服务经反代转发 127.0.0.1:27182，
+# 不要把端口直接发布到公网网卡。
+services:
+  omb:
+    image: ghcr.io/modenicheng/oh-my-bot:1.0.1-rc.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27182:27182"
+    environment:
+      OMB_MAX_PLAYERS: "200"    # 单房席位上限（1–256；回退小房改 64）
+      OMB_GC_PERCENT: "400"     # GC 调优：200 人房 tick 墙钟减半（压测实测）
+      # OMB_PPROF: "1"          # 需要抓 CPU/堆画像时打开 /debug/pprof（默认关）
+    volumes:
+      - omb-data:/app/data      # 对局事件日志持久化（data/matches）
+volumes:
+  omb-data:

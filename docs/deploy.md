@@ -176,6 +176,12 @@ docker run -d -p 27182:27182 -v omb-data:/app/data ghcr.io/modenicheng/oh-my-bot
 
 - 日志落 `/app/data/matches`（挂卷持久化）；镜像以非 root 用户（65532）运行，该目录已预置为可写挂载点。
 - 容器默认 `OMB_ADDR=:27182` 绑所有网卡；`-addr` flag 可覆盖。
+- 镜像自带大房默认 `OMB_MAX_PLAYERS=200` 与 `OMB_GC_PERCENT=400`（见上文
+  「大房间」节；`-e` 可覆盖——`-e OMB_MAX_PLAYERS=64` 即回退小房）。
+
+仓库根的 `compose.yaml` 是单房 200 人的开箱即用配方（固定版本镜像 +
+environment 注入 + 数据卷 + 仅本机发布端口），`docker compose up -d`
+即起；对早于镜像默认值固化的已发布版本同样有效（参数经运行期注入）。
 
 ### 容器配置与认证（OIDC）
 
