@@ -6,6 +6,8 @@
 package snapshot
 
 import (
+	"sort"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -214,6 +216,9 @@ func selfID(s *SelfInput) uint32 {
 }
 
 // goneIDs：上一帧在、本帧不在的实体 id。
+// goneIDs 按 id 升序输出消失实体：Go map 遍历序随机，不排序会使同一状态
+// 在两次运行/两条路径下产生字节不同的 tombstone 顺序（语义等价但破坏
+// 「同 seed 同字节」的对照与排障基线）。
 func goneIDs[T any](prev map[uint32]T, next map[uint32]T) []uint32 {
 	var gone []uint32
 	for id := range prev {
@@ -221,6 +226,7 @@ func goneIDs[T any](prev map[uint32]T, next map[uint32]T) []uint32 {
 			gone = append(gone, id)
 		}
 	}
+	sort.Slice(gone, func(i, j int) bool { return gone[i] < gone[j] })
 	return gone
 }
 
