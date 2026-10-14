@@ -138,42 +138,44 @@ func countHacks(sink *recordingSink) []*ombv1.EvUplinkHack {
 	}
 	return out
 }
-func TestUplinkEightSecondsAndIndependentCooldowns(t *testing.T) {
+func TestUplinkHackCompletionAndIndependentCooldowns(t *testing.T) {
 	s, sink := uplinkSim(t)
+	hackDone := uint32(HackDuration)
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
-	stepTicks(s, 479)
-	if len(countHacks(sink)) != 0 || s.uplinks[0].ProgressTicks != 479 {
-		t.Fatal("uplink scored before 8 seconds")
+	stepTicks(s, hackDone-1)
+	if len(countHacks(sink)) != 0 || s.uplinks[0].ProgressTicks != hackDone-1 {
+		t.Fatal("uplink scored before the hack duration")
 	}
 	s.Tick()
 	hacks := countHacks(sink)
 	if len(hacks) != 1 || hacks[0].By != 1 || hacks[0].UplinkId != 100 || hacks[0].Value != 15 {
 		t.Fatalf("wrong hack %+v", hacks)
 	}
-	if s.UplinkViews()[0].PersonalCDs[1] != 30 || s.uplinks[0].ReadyAt[1] != 2280 {
+	firstReady := hackDone + HackCooldown
+	if s.UplinkViews()[0].PersonalCDs[1] != 30 || s.uplinks[0].ReadyAt[1] != firstReady {
 		t.Fatal("personal cooldown not 30s")
 	}
 	s.robots[0].Position = Vec2{30, 0}
 	s.robots[1].Position = Vec2{20, 0}
 	s.ApplyInput(2, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Interact: true})
-	stepTicks(s, 480)
+	stepTicks(s, hackDone)
 	hacks = countHacks(sink)
 	if len(hacks) != 3 || hacks[1].By != 2 || hacks[1].UplinkId != 100 || hacks[2].By != 1 || hacks[2].UplinkId != 101 {
 		t.Fatalf("station/player cooldowns not independent %+v", hacks)
 	}
 	s.robots[1].Position = Vec2{60, 0}
 	s.robots[0].Position = Vec2{20, 0}
-	advance(s, 2279)
+	advance(s, firstReady-1)
 	if s.uplinks[0].ProgressTicks != 0 {
 		t.Fatal("personal CD bypassed")
 	}
 	s.Tick()
 	if s.uplinks[0].ProgressTicks != 1 {
-		t.Fatal("CD did not expire at tick 2280")
+		t.Fatalf("CD did not expire at tick %d", firstReady)
 	}
 	s.Respawn(1)
 	s.Tick()
-	if s.uplinks[1].ReadyAt[1] != 2760 {
+	if s.uplinks[1].ReadyAt[1] != firstReady+hackDone {
 		t.Fatal("death erased personal CD")
 	}
 }

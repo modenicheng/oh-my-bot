@@ -237,7 +237,7 @@ func TestProjectileIntervalEnergySpeedAndRange(t *testing.T) {
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisFire), Fire: true})
 	s.Tick()
 	closeFloat(t, s.robots[0].Energy, 95)
-	closeFloat(t, s.projectiles[0].Pos.X, .5)
+	closeFloat(t, s.projectiles[0].Pos.X, ProjectileSpeed*DT)
 	stepTicks(s, 14)
 	if len(s.projectiles) != 1 {
 		t.Fatal("fired before 250ms")
@@ -250,19 +250,24 @@ func TestProjectileIntervalEnergySpeedAndRange(t *testing.T) {
 	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisFire)})
 	s.Tick()
 	s.projectiles = []Projectile{{ID: 99, Owner: 1, Spread: MaxSpread}}
-	for i := 0; i < 32; i++ {
+	// Step counts follow ProjectileSpeed so the falloff/range assertions hold
+	// at any balance value. Spread engages once a step's midpoint passes
+	// EffectiveRange; the hard cap then kills the projectile past ProjectileRange.
+	stepLen := ProjectileSpeed * DT
+	for s.projectiles[0].Distance+stepLen/2 < EffectiveRange-collisionEpsilon {
 		s.stepProjectiles()
 	}
-	closeFloat(t, s.projectiles[0].Distance, 16)
 	closeFloat(t, s.projectiles[0].Pos.Y, 0)
 	s.stepProjectiles()
 	if s.projectiles[0].Heading <= 0 || s.projectiles[0].Pos.Y <= 0 {
 		t.Fatal("16-20m spread absent")
 	}
-	for i := 0; i < 6; i++ {
+	for s.projectiles[0].Distance < ProjectileRange-stepLen {
 		s.stepProjectiles()
 	}
-	closeFloat(t, s.projectiles[0].Distance, 19.5)
+	if remaining := ProjectileRange - s.projectiles[0].Distance; remaining <= 0 || remaining > stepLen+1e-9 {
+		t.Fatalf("unexpected pre-cap distance %.14g", s.projectiles[0].Distance)
+	}
 	s.stepProjectiles()
 	if len(s.projectiles) != 0 {
 		t.Fatal("projectile survived 20m hard cap")
@@ -275,7 +280,7 @@ func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 		wall, protected bool
 		damage          float64
 	}{
-		{name: "inside_radius", y: .59, damage: 12}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "invulnerable", protected: true},
+		{name: "inside_radius", y: .59, damage: ShotDamage}, {name: "outside_radius", y: .61}, {name: "wall", wall: true}, {name: "invulnerable", protected: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, sink := enemySim(t)
@@ -294,7 +299,7 @@ func TestProjectileDamageCircleWallsAndAllEnemies(t *testing.T) {
 			for _, ev := range sink.events {
 				if h := ev.GetHit(); h != nil {
 					count++
-					if h.From != 1 || h.To != 2 || h.Dmg != 12 {
+					if h.From != 1 || h.To != 2 || h.Dmg != int32(math.Round(ShotDamage)) {
 						t.Fatalf("bad hit %+v", h)
 					}
 				}
@@ -323,7 +328,7 @@ func TestLegacyCheckpointKeepsScriptLatchAndTimedDash(t *testing.T) {
 				t.Fatalf("legacy simultaneous shield/timed dash changed: %+v", r.Combat)
 			}
 			closeFloat(t, r.Energy, MaxEnergy-ShieldDrain*DT-DashCost)
-			closeFloat(t, r.Velocity.Len(), DashSpeed)
+			closeFloat(t, r.Velocity.Len(), legacyDashSpeed)
 			s.ApplyScriptCommands(1, ScriptCommands{})
 			s.Tick()
 			if s.Arbitrated(1) != out || r.Combat.DashUntil != 1+DashDuration {
@@ -349,18 +354,27 @@ func TestEnergyDashShieldAndPulseNumerics(t *testing.T) {
 		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisAbility), Dash: true})
 		s.Tick()
 		closeFloat(t, s.robots[0].Energy, 100-DashCost*DT)
-		closeFloat(t, s.robots[0].Velocity.Len(), DashSpeed)
+		// v4：起步不再瞬时到 DashSpeed，而是按 DashAcceleration 爬坡。
+		closeFloat(t, s.robots[0].Velocity.Len(), DashAcceleration*DT)
 		stepTicks(s, 59)
 		closeFloat(t, s.robots[0].Energy, 100-DashCost*DT+59*(EnergyRegen-DashCost)*DT)
 		if s.robots[0].Combat.DashUntil != s.tick+1 {
 			t.Fatal("held dash was not refreshed")
 		}
+		// 爬坡完成后速度收敛在 DashSpeed（持续按住场景）。
+		closeFloat(t, s.robots[0].Velocity.Len(), DashSpeed)
 
-		// Releasing held Dash cancels it immediately and removes dash-only speed.
+		// Releasing held Dash ends the dash; v4 keeps the residual speed and
+		// lets the normal acceleration approach decay it instead of clamping.
 		s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisAbility), Dash: false})
 		s.Tick()
-		if s.robots[0].Combat.DashUntil != 0 || s.robots[0].Velocity.Len() > MaxSpeed {
-			t.Fatalf("released dash remained active: until=%d velocity=%v", s.robots[0].Combat.DashUntil, s.robots[0].Velocity.Len())
+		if s.robots[0].Combat.DashUntil != 0 {
+			t.Fatalf("released dash remained active: until=%d", s.robots[0].Combat.DashUntil)
+		}
+		closeFloat(t, s.robots[0].Velocity.Len(), DashSpeed-Acceleration*DT)
+		stepTicks(s, 30)
+		if s.robots[0].Velocity.Len() > MaxSpeed {
+			t.Fatalf("dash residual speed never decayed below MaxSpeed: %v", s.robots[0].Velocity.Len())
 		}
 
 		// Shield has authoritative priority when both intents are true.
@@ -912,4 +926,22 @@ func TestPublishedViewsDetachedAndConcurrent(t *testing.T) {
 	if fresh.Frame.Tick != 1 || s.View().Tick != 301 || s.RobotViews()[0].HpX10 != 1000 {
 		t.Fatal("view not stable across ticks")
 	}
+}
+
+func TestDashAccelerationSteersWithoutInstantReversal(t *testing.T) {
+	s := NewSim(0, []uint32{1}, nil)
+	// 起步：第一 tick 只获得 DashAcceleration·DT 的速度，不是 DashSpeed。
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove | AxisAbility), MoveX: 1000, Dash: true})
+	s.Tick()
+	closeFloat(t, s.robots[0].Velocity.X, DashAcceleration*DT)
+	// 反向：速度沿减速-过零-再加速的轨迹演进，任何单 tick 的速率变化都
+	// 不超过 DashAcceleration·DT（不出现瞬时换向的 2·DashSpeed 跳变）。
+	s.ApplyInput(1, &ombv1.ClientInput{Seq: 2, AxisMask: uint32(AxisMove | AxisAbility), MoveX: -1000, Dash: true})
+	s.Tick()
+	closeFloat(t, s.robots[0].Velocity.X, 0)
+	s.Tick()
+	closeFloat(t, s.robots[0].Velocity.X, -DashAcceleration*DT)
+	// 持续按住反向最终收敛到反向满速。
+	stepTicks(s, 60)
+	closeFloat(t, s.robots[0].Velocity.X, -DashSpeed)
 }

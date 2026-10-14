@@ -43,15 +43,20 @@ func (s *Sim) prepareCombat() {
 				r.Energy = math.Max(0, r.Energy-DashCost*DT)
 				c.DashReady, c.DashUntil, c.DashDirection = s.tick, s.tick+1, dashDirection(in.Move, r.Heading)
 			} else {
-				// Release, shield intent, or insufficient energy stops immediately.
+				// Release, shield intent, or insufficient energy stops the dash.
 				// Exhaustion requires a release before Dash may start again, avoiding
 				// one-tick cue flicker as passive regeneration crosses the threshold.
 				if in.Dash && !in.Shield && r.Energy+collisionEpsilon < DashCost*DT {
 					c.DashExhausted = true
 				}
-				if c.DashUntil >= s.tick && c.DashUntil != 0 {
-					if speed := r.Velocity.Len(); speed > MaxSpeed {
-						r.Velocity = r.Velocity.Scale(MaxSpeed / speed)
+				// v4 keeps the residual speed: the normal acceleration approach
+				// in moveAndCollide decays it to MaxSpeed smoothly. Pre-v4
+				// replays retain the recorded instant clamp.
+				if s.simulationVersion < 4 {
+					if c.DashUntil >= s.tick && c.DashUntil != 0 {
+						if speed := r.Velocity.Len(); speed > MaxSpeed {
+							r.Velocity = r.Velocity.Scale(MaxSpeed / speed)
+						}
 					}
 				}
 				c.DashUntil = 0
@@ -135,7 +140,7 @@ func (s *Sim) stepProjectiles() {
 		if remaining <= collisionEpsilon {
 			continue
 		}
-		length := math.Min(ProjectileSpeed*DT, remaining)
+		length := math.Min(s.projectileSpeed()*DT, remaining)
 		falloff := math.Max(0, math.Min(1, (p.Distance+length/2-EffectiveRange)/(ProjectileRange-EffectiveRange)))
 		p.Heading = p.BaseHeading + p.Spread*falloff
 		delta := Vec2{math.Cos(p.Heading) * length, math.Sin(p.Heading) * length}
@@ -163,7 +168,7 @@ func (s *Sim) stepProjectiles() {
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
 				Projectile: p.ID, Owner: p.Owner, Color: s.robots[owner].Color, Target: v.ID, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y},
 				Shield: v.Combat.ShieldOn, Invulnerable: v.Combat.Invulnerable}}})
-			s.damage(p.Owner, v, ShotDamage)
+			s.damage(p.Owner, v, s.shotDamage())
 			continue
 		}
 		if blocked || p.Distance >= ProjectileRange-collisionEpsilon {

@@ -1,5 +1,5 @@
 // 预测命中才开盾：平时关盾省能量，算出弹道即将命中才举盾。
-// - scan().projectiles 的 heading 是含散布后的瞬时飞行方向（弧度），弹速 30 m/s
+// - scan().projectiles 的 heading 是含散布后的瞬时飞行方向（弧度），弹速 36 m/s
 // - 管线延迟：快照是第 N tick 的，shield(true) 在第 N+2 tick 才结算，
 //   所以拦截窗口要按「从现在起 2~8 tick 内命中」来算，宁早勿晚
 // - 护盾 18 能量/秒、减伤 65%；一次命中 12 伤害，盾下只掉 4.2
@@ -7,7 +7,7 @@
 //   所以同时用上一帧位置差分校验方向，两说一致才算真威胁
 import type { BotContext } from '@omb/bot-api'
 
-const PROJ_SPEED = 0.5 // 30 m/s ÷ 60 tick
+const PROJ_SPEED = 0.6 // 36 m/s ÷ 60 tick
 const LEAD = 2 // 管线延迟（tick）：快照→脚本→下一 tick 生效
 const WINDOW = 8 // 拦截窗口（tick）：窗口内将命中就开盾（含 LEAD）
 const RADIUS = 1.1 // 命中判定半径：机身 0.6 + 散布容差

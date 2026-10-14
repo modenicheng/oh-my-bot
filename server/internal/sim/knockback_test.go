@@ -58,8 +58,8 @@ func TestKnockbackImpulseCap(t *testing.T) {
 		s.softCollide()
 		closeFloat(t, a.Velocity.X, DashSpeed-maxKnockSpeed)
 		closeFloat(t, b.Velocity.X, -(DashSpeed - maxKnockSpeed))
-		closeFloat(t, a.Velocity.Len(), 12)
-		closeFloat(t, b.Velocity.Len(), 12)
+		closeFloat(t, a.Velocity.Len(), DashSpeed-maxKnockSpeed)
+		closeFloat(t, b.Velocity.Len(), DashSpeed-maxKnockSpeed)
 	})
 }
 

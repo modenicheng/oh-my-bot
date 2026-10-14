@@ -19,7 +19,11 @@ import (
 // states. Version 0 predates robot contact impulses; version 2 adds tick-scoped
 // script intent, held Dash, and swept circle pickup contact. Version 3 retains
 // interrupted uplink progress briefly, then decays it at a deterministic cadence.
-const SimulationVersion = 3
+// Version 4 rebalances combat for large rooms (projectile 30→36 m/s, shot damage
+// 12→9, uplink hack 8s→4s) and replaces the pinned dash velocity with an
+// acceleration-limited approach, removing instantaneous speed jumps at dash
+// start/steer/release; pre-v4 replays keep the recorded constants and physics.
+const SimulationVersion = 4
 
 const (
 	TickRate                   = 60
@@ -352,18 +356,34 @@ func (s *Sim) moveAndCollide() {
 			direction.X /= n
 			direction.Y /= n
 		}
-		if r.Combat.DashUntil == s.tick && r.Velocity.Len() > speed {
-			r.Velocity = r.Velocity.Scale(speed / r.Velocity.Len())
+		// v1–v3 replay semantics: the expiry tick clamped overspeed instantly.
+		if s.simulationVersion < 4 {
+			if r.Combat.DashUntil == s.tick && r.Velocity.Len() > speed {
+				r.Velocity = r.Velocity.Scale(speed / r.Velocity.Len())
+			}
 		}
-		dv := Vec2{direction.X*speed - r.Velocity.X, direction.Y*speed - r.Velocity.Y}
-		if n := math.Hypot(dv.X, dv.Y); n > Acceleration*DT {
-			dv.X *= Acceleration * DT / n
-			dv.Y *= Acceleration * DT / n
+		dashing := r.Combat.DashUntil > s.tick
+		var target Vec2
+		var accel float64
+		if dashing && s.simulationVersion >= 4 {
+			// v4：冲刺同样受加速度约束——朝冲刺向量以 DashAcceleration 逼近。
+			// 起步是加速爬坡、换向经过减速-过零-再加速、松开后由常规加速度
+			// 平滑衰减回 MaxSpeed；三种瞬时速率跳变都不复存在。
+			target, accel = r.Combat.DashDirection.Scale(s.dashSpeed()), DashAcceleration
+		} else {
+			target, accel = Vec2{direction.X * speed, direction.Y * speed}, Acceleration
+		}
+		dv := Vec2{target.X - r.Velocity.X, target.Y - r.Velocity.Y}
+		if n := math.Hypot(dv.X, dv.Y); n > accel*DT {
+			dv.X *= accel * DT / n
+			dv.Y *= accel * DT / n
 		}
 		r.Velocity.X += dv.X
 		r.Velocity.Y += dv.Y
-		if r.Combat.DashUntil > s.tick {
-			r.Velocity = r.Combat.DashDirection.Scale(DashSpeed)
+		// v1–v3 replay semantics: while dashing, velocity was pinned outright
+		// after the normal approach step.
+		if dashing && s.simulationVersion < 4 {
+			r.Velocity = r.Combat.DashDirection.Scale(s.dashSpeed())
 		}
 		s.slideRobot(r)
 	}

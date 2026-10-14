@@ -244,7 +244,7 @@ func (s *Sim) stepUplinks() {
 		}
 		busy[u.HackingID] = true
 		u.ProgressTicks++
-		if u.ProgressTicks == HackDuration {
+		if u.ProgressTicks == s.hackDuration() {
 			value := int32(15)
 			if u.Def.Main {
 				value = 25

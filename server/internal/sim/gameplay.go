@@ -5,16 +5,17 @@ package sim
 const (
 	FireInterval       uint32 = TickRate / 4
 	FireCost                  = 5.0
-	ProjectileSpeed           = 30.0
+	ProjectileSpeed           = 36.0
 	EffectiveRange            = 16.0
 	ProjectileRange           = 20.0
 	MaxSpread                 = 0.12 // radians at 20m; tuning default, not a damage falloff.
-	ShotDamage                = 12.0
+	ShotDamage                = 9.0
 	EnergyRegen               = 10.0
 	DashCost                  = 20.0
 	DashCooldown       uint32 = 150
 	DashDuration       uint32 = 18
-	DashSpeed                 = 16.0
+	DashSpeed                 = 15.0
+	DashAcceleration          = 96.0
 	ShieldDrain               = 18.0
 	ShieldDamageScale         = 0.35
 	ShieldSpeedScale          = 0.8
@@ -24,13 +25,55 @@ const (
 	PulseRadius               = 32.0
 	RespawnDelay       uint32 = 180
 	InvulnDuration     uint32 = 240
-	HackDuration       uint32 = 480
+	HackDuration       uint32 = 240
 	HackCooldown       uint32 = 1800
 	HackInterruptGrace uint32 = TickRate / 2
 	HackDecayInterval  uint32 = TickRate
 	HackDecayProgress  uint32 = TickRate / 2
 	SayCooldown        uint32 = 180
 )
+
+// Pre-v4 balance values, retained verbatim so recorded matches replay under
+// the constants they were played with. Live sims always use the block above.
+const (
+	legacyShotDamage      = 12.0
+	legacyProjectileSpeed = 30.0
+	legacyDashSpeed       = 16.0
+)
+
+const legacyHackDuration uint32 = 480
+
+// Version-aware balance accessors: deterministic replay of old recordings must
+// consume the values that were authoritative when the match was played.
+func hackDurationFor(version int) uint32 {
+	if version < 4 {
+		return legacyHackDuration
+	}
+	return HackDuration
+}
+
+func (s *Sim) hackDuration() uint32 { return hackDurationFor(s.simulationVersion) }
+
+func (s *Sim) shotDamage() float64 {
+	if s.simulationVersion < 4 {
+		return legacyShotDamage
+	}
+	return ShotDamage
+}
+
+func (s *Sim) projectileSpeed() float64 {
+	if s.simulationVersion < 4 {
+		return legacyProjectileSpeed
+	}
+	return ProjectileSpeed
+}
+
+func (s *Sim) dashSpeed() float64 {
+	if s.simulationVersion < 4 {
+		return legacyDashSpeed
+	}
+	return DashSpeed
+}
 
 type ControlState struct {
 	Assist        bool            `json:"assist"`

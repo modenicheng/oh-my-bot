@@ -8,21 +8,21 @@ import { emptyWorld, applySnapshot } from './world'
 import { SnapshotDeltaSchema, RobotStateSchema, EntityBaseSchema } from '@omb/protocol'
 
 // 与 server/internal/glue/simtuning_notice_test.go TestSimTuningGoldenBytes 同一 hex
-// （即 server sim.TickRate=60 / MaxHP=MaxEnergy=100 / FireCost=5 / HackDuration=480 /
+// （即 server sim.TickRate=60 / MaxHP=MaxEnergy=100 / FireCost=5 / HackDuration=240 /
 //  InvulnDuration=240 / VisionRadius=20 的编码）。两侧任一改值即失败。
-const SERVER_GOLDEN = '083c10d00f18d00f21000000000000144028e00330f001390000000000003440'
+const SERVER_GOLDEN = '083c10d00f18d00f21000000000000144028f00130f001390000000000003440'
 
 describe('SimTuning 兜底值（X-3）', () => {
   it('FALLBACK_TUNING 黄金字节与 Go 侧 simTuning() 一致', () => {
     expect(FALLBACK_TUNING_HEX).toBe(SERVER_GOLDEN)
   })
 
-  it('兜底值 = 当前服务器常量快照（60/1000/1000/5/480/240/20）', () => {
+  it('兜底值 = 当前服务器常量快照（60/1000/1000/5/240/240/20）', () => {
     expect(FALLBACK_TUNING.tickRate).toBe(60)
     expect(FALLBACK_TUNING.maxHpX10).toBe(1000)
     expect(FALLBACK_TUNING.maxEnergyX10).toBe(1000)
     expect(FALLBACK_TUNING.fireCost).toBe(5)
-    expect(FALLBACK_TUNING.hackDurationTicks).toBe(480)
+    expect(FALLBACK_TUNING.hackDurationTicks).toBe(240)
     expect(FALLBACK_TUNING.invulnDurationTicks).toBe(240)
     expect(FALLBACK_TUNING.visionRadius).toBe(20)
   })
@@ -56,8 +56,8 @@ describe('派生量换算（X-3）', () => {
     expect(invulnWindowMs(resolveTuning(create(SimTuningSchema, { tickRate: 60, invulnDurationTicks: 120, maxHpX10: 1000, maxEnergyX10: 1000, fireCost: 5, hackDurationTicks: 480, visionRadius: 20 })))).toBe(2250)
   })
 
-  it('黑入满值 = hack ticks ×10 / tick_rate（对应 HACK_MAX_X10=80）', () => {
-    expect(hackMaxX10(FALLBACK_TUNING)).toBe(80)
+  it('黑入满值 = hack ticks ×10 / tick_rate（v4：4s → HACK_MAX_X10 同步降为 40）', () => {
+    expect(hackMaxX10(FALLBACK_TUNING)).toBe(40)
   })
 })
 

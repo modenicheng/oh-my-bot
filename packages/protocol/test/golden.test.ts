@@ -135,13 +135,13 @@ describe('frame + protobuf round-trip', () => {
 // ---- SimTuning（X-3）：客户端兜底值与 Go 侧 simTuning() 黄金字节互钉 ----
 // Go 侧断言：server/internal/glue/simtuning_notice_test.go TestSimTuningGoldenBytes。
 // 两侧任一改值（sim 常量 / 兜底快照）都会使「服务器下发 = 客户端兜底」漂移暴露。
-export const SIM_TUNING_GOLDEN = '083c10d00f18d00f21000000000000144028e00330f001390000000000003440'
+export const SIM_TUNING_GOLDEN = '083c10d00f18d00f21000000000000144028f00130f001390000000000003440'
 
 describe('SimTuning golden (X-3)', () => {
   it('黄金字节与 Go simTuning() 一致', () => {
     const tuning = create(SimTuningSchema, {
       tickRate: 60, maxHpX10: 1000, maxEnergyX10: 1000, fireCost: 5,
-      hackDurationTicks: 480, invulnDurationTicks: 240, visionRadius: 20,
+      hackDurationTicks: 240, invulnDurationTicks: 240, visionRadius: 20,
     })
     expect(Buffer.from(toBinary(SimTuningSchema, tuning)).toString('hex')).toBe(SIM_TUNING_GOLDEN)
   })

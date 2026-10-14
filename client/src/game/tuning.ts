@@ -1,7 +1,7 @@
 // 对局数值（审计 X-3）：EvMapBootstrap.tuning 是唯一权威源，本模块持有
 // 「已下发值 + 旧服务器/旧录像兜底」。漂移高危集与服务器 sim 常量一一对应：
 //   tick_rate ↔ sim.TickRate=60 · max_hp_x10/max_energy_x10 ↔ sim.MaxHP/MaxEnergy ×10
-//   fire_cost ↔ sim.FireCost=5 · hack_duration_ticks ↔ sim.HackDuration=480
+//   fire_cost ↔ sim.FireCost=5 · hack_duration_ticks ↔ sim.HackDuration=240
 //   invuln_duration_ticks ↔ sim.InvulnDuration=240 · vision_radius ↔ sim.VisionRadius=20
 // 兜底值与 DEFAULT_TUNING.goldenHex 由 server/internal/glue 的 SimTuning golden
 // 测试互钉（两侧断言同一 hex），服务器调数值而不改协议时漂移即刻暴露。
@@ -14,7 +14,7 @@ export const FALLBACK_TUNING: Readonly<SimTuning> = Object.freeze(create(SimTuni
   maxHpX10: 1000,
   maxEnergyX10: 1000,
   fireCost: 5,
-  hackDurationTicks: 480,
+  hackDurationTicks: 240,
   invulnDurationTicks: 240,
   visionRadius: 20,
 }))

@@ -121,7 +121,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 					(uplink.DecayAt != 0 && uplink.DecayAt <= cp.Tick)
 			}
 			if uplink.Def != check.uplinks[i].Def || uplink.ReadyAt == nil || invalidDecay ||
-				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= HackDuration {
+				(uplink.HackingID != 0 && !known[uplink.HackingID]) || uplink.ProgressTicks >= hackDurationFor(cp.SimulationVersion) {
 				return nil, fmt.Errorf("sim: invalid checkpoint uplink")
 			}
 		}

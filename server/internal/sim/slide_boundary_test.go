@@ -86,6 +86,9 @@ func TestSlideRoundedCornerAndMultipleWalls(t *testing.T) {
 		if err := s.SetSpawn(1, Vec2{.38, 0}, 0); err != nil {
 			t.Fatal(err)
 		}
+		// v4 冲刺是加速度模型：直接置入冲刺速度模拟「冲刺中段」撞墙，
+		// 保持本用例的原始意图——检验冲刺速率下的贴墙切向滑动。
+		s.robots[0].Velocity = Vec2{DashSpeed * .6, DashSpeed * .8}
 		s.ApplyInput(1, &ombv1.ClientInput{Seq: 1, AxisMask: uint32(AxisMove | AxisAbility), MoveX: 600, MoveY: 800, Dash: true})
 		s.Tick()
 		r := s.robots[0]

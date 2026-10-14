@@ -94,7 +94,7 @@ interface ProjectileRef {
   owner: number    // 射手机器人 id（自己的弹也在列表里）
   x: number
   y: number
-  heading: number  // 当前飞行方向（弧度，含散布后的瞬时值）；弹速 30 m/s
+  heading: number  // 当前飞行方向（弧度，含散布后的瞬时值）；弹速 36 m/s
 }
 ```
 

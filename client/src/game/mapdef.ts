@@ -37,10 +37,10 @@ export interface MapDefParsed {
 export const RING_CORE = 28
 export const RING_OUTER = 80
 
-/** 黑入进度满值：progress_x10 的分母（8s × 10，对应 server sim.HackDuration=480）。
+/** 黑入进度满值：progress_x10 的分母（v4：4s × 10，对应 server sim.HackDuration=240）。
  *  X-3 起 HUD/渲染/音效改消费 world.tuning（hackMaxX10，服务器下发）；
  *  本常量仅保留给不持有 world 的旧路径引用，值与兜底 tuning 一致（D3）。 */
-export const HACK_MAX_X10 = 80
+export const HACK_MAX_X10 = 40
 
 type Raw = Record<string, unknown>
 
