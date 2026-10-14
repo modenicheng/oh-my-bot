@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/mapgen"
@@ -84,6 +85,14 @@ type Match struct {
 	// rc.mu → encMu，无反向嵌套。rc.mu 本身保证 step 期间无房间级写者。
 	encMu      sync.Mutex
 	obsWorkers int
+
+	// tickStatWindow（批 2 可观测性）：最近 tick 环形窗口的墙钟（默认
+	// 600 tick = 10s）与脚本顺延累计。statMu 在 step 尾部落账，锁序
+	// rc.mu → statMu（与 encMu 平级叶子）。
+	statMu     sync.Mutex
+	tickWindow []time.Duration
+	tickCursor int
+	deferrals  atomic.Uint64
 }
 
 // parallelObserverThreshold：观察者少于该值走串行路径——小房不值得付
@@ -478,6 +487,53 @@ func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
 	}
 }
 
+// tickStatWindowLen 可观测性窗口：600 tick ≈ 10s。
+const tickStatWindowLen = 600
+
+// recordTickStat 在 step 返回前记录本 tick 墙钟（未激活 tick 不计——
+// inactive 提前 return 不经过本 defer 的注册点）。
+func (m *Match) recordTickStat(started time.Time) {
+	m.statMu.Lock()
+	defer m.statMu.Unlock()
+	if len(m.tickWindow) < tickStatWindowLen {
+		m.tickWindow = append(m.tickWindow, time.Since(started))
+		return
+	}
+	m.tickWindow[m.tickCursor] = time.Since(started)
+	m.tickCursor = (m.tickCursor + 1) % tickStatWindowLen
+}
+
+// MatchStats 是 /api/stats 的单对局快照。
+type MatchStats struct {
+	Tick            uint32  `json:"tick"`
+	TickAvgMs       float64 `json:"tick_avg_ms"`
+	TickP95Ms       float64 `json:"tick_p95_ms"`
+	Warmup          bool    `json:"warmup"`
+	ScriptDeferrals uint64  `json:"script_deferrals"`
+}
+
+// StatSnapshot 汇总本对局观测窗口。并发安全（statMu / atomic）；tick 与
+// warmup 读取不加 rc.mu——两者为单调/装配期冻结字段，撕裂读取无危害。
+func (m *Match) StatSnapshot() MatchStats {
+	m.statMu.Lock()
+	window := make([]time.Duration, len(m.tickWindow))
+	copy(window, m.tickWindow)
+	m.statMu.Unlock()
+	sort.Slice(window, func(i, j int) bool { return window[i] < window[j] })
+	out := MatchStats{Tick: m.tick, Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
+	if len(window) > 0 {
+		var total time.Duration
+		for _, d := range window {
+			total += d
+		}
+		out.TickAvgMs = float64(total.Microseconds()) / float64(len(window)) / 1000
+		// nearest-rank p95：第 ceil(0.95·n) 个次序统计量（下标从 0）。
+		p95 := window[(95*len(window)+99)/100-1]
+		out.TickP95Ms = float64(p95.Microseconds()) / 1000
+	}
+	return out
+}
+
 // Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
 func (m *Match) Abort() { m.Stop() }
 
@@ -677,11 +733,13 @@ func (m *Match) run() {
 }
 
 func (m *Match) step() {
+	started := time.Now()
 	m.rc.mu.Lock()
 	defer m.rc.mu.Unlock()
 	if !m.activeLocked() {
 		return
 	}
+	defer m.recordTickStat(started)
 	m.tick++
 	m.sim.Tick()
 	m.persistAssistStateLocked()
@@ -881,6 +939,7 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 	for _, res := range m.scriptPool.Collect(deadline) {
 		rt := m.scriptPool.RuntimeOf(res.ID)
 		if res.Err != nil || res.Deferred {
+			m.deferrals.Add(1)
 			m.sim.ClearScriptAxes(res.ID) // 超时/异常/顺延：清脚本轴（人类轴保留）
 			if rt != nil && !res.Deferred {
 				m.sendScriptLogsLocked(res.ID, rt)

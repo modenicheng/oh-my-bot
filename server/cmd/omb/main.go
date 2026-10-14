@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path"
@@ -299,6 +300,18 @@ func main() {
 	// 只读版本接口：release 构建经 -ldflags '-X main.version=<tag>' 注入，二进制是唯一版本源。
 	registerVersionRoute(mux)
 
+	// 运维可观测性（批 2）：/api/stats 汇总在线/房间/对局 tick 墙钟/传输
+	// 过载计数；/debug/pprof 经 OMB_PPROF 显式开启（默认关闭）。
+	mux.HandleFunc("/api/stats", statsHandler(hub))
+	if os.Getenv("OMB_PPROF") != "" {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		log.Print("pprof enabled at /debug/pprof/ (OMB_PPROF)")
+	}
+
 	// 回放 API：对局列表 + 单局事件流（JSONL 原样透传，客户端逐行解析）
 	mux.HandleFunc("/api/matches", func(w http.ResponseWriter, _ *http.Request) {
 		entries, err := os.ReadDir("data/matches")
@@ -436,6 +449,31 @@ func envAddr() string {
 		return v
 	}
 	return listen.Default
+}
+
+// statsHandler（批 2）：GET /api/stats 的只读运维快照。无鉴权——与
+// /healthz 同级的基础设施接口，部署侧由反代控制可达性。
+func statsHandler(hub *glue.Hub) http.HandlerFunc {
+	type transportStats struct {
+		LossyDropped      uint64 `json:"lossy_dropped"`
+		ReliableKilled    uint64 `json:"reliable_killed"`
+		ScriptLogsDropped uint64 `json:"script_logs_dropped"`
+	}
+	type statsPayload struct {
+		Online    int              `json:"online"`
+		Rooms     []glue.RoomStats `json:"rooms"`
+		Transport transportStats   `json:"transport"`
+	}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		lossy, killed, logs := netws.TransportStats()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(statsPayload{
+			Online:    hub.OnlineCount(),
+			Rooms:     hub.StatsSnapshot(),
+			Transport: transportStats{LossyDropped: lossy, ReliableKilled: killed, ScriptLogsDropped: logs},
+		})
+	}
 }
 
 // registerVersionRoute 挂载只读 GET /api/version，返回 {"version":...}。

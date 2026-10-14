@@ -811,6 +811,50 @@ func (a *asyncHandle) Abort() {
 }
 func (rc *RoomConn) currentMatch() *Match { rc.mu.Lock(); defer rc.mu.Unlock(); return rc.match }
 
+// OnlineCount 返回当前注册会话数（玩家 + 观战 + 未绑定连接的瞬时值）。
+func (h *Hub) OnlineCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.player)
+}
+
+// RoomStats 是 /api/stats 的单房间快照（批 2 可观测性）。
+type RoomStats struct {
+	Code       string      `json:"code"`
+	State      string      `json:"state"`
+	Players    int         `json:"players"`
+	Spectators int         `json:"spectators"`
+	Match      *MatchStats `json:"match,omitempty"`
+}
+
+// StatsSnapshot 聚合全部房间的观测快照。锁序与 janitorSweep 一致：
+// 先在 h.mu 下拍房间列表，再逐房拿 rc.mu。
+func (h *Hub) StatsSnapshot() []RoomStats {
+	h.mu.Lock()
+	rooms := make([]*RoomConn, 0, len(h.rooms))
+	for _, rc := range h.rooms {
+		rooms = append(rooms, rc)
+	}
+	h.mu.Unlock()
+	out := make([]RoomStats, 0, len(rooms))
+	for _, rc := range rooms {
+		rc.mu.Lock()
+		st := RoomStats{
+			Code:       rc.Code,
+			State:      rc.Room.State().String(),
+			Players:    len(rc.sessions),
+			Spectators: len(rc.spectators),
+		}
+		if m := rc.match; m != nil && m.activeLocked() {
+			ms := m.StatSnapshot()
+			st.Match = &ms
+		}
+		rc.mu.Unlock()
+		out = append(out, st)
+	}
+	return out
+}
+
 func (rc *RoomConn) EnsureLauncher() {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()

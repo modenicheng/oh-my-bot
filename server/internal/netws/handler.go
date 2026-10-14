@@ -54,6 +54,20 @@ const (
 	maxFrameBytes = int64(ombv1.TransportTiming_MAX_FRAME_BYTES)
 )
 
+// transportStats（批 2 可观测性）：进程级累计计数，覆盖三类「过载可见」
+// 信号——慢消费者丢 delta、可靠通道满而断连、script log 低优先丢弃。
+// 仅原子自增，永不重置；/api/stats 聚合消费。
+var transportStats struct {
+	lossyDropped      atomic.Uint64
+	reliableKilled    atomic.Uint64
+	scriptLogsDropped atomic.Uint64
+}
+
+// TransportStats 返回（慢消费者丢 delta 数, 可靠通道满断连数, script log 丢弃数）。
+func TransportStats() (lossyDropped, reliableKilled, scriptLogsDropped uint64) {
+	return transportStats.lossyDropped.Load(), transportStats.reliableKilled.Load(), transportStats.scriptLogsDropped.Load()
+}
+
 // queuedFrame keeps superseded match snapshots and logs out of the new map's timeline.
 // Epochs are transport-local; the protobuf contract remains unchanged.
 type queuedFrame struct {
@@ -119,6 +133,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 				case scriptLogCh <- queuedFrame{data: b, epoch: epoch.Load(), scriptLog: log}:
 				default:
 					droppedScriptLogs.Add(1)
+					transportStats.scriptLogsDropped.Add(1)
 				}
 				return
 			}
@@ -136,6 +151,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			case reliableCh <- frame:
 			default:
 				kill() // 可靠通道满 = 一致性已破坏，断开由客户端重连+Resync 恢复
+				transportStats.reliableKilled.Add(1)
 			}
 		}
 		sendLossy := func(msg *ombv1.ServerMsg) {
@@ -146,6 +162,8 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			select {
 			case lossyCh <- queuedFrame{data: b, epoch: epoch.Load()}:
 			default: // 慢消费者：丢 delta，客户端 base_tick 检测后重同步
+
+				transportStats.lossyDropped.Add(1)
 			}
 		}
 		sendReliableFrame := func(b []byte) {
@@ -157,6 +175,7 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			case reliableCh <- frame:
 			default:
 				kill() // 与 sendReliable 同语义：可靠通道满 = 一致性已破坏
+				transportStats.reliableKilled.Add(1)
 			}
 		}
 
