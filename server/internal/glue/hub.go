@@ -136,6 +136,7 @@ func (h *Hub) Unregister(s *Session) {
 				m.releaseHumanLocked(s.playerID)
 			}
 			delete(rc.sessions, s.playerID)
+			rc.maybeAutoResumeLocked()
 		}
 		rc.mu.Unlock()
 	}
@@ -238,6 +239,10 @@ type RoomConn struct {
 	match          *Match
 	launcher       room.SimLauncher
 	launch         atomic.Pointer[asyncHandle]
+	// paused：房主暂停的正式对局（rc.mu 守护）。房间离开 Running 的任何
+	// 转移（结算/中止/新局发布）都会在广播时自动复位；房主连接全部断开时
+	// 由 maybeAutoResumeLocked 解除，避免对局被永久冻结。
+	paused bool
 
 	// ai is shared by warmup and its following scored match, so both consume
 	// the same room-cycle quota. A new warmup (or direct start from idle) resets it.
@@ -444,6 +449,19 @@ func (s *Session) ToggleAssist() {
 	})
 }
 func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
+	// 暂停/继续/提前结算是对局级控制（不改房间生命周期状态），走 glue 侧
+	// 专用路径；其余动作仍由 room 状态机裁决。
+	switch kind {
+	case ombv1.RoomAction_PAUSE:
+		s.PauseCommand(true)
+		return
+	case ombv1.RoomAction_RESUME:
+		s.PauseCommand(false)
+		return
+	case ombv1.RoomAction_FINISH:
+		s.FinishCommand()
+		return
+	}
 	act := map[ombv1.RoomAction_Kind]room.Action{ombv1.RoomAction_START: room.ActionStart, ombv1.RoomAction_ABORT: room.ActionAbort, ombv1.RoomAction_RESTART: room.ActionRestart, ombv1.RoomAction_WARMUP: room.ActionWarmup, ombv1.RoomAction_SOLO_BOTS: room.ActionSoloBots}[kind]
 	if act == 0 {
 		return
@@ -453,6 +471,48 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 			s.SendReliable(say("command failed: " + err.Error()))
 			return
 		}
+		rc.broadcastRoomStateLocked()
+	})
+}
+
+// PauseCommand 房主暂停/继续正式对局。房间保持 Running，权威循环停推 tick；
+// EvRoomState.paused 随广播下发（含暂停期间的进房 catch-up），客户端据此
+// 展示/撤下暂停覆盖层。
+func (s *Session) PauseCommand(paused bool) {
+	s.withRoom(func(rc *RoomConn) {
+		if !rc.Room.IsHost(s.playerID) {
+			s.SendReliable(say("command failed: only the host may pause the match"))
+			return
+		}
+		if rc.Room.State() != room.Running {
+			s.SendReliable(say("command failed: no running match to pause"))
+			return
+		}
+		if m := rc.match; m == nil || !m.activeLocked() || m.warmup {
+			s.SendReliable(say("command failed: no running match to pause"))
+			return
+		}
+		if rc.paused != paused {
+			rc.paused = paused
+		}
+		rc.broadcastRoomStateLocked()
+	})
+}
+
+// FinishCommand 房主提前结算：当前正式对局在下一拍按正常结算流收口（计分、
+// 称号、事件日志、结算广播），房间进入 Ended。
+func (s *Session) FinishCommand() {
+	s.withRoom(func(rc *RoomConn) {
+		if !rc.Room.IsHost(s.playerID) {
+			s.SendReliable(say("command failed: only the host may finish the match"))
+			return
+		}
+		m := rc.match
+		if m == nil || !m.activeLocked() || m.warmup {
+			s.SendReliable(say("command failed: no running match to finish"))
+			return
+		}
+		m.requestFinishLocked()
 		rc.broadcastRoomStateLocked()
 	})
 }
@@ -604,6 +664,7 @@ func (s *Session) LeaveRoom() {
 			}
 			s.hub.mu.Unlock()
 		}
+		rc.maybeAutoResumeLocked()
 		rc.broadcastRoomStateLocked()
 	})
 }
@@ -667,7 +728,28 @@ func (rc *RoomConn) BroadcastRoomState() {
 	rc.broadcastRoomStateLocked()
 }
 func (rc *RoomConn) broadcastRoomStateLocked() {
-	rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_RoomState{RoomState: rc.Room.StateBroadcast()}}}})
+	// 暂停只在 Running 内有意义；任何离开 Running 的转移都在广播时复位，
+	// 防止暂停态泄漏到下一局（新局发布/结算/中止共用本出口）。
+	rc.paused = rc.paused && rc.Room.State() == room.Running
+	ev := &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_RoomState{RoomState: rc.Room.StateBroadcast()}}
+	if rc.paused {
+		ev.GetRoomState().Paused = true
+	}
+	rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}})
+}
+
+// maybeAutoResumeLocked 在一次会话移除后检查：房主是否仍有存活连接。房主
+// 全部掉线/离开时解除暂停——否则非房主既看不到房主也无法继续，对局被永久
+// 冻结在暂停态。Caller holds rc.mu.
+func (rc *RoomConn) maybeAutoResumeLocked() {
+	if !rc.paused {
+		return
+	}
+	if host := rc.sessions[rc.Room.HostID()]; host != nil {
+		return
+	}
+	rc.paused = false
+	rc.broadcastRoomStateLocked()
 }
 func say(text string) *ombv1.ServerMsg {
 	return &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Text: text}}}}}
@@ -748,6 +830,11 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 	}
 	addSoloBots(players, botCount)
 	aiSvc := rc.ai
+	// 房主建房时长的正式局配置（0/0 = 默认）；warmup 不消费。
+	var dur MatchDurations
+	if !warmup {
+		dur.MatchTicks, dur.CoreOpenTick = rc.Room.DurationConfig()
+	}
 	// Warmup starts a new quota cycle. A direct scored start from idle does too;
 	// starting from an active warmup deliberately keeps the same budget.
 	if aiSvc != nil && (warmup || rc.match == nil || !rc.match.warmup) {
@@ -758,6 +845,9 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 		return
 	}
 	m, err := NewMatch(rc, seed, int(seed&0xffffffff), players, warmup, aiSvc)
+	if err == nil {
+		err = m.ApplyDurations(dur)
+	}
 	if err != nil {
 		rc.mu.Lock()
 		if rc.launch.Load() == a && !a.cancelled.Load() {
@@ -784,6 +874,7 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	if rc.match != nil {
 		rc.match.Stop()
 	}
+	rc.paused = false // 新局从干净状态开始，不继承上一局残留暂停
 	m.handle = a
 	m.syncRoomSnippetsLocked()
 	rc.match = m

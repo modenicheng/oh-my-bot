@@ -74,6 +74,7 @@ type Match struct {
 	tick       uint32
 	eventSeq   uint64 // projected-event identity for OnEventRecord dedup
 	warmup     bool
+	finishReq  bool // 房主提前结算请求（rc.mu 守护；下一 step 消费）
 	stopOnce   sync.Once
 	finishOnce sync.Once
 	stop       chan struct{}
@@ -267,6 +268,10 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 		return nil, fmt.Errorf("setmap: %w", err)
 	}
+	if warmup {
+		// 热身场无终局语义：拉长时长上限，避免长时间热身被终局逻辑冻结。
+		m.sim.SetWarmupDurations()
+	}
 	for pid, info := range players {
 		m.sim.SetRobotMeta(m.robotOf[pid], info.Nick, info.Color)
 	}
@@ -354,7 +359,10 @@ func (m *Match) newSink() sim.EventSink { return glueSink{m: m} }
 
 func (g glueSink) OnCheckpoint(state sim.Checkpoint) {
 	g.m.proj.OnCheckpoint(state)
-	if state.Tick != sim.MatchTicks {
+	// 终局 checkpoint（自然到点 tick==matchTicks，或提前结算 Ended）触发结算
+	// 投影与广播；热身场无结算语义。此前按 tick==MatchTicks 判定，无法覆盖
+	// 可配置时长与提前结算两种形态（Ended 由 sim 在 emit 后置位，见 Tick）。
+	if !state.Ended || g.m.warmup {
 		return
 	}
 	end := settledMatchEnd(state.Tick, nil)
@@ -703,6 +711,114 @@ func (m *Match) dropSpectatorLocked(pid uint64) {
 	delete(m.specEncoders, pid)
 	delete(m.specReliableFull, pid)
 }
+// selfInputOf 组装某机器人的 owner-locked 私有投影（不改冻结的 RobotView API）。
+// step 的常规帧与暂停期的重同步帧共用，保证两条路径字段一致。Caller holds rc.mu.
+func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInput {
+	ctrl := wv.Controls[rv.ID]
+	robot, _ := m.sim.Robot(rv.ID)
+	self := snapshot.SelfInput{
+		Robot:         rv,
+		MoveSrc:       ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
+		TurretSrc:     ctrl.TurretSrc,
+		FireSrc:       ctrl.FireSrc,
+		AbilitySrc:    ctrl.AbilitySrc,
+		ManualAxes:    uint32(robot.Control.HumanAxes),
+		AssistOn:      robot.Control.Assist,
+		DashReadyTick: robot.Combat.DashReady,
+		FireReadyTick: robot.Combat.FireReady,
+	}
+	if m.ai != nil && m.ai.quota != nil {
+		if pid, ok := m.playerOf[rv.ID]; ok {
+			self.AiRounds, self.AiTokensK, _ = m.ai.quota.Snapshot(pid)
+		}
+	}
+	return self
+}
+
+// flushPausedResyncs：暂停期间没有下一 tick 可消费 reliableFull 标记——对
+// 标记中的玩家与观战者直接编码一帧当前全量快照（可靠下发），世界其余部分
+// 保持冻结。Caller holds rc.mu.
+func (m *Match) flushPausedResyncs() {
+	m.encMu.Lock()
+	pids := make([]uint64, 0, len(m.reliableFull))
+	for pid := range m.reliableFull {
+		pids = append(pids, pid)
+	}
+	specs := make([]uint64, 0, len(m.specReliableFull))
+	for pid := range m.specReliableFull {
+		specs = append(specs, pid)
+	}
+	m.encMu.Unlock()
+	if len(pids) == 0 && len(specs) == 0 {
+		return
+	}
+	wv := m.sim.WorldView()
+	world := snapshot.WorldOf(wv)
+	for _, pid := range pids {
+		if !m.takeReliableFull(pid) {
+			continue
+		}
+		s := m.rc.sessions[pid]
+		rid, ok := m.robotOf[pid]
+		if s == nil || !ok {
+			continue
+		}
+		rv, found := robotOf(wv, rid)
+		if !found {
+			continue
+		}
+		enc := m.encoderFor(rid)
+		enc.ForceFull()
+		obs := snapshot.BuildObservation(world, m.wallIX, rid, 0, wv.ScanRadius(rid))
+		self := m.selfInputOf(wv, rv)
+		delta := enc.Encode(wv.Frame.Tick, wv.AckSeqs[rid], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+	}
+	if len(specs) == 0 {
+		return
+	}
+	specObs := snapshot.BuildSpectatorObservation(world)
+	for _, pid := range specs {
+		if !m.takeSpecReliableFull(pid) {
+			continue
+		}
+		s := m.rc.spectators[pid]
+		if s == nil {
+			continue
+		}
+		enc := m.specEncoderFor(pid)
+		enc.ForceFull()
+		delta := enc.Encode(wv.Frame.Tick, 0, wv.Frame.Phase, wv.Frame.TimeLeftS, specObs, nil)
+		s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
+	}
+}
+
+// requestFinishLocked 房主提前结算请求：下一拍走终局路径（完整管线 + MatchEnd
+// + 终局 checkpoint + 结算广播）。隐含解除暂停。Caller holds rc.mu.
+func (m *Match) requestFinishLocked() {
+	if !m.activeLocked() || m.warmup {
+		return
+	}
+	m.rc.paused = false
+	m.finishReq = true
+}
+
+// MatchDurations 正式局时长配置（tick；零值 = 服务器默认 8/4 分钟）。
+// 由房间建房配置（JoinRoom）解析而来，随每次 Launch 传入。
+type MatchDurations struct {
+	MatchTicks   uint32
+	CoreOpenTick uint32
+}
+
+// ApplyDurations 在发布（start）前应用房主时长配置；warmup 忽略（热身场
+// 使用 sim 的 WarmupTicks 语义，与正式局时长无关）。
+func (m *Match) ApplyDurations(d MatchDurations) error {
+	if m.warmup {
+		return nil
+	}
+	return m.sim.SetDurations(d.MatchTicks, d.CoreOpenTick)
+}
+
 func (m *Match) run() {
 	defer close(m.done)
 	defer func() {
@@ -739,7 +855,18 @@ func (m *Match) step() {
 	if !m.activeLocked() {
 		return
 	}
+	// 房主暂停（仅正式局）：权威时钟停走，世界冻结。暂停期不再有 tick 帧，
+	// 但 bootstrap/resync 标记仍需出帧——新接入的玩家/观战者不能挂
+	// 「正在同步」到恢复为止。
+	if m.rc.paused && !m.warmup {
+		m.flushPausedResyncs()
+		return
+	}
 	defer m.recordTickStat(started)
+	if m.finishReq {
+		m.finishReq = false
+		m.sim.FinishEarly()
+	}
 	m.tick++
 	m.sim.Tick()
 	m.persistAssistStateLocked()
@@ -764,7 +891,8 @@ func (m *Match) step() {
 	// ended：终局帧（审计 S-34）——没有下一个 tick 可以修复丢失的末帧，
 	// 玩家与观战者同样 ForceFull + 可靠下发（此前玩家走 lossy，终局帧被
 	// 丢时该玩家世界定格在倒数第二帧，仅分数可靠不受影响）。
-	ended := m.tick >= sim.MatchTicks && !m.warmup
+	// 判定用 sim 终局位：自然到点（tick==matchTicks）与提前结算同构。
+	ended := m.sim.Ended() && !m.warmup
 	world := snapshot.WorldOf(wv)
 	m.parallelFor(len(wv.Robots), func(i int) {
 		rv := wv.Robots[i]
@@ -778,23 +906,7 @@ func (m *Match) step() {
 		}
 		enc := m.encoderFor(rv.ID)
 		obs := obsByRobot[rv.ID]
-		ctrl := wv.Controls[rv.ID]
-		// Owner-locked private state is projected without changing the frozen RobotView API.
-		robot, _ := m.sim.Robot(rv.ID)
-		self := snapshot.SelfInput{
-			Robot:         rv,
-			MoveSrc:       ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
-			TurretSrc:     ctrl.TurretSrc,
-			FireSrc:       ctrl.FireSrc,
-			AbilitySrc:    ctrl.AbilitySrc,
-			ManualAxes:    uint32(robot.Control.HumanAxes),
-			AssistOn:      robot.Control.Assist,
-			DashReadyTick: robot.Combat.DashReady,
-			FireReadyTick: robot.Combat.FireReady,
-		}
-		if m.ai != nil && m.ai.quota != nil {
-			self.AiRounds, self.AiTokensK, _ = m.ai.quota.Snapshot(pid)
-		}
+		self := m.selfInputOf(wv, rv)
 		if ended {
 			enc.ForceFull()
 			delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
