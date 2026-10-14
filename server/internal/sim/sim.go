@@ -39,6 +39,11 @@ const (
 	MaxEnergy                  = 100.0
 	FrameBudget                = 12 * time.Millisecond
 	DefaultScriptBudget        = 10 * time.Millisecond
+	// 可配置时长界（SetDurations）：正式局时长与核心区开放时点可由房主在建房
+	// 时设定；下界防秒级空局，上界同时是日志 tick 校验的硬上限（log.go）。
+	MinMatchTicks  uint32 = 60 * TickRate
+	MaxMatchTicks  uint32 = 30 * 60 * TickRate
+	WarmupTicks    uint32 = 24 * 60 * 60 * TickRate // 热身场无终局语义，取远离日常使用的上界
 )
 
 // EventSink must not mutate the Sim or block on unbounded work. Persistence
@@ -137,20 +142,24 @@ type HealthPack struct {
 }
 
 type Checkpoint struct {
-	SimulationVersion int          `json:"simulation_version,omitempty"`
-	Tick              uint32       `json:"tick"`
-	Seed              uint64       `json:"seed"`
+	SimulationVersion int    `json:"simulation_version,omitempty"`
+	Tick              uint32 `json:"tick"`
+	Seed              uint64 `json:"seed"`
 	Phase             ombv1.Phase  `json:"phase"`
 	Ended             bool         `json:"ended"`
-	Robots            []Robot      `json:"robots"`
-	Walls             []Wall       `json:"walls"`
-	Map               *MapDef      `json:"map,omitempty"`
-	RNG               uint64       `json:"rng"`
-	NextProjectile    uint32       `json:"next_projectile"`
-	Projectiles       []Projectile `json:"projectiles"`
-	Cores             []CoreView   `json:"cores"`
-	HealthPacks       []HealthPack `json:"health_packs"`
-	Uplinks           []Uplink     `json:"uplinks"`
+	// MatchTicks/CoreOpenTick 是本局解析后的时长配置（0 = 历史日志，回放读取
+	// 时回退包默认常量）。进 Checkpoint 供回放/校验恢复同一时长语义。
+	MatchTicks    uint32       `json:"match_ticks,omitempty"`
+	CoreOpenTick  uint32       `json:"core_open_tick,omitempty"`
+	Robots        []Robot      `json:"robots"`
+	Walls         []Wall       `json:"walls"`
+	Map           *MapDef      `json:"map,omitempty"`
+	RNG           uint64       `json:"rng"`
+	NextProjectile uint32       `json:"next_projectile"`
+	Projectiles   []Projectile `json:"projectiles"`
+	Cores         []CoreView   `json:"cores"`
+	HealthPacks   []HealthPack `json:"health_packs"`
+	Uplinks       []Uplink     `json:"uplinks"`
 }
 
 type consumedInput struct {
@@ -166,7 +175,13 @@ type Sim struct {
 	tick              uint32
 	phase             ombv1.Phase
 	ended             bool
-	robots            []Robot
+	// matchTicks/coreOpenTick 是解析后的本局时长（NewSim 即默认常量；SetDurations
+	// 在首个 Tick 前覆盖）。finishEarly 由外部（房主提前结算）请求，下一次 Tick
+	// 作为最后一拍：完整走完管线与事件，再按终局路径收口。
+	matchTicks   uint32
+	coreOpenTick uint32
+	finishEarly  bool
+	robots       []Robot
 	index             map[uint32]int
 	walls             []Wall
 	// wallIX/wallBuf：墙体空间索引与查询复用缓冲（wallgrid.go；批 2 压测
@@ -202,6 +217,7 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 	ids := append([]uint32(nil), playerIDs...)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	s := &Sim{simulationVersion: SimulationVersion, seed: seed, rng: seed, nextProjectile: 1, phase: ombv1.Phase_OUTER_RING, sink: eventSink,
+		matchTicks: MatchTicks, coreOpenTick: CoreOpenTick,
 		robots: make([]Robot, len(ids)), index: make(map[uint32]int, len(ids)),
 		walls: make([]Wall, 0)}
 	for i, id := range ids {
@@ -223,6 +239,60 @@ func (s *Sim) CurrentTick() uint32 { return s.tick }
 func (s *Sim) Phase() ombv1.Phase  { return s.phase }
 func (s *Sim) Ended() bool         { return s.ended }
 
+// MatchTicks/CoreOpenTick 返回本局解析后的时长配置（tick 数）。
+func (s *Sim) MatchTickLimit() uint32 { return s.matchTicks }
+func (s *Sim) CoreOpenAt() uint32     { return s.coreOpenTick }
+
+// ValidateDurations 校验一对时长配置（0 = 对应默认值），返回解析后的值。
+// 规则：时长落在 [MinMatchTicks, MaxMatchTicks]，核心区开放严格早于终局。
+// 供装配入口（glue/回放恢复）与本包 SetDurations 共用同一语义。
+func ValidateDurations(matchTicks, coreOpenTicks uint32) (uint32, uint32, error) {
+	if matchTicks == 0 {
+		matchTicks = MatchTicks
+	}
+	if coreOpenTicks == 0 {
+		coreOpenTicks = CoreOpenTick
+	}
+	if matchTicks < MinMatchTicks || matchTicks > MaxMatchTicks {
+		return 0, 0, fmt.Errorf("sim: match duration %d ticks outside [%d, %d]", matchTicks, MinMatchTicks, MaxMatchTicks)
+	}
+	if coreOpenTicks == 0 || coreOpenTicks >= matchTicks {
+		return 0, 0, fmt.Errorf("sim: core open %d ticks must be within (0, %d)", coreOpenTicks, matchTicks)
+	}
+	return matchTicks, coreOpenTicks, nil
+}
+
+// SetDurations 覆盖本局时长（须在首个 Tick 前调用，与 SetMap 同一装配期契约）。
+// 零值字段回退包默认；非法组合报错且不改动状态。
+func (s *Sim) SetDurations(matchTicks, coreOpenTicks uint32) error {
+	if s.tick != 0 {
+		return fmt.Errorf("sim: durations must be configured before the first tick")
+	}
+	mt, ct, err := ValidateDurations(matchTicks, coreOpenTicks)
+	if err != nil {
+		return err
+	}
+	s.matchTicks, s.coreOpenTick = mt, ct
+	return nil
+}
+
+// SetWarmupDurations applies the never-ending warmup profile: 热身场无终局语义
+// （不结算、不落日志），时长取远离日常使用的上界，避免长时间热身被终局
+// 逻辑冻结。
+func (s *Sim) SetWarmupDurations() {
+	s.matchTicks = WarmupTicks
+}
+
+// FinishEarly 请求提前结算：下一次 Tick 为最后一拍（完整管线 + MatchEnd 标记
+// + 终局 checkpoint），结算投影由调用侧 sink 完成。已结束的对局返回 false。
+func (s *Sim) FinishEarly() bool {
+	if s.ended {
+		return false
+	}
+	s.finishEarly = true
+	return true
+}
+
 func (s *Sim) Robot(id uint32) (Robot, bool) {
 	i, ok := s.index[id]
 	if !ok {
@@ -237,6 +307,7 @@ func (s *Sim) Snapshot() Checkpoint {
 		robots[i] = cloneRobot(r)
 	}
 	return Checkpoint{SimulationVersion: s.simulationVersion, Tick: s.tick, Seed: s.seed, Phase: s.phase, Ended: s.ended,
+		MatchTicks: s.matchTicks, CoreOpenTick: s.coreOpenTick,
 		Robots: robots, Walls: append([]Wall{}, s.walls...), Map: cloneMap(s.mapDef), RNG: s.rng,
 		NextProjectile: s.nextProjectile, Projectiles: append([]Projectile{}, s.projectiles...),
 		Cores: append([]CoreView{}, s.cores...), HealthPacks: append([]HealthPack{}, s.healthPacks...), Uplinks: cloneUplinks(s.uplinks)}
@@ -303,7 +374,8 @@ func (s *Sim) Respawn(robotID uint32) bool {
 // Tick advances exactly 1/60s: phase -> input/arbitration -> energy/movement ->
 // projectiles/objectives -> immutable view -> events -> checkpoint. Script
 // workers consume the last published frame and hand results to this owner.
-// Ticks after 28800 are no-ops, including checkpoint/end emission.
+// Ticks after the configured match length (default 28800) are no-ops, including
+// checkpoint/end emission.
 func (s *Sim) Tick() {
 	if s.ended {
 		return
@@ -333,7 +405,9 @@ func (s *Sim) Tick() {
 	s.stepHealthPacks()
 	s.publishView()
 	s.emit(initial)
-	if s.tick%CheckpointInterval == 0 {
+	// 终局（自然到点或提前结算）强制落最后一拍 checkpoint：结算投影与回放
+	// 的最终状态都依赖它，不能等下一个 CheckpointInterval。
+	if s.tick%CheckpointInterval == 0 || s.ended {
 		if sink, ok := s.sink.(CheckpointSink); ok {
 			sink.OnCheckpoint(s.Snapshot())
 		}
@@ -449,7 +523,7 @@ func (s *Sim) slideRobot(r *Robot) {
 }
 
 func (s *Sim) changePhase() {
-	if s.tick == CoreOpenTick {
+	if s.tick == s.coreOpenTick {
 		from := s.phase
 		s.phase = ombv1.Phase_CORE_OPEN
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_PhaseChange{
@@ -458,8 +532,9 @@ func (s *Sim) changePhase() {
 }
 
 func (s *Sim) emit(initial *Checkpoint) {
-	if s.tick == MatchTicks {
+	if s.tick == s.matchTicks || (s.finishEarly && s.tick < s.matchTicks) {
 		s.ended = true
+		s.finishEarly = false
 		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MatchEnd{MatchEnd: &ombv1.EvMatchEnd{}}})
 	}
 	if replay, ok := s.sink.(ReplaySink); ok {

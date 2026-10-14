@@ -293,7 +293,7 @@ func TestMatchEventLogRejectsCorruptRecords(t *testing.T) {
 		"null_event":            `{"type":"event","tick":1,"event":null}`,
 		"missing_event":         `{"type":"event","tick":1}`,
 		"tick_mismatch":         `{"type":"event","tick":1,"event":{"tick":2,"matchStart":{}}}`,
-		"beyond_end":            `{"type":"event","tick":28801,"event":{"tick":28801,"matchStart":{}}}`,
+		"beyond_end":            `{"type":"event","tick":108001,"event":{"tick":108001,"matchStart":{}}}`,
 		"unknown_proto_field":   `{"type":"event","tick":1,"event":{"tick":1,"future":{}}}`,
 		"two_json_values":       `{"type":"event","tick":1,"event":{"tick":1,"matchStart":{}}} {}`,
 		"missing_state":         `{"type":"checkpoint","tick":3600}`,

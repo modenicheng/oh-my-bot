@@ -451,7 +451,9 @@ func decodeJSON(data []byte, target any) error {
 }
 
 func validateRecord(r diskRecord) error {
-	if r.Tick > MatchTicks {
+	// 单条记录无全局上下文，用可配置上界（SetDurations 的硬上限）兜底；
+	// 具体本局时长由回放恢复时的 checkpoint 校验把关。
+	if r.Tick > MaxMatchTicks {
 		return errors.New("sim: log tick beyond match end")
 	}
 	if r.Type != RecordTypeDiskName(RecordControl) && r.Control != nil {
@@ -478,7 +480,9 @@ func validateRecord(r diskRecord) error {
 		if r.State == nil || r.State.Tick != r.Tick || len(r.Event) != 0 || len(r.Input) != 0 || r.RobotID != 0 {
 			return errors.New("sim: invalid state record")
 		}
-		if (r.Type == RecordTypeDiskName(RecordMatchStart) && r.Tick != 0) || (r.Type == RecordTypeDiskName(RecordCheckpoint) && (r.Tick == 0 || r.Tick%CheckpointInterval != 0)) {
+		// checkpoint 记录须落在 CheckpointInterval 整数倍上；唯一例外是终局
+		// 强制 checkpoint（提前结算在任意 tick 收口，以 State.Ended 标记）。
+		if (r.Type == RecordTypeDiskName(RecordMatchStart) && r.Tick != 0) || (r.Type == RecordTypeDiskName(RecordCheckpoint) && (r.Tick == 0 || (r.Tick%CheckpointInterval != 0 && !r.State.Ended))) {
 			return errors.New("sim: invalid state record tick")
 		}
 		if r.State.Robots == nil || r.State.Walls == nil {

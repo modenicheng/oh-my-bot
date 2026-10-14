@@ -38,7 +38,7 @@ func cloneUplinks(src []Uplink) []Uplink {
 	return out
 }
 func (s *Sim) publishView() {
-	v := &WorldView{Frame: FrameView{Tick: s.tick, Phase: Phase(s.phase), TimeLeftS: secondsLeft(s.tick, MatchTicks), Map: s.mapDef},
+	v := &WorldView{Frame: FrameView{Tick: s.tick, Phase: Phase(s.phase), TimeLeftS: secondsLeft(s.tick, s.matchTicks), Map: s.mapDef},
 		Robots: make([]RobotView, len(s.robots)), Projectiles: make([]ProjView, len(s.projectiles)), Cores: append([]CoreView{}, s.cores...),
 		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
 	if v.Frame.Map == nil && len(s.walls) != 0 {

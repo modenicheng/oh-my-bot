@@ -123,7 +123,7 @@ func TestRestoreCheckpointDetachesAndRejectsInvalidState(t *testing.T) {
 		"robot identity": func(c *Checkpoint) { c.Robots[1].ID = c.Robots[0].ID },
 		"version":        func(c *Checkpoint) { c.SimulationVersion = SimulationVersion + 1 },
 		"nonfinite":      func(c *Checkpoint) { c.Robots[0].Position.X = math.NaN() },
-		"ended":          func(c *Checkpoint) { c.Ended = true },
+		"ended":          func(c *Checkpoint) { c.Ended = true; c.Tick = MatchTicks + 1 },
 		"phase":          func(c *Checkpoint) { c.Phase = ombv1.Phase_PHASE_UNSPECIFIED },
 		"core geometry":  func(c *Checkpoint) { c.Cores[0].Pos.X++ },
 		"core rules":     func(c *Checkpoint) { c.Map.CoreRules.PeriodTicks = 0 },

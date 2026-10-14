@@ -38,13 +38,19 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	if err := json.Unmarshal(raw, &cp); err != nil {
 		return nil, fmt.Errorf("sim: checkpoint: %w", err)
 	}
+	// 时长配置：0 = 历史日志，回退包默认常量。提前结算的合法终局形态为
+	// Ended && Tick <= matchTicks（自然到点为 Tick == matchTicks）。
+	matchTicks, coreOpen, err := ValidateDurations(cp.MatchTicks, cp.CoreOpenTick)
+	if err != nil {
+		return nil, fmt.Errorf("sim: invalid checkpoint durations: %w", err)
+	}
 	wantPhase := ombv1.Phase_OUTER_RING
-	if cp.Tick >= CoreOpenTick {
+	if cp.Tick >= coreOpen {
 		wantPhase = ombv1.Phase_CORE_OPEN
 	}
-	if cp.SimulationVersion < 0 || cp.SimulationVersion > SimulationVersion || cp.Tick > MatchTicks ||
+	if cp.SimulationVersion < 0 || cp.SimulationVersion > SimulationVersion || cp.Tick > matchTicks ||
 		cp.Phase != wantPhase ||
-		cp.Ended != (cp.Tick == MatchTicks) || cp.Robots == nil || cp.Walls == nil {
+		(!cp.Ended && cp.Tick >= matchTicks) || cp.Robots == nil || cp.Walls == nil {
 		return nil, fmt.Errorf("sim: invalid checkpoint lifecycle")
 	}
 	ids := make([]uint32, len(cp.Robots))
@@ -131,6 +137,8 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	s := NewSim(cp.Seed, ids, sink)
 	s.simulationVersion = cp.SimulationVersion
 	s.tick, s.phase, s.ended = cp.Tick, cp.Phase, cp.Ended
+	// 恢复本局时长语义（阶段判定/终局 tick 与录制时一致；已 ValidateDurations）。
+	s.matchTicks, s.coreOpenTick = matchTicks, coreOpen
 	s.robots, s.walls, s.mapDef = cp.Robots, cp.Walls, cp.Map
 	s.rebuildWallIndex()
 	s.rng, s.nextProjectile = cp.RNG, cp.NextProjectile
@@ -144,15 +152,23 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 // projected separately by stats.ReadReplay. EOF is not proof of match end;
 // replay beyond the last recorded tick is rejected.
 func ReplayTo(source io.Reader, targetTick uint32, sink EventSink) (*Sim, error) {
-	if targetTick > MatchTicks {
-		return nil, fmt.Errorf("sim: replay target beyond match end")
-	}
 	records, err := ReadMatchEventLog(source)
 	if err != nil {
 		return nil, err
 	}
-	if len(records) == 0 || records[0].Type != RecordMatchStart || records[len(records)-1].Tick < targetTick {
-		return nil, fmt.Errorf("sim: replay missing start or target coverage")
+	if len(records) == 0 || records[0].Type != RecordMatchStart {
+		return nil, fmt.Errorf("sim: replay missing start")
+	}
+	// 目标 tick 上限用本局录制时长（历史日志缺省回退默认常量）。
+	matchTicks, _, err := ValidateDurations(records[0].State.MatchTicks, records[0].State.CoreOpenTick)
+	if err != nil {
+		return nil, fmt.Errorf("sim: replay durations: %w", err)
+	}
+	if targetTick > matchTicks {
+		return nil, fmt.Errorf("sim: replay target beyond match end")
+	}
+	if records[len(records)-1].Tick < targetTick {
+		return nil, fmt.Errorf("sim: replay missing target coverage")
 	}
 	if err := validateReplayContinuity(records); err != nil {
 		return nil, err
