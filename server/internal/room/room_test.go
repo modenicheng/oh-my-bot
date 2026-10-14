@@ -232,6 +232,23 @@ func TestLegalTransitions(t *testing.T) {
 			t.Fatalf("state = %v, want Warmup", r.State())
 		}
 	})
+
+	t.Run("ended_start_next_match_directly", func(t *testing.T) {
+		r, l := newTestRoom(t)
+		mustAction(t, r, 1, ActionStart)
+		r.EndMatch() // natural end
+		// 打完正式局直接开下一局正式赛：不必先回热身场。
+		mustAction(t, r, 1, ActionStart)
+		if r.State() != Running {
+			t.Fatalf("state = %v, want Running", r.State())
+		}
+		if l.launches != 2 {
+			t.Fatalf("launches = %d, want 2", l.launches)
+		}
+		if r.SessionSeq() != 2 {
+			t.Fatalf("SessionSeq = %d, want 2", r.SessionSeq())
+		}
+	})
 }
 
 // --- illegal transitions ------------------------------------------------
@@ -253,10 +270,6 @@ func TestIllegalTransitions(t *testing.T) {
 		{"restart_from_running", func(r *Room) { mustAction(t, r, 1, ActionStart) }, ActionRestart},
 		{"warmup_from_running", func(r *Room) { mustAction(t, r, 1, ActionStart) }, ActionWarmup},
 		{"start_from_running", func(r *Room) { mustAction(t, r, 1, ActionStart) }, ActionStart},
-		{"start_from_ended", func(r *Room) {
-			mustAction(t, r, 1, ActionStart)
-			r.EndMatch()
-		}, ActionStart},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

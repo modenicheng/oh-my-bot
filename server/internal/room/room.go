@@ -348,7 +348,8 @@ func (r *Room) SessionSeq() int {
 // Only the host may issue any action. Legal transitions:
 //
 //	WARMUP:  Idle → Warmup, Ended → Warmup (restart-like), [Running → Warmup rejected]
-//	START:   Warmup → Running, Idle → Running (single-player quick start)
+//	START:   Warmup → Running, Idle → Running, Ended → Running（打完上一局
+//	         直接开下一局正式赛，不必先回热身场）
 //	ABORT:   Running → Ended
 //	RESTART: Ended → Warmup
 //
@@ -388,7 +389,7 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 		return nil
 
 	case ActionStart:
-		if r.state != Warmup && r.state != Idle {
+		if r.state != Warmup && r.state != Idle && r.state != Ended {
 			return fmt.Errorf("%w: Start from %s", ErrIllegalTransit, r.state)
 		}
 		seed, playerIDs, soloLauncher, err := r.prepareLaunchLocked()
