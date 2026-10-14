@@ -879,7 +879,14 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	m.syncRoomSnippetsLocked()
 	rc.match = m
 	for _, s := range rc.sessions {
-		m.bootstrapLocked(s)
+		// S-27 花名册守卫（与 Bind 同款）：HostCommand 冻结 ids 与异步 publish
+		// 之间存在装配窗口，窗口内 Bind 的会话是房间成员但不在本轮 robotOf。
+		// 对其 bootstrap 会让客户端进入 awaitingFull，而快照循环只服务花名册
+		// 机器人——该会话将卡「正在同步对局…」到下一局发布且无任何报错。
+		// 跳过：留在房间大厅，下一局发布（届时已在花名册）自动入列。
+		if _, inRoster := m.robotOf[s.playerID]; inRoster {
+			m.bootstrapLocked(s)
+		}
 	}
 	for _, s := range rc.spectators {
 		m.bootstrapSpectatorLocked(s)

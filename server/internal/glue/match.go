@@ -711,6 +711,7 @@ func (m *Match) dropSpectatorLocked(pid uint64) {
 	delete(m.specEncoders, pid)
 	delete(m.specReliableFull, pid)
 }
+
 // selfInputOf 组装某机器人的 owner-locked 私有投影（不改冻结的 RobotView API）。
 // step 的常规帧与暂停期的重同步帧共用，保证两条路径字段一致。Caller holds rc.mu.
 func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInput {
