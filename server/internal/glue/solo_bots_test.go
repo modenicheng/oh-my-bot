@@ -277,16 +277,18 @@ func TestSoloBotsCancelledAssemblyClosesRuntimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &asyncHandle{}
-	rc.launch.Store(a)
-	a.Abort()
-	(&launcherAdapter{rc}).publish(a, m)
-	// Snapshot the bot runtimes before teardown — pool Close empties its
-	// registry, so the pointers must be captured up front.
+	// Snapshot the bot runtimes before publish — the cancelled publish path
+	// (m.Stop → async run teardown) closes the pool and empties its registry
+	// concurrently, so the pointers must be captured while registration is
+	// still quiescent (NewMatch registers every bot runtime synchronously).
 	bots := make(map[uint32]*script.GojaRuntime, len(m.botRobots))
 	for rid := range m.botRobots {
 		bots[rid] = m.scriptPool.RuntimeOf(rid)
 	}
+	a := &asyncHandle{}
+	rc.launch.Store(a)
+	a.Abort()
+	(&launcherAdapter{rc}).publish(a, m)
 	stopTestMatch(t, m)
 	if rc.currentMatch() != nil {
 		t.Fatal("cancelled bot match published")
