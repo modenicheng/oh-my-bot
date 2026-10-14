@@ -120,6 +120,7 @@ func (s *Sim) SetMap(def *MapDef) error {
 		positions[i] = p
 	}
 	s.mapDef, s.walls, s.rng = m, m.Walls, candidate.rng
+	s.rebuildWallIndex()
 	s.uplinks = make([]Uplink, len(m.Uplinks))
 	s.cores = make([]CoreView, len(m.CorePads))
 	s.healthPacks = make([]HealthPack, len(m.HealthPacks))

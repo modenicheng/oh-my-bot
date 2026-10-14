@@ -132,6 +132,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	s.simulationVersion = cp.SimulationVersion
 	s.tick, s.phase, s.ended = cp.Tick, cp.Phase, cp.Ended
 	s.robots, s.walls, s.mapDef = cp.Robots, cp.Walls, cp.Map
+	s.rebuildWallIndex()
 	s.rng, s.nextProjectile = cp.RNG, cp.NextProjectile
 	s.projectiles, s.cores, s.healthPacks, s.uplinks = cp.Projectiles, cp.Cores, cp.HealthPacks, cp.Uplinks
 	s.publishView()

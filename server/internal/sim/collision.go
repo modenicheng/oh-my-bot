@@ -48,7 +48,7 @@ func (s *Sim) sweepContact(p, d Vec2) contact {
 			best.hit = true
 		}
 	}
-	for _, wall := range s.walls {
+	for _, wall := range s.sweepWalls(p, p.Add(d), RobotRadius) {
 		if t, n, ok := sweepWallNormal(p, d, wall); ok {
 			consider(t, n)
 		}
@@ -184,6 +184,7 @@ func (s *Sim) SetWalls(walls []Wall) error {
 		}
 	}
 	s.walls = next
+	s.rebuildWallIndex()
 	if s.mapDef != nil {
 		s.mapDef = cloneMap(s.mapDef)
 		s.mapDef.Walls = append([]Wall{}, next...)

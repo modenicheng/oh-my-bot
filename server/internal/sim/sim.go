@@ -169,18 +169,22 @@ type Sim struct {
 	robots            []Robot
 	index             map[uint32]int
 	walls             []Wall
-	sink              EventSink
-	events            []*ombv1.ServerEvent
-	consumed          []consumedInput
-	mapDef            *MapDef
-	rng               uint64
-	nextProjectile    uint32
-	projectiles       []Projectile
-	cores             []CoreView
-	healthPacks       []HealthPack
-	uplinks           []Uplink
-	view              atomic.Pointer[WorldView]
-	controlEvents     []controlRecord
+	// wallIX/wallBuf：墙体空间索引与查询复用缓冲（wallgrid.go；批 2 压测
+	// 后引入）。walls 只在装配入口整体替换并随即重建索引。
+	wallIX         *wallGrid
+	wallBuf        []Wall
+	sink           EventSink
+	events         []*ombv1.ServerEvent
+	consumed       []consumedInput
+	mapDef         *MapDef
+	rng            uint64
+	nextProjectile uint32
+	projectiles    []Projectile
+	cores          []CoreView
+	healthPacks    []HealthPack
+	uplinks        []Uplink
+	view           atomic.Pointer[WorldView]
+	controlEvents  []controlRecord
 }
 
 // NewSim uses player IDs as robot IDs. Zero/duplicate IDs panic, as they violate

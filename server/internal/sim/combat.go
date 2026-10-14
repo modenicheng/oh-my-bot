@@ -293,9 +293,9 @@ func segmentWall(p, d Vec2, w Wall) (float64, bool) {
 	return lo, true
 }
 
-func (s *Sim) traceSolid(p, d Vec2) (float64, bool) {
-	fraction, hit := 1.0, false
-	for _, w := range s.walls {
+func (s *Sim) traceSolid(p, d Vec2) (fraction float64, hit bool) {
+	fraction, hit = 1.0, false
+	for _, w := range s.sweepWalls(p, p.Add(d), 0) {
 		if t, ok := segmentWall(p, d, w); ok && t <= fraction {
 			fraction, hit = t, true
 		}
@@ -319,7 +319,7 @@ func (s *Sim) LineOfSight(from, to Vec2) bool {
 
 func (s *Sim) pushRobot(r *Robot, delta Vec2) {
 	fraction := 1.0
-	for _, w := range s.walls {
+	for _, w := range s.sweepWalls(r.Position, r.Position.Add(delta), RobotRadius) {
 		if t, hit := sweepWall(r.Position, delta, w); hit && t < fraction {
 			fraction = t
 		}
