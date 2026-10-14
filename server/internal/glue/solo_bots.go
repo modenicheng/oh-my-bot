@@ -10,8 +10,8 @@ import (
 // Synthetic identities live only in the match, never in RoomConn.identities or
 // sessions. Keep the existing 64-robot cap when humans fill the room.
 func addSoloBots(players map[uint64]SessionInfo, count uint32) {
-	if count > room.MaxSoloBots {
-		count = room.MaxSoloBots
+	if count > uint32(room.MaxSoloBots) {
+		count = uint32(room.MaxSoloBots)
 	}
 	used := make(map[uint32]bool, len(players))
 	for pid := range players {

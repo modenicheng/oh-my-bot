@@ -101,6 +101,23 @@ sudo systemctl daemon-reload && sudo systemctl enable --now omb
 journalctl -u omb -f                # 跟踪日志
 ```
 
+### 大房间（单房间 >64 人）
+
+单房间席位上限默认 64（设计基线）；大型活动用环境变量 `OMB_MAX_PLAYERS`
+提升（1–256，超界钳制，须在服务启动前设置）：
+
+```ini
+# 200 人单房示例（同一 [Service] 段）
+Environment=OMB_MAX_PLAYERS=200
+```
+
+席位提高后**地图与资源会随开房人数自动伸缩**（GeneratorVer 8：场地面积
+∝ 人数、掩体/Uplink/血包/Core Pad 分档增长），无需额外配置。注意：
+
+- 大房间对单进程 CPU 的压力近似线性于房间规模，200 人房建议 ≥8 核并
+  先做一轮压测（人数 × 脚本活跃度）；
+- 每房观战席位仍为 64（全图视角，编码成本高于玩家）。
+
 ## 反向代理（推荐的生产接入方式）
 
 监听 `127.0.0.1` 或 unix socket 后，通过反向代理统一处理跨网段入口、TLS 终结和访问控制。socket 文件权限默认 `0666`（反代进程通常以别的用户运行）；要收紧就按上例设置服务的 `User=omb` / `Group=omb`，把反代用户加入 `omb` 组，再设 `RuntimeDirectoryMode=0750`，重启两个服务使组权限生效。目录进不去则 socket 不可达。

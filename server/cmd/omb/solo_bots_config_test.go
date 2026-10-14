@@ -12,8 +12,8 @@ func TestEnvDefaultSoloBots(t *testing.T) {
 		want        uint32
 	}{
 		{name: "unset", value: "", want: 0},
-		{name: "full room", value: "63", want: room.MaxSoloBots},
-		{name: "clamped", value: "999", want: room.MaxSoloBots},
+		{name: "full room", value: "63", want: uint32(room.MaxSoloBots)},
+		{name: "clamped", value: "999", want: uint32(room.MaxSoloBots)},
 		{name: "invalid", value: "many", want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

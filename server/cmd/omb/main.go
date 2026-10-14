@@ -177,11 +177,34 @@ func envDefaultSoloBots() uint32 {
 	}
 	if n > uint64(room.MaxSoloBots) {
 		log.Printf("OMB_DEFAULT_SOLO_BOTS=%d exceeds %d; clamped", n, room.MaxSoloBots)
-		return room.MaxSoloBots
+		return uint32(room.MaxSoloBots)
 	}
 	return uint32(n)
 }
 
+// envMaxPlayers 启动期应用 OMB_MAX_PLAYERS（单房间席位上限，默认 64；
+// 上界由 room.SetMaxPlayers 钳制到 256——200 为已压测目标，余量防配置错字）。
+// 必须在第一间房间创建前调用——main 里位于 hub 装配之前，满足该约束。
+// 解析失败回退默认值并记日志。
+func envMaxPlayers() {
+	raw := strings.TrimSpace(os.Getenv("OMB_MAX_PLAYERS"))
+	if raw == "" {
+		return
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		log.Printf("invalid OMB_MAX_PLAYERS=%q (using default %d)", raw, room.MaxPlayers)
+		return
+	}
+	before := room.MaxPlayers
+	room.SetMaxPlayers(n)
+	if room.MaxPlayers != n {
+		log.Printf("OMB_MAX_PLAYERS=%d clamped to %d", n, room.MaxPlayers)
+	}
+	if room.MaxPlayers != before {
+		log.Printf("room seat cap set to %d (OMB_MAX_PLAYERS)", room.MaxPlayers)
+	}
+}
 
 // envDuration 读取 Go duration 字符串环境变量（如 "15s"、"5m"；容忍首尾空白）。
 // 空/未设置返回 ok=false，调用方跳过——Hub 保留默认；解析失败打一条日志并按
@@ -235,6 +258,8 @@ func main() {
 	}
 
 	hub := glue.NewHub()
+	// 席位上限先于一切房间装配（env OMB_MAX_PLAYERS，默认 64）。
+	envMaxPlayers()
 	// 空房间清道夫（审计 S-26）：空置停 warmup 对局、久置逐出房间；阈值经
 	// OMB_WARMUP_IDLE_STOP / OMB_ROOM_EVICT_AFTER 配置（未设置=默认）。
 	hub.StartJanitor(30 * time.Second)

@@ -678,13 +678,13 @@ func TestSoloBotsNextLaunchConfiguration(t *testing.T) {
 	if err := r.HostCommand(1, ActionSoloBots); err != nil {
 		t.Fatal(err)
 	}
-	if rs := r.StateBroadcast(); rs.SoloBots != MaxSoloBots || rs.RobotsOnline != 1 {
+	if rs := r.StateBroadcast(); rs.SoloBots != uint32(MaxSoloBots) || rs.RobotsOnline != 1 {
 		t.Fatalf("state: %+v", rs)
 	}
 	if err := r.HostCommand(1, ActionWarmup); err != nil {
 		t.Fatal(err)
 	}
-	if len(launcher.counts) != 1 || launcher.counts[0] != MaxSoloBots || !launcher.warmups[0] {
+	if len(launcher.counts) != 1 || launcher.counts[0] != uint32(MaxSoloBots) || !launcher.warmups[0] {
 		t.Fatal("warmup lost config")
 	}
 	warm := base.handles[0]
@@ -766,5 +766,33 @@ func TestUnsupportedSoloBotsKeepStateAndHandle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSetMaxPlayersConfiguresSeatCap(t *testing.T) {
+	orig := MaxPlayers
+	t.Cleanup(func() { SetMaxPlayers(orig) })
+
+	SetMaxPlayers(200)
+	if MaxPlayers != 200 || MaxSoloBots != 199 {
+		t.Fatalf("seat cap = %d/%d, want 200/199", MaxPlayers, MaxSoloBots)
+	}
+	r := NewRoom("BIG", 1)
+	for i := 1; i <= 200; i++ {
+		if err := r.Join(uint64(i), "n", "#000000"); err != nil {
+			t.Fatalf("join %d: %v", i, err)
+		}
+	}
+	if err := r.Join(201, "overflow", "#ffffff"); err != ErrRoomFull {
+		t.Fatalf("201st join err = %v, want ErrRoomFull", err)
+	}
+
+	SetMaxPlayers(999)
+	if MaxPlayers != 256 || MaxSoloBots != 255 {
+		t.Fatalf("hard cap = %d/%d, want 256/255", MaxPlayers, MaxSoloBots)
+	}
+	SetMaxPlayers(0)
+	if MaxPlayers != 256 {
+		t.Fatal("zero seat cap was accepted")
 	}
 }

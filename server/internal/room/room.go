@@ -92,13 +92,34 @@ func (a Action) String() string {
 	}
 }
 
-// MaxPlayers is the hard seat limit per game_design_v0.3 §2 (1–64 robots).
-const MaxPlayers = 64
+// MaxPlayers is the seat limit per room. game_design_v0.3 §2 shipped a fixed
+// 64; large-room deployments raise it via OMB_MAX_PLAYERS (cmd/omb applies it
+// once at startup, before any room exists). Runtime code treats it as
+// read-only after startup.
+var MaxPlayers = 64
 
 // MaxSoloBots fills every non-human seat while always reserving at least one
 // seat for the room host. Launch assembly still caps the final roster at
 // MaxPlayers when more humans are seated.
-const MaxSoloBots = MaxPlayers - 1
+var MaxSoloBots = MaxPlayers - 1
+
+// maxPlayersHardCap bounds OMB_MAX_PLAYERS typos; 200 is the load-tested
+// target for the 2026-10 event, 256 leaves documented headroom.
+const maxPlayersHardCap = 256
+
+// SetMaxPlayers configures the seat limit at process startup and keeps
+// MaxSoloBots in sync. Out-of-range values are clamped, never rejected:
+// a typo must not lock every room at one seat.
+func SetMaxPlayers(n int) {
+	if n < 1 {
+		return
+	}
+	if n > maxPlayersHardCap {
+		n = maxPlayersHardCap
+	}
+	MaxPlayers = n
+	MaxSoloBots = n - 1
+}
 
 // MatchHandle is the running-side handle of a launched match. The room only
 // ever needs to abort it; lifecycle completion is driven externally by the
@@ -235,8 +256,8 @@ func (r *Room) SoloBots() uint32 {
 func (r *Room) SetSoloBots(count uint32) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if count > MaxSoloBots {
-		count = MaxSoloBots
+	if count > uint32(MaxSoloBots) {
+		count = uint32(MaxSoloBots)
 	}
 	r.soloBots = count
 }
@@ -251,7 +272,7 @@ func (r *Room) MemberCount() int {
 // ErrRoomFull, ErrAlreadyJoined, ErrNotMember and ErrNotHost are membership
 // errors returned by Join/Leave/HostCommand.
 var (
-	ErrRoomFull       = errors.New("room: room is full (64 players)")
+	ErrRoomFull       = errors.New("room: room is full")
 	ErrAlreadyJoined  = errors.New("room: player already in room")
 	ErrNotMember      = errors.New("room: player not in room")
 	ErrNotHost        = errors.New("room: only the host may issue room commands")
@@ -347,7 +368,7 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 			return fmt.Errorf("%w: SoloBots from %s", ErrIllegalTransit, r.state)
 		}
 		if r.soloBots == 0 {
-			r.soloBots = MaxSoloBots
+			r.soloBots = uint32(MaxSoloBots)
 		} else {
 			r.soloBots = 0
 		}

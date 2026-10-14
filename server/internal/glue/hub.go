@@ -59,8 +59,8 @@ func (h *Hub) SetAIService(newSvc func() *AIService) { h.aiNew = newSvc }
 func (h *Hub) SetDefaultSoloBots(count uint32) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if count > room.MaxSoloBots {
-		count = room.MaxSoloBots
+	if count > uint32(room.MaxSoloBots) {
+		count = uint32(room.MaxSoloBots)
 	}
 	h.defaultSoloBots = count
 }

@@ -44,8 +44,8 @@ func TestSoloBotIdentityCapacity(t *testing.T) {
 		}
 	}
 	a, b := map[uint64]SessionInfo{}, map[uint64]SessionInfo{}
-	addSoloBots(a, room.MaxSoloBots)
-	addSoloBots(b, room.MaxSoloBots)
+	addSoloBots(a, uint32(room.MaxSoloBots))
+	addSoloBots(b, uint32(room.MaxSoloBots))
 	if !reflect.DeepEqual(a, b) {
 		t.Fatal("synthetic identities are not stable")
 	}
@@ -53,7 +53,7 @@ func TestSoloBotIdentityCapacity(t *testing.T) {
 
 func TestSoloBotFullRosterCapacity(t *testing.T) {
 	players := map[uint64]SessionInfo{1: {PlayerID: 1, Nick: "host"}}
-	addSoloBots(players, room.MaxSoloBots)
+	addSoloBots(players, uint32(room.MaxSoloBots))
 	if len(players) != room.MaxPlayers {
 		t.Fatalf("full roster = %d, want %d", len(players), room.MaxPlayers)
 	}
@@ -78,11 +78,11 @@ func TestHubDefaultSoloBots(t *testing.T) {
 	h := NewHub()
 	h.SetDefaultSoloBots(999)
 	first := h.EnsureRoom("FULLBOT")
-	if got := first.Room.SoloBots(); got != room.MaxSoloBots {
+	if got := first.Room.SoloBots(); got != uint32(room.MaxSoloBots) {
 		t.Fatalf("default solo bots = %d, want %d", got, room.MaxSoloBots)
 	}
 	h.SetDefaultSoloBots(0)
-	if got := h.EnsureRoom("FULLBOT").Room.SoloBots(); got != room.MaxSoloBots {
+	if got := h.EnsureRoom("FULLBOT").Room.SoloBots(); got != uint32(room.MaxSoloBots) {
 		t.Fatalf("existing room changed to %d", got)
 	}
 	if got := h.EnsureRoom("EMPTYBOT").Room.SoloBots(); got != 0 {
@@ -245,12 +245,12 @@ func TestSoloBotsHostToggleAndReconnect(t *testing.T) {
 		t.Fatal("guest changed bot config")
 	}
 	host.HostCommand(ombv1.RoomAction_SOLO_BOTS)
-	if rc.Room.SoloBots() != room.MaxSoloBots {
+	if rc.Room.SoloBots() != uint32(room.MaxSoloBots) {
 		t.Fatal("protobuf action not routed to room")
 	}
 	broadcast := false
 	for _, sent := range log.take() {
-		if rs := sent.msg.GetEvent().GetRoomState(); rs != nil && rs.SoloBots == room.MaxSoloBots && rs.RobotsOnline == 2 {
+		if rs := sent.msg.GetEvent().GetRoomState(); rs != nil && rs.SoloBots == uint32(room.MaxSoloBots) && rs.RobotsOnline == 2 {
 			broadcast = true
 		}
 	}
@@ -259,7 +259,7 @@ func TestSoloBotsHostToggleAndReconnect(t *testing.T) {
 	}
 	replacement, _ := bindLogged(t, h, rc, "host")
 	host.HostCommand(ombv1.RoomAction_SOLO_BOTS)
-	if rc.Room.SoloBots() != room.MaxSoloBots {
+	if rc.Room.SoloBots() != uint32(room.MaxSoloBots) {
 		t.Fatal("stale session changed bot config")
 	}
 	replacement.HostCommand(ombv1.RoomAction_SOLO_BOTS)
