@@ -174,6 +174,11 @@ type Room struct {
 
 	pendingNicks map[uint64]string
 	soloBots     uint32
+
+	// matchTicks/coreOpenTicks：本房正式局时长配置（tick，0/0 = 默认 8/4 分钟）。
+	// 建房语义：仅房间空闲且无人入座时（创建窗口）可写入，进房/开局后固定。
+	matchTicks   uint32
+	coreOpenTick uint32
 }
 
 // NewRoom creates a room with the given code and host. The host is not
@@ -260,6 +265,26 @@ func (r *Room) SetSoloBots(count uint32) {
 		count = uint32(MaxSoloBots)
 	}
 	r.soloBots = count
+}
+
+// SetDurationConfig 记录本房正式局时长（tick，0/0 = 默认）。仅创建窗口
+// （Idle 且无人入座）接受写入并返回 true；其余时点静默忽略（后进房者携带
+// 的设置不覆盖房主配置）。数值合法性由调用侧（glue/入口）用 sim 规则校验。
+func (r *Room) SetDurationConfig(matchTicks, coreOpenTicks uint32) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state != Idle || len(r.members) > 0 {
+		return false
+	}
+	r.matchTicks, r.coreOpenTick = matchTicks, coreOpenTicks
+	return true
+}
+
+// DurationConfig 返回本房正式局时长配置（tick，0/0 = 默认）。
+func (r *Room) DurationConfig() (matchTicks, coreOpenTicks uint32) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.matchTicks, r.coreOpenTick
 }
 
 // MemberCount returns the number of seated players.
