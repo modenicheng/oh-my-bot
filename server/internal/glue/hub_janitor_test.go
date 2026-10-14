@@ -15,9 +15,11 @@ func roomExists(h *Hub, code string) bool {
 }
 
 // waitForMatch 等待异步装配发布（launcher 在后台 goroutine 组装）。
+// 预算给到 10s：race 模式下装配含 mapgen，2 核 CI runner 满载时
+// 2s 级预算会偶发超时（2026-10-14 rc 窗口实测）；happy path 毫秒级返回。
 func waitForMatch(t *testing.T, rc *RoomConn) *Match {
 	t.Helper()
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 1000; i++ {
 		if m := rc.currentMatch(); m != nil {
 			return m
 		}
