@@ -283,9 +283,10 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
-	m.scriptPool = script.NewRunPool(script.Config{})
+	scriptCfg := script.Config{TickTimeout: scriptTickQuota(len(players))}
+	m.scriptPool = script.NewRunPool(scriptCfg)
 	for rid := range m.botRobots {
-		rt := script.NewGojaRuntime(script.Config{})
+		rt := script.NewGojaRuntime(scriptCfg)
 		if err := rt.Load(soloBotSource(rid)); err != nil {
 			rt.Close()
 			m.scriptPool.Close()
@@ -306,6 +307,21 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 	m.restoreSavedAssist(players)
 
 	return m, nil
+}
+
+// scriptTickQuota 单脚本 tick 配额随花名册规模分档（批 2）。收集 deadline
+// 仍是整帧 FrameBudget；单脚本配额限制的是最坏脚本的独占时长——花名册
+// 越大、worker 上排队的脚本越多，越早把超时脚本顺延（清轴计 idle），
+// 让「更多但更瘦」的脚本都能轮转。≤64 人维持包默认 10ms 不变。
+func scriptTickQuota(players int) time.Duration {
+	switch {
+	case players > 128:
+		return 4 * time.Millisecond
+	case players > 64:
+		return 6 * time.Millisecond
+	default:
+		return 0
+	}
 }
 
 // sink 适配 EventSink 接口：投影 + 广播（不阻塞、不改事件——契约要求）。
