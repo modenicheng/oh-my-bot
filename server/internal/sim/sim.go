@@ -41,9 +41,9 @@ const (
 	DefaultScriptBudget        = 10 * time.Millisecond
 	// 可配置时长界（SetDurations）：正式局时长与核心区开放时点可由房主在建房
 	// 时设定；下界防秒级空局，上界同时是日志 tick 校验的硬上限（log.go）。
-	MinMatchTicks  uint32 = 60 * TickRate
-	MaxMatchTicks  uint32 = 30 * 60 * TickRate
-	WarmupTicks    uint32 = 24 * 60 * 60 * TickRate // 热身场无终局语义，取远离日常使用的上界
+	MinMatchTicks uint32 = 60 * TickRate
+	MaxMatchTicks uint32 = 30 * 60 * TickRate
+	WarmupTicks   uint32 = 24 * 60 * 60 * TickRate // 热身场无终局语义，取远离日常使用的上界
 )
 
 // EventSink must not mutate the Sim or block on unbounded work. Persistence
@@ -142,24 +142,24 @@ type HealthPack struct {
 }
 
 type Checkpoint struct {
-	SimulationVersion int    `json:"simulation_version,omitempty"`
-	Tick              uint32 `json:"tick"`
-	Seed              uint64 `json:"seed"`
-	Phase             ombv1.Phase  `json:"phase"`
-	Ended             bool         `json:"ended"`
+	SimulationVersion int         `json:"simulation_version,omitempty"`
+	Tick              uint32      `json:"tick"`
+	Seed              uint64      `json:"seed"`
+	Phase             ombv1.Phase `json:"phase"`
+	Ended             bool        `json:"ended"`
 	// MatchTicks/CoreOpenTick 是本局解析后的时长配置（0 = 历史日志，回放读取
 	// 时回退包默认常量）。进 Checkpoint 供回放/校验恢复同一时长语义。
-	MatchTicks    uint32       `json:"match_ticks,omitempty"`
-	CoreOpenTick  uint32       `json:"core_open_tick,omitempty"`
-	Robots        []Robot      `json:"robots"`
-	Walls         []Wall       `json:"walls"`
-	Map           *MapDef      `json:"map,omitempty"`
-	RNG           uint64       `json:"rng"`
+	MatchTicks     uint32       `json:"match_ticks,omitempty"`
+	CoreOpenTick   uint32       `json:"core_open_tick,omitempty"`
+	Robots         []Robot      `json:"robots"`
+	Walls          []Wall       `json:"walls"`
+	Map            *MapDef      `json:"map,omitempty"`
+	RNG            uint64       `json:"rng"`
 	NextProjectile uint32       `json:"next_projectile"`
-	Projectiles   []Projectile `json:"projectiles"`
-	Cores         []CoreView   `json:"cores"`
-	HealthPacks   []HealthPack `json:"health_packs"`
-	Uplinks       []Uplink     `json:"uplinks"`
+	Projectiles    []Projectile `json:"projectiles"`
+	Cores          []CoreView   `json:"cores"`
+	HealthPacks    []HealthPack `json:"health_packs"`
+	Uplinks        []Uplink     `json:"uplinks"`
 }
 
 type consumedInput struct {
@@ -182,8 +182,8 @@ type Sim struct {
 	coreOpenTick uint32
 	finishEarly  bool
 	robots       []Robot
-	index             map[uint32]int
-	walls             []Wall
+	index        map[uint32]int
+	walls        []Wall
 	// wallIX/wallBuf：墙体空间索引与查询复用缓冲（wallgrid.go；批 2 压测
 	// 后引入）。walls 只在装配入口整体替换并随即重建索引。
 	wallIX         *wallGrid
