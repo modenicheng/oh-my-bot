@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.1-rc.1...v1.1.0-rc.1) (2026-10-14)
+
+
+### Features
+
+* **client:** host ESC controls, pause overlay, duration form, direct next match ([55f1e49](https://github.com/modenicheng/oh-my-bot/commit/55f1e492104ccc5ee34e34155aaa70203339acab))
+* **deploy:** bake large-room defaults into image and add compose recipe ([111fff8](https://github.com/modenicheng/oh-my-bot/commit/111fff81535ac619b1e6ab8efa05cac6fd425d7c))
+* **glue:** host pause/resume/finish controls with paused broadcast ([34cfeaa](https://github.com/modenicheng/oh-my-bot/commit/34cfeaace7154537dc991f73330ea652b418b438))
+* **omb:** parse join-time duration settings at room creation ([8a778a1](https://github.com/modenicheng/oh-my-bot/commit/8a778a11802b36caa37e16296132a8d90b55ae28))
+* **protocol:** host PAUSE/RESUME/FINISH actions, paused flag and join-time durations ([0cc476a](https://github.com/modenicheng/oh-my-bot/commit/0cc476ac9650e2463d61baa2a08ec20e0022b08a))
+* **room:** host duration config captured at room creation window ([e7a51b4](https://github.com/modenicheng/oh-my-bot/commit/e7a51b4a08e52491a51941819b6c6c37fa0c1d8e))
+* **sim:** configurable match durations and early-finish settlement ([5de3d64](https://github.com/modenicheng/oh-my-bot/commit/5de3d6411ef99e743385d578d0ef6d92ab3cbdbc))
+
+
+### Bug Fixes
+
+* **ci:** check Close errors in omb-load and stats test (errcheck) ([5b11564](https://github.com/modenicheng/oh-my-bot/commit/5b11564b7a01911970e115e61b694bca0f0b35b0))
+* **glue:** skip roster bootstrap for sessions bound mid-publish (S-27) ([87179de](https://github.com/modenicheng/oh-my-bot/commit/87179def42d8a255cb5e6b28db1595ebb9e497a4))
+* **room:** accept full A-Z0-9 room codes, drop confusable exclusion ([7135574](https://github.com/modenicheng/oh-my-bot/commit/7135574b634844564253b5edc410bb4c623d1d55))
+* **room:** allow START from Ended to launch the next scored match directly ([56142e3](https://github.com/modenicheng/oh-my-bot/commit/56142e34779753366f06b23d53f3692a9450b6cb))
+
 ## [1.0.1-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0...v1.0.1-rc.1) (2026-10-14)
 
 
