@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,102 @@ type Match struct {
 	finishOnce sync.Once
 	stop       chan struct{}
 	done       chan struct{}
+
+	// 大房并行（批 2）：观察者侧 AOI/编码按机器人互相独立，分派到
+	// obsWorkers 个 worker 并行执行。encMu 只护编码器/全量标记两个 map
+	// 的并发读写（key 互异的 map 并发写在 Go 亦是竞态）；锁序恒为
+	// rc.mu → encMu，无反向嵌套。rc.mu 本身保证 step 期间无房间级写者。
+	encMu      sync.Mutex
+	obsWorkers int
+}
+
+// parallelObserverThreshold：观察者少于该值走串行路径——小房不值得付
+// 任务分发的调度开销。包级 var 供确定性对照测试改写（强制串行/并行）。
+var parallelObserverThreshold = 16
+
+// observerWorkers 默认并行度 = clamp(NumCPU, 1, 8)。每 tick 的
+// parallelFor 按需起临时 goroutine（60Hz 下调度开销可忽略），避免
+// 常驻 worker 的生命周期管理。
+func observerWorkers() int {
+	w := runtime.NumCPU()
+	if w > 8 {
+		w = 8
+	}
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
+// parallelFor 对 n 个下标并行执行 fn（少于 2 项、单 worker 或未过阈值时
+// 串行）。必须在 rc.mu 持有下调用；fn 不得再获取 rc.mu。
+func (m *Match) parallelFor(n int, fn func(i int)) {
+	if n < 2 || m.obsWorkers < 2 || n < parallelObserverThreshold {
+		for i := 0; i < n; i++ {
+			fn(i)
+		}
+		return
+	}
+	jobs := make(chan int, n)
+	for i := 0; i < n; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	wg.Add(m.obsWorkers)
+	for w := 0; w < m.obsWorkers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				fn(i)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// encoderFor 取（或首帧惰性建）机器人的增量编码器。并发安全：并行观察者
+// 任务经 encMu 互斥；rc.mu 持有期无其它写者。
+func (m *Match) encoderFor(rid uint32) *snapshot.DeltaEncoder {
+	m.encMu.Lock()
+	defer m.encMu.Unlock()
+	enc := m.encoders[rid]
+	if enc == nil {
+		enc = snapshot.NewEncoder()
+		enc.ForceFull()
+		m.encoders[rid] = enc
+	}
+	return enc
+}
+
+// takeReliableFull 原子读取并清除「下一帧走可靠+全量」标记。
+func (m *Match) takeReliableFull(pid uint64) bool {
+	m.encMu.Lock()
+	defer m.encMu.Unlock()
+	v := m.reliableFull[pid]
+	delete(m.reliableFull, pid)
+	return v
+}
+
+// specEncoderFor / takeSpecReliableFull：观战者侧同构（按连接 id 键控）。
+func (m *Match) specEncoderFor(pid uint64) *snapshot.DeltaEncoder {
+	m.encMu.Lock()
+	defer m.encMu.Unlock()
+	enc := m.specEncoders[pid]
+	if enc == nil {
+		enc = snapshot.NewEncoder()
+		enc.ForceFull()
+		m.specEncoders[pid] = enc
+	}
+	return enc
+}
+
+func (m *Match) takeSpecReliableFull(pid uint64) bool {
+	m.encMu.Lock()
+	defer m.encMu.Unlock()
+	v := m.specReliableFull[pid]
+	delete(m.specReliableFull, pid)
+	return v
 }
 
 // SessionInfo 装配参数（房间成员快照）。
@@ -112,6 +209,7 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		stop:             make(chan struct{}),
 		done:             make(chan struct{}),
 		ai:               aiSvc,
+		obsWorkers:       observerWorkers(),
 	}
 
 	// The room launcher owns quota-cycle resets so warmup and its following
@@ -575,33 +673,36 @@ func (m *Match) step() {
 	wv := m.sim.WorldView()
 	// 审计 S-6：每 tick 对同一机器人只构建一次 AOI，脚本池与快照循环共用
 	// 同一观测（此前各自构建一遍，SOLO 63 机下每 tick 128 次 LOS 计算）。
+	// 批 2：AOI 构建与逐观察者编码均按机器人独立，大房经 parallelFor
+	// 并行执行（观察者数低于 parallelObserverThreshold 时保持串行）。
+	obsSlice := make([]sim.Observation, len(wv.Robots))
+	m.parallelFor(len(wv.Robots), func(i int) {
+		rv := wv.Robots[i]
+		obsSlice[i] = snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+	})
 	obsByRobot := make(map[uint32]sim.Observation, len(wv.Robots))
-	for _, rv := range wv.Robots {
-		obsByRobot[rv.ID] = snapshot.BuildObservation(snapshot.WorldOf(wv), m.wallIX, rv.ID, 0, wv.ScanRadius(rv.ID))
+	for i, rv := range wv.Robots {
+		obsByRobot[rv.ID] = obsSlice[i]
 	}
 	m.runScripts(wv, obsByRobot)
-	_ = wv // 快照循环在下方使用
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
 	// ended：终局帧（审计 S-34）——没有下一个 tick 可以修复丢失的末帧，
 	// 玩家与观战者同样 ForceFull + 可靠下发（此前玩家走 lossy，终局帧被
 	// 丢时该玩家世界定格在倒数第二帧，仅分数可靠不受影响）。
 	ended := m.tick >= sim.MatchTicks && !m.warmup
-	for _, rv := range wv.Robots {
+	world := snapshot.WorldOf(wv)
+	m.parallelFor(len(wv.Robots), func(i int) {
+		rv := wv.Robots[i]
 		pid, ok := m.playerOf[rv.ID]
 		if !ok {
-			continue
+			return
 		}
 		s := m.rc.sessions[pid]
 		if s == nil {
-			continue
+			return
 		}
-		enc := m.encoders[rv.ID]
-		if enc == nil {
-			enc = snapshot.NewEncoder()
-			enc.ForceFull()
-			m.encoders[rv.ID] = enc
-		}
+		enc := m.encoderFor(rv.ID)
 		obs := obsByRobot[rv.ID]
 		ctrl := wv.Controls[rv.ID]
 		// Owner-locked private state is projected without changing the frozen RobotView API.
@@ -624,31 +725,31 @@ func (m *Match) step() {
 			enc.ForceFull()
 			delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
 			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}})
-			delete(m.reliableFull, pid)
-			continue
+			m.takeReliableFull(pid)
+			return
 		}
 		delta := enc.Encode(m.tick, wv.AckSeqs[rv.ID], wv.Frame.Phase, wv.Frame.TimeLeftS, obs, &self)
 		msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}
-		if m.reliableFull[pid] {
+		if m.takeReliableFull(pid) {
 			s.SendReliable(msg)
-			delete(m.reliableFull, pid)
 		} else {
 			s.SendLossy(msg)
 		}
-	}
+	})
 
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
 	if len(m.rc.spectators) > 0 {
-		obs := snapshot.BuildSpectatorObservation(snapshot.WorldOf(wv))
-		for pid, s := range m.rc.spectators {
-			enc := m.specEncoders[pid]
-			if enc == nil {
-				enc = snapshot.NewEncoder()
-				enc.ForceFull()
-				m.specEncoders[pid] = enc
-			}
+		obs := snapshot.BuildSpectatorObservation(world)
+		specIDs := make([]uint64, 0, len(m.rc.spectators))
+		for pid := range m.rc.spectators {
+			specIDs = append(specIDs, pid)
+		}
+		m.parallelFor(len(specIDs), func(i int) {
+			pid := specIDs[i]
+			s := m.rc.spectators[pid]
+			enc := m.specEncoderFor(pid)
 			if ended {
 				// No next tick can repair a dropped final frame.
 				enc.ForceFull()
@@ -657,18 +758,17 @@ func (m *Match) step() {
 				if m.finalEnd != nil {
 					s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.finalEnd}})
 				}
-				delete(m.specReliableFull, pid)
-				continue
+				m.takeSpecReliableFull(pid)
+				return
 			}
 			delta := enc.Encode(m.tick, 0, wv.Frame.Phase, wv.Frame.TimeLeftS, obs, nil)
 			msg := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Snapshot{Snapshot: delta}}
-			if m.specReliableFull[pid] {
+			if m.takeSpecReliableFull(pid) {
 				s.SendReliable(msg)
-				delete(m.specReliableFull, pid)
 			} else {
 				s.SendLossy(msg)
 			}
-		}
+		})
 	}
 
 	if ended {
