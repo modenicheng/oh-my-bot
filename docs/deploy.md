@@ -114,8 +114,14 @@ Environment=OMB_MAX_PLAYERS=200
 席位提高后**地图与资源会随开房人数自动伸缩**（GeneratorVer 8：场地面积
 ∝ 人数、掩体/Uplink/血包/Core Pad 分档增长），无需额外配置。注意：
 
-- 大房间对单进程 CPU 的压力近似线性于房间规模，200 人房建议 ≥8 核并
-  先做一轮压测（人数 × 脚本活跃度）；
+- **务必设置 GC 调优**（`OMB_GC_PERCENT=400` 或 config.yaml `gc.percent`）：
+  200 人实测其收益是 tick 墙钟减半；
+- 200 人房实测（16 核 dev 机，`omb-load` 200 连接 × 50% 脚本 × 30Hz
+  输入，GOGC=400）：tick_avg ≈ 4ms（p95 ≈ 6.7ms），稳定 60Hz 满帧，
+  0 丢帧 / 0 断连 / 0 脚本顺延，下行 ≈ 15 Mbps。8 核目标机预计 tick
+  翻倍仍在 12ms 帧预算内，活动前建议用 `omb-load` 在目标机复测一轮；
+- 观测口：`/api/stats`（在线/房间/每房 tick avg·p95/脚本顺延/传输丢帧
+  计数）；`/debug/pprof` 需 `OMB_PPROF=1` 显式开启；
 - 每房观战席位仍为 64（全图视角，编码成本高于玩家）。
 
 ## 反向代理（推荐的生产接入方式）
