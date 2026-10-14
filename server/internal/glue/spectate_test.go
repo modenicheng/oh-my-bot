@@ -11,7 +11,7 @@ import (
 func bindSpectator(t *testing.T, h *Hub, rc *RoomConn) (*Session, *messageLog) {
 	t.Helper()
 	log := &messageLog{}
-	s := NewSession(log.send(true), log.send(false))
+	s := NewSession(log.send(true), log.send(false), nil)
 	h.Register(s)
 	if err := rc.BindSpectator(s); err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestSpectatorDisconnectFencesActionsAndFreesOnlyOwnState(t *testing.T) {
 func TestSpectatorStaleUnregisterDoesNotDropNewEncoder(t *testing.T) {
 	h, rc, _, _, m := spectatorMatch(t, true)
 	old, _ := bindSpectator(t, h, rc)
-	current := NewSession(func(*ombv1.ServerMsg) {}, func(*ombv1.ServerMsg) {})
+	current := NewSession(func(*ombv1.ServerMsg) {}, func(*ombv1.ServerMsg) {}, nil)
 	current.playerID, current.rc, current.spectator = old.playerID, rc, true
 	rc.spectators[old.playerID] = current
 	m.step()
@@ -246,7 +246,7 @@ func TestSpectatorCapEnforcedAndLeaveReleasesSlot(t *testing.T) {
 			first = s
 		}
 	}
-	over := NewSession(func(*ombv1.ServerMsg) {}, func(*ombv1.ServerMsg) {})
+	over := NewSession(func(*ombv1.ServerMsg) {}, func(*ombv1.ServerMsg) {}, nil)
 	h.Register(over)
 	if err := rc.BindSpectator(over); err == nil {
 		t.Fatal("spectator cap not enforced")

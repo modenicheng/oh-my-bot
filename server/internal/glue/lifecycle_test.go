@@ -41,7 +41,7 @@ func (l *messageLog) take() []sentMessage {
 func bindLogged(t *testing.T, h *Hub, rc *RoomConn, nick string) (*Session, *messageLog) {
 	t.Helper()
 	l := &messageLog{}
-	s := NewSession(l.send(true), l.send(false))
+	s := NewSession(l.send(true), l.send(false), nil)
 	h.Register(s)
 	if err := rc.Bind(s, nick, "red"); err != nil {
 		t.Fatal(err)
@@ -566,7 +566,7 @@ func TestConcurrentInputResyncTakeoverAndTick(t *testing.T) {
 				case 2:
 					m.step()
 				case 3:
-					next := NewSession(discard, discard)
+					next := NewSession(discard, discard, nil)
 					h.Register(next)
 					if err := rc.Bind(next, "host", "red"); err != nil {
 						t.Error(err)

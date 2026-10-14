@@ -64,12 +64,16 @@ type queuedFrame struct {
 }
 
 // Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
-// 专属的 onUp（闭包可捕获每连接状态）；sendReliable/sendLossy 为该连接的下行通道。
+// 专属的 onUp（闭包可捕获每连接状态）；sendReliable/sendLossy 为该连接的下行通道，
+// sendReliableFrame 是广播预编码通道：入参为「0x03 帧类型 + ServerMsg protobuf」
+// 的完整帧字节，跳过逐连接 marshal（广播方 marshal 一次、全部连接共享同一切片，
+// 本 handler 只读不写）。该通道不区分消息类型——MapBootstrap/ScriptLog 等需要
+// epoch/scriptlog 分流的帧不得走此路径，由调用方（glue broadcastFrame）保证。
 // closeConn 请求优雅关闭：已排队帧（reliable/lossy/script log）全部写完后连接
 // 才关闭——closeConn 调用前入队的可靠帧保证送达（审计 S-33：同身份接管时旧连接
 // 的接管通知先入队、再 closeConn，不能被直接 kill 截断）。后续上行 ClientMsg 帧
 // 路由到返回的 onUp。
-func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func()) (onUp func(up *ombv1.ClientMsg))) http.Handler {
+func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg), sendReliableFrame func([]byte), closeConn func()) (onUp func(up *ombv1.ClientMsg))) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
 		if err != nil {
@@ -144,8 +148,19 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			default: // 慢消费者：丢 delta，客户端 base_tick 检测后重同步
 			}
 		}
+		sendReliableFrame := func(b []byte) {
+			if len(b) == 0 {
+				return
+			}
+			frame := queuedFrame{data: b}
+			select {
+			case reliableCh <- frame:
+			default:
+				kill() // 与 sendReliable 同语义：可靠通道满 = 一致性已破坏
+			}
+		}
 
-		connOnUp := sessionFactory(sendReliable, sendLossy, closeGracefully)
+		connOnUp := sessionFactory(sendReliable, sendLossy, sendReliableFrame, closeGracefully)
 
 		readerErr := make(chan error, 1)
 		go func() {

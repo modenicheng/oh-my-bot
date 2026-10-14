@@ -47,7 +47,7 @@ func TestGracefulCloseDrainsQueuedFrames(t *testing.T) {
 	var sendReliable func(*ombv1.ServerMsg)
 	var closeConn func()
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), cc func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), srf func([]byte), cc func()) func(up *ombv1.ClientMsg) {
 		sendReliable, closeConn = sr, cc
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -107,7 +107,7 @@ func TestGracefulCloseDrainsQueuedFrames(t *testing.T) {
 func TestGracefulCloseWithEmptyQueues(t *testing.T) {
 	var closeConn func()
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), cc func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), srf func([]byte), cc func()) func(up *ombv1.ClientMsg) {
 		closeConn = cc
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -143,7 +143,7 @@ func TestGracefulCloseWithEmptyQueues(t *testing.T) {
 func TestDualChannelDelivery(t *testing.T) {
 	var sendReliable, sendLossy func(*ombv1.ServerMsg)
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func([]byte), _ func()) func(up *ombv1.ClientMsg) {
 		sendReliable, sendLossy = sr, sl
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -183,7 +183,7 @@ func TestDualChannelDelivery(t *testing.T) {
 func TestScriptLogFloodDoesNotDisconnectOrBlockReliable(t *testing.T) {
 	var sendReliable func(*ombv1.ServerMsg)
 	ready := make(chan struct{})
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func([]byte), _ func()) func(up *ombv1.ClientMsg) {
 		sendReliable = sr
 		close(ready)
 		return func(*ombv1.ClientMsg) {}
@@ -244,7 +244,7 @@ func TestScriptLogFloodDoesNotDisconnectOrBlockReliable(t *testing.T) {
 // StatusMessageTooBig 默默断连。上限与客户端预检同源 TransportTiming。
 func TestReadLimitAllows64KiBScriptSubmit(t *testing.T) {
 	var got atomic.Int32
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func([]byte), _ func()) func(up *ombv1.ClientMsg) {
 		return func(up *ombv1.ClientMsg) {
 			if sub := up.GetScriptSubmit(); sub != nil {
 				got.Add(int32(len(sub.GetSource())))
@@ -294,7 +294,7 @@ func TestReadLimitAllows64KiBScriptSubmit(t *testing.T) {
 
 func TestReliableOverflowDisconnects(t *testing.T) {
 	big := strings.Repeat("x", 4096)
-	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func()) func(up *ombv1.ClientMsg) {
+	h := Handler(func(sr, sl func(*ombv1.ServerMsg), _ func([]byte), _ func()) func(up *ombv1.ClientMsg) {
 		ev := &ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{
 			Kind: &ombv1.ServerEvent_Say{Say: &ombv1.EvSay{Robot: 1, Text: big}}}}}
 		go func() {

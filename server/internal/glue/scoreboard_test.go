@@ -22,7 +22,7 @@ func scoreboardEvents(msgs []sentMessage) []*ombv1.EvScoreboard {
 func bindSpectatorLogged(t *testing.T, h *Hub, rc *RoomConn) (*Session, *messageLog) {
 	t.Helper()
 	l := &messageLog{}
-	s := NewSession(l.send(true), l.send(false))
+	s := NewSession(l.send(true), l.send(false), nil)
 	h.Register(s)
 	if err := rc.BindSpectator(s); err != nil {
 		t.Fatal(err)

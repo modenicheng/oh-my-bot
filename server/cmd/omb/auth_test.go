@@ -239,7 +239,7 @@ func TestJoinAuthNickTruncation(t *testing.T) {
 	var received []*ombv1.ServerMsg
 	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
 	longName := "这是一个超过十六个字符的认证昵称名称"
-	handleUpstream(h, joinCase("HEAL", "attacker"), send, send, nil, &session, longName)
+	handleUpstream(h, joinCase("HEAL", "attacker"), send, send, nil, nil, &session, longName)
 	if session == nil {
 		t.Fatal("valid join did not bind a session")
 	}

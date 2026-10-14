@@ -102,7 +102,7 @@ func TestJanitorEvictsEmptyRoom(t *testing.T) {
 	}
 	// 逐出后的房间拒绝新绑定（publish 侧由 TestPublishRefusesClosedRoom 覆盖）。
 	l := &messageLog{}
-	s := NewSession(l.send(true), l.send(false))
+	s := NewSession(l.send(true), l.send(false), nil)
 	h.Register(s)
 	if err := rc.Bind(s, "bob", "red"); err == nil {
 		t.Fatal("bind to closed room should fail")

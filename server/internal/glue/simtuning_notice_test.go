@@ -82,7 +82,7 @@ func TestControlNoticePairOrder(t *testing.T) {
 	h := NewHub()
 	rc := h.EnsureRoom("NOTICE")
 	l := &messageLog{}
-	s := NewSession(l.send(true), l.send(false))
+	s := NewSession(l.send(true), l.send(false), nil)
 	h.Register(s)
 	rc.mu.Lock()
 	aiNotice(s, ombv1.EvControlNotice_CN_AI_REQUEST_FAILED, "AI 请求失败：x")
@@ -117,7 +117,7 @@ func TestAiNoticeCodes(t *testing.T) {
 	h := NewHub()
 	rc := h.EnsureRoom("AICODE")
 	l := &messageLog{}
-	s := NewSession(l.send(true), l.send(false))
+	s := NewSession(l.send(true), l.send(false), nil)
 	h.Register(s)
 	rc.mu.Lock()
 	for _, c := range cases {

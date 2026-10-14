@@ -10,7 +10,7 @@ import (
 
 func joinTestSession(t *testing.T, h *Hub, rc *RoomConn, nick string, send func(*ombv1.ServerMsg)) *Session {
 	t.Helper()
-	s := NewSession(send, send)
+	s := NewSession(send, send, nil)
 	h.Register(s)
 	if err := rc.Bind(s, nick, "red"); err != nil {
 		t.Fatal(err)

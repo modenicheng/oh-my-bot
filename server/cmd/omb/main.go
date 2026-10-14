@@ -500,12 +500,12 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 				hub.Unregister(sess)
 			}
 		}()
-		netws.Handler(func(reliable, lossy func(*ombv1.ServerMsg), closeConn func()) func(*ombv1.ClientMsg) {
+		netws.Handler(func(reliable, lossy func(*ombv1.ServerMsg), frame func([]byte), closeConn func()) func(*ombv1.ClientMsg) {
 			return func(up *ombv1.ClientMsg) {
 				mu.Lock()
 				defer mu.Unlock()
 				if !closed {
-					handleUpstream(hub, up, reliable, lossy, closeConn, &sess, authName)
+					handleUpstream(hub, up, reliable, lossy, frame, closeConn, &sess, authName)
 				}
 			}
 		}).ServeHTTP(w, r)
@@ -521,7 +521,7 @@ const authRejectedReason = "登录已过期或无效：请重新完成 OIDC 登�
 // 送达；此后一切上行经 no-op 丢弃，连接不可能进房/观战。不区分具体失败原因
 // （缺 token/坏签名/过期），避免给伪造者当 oracle。
 func serveAuthRejectedWS(w http.ResponseWriter, r *http.Request) {
-	netws.Handler(func(sendReliable, _ func(*ombv1.ServerMsg), closeConn func()) func(*ombv1.ClientMsg) {
+	netws.Handler(func(sendReliable, _ func(*ombv1.ServerMsg), _ func([]byte), closeConn func()) func(*ombv1.ClientMsg) {
 		sendJoinFailedReliable(sendReliable, authRejectedReason)
 		closeConn()
 		return func(*ombv1.ClientMsg) {}
@@ -532,7 +532,7 @@ func serveAuthRejectedWS(w http.ResponseWriter, r *http.Request) {
 // closeConn 请求优雅关闭本连接（排队帧先发完）：注入到玩家会话，供同身份
 // 接管时关闭被替换的旧连接（审计 S-33）。authName 为 /ws 门禁验出的认证名
 // （未启用认证时恒空），join 时强制覆盖客户端自报昵称。
-func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sess **glue.Session, authName string) {
+func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy func(*ombv1.ServerMsg), sendReliableFrame func([]byte), closeConn func(), sess **glue.Session, authName string) {
 	if up == nil {
 		return
 	}
@@ -564,9 +564,9 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	}
 	switch p := up.Payload.(type) {
 	case *ombv1.ClientMsg_Join:
-		handleJoin(hub, p.Join, sendReliable, sendLossy, closeConn, sess, authName)
+		handleJoin(hub, p.Join, sendReliable, sendLossy, sendReliableFrame, closeConn, sess, authName)
 	case *ombv1.ClientMsg_Spectate:
-		handleSpectate(hub, p.Spectate, sendReliable, sendLossy, sess)
+		handleSpectate(hub, p.Spectate, sendReliable, sendLossy, sendReliableFrame, sess)
 	case *ombv1.ClientMsg_Input:
 		if cur := (*sess); cur != nil {
 			cur.RouteInput(p.Input)
@@ -629,7 +629,7 @@ const (
 // handleJoin 进房：房码/昵称校验 + 会话绑定。authName 非空（认证开启）时昵称
 // 以认证名为准——客户端自报昵称仅作认证关闭时的输入，杜绝冒名；认证名来自
 // IdP 昵称回退链，trim 后恒非空，但仍保留空昵称检查兜底。
-func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), closeConn func(), sessOut **glue.Session, authName string) {
+func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sendReliableFrame func([]byte), closeConn func(), sessOut **glue.Session, authName string) {
 	if join == nil {
 		return
 	}
@@ -654,7 +654,7 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	rc := hub.EnsureRoom(code)
 	rc.EnsureLauncher()
-	sess := glue.NewSession(sendReliable, sendLossy)
+	sess := glue.NewSession(sendReliable, sendLossy, sendReliableFrame)
 	sess.SetCloser(closeConn) // 同身份接管时由 glue 关闭本连接（S-33）
 	hub.Register(sess)
 	if err := rc.Bind(sess, nick, join.GetColor()); err != nil {
@@ -690,7 +690,7 @@ func sendJoinFailedReliable(send func(*ombv1.ServerMsg), reason string) {
 // handleSpectate attaches a read-only live observer. Reuses the established
 // joinFailedPrefix robot-0 say prefix so the client RoomSession stops retrying
 // exactly like a rejected player join.
-func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sessOut **glue.Session) {
+func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendLossy func(*ombv1.ServerMsg), sendReliableFrame func([]byte), sessOut **glue.Session) {
 	if spec == nil {
 		return
 	}
@@ -701,7 +701,7 @@ func handleSpectate(hub *glue.Hub, spec *ombv1.SpectateRoom, sendReliable, sendL
 	}
 	rc := hub.EnsureRoom(spec.GetRoomCode())
 	rc.EnsureLauncher()
-	sess := glue.NewSession(sendReliable, sendLossy)
+	sess := glue.NewSession(sendReliable, sendLossy, sendReliableFrame)
 	hub.Register(sess)
 	if err := rc.BindSpectator(sess); err != nil {
 		hub.Unregister(sess)

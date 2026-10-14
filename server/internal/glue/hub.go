@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
 	"github.com/modenicheng/oh-my-bot/server/internal/snippet"
@@ -266,14 +268,18 @@ type Session struct {
 	spectator    bool // read-only observer; never joins Room/identities/match players
 	SendReliable func(*ombv1.ServerMsg)
 	SendLossy    func(*ombv1.ServerMsg)
+	// SendReliableFrame 是广播预编码通道（netws 注入；测试/旧路径可 nil）：
+	// 入参为「0x03 + ServerMsg protobuf」完整帧字节。nil 或消息不适用预编码
+	// （ScriptLog/MapBootstrap）时广播方回退 SendReliable 逐连接编码。
+	SendReliableFrame func([]byte)
 	// closeConn（审计 S-33）：请求优雅关闭本会话底层连接（排队帧先发完）。
 	// atomic 而非 mu 守护——CloseConn 会在 Bind 持 rc.mu 时调用，不能在
 	// rc.mu 下再取 s.mu（锁序只允许 s.mu → rc.mu）。未注入时为无操作。
 	closeConn atomic.Value // func()
 }
 
-func NewSession(reliable, lossy func(*ombv1.ServerMsg)) *Session {
-	return &Session{SendReliable: reliable, SendLossy: lossy}
+func NewSession(reliable, lossy func(*ombv1.ServerMsg), reliableFrame func([]byte)) *Session {
+	return &Session{SendReliable: reliable, SendLossy: lossy, SendReliableFrame: reliableFrame}
 }
 
 // SetCloser 注入连接关闭钩子（连接所有者在会话可达前调用一次；重复调用
@@ -612,12 +618,48 @@ func (rc *RoomConn) Broadcast(msg *ombv1.ServerMsg) {
 	rc.broadcastLocked(msg)
 }
 func (rc *RoomConn) broadcastLocked(msg *ombv1.ServerMsg) {
+	if frame := broadcastFrame(msg); frame != nil {
+		// 预编码广播：marshal 一次、全部连接共享同一字节切片（只读）。
+		// 未注入帧通道的会话（测试/旧装配）回退逐连接编码，行为等价。
+		for _, s := range rc.sessions {
+			if s.SendReliableFrame != nil {
+				s.SendReliableFrame(frame)
+			} else {
+				s.SendReliable(msg)
+			}
+		}
+		for _, s := range rc.spectators {
+			if s.SendReliableFrame != nil {
+				s.SendReliableFrame(frame)
+			} else {
+				s.SendReliable(msg)
+			}
+		}
+		return
+	}
 	for _, s := range rc.sessions {
 		s.SendReliable(msg)
 	}
 	for _, s := range rc.spectators {
 		s.SendReliable(msg)
 	}
+}
+
+// broadcastFrame 把可预编码的广播消息编成完整帧字节（0x03 + protobuf）。
+// 不适用预编码的形态返回 nil：ScriptLog 需走可丢低优先队列（netws 分流），
+// MapBootstrap 需推进 epoch，非事件消息没有广播语义。
+func broadcastFrame(msg *ombv1.ServerMsg) []byte {
+	ev := msg.GetEvent()
+	if ev == nil || ev.GetScriptLog() != nil || ev.GetMapBootstrap() != nil {
+		return nil
+	}
+	body, err := proto.Marshal(msg)
+	if err != nil {
+		return nil
+	}
+	frame := make([]byte, 0, len(body)+1)
+	frame = append(frame, byte(ombv1.TransportTiming_FRAME_DOWN))
+	return append(frame, body...)
 }
 func (rc *RoomConn) BroadcastRoomState() {
 	rc.mu.Lock()
