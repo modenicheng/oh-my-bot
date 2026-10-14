@@ -26,8 +26,7 @@ func TestJoinRejectsInvalidParams(t *testing.T) {
 	}{
 		{"empty room code", "", "alice"},
 		{"lowercase room code", "spec", "alice"},
-		{"confusable digit", "AB12", "alice"},
-		{"confusable letter", "TAKEOVER", "alice"},
+		{"symbol room code", "SP-EC", "alice"},
 		{"path hostile", "../etc", "alice"},
 		{"blank nick", "SPEC", "   "},
 		{"tabs-only nick", "SPEC", "\t\n"},
@@ -66,7 +65,7 @@ func spectateCase(roomCode string) *ombv1.ClientMsg {
 // TestSpectateRejectsInvalidRoomCode（审计 S-31）：观战路径与 join 同一房码门，
 // 空房码/非法字符不再创建共享 "" 观战房，拒绝走同一 join-failed 双形态。
 func TestSpectateRejectsInvalidRoomCode(t *testing.T) {
-	for name, code := range map[string]string{"empty": "", "confusable": "LIVEBOT"} {
+	for name, code := range map[string]string{"empty": "", "lowercase": "livebot"} {
 		t.Run(name, func(t *testing.T) {
 			h := glue.NewHub()
 			var session *glue.Session
@@ -91,30 +90,33 @@ func TestSpectateRejectsInvalidRoomCode(t *testing.T) {
 }
 
 // TestJoinAcceptsValidParams：合法房码 + 带空白昵称照常进房，昵称以 trim 后
-// 的值绑定（与客户端表单行为一致），并回房态广播。
+// 的值绑定（与客户端表单行为一致），并回房态广播。0/O/1/I 房码不再排除
+// （D19 收口）：易混字符房码与历史脚本房码（TAKEOVER 等）恢复可加入。
 func TestJoinAcceptsValidParams(t *testing.T) {
-	h := glue.NewHub()
-	var session *glue.Session
-	var received []*ombv1.ServerMsg
-	send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
-	handleUpstream(h, joinCase("HEALTH", "  alice  "), send, send, nil, nil, &session, "")
-	if session == nil {
-		t.Fatal("valid join did not bind a session")
-	}
-	rc := h.EnsureRoom("HEALTH")
-	if rc.Room.MemberCount() != 1 {
-		t.Fatalf("room members = %d, want 1", rc.Room.MemberCount())
-	}
-	if state := rc.Room.StateBroadcast(); state.GetHostNick() != "alice" {
-		t.Fatalf("bound nick = %q, want trimmed %q", state.GetHostNick(), "alice")
-	}
-	sawState := false
-	for _, msg := range received {
-		if msg.GetEvent().GetRoomState() != nil {
-			sawState = true
+	for _, code := range []string{"HEALTH", "AB12", "R0OM", "OIL", "TAKEOVER"} {
+		h := glue.NewHub()
+		var session *glue.Session
+		var received []*ombv1.ServerMsg
+		send := func(msg *ombv1.ServerMsg) { received = append(received, msg) }
+		handleUpstream(h, joinCase(code, "  alice  "), send, send, nil, nil, &session, "")
+		if session == nil {
+			t.Fatalf("valid join (room %q) did not bind a session", code)
 		}
-	}
-	if !sawState {
-		t.Fatal("join did not broadcast room state")
+		rc := h.EnsureRoom(code)
+		if rc.Room.MemberCount() != 1 {
+			t.Fatalf("room %q members = %d, want 1", code, rc.Room.MemberCount())
+		}
+		if state := rc.Room.StateBroadcast(); state.GetHostNick() != "alice" {
+			t.Fatalf("bound nick = %q, want trimmed %q", state.GetHostNick(), "alice")
+		}
+		sawState := false
+		for _, msg := range received {
+			if msg.GetEvent().GetRoomState() != nil {
+				sawState = true
+			}
+		}
+		if !sawState {
+			t.Fatal("join did not broadcast room state")
+		}
 	}
 }

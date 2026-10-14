@@ -14,11 +14,20 @@ func TestValidCodeAcceptsGeneratedCodes(t *testing.T) {
 }
 
 // TestValidCodeRejectsDegenerateInput（审计 S-31）：空房码（共享 "" 房的根源）、
-// 小写、易混字符 0/O/1/I、超长、符号与多字节一律拒绝。
-// 注意：字母表排除易混字符意味着历史浏览器脚本用的 O/I 形房码（TAKEOVER/
-// SOLOBOT/SHOT/…）不再可加入——这是刻意的收紧（见审计台账 S-31 报告注记）。
+// 小写、超长、符号与多字节一律拒绝。0/O/1/I 不再排除（UI 字体不混淆，
+// D19 收口）——历史浏览器脚本房码（TAKEOVER/SOLOBOT/…）恢复可加入。
 func TestValidCodeRejectsDegenerateInput(t *testing.T) {
-	valid := []string{"A", "SPEC", "HEALTH", "MVPRE2", "FEEL2", "ABCDEFGH"}
+	valid := []string{
+		"A", "SPEC", "HEALTH", "MVPRE2", "FEEL2", "ABCDEFGH",
+		"AB12",     // '1'（已不再排除）
+		"NAV1",     // 同上
+		"AIMGRD",   // 'I'（历史脚本房码，恢复可加入）
+		"R0OM",     // '0'
+		"OIL",      // 'O' 与 'I'
+		"TAKEOVER", // 含 'O'：历史脚本房码
+		"LIVEBOT",  // 含 'I' 与 'O'
+		"O0OI1L",   // 全易混字符组合
+	}
 	for _, code := range valid {
 		if !ValidCode(code) {
 			t.Fatalf("ValidCode(%q) = false, want true", code)
@@ -30,13 +39,6 @@ func TestValidCodeRejectsDegenerateInput(t *testing.T) {
 		"SPEC ",     // 尾随空白
 		"spec",      // 小写
 		"Spec",      // 混合大小写
-		"AB12",      // '1' 不在字母表（易混字符）
-		"NAV1",      // 同上
-		"AIMGRD",    // 'I' 不在字母表（历史脚本房码）
-		"R0OM",      // '0' 不在字母表
-		"OIL",       // 'O' 与 'I'
-		"TAKEOVER",  // 含 'O'：字母表收紧后拒绝（历史脚本房码）
-		"LIVEBOT",   // 含 'I' 与 'O'
 		"ABCDEFGHI", // 超过 maxJoinCodeLen
 		"SP-EC",     // 符号
 		"码",         // 多字节

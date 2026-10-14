@@ -661,7 +661,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 // 校验失败的拒绝文案。走 sendJoinFailedReliable（结构化 notice + 兼容 say），
 // 与其他 join 拒绝同一条终态路径。
 const (
-	joinInvalidCodeReason = "房码无效：仅限大写字母与数字（不含易混字符 0/O/1/I），长度 1-8"
+	joinInvalidCodeReason = "房码无效：仅限大写字母与数字，长度 1-8"
 	joinEmptyNickReason   = "昵称不能为空"
 )
 

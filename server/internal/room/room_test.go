@@ -80,11 +80,8 @@ func TestGenerateCodeFormat(t *testing.T) {
 			t.Fatalf("code %q: want 6 chars, got %d", c, len(c))
 		}
 		for _, ch := range c {
-			switch ch {
-			case '0', 'O', '1', 'I':
-				t.Fatalf("code %q contains confusable %q", c, ch)
-			}
-			isValid := (ch >= 'A' && ch <= 'Z') || (ch >= '2' && ch <= '9')
+			// 全 A-Z0-9 字母表（易混字符排除已移除，D19 收口）
+			isValid := (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 			if !isValid {
 				t.Fatalf("code %q contains invalid char %q", c, ch)
 			}

@@ -56,7 +56,7 @@ R7 收尾时主工作树已干净；后续修复仍应先 `git status`，并以�
 | D16 | ASCII 字符方言 | `startup-art.ts:15` `'#%+=*#'`、`startup.ts:49` `'01[]{}+*#'`、`startup-art.ts:19` `'#*+:.'` | R3 从 2 套变 3 套（低危，可读性问题） |
 | D17 | HUD 键位摘要 | `index.html:86`（帮助面板）+ `index.html:80`（canvas aria-label）↔ `docs/manual/rules/controls.md` 键位表 | 手抄三处、无对拍（R5 新发现） |
 | D18 | 称号评选规则文案 | `server/internal/stats/titles.go` ↔ `client/src/game/scoreboard.ts:79-96`（TITLE_DETAILS 注释自认 mirror） | 阈值/占比手抄镜像、无漂移测试（R8 新发现） |
-| D19 | Join 房码规则（字符集/长度） | `room/code.go` `ValidCode`（字母表由 GenerateCode 单源派生）↔ `client/src/lobby.ts` `ROOM_CODE_RE`（更宽：允许 0/O/1/I） | ☐ R10 新发现（S-31 收紧后暴露）：表单预检比服务端宽，用户输入 0/O/1/I 房码时由服务器 join-failed 文案兜底可自解释。对齐要么客户端再抄一份字母表（违背单源）要么经协议下发规则——需产品拍板 |
+| D19 | Join 房码规则（字符集/长度） | `room/code.go` `ValidCode`（字母表由 GenerateCode 单源派生）↔ `client/src/lobby.ts` `ROOM_CODE_RE`（更宽：允许 0/O/1/I） | ✅ 2026-10-14：用户拍板移除易混字符排除（UI 字体下 0/O、1/I 不混淆）——服务端字母表扩至全 A-Z0-9，与客户端 `ROOM_CODE_RE` 自此一致，join-failed 文案同步收口；历史脚本房码（TAKEOVER 等）恢复可加入 |
 
 ---
 

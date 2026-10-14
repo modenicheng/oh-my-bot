@@ -5,9 +5,9 @@ import (
 	"math/big"
 )
 
-// codeAlphabet excludes easily confused characters (0/O, 1/I) per the
-// room-code requirement.
-const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+// codeAlphabet is the full uppercase + digit alphabet. UI 字体下 0/O、1/I
+// 已不易混淆，不再排除（历史排除规则见审计台账 D19 收口记录）。
+const codeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // codeLen is the fixed room code length.
 const codeLen = 6
