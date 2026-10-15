@@ -93,10 +93,11 @@ func (a Action) String() string {
 }
 
 // MaxPlayers is the seat limit per room. game_design_v0.3 §2 shipped a fixed
-// 64; large-room deployments raise it via OMB_MAX_PLAYERS (cmd/omb applies it
-// once at startup, before any room exists). Runtime code treats it as
-// read-only after startup.
-var MaxPlayers = 64
+// 64; the 2026-10 load-tested 200-player target is now the in-code default,
+// and OMB_MAX_PLAYERS adjusts it either way (cmd/omb applies it once at
+// startup, before any room exists). Runtime code treats it as read-only
+// after startup.
+var MaxPlayers = 200
 
 // MaxSoloBots fills every non-human seat while always reserving at least one
 // seat for the room host. Launch assembly still caps the final roster at
@@ -104,7 +105,7 @@ var MaxPlayers = 64
 var MaxSoloBots = MaxPlayers - 1
 
 // maxPlayersHardCap bounds OMB_MAX_PLAYERS typos; 200 is the load-tested
-// target for the 2026-10 event, 256 leaves documented headroom.
+// default, 256 leaves documented headroom.
 const maxPlayersHardCap = 256
 
 // SetMaxPlayers configures the seat limit at process startup and keeps

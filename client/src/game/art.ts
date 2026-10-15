@@ -75,6 +75,28 @@ function visible(cam: Camera, x: number, y: number, margin = 80): boolean {
 }
 
 export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam: Camera, phase: number): void {
+  if (map.partial) {
+    ctx.save()
+    ctx.fillStyle = ink.floor
+    ctx.fillRect(0, 0, cam.cw, cam.ch)
+    ctx.strokeStyle = '#263b4760'
+    ctx.lineWidth = 1
+    const left = Math.floor(cam.toWorldX(0) / 4) * 4
+    const top = Math.floor(cam.toWorldY(0) / 4) * 4
+    const right = cam.toWorldX(cam.cw), bottom = cam.toWorldY(cam.ch)
+    ctx.beginPath()
+    for (let gridX = left; gridX <= right; gridX += 4) {
+      const pixelX = cam.toPxX(gridX)
+      ctx.moveTo(pixelX, 0); ctx.lineTo(pixelX, cam.ch)
+    }
+    for (let gridY = top; gridY <= bottom; gridY += 4) {
+      const pixelY = cam.toPxY(gridY)
+      ctx.moveTo(0, pixelY); ctx.lineTo(cam.cw, pixelY)
+    }
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
   const x = cam.toPxX(0), y = cam.toPxY(0), s = cam.scale
   // 竞技场骨架按 arenaRadius 等比绘制（人数自适应地图会下发更大的圆盘；
   // 环线/服务车道半径取与原版 80m 图相同的占比）。
@@ -148,7 +170,47 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   ctx.stroke(); ctx.restore()
 }
 
-export function drawCover(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam: Camera): void {
+export function drawCover(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam: Camera, observer?: { x: number; y: number }): void {
+  if (map.partial) {
+    ctx.save()
+    ctx.lineCap = 'butt'
+    ctx.lineJoin = 'miter'
+    const self = observer ?? { x: cam.cx, y: cam.cy }
+    for (const wall of map.walls) {
+      const startX = cam.toPxX(wall.min.x), startY = cam.toPxY(wall.min.y)
+      const endX = cam.toPxX(wall.max.x), endY = cam.toPxY(wall.max.y)
+      const length = Math.hypot(endX - startX, endY - startY)
+      if (length <= 0) continue
+      const tangentX = (endX - startX) / length, tangentY = (endY - startY) / length
+      let normalX = -tangentY, normalY = tangentX
+      if (normalX * (self.x - wall.min.x) + normalY * (self.y - wall.min.y) > 0) { normalX = -normalX; normalY = -normalY }
+      const depth = Math.max(7, cam.scale * 0.45)
+      const faceX = normalX * depth, faceY = normalY * depth
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY)
+      ctx.lineTo(endX + faceX, endY + faceY); ctx.lineTo(startX + faceX, startY + faceY); ctx.closePath()
+      ctx.fillStyle = '#293e4c'; ctx.fill()
+      ctx.strokeStyle = '#111e28'; ctx.lineWidth = 2; ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY)
+      ctx.strokeStyle = '#99b4c2'; ctx.lineWidth = 1.5; ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(startX + faceX, startY + faceY); ctx.lineTo(endX + faceX, endY + faceY)
+      ctx.strokeStyle = '#5c798b'; ctx.lineWidth = 1; ctx.stroke()
+      ctx.beginPath()
+      for (let offset = 12; offset < length - 6; offset += 14) {
+        const pixelX = startX + tangentX * offset, pixelY = startY + tangentY * offset
+        ctx.moveTo(pixelX + normalX * 2, pixelY + normalY * 2)
+        ctx.lineTo(pixelX + faceX - normalX * 2, pixelY + faceY - normalY * 2)
+      }
+      ctx.strokeStyle = '#131f2a'; ctx.stroke()
+    }
+    for (const boundary of map.boundaries ?? []) {
+      ctx.beginPath(); ctx.moveTo(cam.toPxX(boundary.start.x), cam.toPxY(boundary.start.y))
+      ctx.lineTo(cam.toPxX(boundary.end.x), cam.toPxY(boundary.end.y))
+      ctx.strokeStyle = boundary.kind === 'lock' ? '#71909f' : '#3b6878'; ctx.lineWidth = 7; ctx.stroke()
+      ctx.strokeStyle = boundary.kind === 'lock' ? '#b4c8d1' : '#6dd1db'; ctx.lineWidth = 1.5; ctx.stroke()
+    }
+    ctx.restore()
+    return
+  }
   // 墙体 AABB 互不重叠且样式只有 4 种：按样式分桶遍历，把每墙 4 次样式切换
   // 降为常量次；描边合并为整批 beginPath/stroke。绘制次序(影→体→描边)不变。
   const s = cam.scale
@@ -251,29 +313,60 @@ export function drawCore(ctx: CanvasRenderingContext2D, cam: Camera, wx: number,
   ctx.restore()
 }
 
-// drawPointDrop：技能点晶片（ADR-0016）——amber 菱形本体 + 数值角标。
-// 菱形与 HUD 计数器同一语义形状（icons.skillPoint 的画布近亲），带轻微
-// 浮动（reduced-motion 关）与落地阴影。
-export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, points: number, tick = 0): void {
-  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(9, 0.85 * cam.scale)
+/** 散开入场参数（render 插值后传入）：p 为缓动后的飞行进度 0..1，from 为出发原点（世界坐标）。 */
+export interface PointDropIntro { p: number; fromX: number; fromY: number }
+
+/** reduced-motion 查询：渲染层据此跳过晶片入场动画（本体浮动在内部同源裁决）。 */
+export function reducedMotion(): boolean { return motion.matches }
+
+function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  ctx.beginPath()
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y)
+  ctx.closePath()
+}
+
+// drawPointDrop：技能点晶片（ADR-0016）——amber 小菱形（0.315m，明显小于
+// 0.8m 的 core），与 HUD 计数器同一语义形状（icons.skillPoint 的画布近亲）：
+// 微光外菱 + amber 本体 + 深色内菱 + 闪点，>1 点才带数值角标。轻微浮动
+// （reduced-motion 关）与落地阴影；入场期（intro）自阵亡点飞来：淡入、
+// 放大弹出并拖出渐隐运动条。
+export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, points: number, tick = 0, intro?: PointDropIntro): void {
+  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(4.5, 0.315 * cam.scale)
   if (!visible(cam, x, y)) return
-  const bob = motion.matches ? 0 : Math.sin(tick / 20 + wx) * Math.min(2, cam.scale * 0.05)
-  ctx.save()
-  ctx.fillStyle = '#02091090'
-  ctx.beginPath(); ctx.ellipse(x, y + size * 0.5, size * 0.34, size * 0.12, 0, 0, tau); ctx.fill()
+  // reduced-motion 下入场动画整体退化（渲染层也会跳过，这里兜底独立调用方）。
+  const fly = !motion.matches && intro !== undefined && intro.p < 1 ? intro : undefined
+  const p = fly?.p ?? 1
+  const s = size * (fly ? 0.55 + 0.45 * p : 1)
+  const alpha = fly ? Math.min(1, 0.3 + p * 2.2) : 1
+  const bob = motion.matches || fly ? 0 : Math.sin(tick / 20 + wx) * Math.min(1.125, cam.scale * 0.03)
   const cy = y + bob
-  ctx.globalAlpha = 0.25; ctx.fillStyle = ink.amber
-  ctx.fillRect(x - size * 0.5, cy - size * 0.5, size, size)
-  ctx.globalAlpha = 1; ctx.fillStyle = ink.amber
-  ctx.beginPath()
-  ctx.moveTo(x, cy - size * 0.5); ctx.lineTo(x + size * 0.5, cy); ctx.lineTo(x, cy + size * 0.5); ctx.lineTo(x - size * 0.5, cy)
-  ctx.closePath(); ctx.fill()
+  ctx.save()
+  if (fly) {
+    const fx = cam.toPxX(fly.fromX), fy = cam.toPxY(fly.fromY)
+    if (Math.hypot(x - fx, y - fy) > 3) {
+      ctx.globalAlpha = 0.38 * (1 - p); ctx.strokeStyle = ink.amber
+      ctx.lineWidth = Math.max(1, s * 0.14)
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(x, cy); ctx.stroke()
+    }
+  }
+  ctx.globalAlpha = alpha * (fly ? 0.3 + 0.7 * p : 1)
+  ctx.fillStyle = '#02091090'
+  ctx.beginPath(); ctx.ellipse(x, y + size * 0.4, s * 0.26, s * 0.09, 0, 0, tau); ctx.fill()
+  ctx.globalAlpha = alpha * 0.16; ctx.fillStyle = ink.amber
+  diamond(ctx, x, cy, s * 0.85); ctx.fill()
+  ctx.globalAlpha = alpha; ctx.fillStyle = ink.amber
+  diamond(ctx, x, cy, s * 0.5); ctx.fill()
   ctx.fillStyle = '#070d14'
-  ctx.beginPath()
-  ctx.moveTo(x, cy - size * 0.24); ctx.lineTo(x + size * 0.24, cy); ctx.lineTo(x, cy + size * 0.24); ctx.lineTo(x - size * 0.24, cy)
-  ctx.closePath(); ctx.fill()
-  ctx.fillStyle = ink.amber; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-  ctx.fillText(`${points}`, x, cy + size * 0.55)
+  diamond(ctx, x, cy, s * 0.3); ctx.fill()
+  const twinkle = motion.matches ? 0.6 : 0.5 + 0.5 * Math.sin(tick / 9 + wx * 3)
+  ctx.globalAlpha = alpha * (0.3 + 0.4 * twinkle)
+  ctx.fillStyle = ink.white
+  const g = Math.max(1, s * 0.1)
+  ctx.fillRect(x - s * 0.2, cy - s * 0.36, g, g)
+  if (points > 1) {
+    ctx.fillStyle = ink.amber; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+    ctx.fillText(`${points}`, x, cy + s * 0.55)
+  }
   ctx.restore()
 }
 

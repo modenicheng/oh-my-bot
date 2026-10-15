@@ -8,6 +8,7 @@
 
 ## 已完成
 
+- [x] **bot-api 升级面与 solo bots 自动加点**（2026-10-15）：`self.upgrade` / `game.upgradeCosts` / `obs.pointDrops`、`RobotRef.maxHp/maxEnergy`、`buyUpgrade` / `nearestPointDrop`；购买单通道、回放与失败清空、4Hz 自动加点、TS 单源扇出 AI/Monaco、drift 测试及手册同步（见 docs/plans/bot-api-upgrade.md）。
 - [x] **R10 硬化批 S-28~S-34**（2026-10-11）：checkpoint/回放日志校验（S-28/S-29）；非激活提交回执（S-30）；join/观战房码+昵称校验（S-31，含检查脚本房码改名与 D19 遗留）；AI 流式 50ms/512B 聚合（S-32）；接管通知+graceful 关闭旧连接（S-33，proto additive CN_TAKEOVER）；终局玩家帧 reliable（S-34）。
 - [x] **R10 前端打磨**（2026-10-11）：C-36 chat/kill-feed 让位（:has 单规则）；C-37 color-scheme:dark + ::selection；C-45 回放尾行截断容忍。待实机复核：C-36 动效、C-37 滚动条/select 观感。
 - [x] **R10 feedback 拆分 + 空闲跳帧**（2026-10-11）：C-17 `game/feedback/` 目录化 + 魔法数命名 + DRAWERS 注册表；C-26 controls awake 门 + `quiet()` 静默判定 + requestDraw 脏保底。
@@ -44,7 +45,6 @@
 
 - [ ] 升级玩法实装后试玩观察：前 3 分钟弃局率（赏金掉级体感）、击杀榜与点数分布（连杀收割是否过强）；必要时把赏金门槛 L4 升到 L5（docs/plans/upgrade-system.md §合理性评估）。
 - [ ] 200 人压测复验：TA 保底后 stepCores 碰撞量 +（mapgen v9 大房 pad 数），tick p95 与 AOI 带宽对照 bit-333 基线；超预算则为拾取判定加空间索引（照墙索引 8.6× 先例）。
-- [ ] bot-api 暴露升级面（solo bots 自动加点）：五处平行定义同步 + drift 测试，v2 再议。
 
 ## 已决策（不再列为任务）
 

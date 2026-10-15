@@ -23,9 +23,11 @@ func cloneMap(m *MapDef) *MapDef {
 	}
 	out := *m
 	out.Walls = append([]Wall{}, m.Walls...)
+	out.Boundaries = append([]BoundaryEdge{}, m.Boundaries...)
 	out.Uplinks = append([]UplinkDef{}, m.Uplinks...)
 	out.CorePads = append([]CorePadDef{}, m.CorePads...)
 	out.HealthPacks = append([]HealthPackDef{}, m.HealthPacks...)
+	out.CoreRules.SpawnBands = append([]CoreSpawnBand(nil), m.CoreRules.SpawnBands...)
 	out.CoreRules.GroupWeights = make(map[Phase][]float64, len(m.CoreRules.GroupWeights))
 	for phase, weights := range m.CoreRules.GroupWeights {
 		out.CoreRules.GroupWeights[phase] = append([]float64{}, weights...)
@@ -85,6 +87,12 @@ func (s *Sim) SetMap(def *MapDef) error {
 	if m.CoreRules.TargetAlive < 0 || m.CoreRules.TargetAlive > len(m.CorePads) {
 		return fmt.Errorf("sim: invalid core target")
 	}
+	for _, band := range m.CoreRules.SpawnBands {
+		if !finite(band.MinRadius) || !finite(band.MaxRadius) || band.MinRadius < 0 || band.MaxRadius <= band.MinRadius ||
+			(m.GeneratorVer >= 2 && band.MaxRadius > arenaCenterRadiusOf(m)) {
+			return fmt.Errorf("sim: invalid core spawn band")
+		}
+	}
 	for phase, weights := range m.CoreRules.GroupWeights {
 		if !validPhase(phase) {
 			return fmt.Errorf("sim: invalid weight phase")
@@ -103,6 +111,9 @@ func (s *Sim) SetMap(def *MapDef) error {
 	for i, p := range m.CorePads {
 		if p.ID == 0 || (i > 0 && m.CorePads[i-1].ID == p.ID) || !p.Pos.finite() || p.Group < 0 || (p.Value != 10 && p.Value != 25) {
 			return fmt.Errorf("sim: invalid core pad %d", p.ID)
+		}
+		if len(m.CoreRules.SpawnBands) > 0 && (p.Group >= len(m.CoreRules.SpawnBands) || !m.CoreRules.SpawnBands[p.Group].contains(p.Pos)) {
+			return fmt.Errorf("sim: invalid core spawn group %d", p.ID)
 		}
 		for _, phase := range []Phase{PhaseOuterRing, PhaseCoreOpen} {
 			if p.Group >= len(m.CoreRules.GroupWeights[phase]) {
@@ -250,7 +261,7 @@ func (s *Sim) stepUplinks() {
 			if u.Def.Main {
 				value = 25
 			}
-			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_UplinkHack{UplinkHack: &ombv1.EvUplinkHack{By: u.HackingID, UplinkId: u.Def.ID, Value: value}}})
+			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_UplinkHack{UplinkHack: &ombv1.EvUplinkHack{By: u.HackingID, UplinkId: u.Def.ID, Value: value, At: &ombv1.Vec2{X: u.Def.Pos.X, Y: u.Def.Pos.Y}}}})
 			u.ReadyAt[u.HackingID] = s.tick + HackCooldown
 			u.HackingID, u.ProgressTicks, u.DecayAt = 0, 0, 0
 		}
@@ -341,11 +352,16 @@ func (s *Sim) stepCores() {
 			if r.State == Alive && reached {
 				core.Alive = false
 				if s.simulationVersion >= 5 {
-					// 技能点奖励（ADR-0016）：普通 5 / Mega 10，与计分并行的货币；
+					// 技能点奖励（ADR-0016）：普通 2 / Mega 5，与计分并行的货币；
 					// pre-v5 回放不含升级状态，保持零值以复现录制 checkpoint。
-					r.Upg.Points += UpgradePointsFor(core.Value)
+					r.Upg.Points += s.coreUpgradePoints(core.Value)
 				}
-				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_CorePickup{CorePickup: &ombv1.EvCorePickup{By: r.ID, CoreId: core.ID, Value: core.Value}}})
+				pickup := &ombv1.EvCorePickup{By: r.ID, CoreId: core.ID, Value: core.Value, At: &ombv1.Vec2{X: core.Pos.X, Y: core.Pos.Y}}
+				if s.simulationVersion >= 7 {
+					points := s.coreUpgradePoints(core.Value)
+					pickup.SkillPoints = &points
+				}
+				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_CorePickup{CorePickup: pickup}})
 				break
 			}
 		}
@@ -401,7 +417,11 @@ func (s *Sim) spawnCore() bool {
 		}
 		pick -= weights[g]
 		if pick < 0 {
-			s.cores[ids[int(s.random()%uint64(len(ids)))]].Alive = true
+			index := ids[int(s.random()%uint64(len(ids)))]
+			if s.simulationVersion >= 7 && len(s.mapDef.CoreRules.SpawnBands) > 0 {
+				return s.spawnRandomCore(index)
+			}
+			s.cores[index].Alive = true
 			return true
 		}
 	}

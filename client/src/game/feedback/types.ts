@@ -11,6 +11,7 @@ export interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: 
 /** 延迟血条（白条）视觉态：受击保持后线性排空到实际值。 */
 export interface HealthVisual { actualX10: number; delayedX10: number; holdUntil: number; updatedAt: number }
 
-export interface DamagePopup { robot: number; pos: MapVec2; amountX10: number; at: number; seed: number }
+/** 飘字：color/prefix 区分伤害（red/-）与技能点拾取（amber/+）。 */
+export interface DamagePopup { robot: number; pos: MapVec2; amountX10: number; at: number; seed: number; color: string; prefix: string }
 
 export interface TrailPoint { pos: MapVec2; tick: number; color: string }

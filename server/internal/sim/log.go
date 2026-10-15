@@ -474,6 +474,9 @@ func validateRecord(r diskRecord) error {
 		}
 		// 升级购买同族防回放空转：单 tick 每机器人最多 MaxUpgradeBuysPerTick 次，
 		// 且轨号必须落在 1–5（consumeInputs 逐次校验，这里先拒绝明显坏值）。
+		if r.Control.Script != nil && len(r.Control.Script.Upgrades) != 0 {
+			return errors.New("sim: control script upgrades must use the canonical upgrades queue")
+		}
 		if len(r.Control.Upgrades) > MaxUpgradeBuysPerTick {
 			return fmt.Errorf("sim: control upgrades %d exceed %d", len(r.Control.Upgrades), MaxUpgradeBuysPerTick)
 		}

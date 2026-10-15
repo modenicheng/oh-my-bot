@@ -58,6 +58,13 @@ gc:
 1.4%→0%。防御上限 `GCPercentMax=2000`。`config.example.yaml`
 默认注释带推荐值 400。
 
+> **修订（2026-10-15）**：400 由「推荐配置」升级为代码内默认
+> （`ai.GCPercentDefault`，`LoadServerConfig` 裸加载即生效）——裸部署
+> / systemd 此前必须手动设 `OMB_GC_PERCENT`，漏设即回落 GOGC=100 丢掉
+> 一半 tick 性能。上句「0/缺省 = 不调整」中「缺省」语义随之变更：
+> **显式 0** 才是「沿用进程默认/外部 GOGC」的回退口，缺省 = 400。
+> env / config.yaml 显式值仍最高优先。
+
 ## 实测（bit-333，E3-1230V2 8核 @3.3GHz，同一基准三组对照）
 
 | 场景 | 基线 | 根治后 | 变化 |

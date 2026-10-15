@@ -12,9 +12,9 @@ import (
 const (
 	UpgradeTrackCount = 5
 	UpgradeMaxLevel   = 10
-	// core 拾取的技能点：普通（value 10）5 点、Mega（value 25）10 点。
-	UpgradePointsCore = 5
-	UpgradePointsMega = 10
+	// core 拾取的技能点：普通（value 10）2 点、Mega（value 25）5 点。
+	UpgradePointsCore = 2
+	UpgradePointsMega = 5
 	// BountyStateLevel：任一轨达到该等级即进入赏金状态（阵亡散落）。
 	BountyStateLevel = 4
 	// 单 tick 每 robot 排队的购买上限：防止伪造上游把回放消费循环撑大
@@ -25,7 +25,12 @@ const (
 	PointDropRadius            = 0.4
 	PointDropScatterMin        = 1.0
 	PointDropScatterMax        = 4.0
-	PointDropMaxOrbs           = 4
+	// 赏金拆分策略（2026-10-15 调整）：单只 ≤4 点，环境晶片另固定为 1 点；
+	// 只数随机 6–12 起、但至少要满足单只上限推导的下限（ceil(total/4)），
+	// 总量小于随机下限时只数=总量（每只至少 1 点）。
+	PointDropPerOrbMax    = 4
+	PointDropOrbsMin      = 6
+	PointDropOrbsRandSpan = 7
 )
 
 // 轨下标（协议 UpgradeSelf.levels 与 UpgradeTuning 数组同序）。
@@ -133,6 +138,20 @@ func UpgradePointsFor(value int32) int32 {
 		return UpgradePointsMega
 	}
 	return UpgradePointsCore
+}
+
+func legacyUpgradePointsFor(value int32) int32 {
+	if value >= 25 {
+		return 10
+	}
+	return 5
+}
+
+func (world *Sim) coreUpgradePoints(value int32) int32 {
+	if world.simulationVersion < 7 {
+		return legacyUpgradePointsFor(value)
+	}
+	return UpgradePointsFor(value)
 }
 
 // UpgradeCostsFlat 是 SimTuning.UpgradeTuning.costs 的唯一来源（50 项
@@ -265,20 +284,28 @@ func (s *Sim) applyBountyPenalty(v *Robot) {
 		FromRobot: v.ID, At: &ombv1.Vec2{X: v.Position.X, Y: v.Position.Y}, TotalPoints: total, LevelLost: lost}}})
 }
 
-// spawnPointDrops 把总量拆成 ≤4 只晶片（每只约 15 点、余数归末只），散布在
-// 死亡点周围的确定性 RNG 环带内（避墙/避锁区/场内钳制）。
+// spawnPointDrops 把赏金总量随机拆成多只小晶片：单只 ≤4 点，
+// 只数 ≥6 随机且不低于 ceil(total/4)（保证单只上限成立），
+// 总量小于随机下限时只数=总量。散布在死亡点周围的确定性 RNG 环带内
+// （避墙/避锁区/场内钳制）。
 func (s *Sim) spawnPointDrops(center Vec2, total int32) {
 	if total <= 0 {
 		return
 	}
-	k := int(math.Ceil(float64(total) / 15))
-	k = max(1, min(PointDropMaxOrbs, k))
+	k := max(1, min(4, int(math.Ceil(float64(total)/15))))
+	if s.simulationVersion >= 6 {
+		needed := int((int64(total) + PointDropPerOrbMax - 1) / PointDropPerOrbMax)
+		k = PointDropOrbsMin + int(s.randomUnit()*float64(PointDropOrbsRandSpan))
+		k = min(max(needed, k), int(total))
+	}
 	base := total / int32(k)
 	rem := total - base*int32(k)
 	for i := 0; i < k; i++ {
 		points := base
-		if i == k-1 {
+		if s.simulationVersion < 6 && i == k-1 {
 			points += rem
+		} else if s.simulationVersion >= 6 && i < int(rem) {
+			points++
 		}
 		id := s.nextProjectile
 		s.nextProjectile++
@@ -318,7 +345,7 @@ func (s *Sim) stepPointDrops() {
 			r := &s.robots[j]
 			if r.State == Alive && s.sweptReach(r.PathStart, r.Position, d.Pos, PointDropRadius) {
 				r.Upg.Points += d.Points
-				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_PointDropPickup{PointDropPickup: &ombv1.EvPointDropPickup{By: r.ID, DropId: d.ID, Points: d.Points}}})
+				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_PointDropPickup{PointDropPickup: &ombv1.EvPointDropPickup{By: r.ID, DropId: d.ID, Points: d.Points, At: &ombv1.Vec2{X: d.Pos.X, Y: d.Pos.Y}}}})
 				picked = true
 				break
 			}

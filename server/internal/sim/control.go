@@ -49,6 +49,7 @@ func cloneCommands(v *ScriptCommands) *ScriptCommands {
 	c := *v
 	c.Move, c.Aim, c.Fire = copyPointer(v.Move), copyPointer(v.Aim), copyPointer(v.Fire)
 	c.Dash, c.Shield, c.Interact, c.Say = copyPointer(v.Dash), copyPointer(v.Shield), copyPointer(v.Interact), copyPointer(v.Say)
+	c.Upgrades = append([]uint8(nil), v.Upgrades...)
 	return &c
 }
 
@@ -64,8 +65,25 @@ func (s *Sim) ApplyScriptCommands(id uint32, commands ScriptCommands) bool {
 		s.ClearScriptAxes(id)
 		return false
 	}
+	commands.Upgrades = commands.Upgrades[:min(len(commands.Upgrades), MaxUpgradeBuysPerTick)]
+	if !validUpgradeQueue(commands.Upgrades) {
+		s.ClearScriptAxes(id)
+		return false
+	}
 	c := &s.robots[i].Control
 	c.PendingScript, c.ScriptPending, c.ScriptFailed = cloneCommands(&commands), true, false
+	return true
+}
+
+func validUpgradeQueue(tracks []uint8) bool {
+	if len(tracks) > MaxUpgradeBuysPerTick {
+		return false
+	}
+	for _, track := range tracks {
+		if track == 0 || track > UpgradeTrackCount {
+			return false
+		}
+	}
 	return true
 }
 
@@ -245,6 +263,17 @@ func (s *Sim) consumeInputs() {
 	for i := range s.robots {
 		r := &s.robots[i]
 		c := &r.Control
+		if c.ScriptPending && !c.ScriptFailed && c.PendingScript != nil {
+			if s.simulationVersion >= 5 {
+				for _, track := range c.PendingScript.Upgrades {
+					if len(c.PendingUpgrades) >= MaxUpgradeBuysPerTick {
+						break
+					}
+					c.PendingUpgrades = append(c.PendingUpgrades, track)
+				}
+			}
+			c.PendingScript.Upgrades = nil
+		}
 		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" || len(c.PendingUpgrades) != 0 {
 			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay, Upgrades: append([]uint8(nil), c.PendingUpgrades...)}})
 		}

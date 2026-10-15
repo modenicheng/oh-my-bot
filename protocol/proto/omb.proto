@@ -261,6 +261,8 @@ message SelfState {
   optional ControlSource ability_src = 10; // 分轴仲裁结果：技能轴当前来源（ADR-0009）
   optional uint32 manual_axes_mask = 11; // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
   optional UpgradeSelf upgrade = 12; // 局内升级状态；缺失表示旧服务器（=0 点全零级）
+  optional uint32 shield_ready_tick = 13;
+  optional uint32 shield_started_tick = 14;
 }
 
 message SnapshotDelta {
@@ -281,6 +283,10 @@ message SnapshotDelta {
   repeated HealthPackState health_packs = 15;
   repeated PointDropState point_drops = 16; // 恒全量（同 Core/HealthPack 通道）
   repeated uint32 point_drop_gone = 17;     // tombstone：消失的晶片 id（拾取/到期）
+  repeated uint32 uplink_gone = 18;
+  repeated uint32 health_pack_gone = 19;
+  optional string map_json = 20;
+  optional double vision_radius = 21;
 }
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
@@ -293,7 +299,7 @@ message EvKill {
   repeated uint32 assists = 5; // 按 robot id 升序，允许多人
   bool kill_steal = 6; // 终结者本生命伤害份额严格小于 50%
 }
-message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; } // 价值 +10/+25；技能点奖励由 value 确定性推导（5/10）
+message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; Vec2 at = 4; optional sint32 skill_points = 5; } // 价值 +10/+25；技能点奖励 2/5，旧录像缺省时为 5/10
 message EvPointDropSpawn { // 赏金玩家阵亡散落（每次死亡一条，非每晶片一条）；落 Match Event Log 供回放/分析
   uint32 from_robot = 1;
   Vec2 at = 2;            // 死亡点（晶片散布中心）
@@ -304,8 +310,9 @@ message EvPointDropPickup { // 晶片被拾取（每晶片一条）；只给点�
   uint32 by = 1;
   uint32 drop_id = 2;
   sint32 points = 3;
+  Vec2 at = 4;
 }
-message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
+message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; Vec2 at = 4; } // 引导 4s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
 message EvHeal { uint32 by = 1; uint32 id = 2; sint32 heal_x10 = 3; Vec2 at = 4; }
@@ -603,6 +610,12 @@ message ReplayVisualFrame {
   Phase phase = 3;
   repeated ReplayVisualRobot robots = 4;
   repeated ReplayVisualProjectile projectiles = 5;
+  ReplayVisualResources resources = 6;
+}
+
+message ReplayVisualResources {
+  repeated CoreState cores = 1;
+  repeated PointDropState point_drops = 2;
 }
 
 message ReplayVisualRobot {

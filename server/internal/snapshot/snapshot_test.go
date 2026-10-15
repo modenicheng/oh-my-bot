@@ -99,7 +99,7 @@ func TestHealthPacksArePublicMapObjects(t *testing.T) {
 	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0)})
 	w.HealthPacks = []sim.HealthPackView{{ID: 3, Pos: sim.Vec2{X: 60, Y: 60}, Available: false, RespawnInS: 12}}
 	obs := BuildObservation(w, nil, 1, 0)
-	if len(obs.HealthPacks) != 1 || obs.HealthPacks[0] != w.HealthPacks[0] {
+	if len(obs.HealthPacks) != 0 {
 		t.Fatalf("health packs missing from player observation: %+v", obs.HealthPacks)
 	}
 	spec := BuildSpectatorObservation(w)
@@ -114,9 +114,9 @@ func TestMapObjectsAlwaysFull(t *testing.T) {
 	// Core/Uplink 放在 100m 外 + 墙后，仍全量下发。
 	walls := []sim.Wall{mkWall(1, 4, -10, 5, 10)}
 	w := mkWorld(walls, []sim.RobotView{mkRobot(1, 0, 0)})
-	w.Cores = []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 100, Y: 100}, Value: 25, Alive: true}}
+	w.Cores = []sim.CoreView{{ID: 10, Pos: sim.Vec2{X: 2}, Value: 25, Alive: true}, {ID: 11, Pos: sim.Vec2{X: 8}, Alive: true}}
 	w.Uplinks = []sim.UplinkView{{
-		ID: 20, Pos: sim.Vec2{X: -100, Y: -100}, Active: true,
+		ID: 20, Pos: sim.Vec2{X: -2, Y: -2}, Active: true,
 		PersonalCDs: map[uint32]uint32{1: 12, 2: 5},
 	}}
 	obs := BuildObservation(w, NewWallIndex(walls, 0), 1, 0)
@@ -159,8 +159,8 @@ func TestProjectileClipping(t *testing.T) {
 func TestMissingObserverFallback(t *testing.T) {
 	w := mkWorld(nil, []sim.RobotView{mkRobot(1, 0, 0), mkRobot(2, 30, 0)})
 	obs := BuildObservation(w, nil, 99, 0) // 99 不存在
-	if got := idsOf(obs.Robots); !slices.Equal(got, []uint32{1}) {
-		t.Fatalf("原点视野应只含 20m 内的 1 号：got %v", got)
+	if got := idsOf(obs.Robots); len(got) != 0 {
+		t.Fatalf("missing observer must fail closed: got %v", got)
 	}
 }
 

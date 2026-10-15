@@ -207,7 +207,7 @@ func (l layout) coverCells() []coverCell {
 // 9：外/中环 pad 配额保底 ≥ TargetAlive——升级玩法（ADR-0016）的点数经济
 //
 //	在大房不被 pad 面积配额封顶；n≤49 配额已达 TA，几何与 v8 完全一致。
-const GeneratorVer = 9
+const GeneratorVer = 10
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
@@ -256,6 +256,11 @@ func GenerateForPlayers(seed uint64, participants int) (*sim.MapDef, error) {
 		CoreRules: sim.CoreRulesDef{
 			PeriodTicks: period,
 			TargetAlive: target,
+			SpawnBands: []sim.CoreSpawnBand{
+				{MinRadius: l.outerMinR + sim.RobotRadius, MaxRadius: l.outerMaxR - sim.RobotRadius},
+				{MinRadius: l.midMinR + sim.RobotRadius, MaxRadius: l.midMaxR - sim.RobotRadius},
+				{MaxRadius: l.coreZoneR - sim.RobotRadius},
+			},
 			GroupWeights: map[sim.Phase][]float64{
 				sim.PhaseOuterRing: {0.6, 0.4, 0.0},
 				sim.PhaseCoreOpen:  {0.2, 0.4, 0.4},

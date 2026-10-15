@@ -108,5 +108,16 @@ func visualFrameProto(frame sim.ReplayVisualFrame) *ombv1.ReplayVisualFrame {
 			Pos: &ombv1.Vec2{X: projectile.Pos.X, Y: projectile.Pos.Y}, Heading: projectile.Heading,
 		}
 	}
+	if frame.Resources != nil {
+		out.Resources = &ombv1.ReplayVisualResources{}
+		for _, core := range frame.Resources.Cores {
+			if core.Alive {
+				out.Resources.Cores = append(out.Resources.Cores, &ombv1.CoreState{Base: &ombv1.EntityBase{Id: core.ID, Pos: &ombv1.Vec2{X: core.Pos.X, Y: core.Pos.Y}}, Value: core.Value})
+			}
+		}
+		for _, drop := range frame.Resources.PointDrops {
+			out.Resources.PointDrops = append(out.Resources.PointDrops, &ombv1.PointDropState{Base: &ombv1.EntityBase{Id: drop.ID, Pos: &ombv1.Vec2{X: drop.Pos.X, Y: drop.Pos.Y}}, Points: drop.Points})
+		}
+	}
 	return out
 }

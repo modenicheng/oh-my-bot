@@ -135,9 +135,21 @@ describe('appendWallShadow silhouette geometry', () => {
     for (const p of [{ x: 16, y: 0 }, { x: 18, y: -6 }, { x: 18, y: 6 }]) expect(inside(p, poly)).toBe(true)
   })
 
-  it('zero-area / degenerate walls project nothing', () => {
-    expect(run(0, 0, wall(10, 10, 10, 14))).toEqual([])
-    expect(run(0, 0, wall(10, 10, 14, 10))).toEqual([])
+  it('local vertical and horizontal wall faces cast shadows without inventing wall depth', () => {
+    const vertical = run(0, 0, wall(10, -2, 10, 2))
+    const horizontal = run(0, 0, wall(-2, 10, 2, 10))
+    expect(inside({ x: 16, y: 0 }, vertical)).toBe(true)
+    expect(inside({ x: 5, y: 0 }, vertical)).toBe(false)
+    expect(inside({ x: 0, y: 16 }, horizontal)).toBe(true)
+    expect(inside({ x: 0, y: 5 }, horizontal)).toBe(false)
+    expect(signedArea(vertical)).toBeLessThan(0)
+    expect(signedArea(horizontal)).toBeLessThan(0)
+    expect(inside({ x: 19, y: 0 }, run(0, 0, wall(0.601, -2, 0.601, 2)))).toBe(true)
+  })
+
+  it('point / invalid walls project nothing', () => {
+    expect(run(0, 0, wall(10, 10, 10, 10))).toEqual([])
+    expect(run(0, 0, wall(14, 10, 10, 14))).toEqual([])
     expect(run(0, 0, { min: { x: Number.NaN, y: 0 }, max: { x: 4, y: 4 } })).toEqual([])
   })
 

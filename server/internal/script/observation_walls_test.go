@@ -104,7 +104,7 @@ func TestScanWallsDontBreakMapSeed(t *testing.T) {
 	frame := testFrame()
 	src := `
 function tick(ctx) {
-  if (ctx.game.mapSeed !== 42) throw new Error("mapSeed changed: " + ctx.game.mapSeed);
+  if (ctx.game.mapSeed !== 0) throw new Error("mapSeed leaked: " + ctx.game.mapSeed);
   if (ctx.scan().walls === undefined) throw new Error("walls undefined");
 }
 `

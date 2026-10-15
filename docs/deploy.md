@@ -74,10 +74,11 @@ WorkingDirectory=/opt/omb
 # 对外服务必须显式 -addr（默认 127.0.0.1 只有本机可达）
 ExecStart=/opt/omb/omb -addr :27182
 Restart=on-failure
-# GC 调优（ADR-0015：64 脚本满载时默认 GOGC=100 会耗掉 ~40% 帧预算）
-# 也可写进 /opt/omb/config.yaml 的 gc: 段，二选一
-Environment=OMB_GC_PERCENT=400
-# Environment=OMB_GC_MEMORY_LIMIT=1GiB   # 软上限兑底，内存紧张时再加
+# GC 调优已默认内置（代码默认 GOGC=400，ADR-0015：标准 GOGC=100 会耗掉
+# ~40% 帧预算），无需在此设置；要回退改 100（或 0 = 沿用进程默认/外部
+# GOGC），也可写进 /opt/omb/config.yaml 的 gc: 段
+# Environment=OMB_GC_PERCENT=400
+# Environment=OMB_GC_MEMORY_LIMIT=1GiB   # 软上限兜底，内存紧张时再加
 
 [Install]
 WantedBy=multi-user.target
@@ -101,25 +102,29 @@ sudo systemctl daemon-reload && sudo systemctl enable --now omb
 journalctl -u omb -f                # 跟踪日志
 ```
 
-### 大房间（单房间 >64 人）
+### 房间席位上限（OMB_MAX_PLAYERS）
 
-单房间席位上限默认 64（设计基线）；大型活动用环境变量 `OMB_MAX_PLAYERS`
-提升（1–256，超界钳制，须在服务启动前设置）：
+单房间席位上限**默认 200**（2026-10 压测口径，代码内置）；小房部署可用环境
+变量 `OMB_MAX_PLAYERS` 下调、活动可上调（1–256，超界钳制，须在服务启动前
+设置）：
 
 ```ini
-# 200 人单房示例（同一 [Service] 段）
+# 显式固定 200（与默认一致；回退小房改 64，同一 [Service] 段）
 Environment=OMB_MAX_PLAYERS=200
 ```
 
 席位提高后**地图与资源会随开房人数自动伸缩**（GeneratorVer 8：场地面积
 ∝ 人数、掩体/Uplink/血包/Core Pad 分档增长），无需额外配置。注意：
 
-- **务必设置 GC 调优**（`OMB_GC_PERCENT=400` 或 config.yaml `gc.percent`）：
-  200 人实测其收益是 tick 墙钟减半；
-- 200 人房实测（16 核 dev 机，`omb-load` 200 连接 × 50% 脚本 × 30Hz
-  输入，GOGC=400）：tick_avg ≈ 4ms（p95 ≈ 6.7ms），稳定 60Hz 满帧，
-  0 丢帧 / 0 断连 / 0 脚本顺延，下行 ≈ 15 Mbps。8 核目标机预计 tick
-  翻倍仍在 12ms 帧预算内，活动前建议用 `omb-load` 在目标机复测一轮；
+- **GC 调优已默认内置**（代码默认 GOGC=400）：200 人实测其收益是 tick
+  墙钟减半，无需部署侧设置；内存紧张可加 `OMB_GC_MEMORY_LIMIT` 兜底，
+  要回退标准 GC 设 `OMB_GC_PERCENT=100`（或 0 = 沿用进程默认/外部 GOGC）；
+- 200 人房本地 RC 验证（2026-10-16，`omb-load` 200 连接 × 50% 脚本 ×
+  30Hz 输入，GOGC=400，35s 热身局）：tick_avg 约 13–16ms、p95 约
+  15–22ms，0 快照缺口 / 0 传输丢弃 / 0 脚本顺延，下行约 29 Mbps。
+  局部地形感知后不能沿用旧版本的 4ms / 15 Mbps 数据；当前 p95 已超过
+  60Hz 的 16.7ms，不能宣称 200 人稳定满帧。活动前须在目标机隔离复测，
+  性能不足时下调 `OMB_MAX_PLAYERS`（例如 64），不要按核数线性推算；
 - 观测口：`/api/stats`（在线/房间/每房 tick avg·p95/脚本顺延/传输丢帧
   计数）；`/debug/pprof` 需 `OMB_PPROF=1` 显式开启；
 - 每房观战席位仍为 64（全图视角，编码成本高于玩家）。
@@ -176,8 +181,9 @@ docker run -d -p 27182:27182 -v omb-data:/app/data ghcr.io/modenicheng/oh-my-bot
 
 - 日志落 `/app/data/matches`（挂卷持久化）；镜像以非 root 用户（65532）运行，该目录已预置为可写挂载点。
 - 容器默认 `OMB_ADDR=:27182` 绑所有网卡；`-addr` flag 可覆盖。
-- 镜像自带大房默认 `OMB_MAX_PLAYERS=200` 与 `OMB_GC_PERCENT=400`（见上文
-  「大房间」节；`-e` 可覆盖——`-e OMB_MAX_PLAYERS=64` 即回退小房）。
+- 镜像显式固定 `OMB_MAX_PLAYERS=200` 与 `OMB_GC_PERCENT=400`（两者均已是
+  代码默认，见上文「房间席位上限」节与 GC 说明；ENV 的作用只是让
+  `docker run -e` 一眼可改——`-e OMB_MAX_PLAYERS=64` 即回退小房）。
 
 仓库根的 `compose.yaml` 是单房 200 人的开箱即用配方（固定版本镜像 +
 environment 注入 + 数据卷 + 仅本机发布端口），`docker compose up -d`

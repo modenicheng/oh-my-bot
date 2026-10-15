@@ -39,13 +39,15 @@ const (
 // MapDef 是地图的唯一权威描述，序列化 JSON 后经 EvMapBootstrap 下发客户端。
 // 同 seed + generator_version 必产出 map_hash 一致的 MapDef（确定性契约）。
 type MapDef struct {
+	Partial      bool            `json:"partial,omitempty"`
 	Version      int             `json:"version"`       // MapDef 结构版本（当前 1）
 	GeneratorVer int             `json:"generator_ver"` // mapgen 算法版本
 	Seed         uint64          `json:"seed"`
 	MapHash      string          `json:"map_hash"` // 内容哈希（一致性校验）
 	Walls        []Wall          `json:"walls"`    // 实体墙：挡移动+弹丸+视线
-	Sectors      [8]Sector       `json:"sectors"`  // 出生扇区
-	Uplinks      []UplinkDef     `json:"uplinks"`  // 含中央主桩
+	Boundaries   []BoundaryEdge  `json:"boundaries,omitempty"`
+	Sectors      [8]Sector       `json:"sectors"` // 出生扇区
+	Uplinks      []UplinkDef     `json:"uplinks"` // 含中央主桩
 	HealthPacks  []HealthPackDef `json:"health_packs"`
 	CorePads     []CorePadDef    `json:"core_pads"`  // 确定性刷新点
 	CoreZone     CoreZoneDef     `json:"core_zone"`  // 中央锁区
@@ -53,6 +55,12 @@ type MapDef struct {
 	// ArenaRadius 竞技场圆盘半径（GeneratorVer>=8 的地图必填；此前版本
 	// 无此字段，物理沿用历史 80m 圆盘）。0 = 沿用历史值。
 	ArenaRadius float64 `json:"arena_radius,omitempty"`
+}
+
+type BoundaryEdge struct {
+	Kind  string `json:"kind"`
+	Start Vec2   `json:"start"`
+	End   Vec2   `json:"end"`
 }
 
 // Wall 复用 collision.go 的定义（ID + Min + Max，AABB 语义与 Rect 同构）。
@@ -93,6 +101,17 @@ type CoreRulesDef struct {
 	PeriodTicks  int                 `json:"period_ticks"`           // 补货周期（tick）
 	TargetAlive  int                 `json:"target_alive,omitempty"` // 每波补到的场上 Core 目标数；0=旧地图每波仅生成 1 个
 	GroupWeights map[Phase][]float64 `json:"group_weights"`          // 各阶段各组刷新权重
+	SpawnBands   []CoreSpawnBand     `json:"spawn_bands,omitempty"`
+}
+
+type CoreSpawnBand struct {
+	MinRadius float64 `json:"min_radius"`
+	MaxRadius float64 `json:"max_radius"`
+}
+
+func (band CoreSpawnBand) contains(position Vec2) bool {
+	radius := position.Len()
+	return radius >= band.MinRadius && radius <= band.MaxRadius
 }
 
 // ============ 帧视图（T1 产、T2/T3 消费；每 tick 快照、不可变） ============
@@ -142,16 +161,17 @@ type CoreView struct {
 	Alive bool
 }
 
-// PointDrop：赏金阵亡散落的技能点晶片（ADR-0016）。只给点数不给计分；
+// PointDrop：环境补货或赏金阵亡散落的技能点晶片（ADR-0016）。只给点数不给计分；
 // GoneAt 是到期 tick（stepPointDrops 到期移除，走 tombstone 下发）。
 type PointDrop struct {
-	ID     uint32 `json:"id"`
-	Pos    Vec2   `json:"pos"`
-	Points int32  `json:"points"`
-	GoneAt uint32 `json:"gone_at"`
+	ID      uint32 `json:"id"`
+	Pos     Vec2   `json:"pos"`
+	Points  int32  `json:"points"`
+	GoneAt  uint32 `json:"gone_at"`
+	Ambient bool   `json:"ambient,omitempty"`
 }
 
-// PointDropView：晶片公开状态（观察者无关，恒全量下发）。
+// PointDropView：晶片公开状态；下发前按观察者距离与 LOS 裁剪。
 type PointDropView struct {
 	ID     uint32
 	Pos    Vec2
@@ -182,13 +202,14 @@ type UplinkView struct {
 // line-of-sight clipping; cores, health packs, and uplinks are public map objects.
 // PartnerID remains only as a zero-valued source-compatibility field for older integrations.
 type Observation struct {
-	Frame       FrameView
-	Robots      []RobotView // 按扫描半径与视线裁剪
-	PartnerID   uint32      // deprecated compatibility; live observations keep zero
-	Cores       []CoreView
-	HealthPacks []HealthPackView
-	Uplinks     []UplinkView
-	Projectiles []ProjView
+	VisionRadius float64
+	Frame        FrameView
+	Robots       []RobotView // 按扫描半径与视线裁剪
+	PartnerID    uint32      // deprecated compatibility; live observations keep zero
+	Cores        []CoreView
+	HealthPacks  []HealthPackView
+	Uplinks      []UplinkView
+	Projectiles  []ProjView
 	// PointDrops 公共世界对象（快照/观战通道消费；ADR-0016）。刻意不经
 	// script/observation.go 暴露给 bot 脚本——v1 不向脚本开放升级面。
 	PointDrops []PointDropView
@@ -201,8 +222,11 @@ func (o *Observation) IsPartner(id uint32) bool { return o.PartnerID != 0 && id 
 
 // ScriptFrame 是每 tick 递给脚本的只读上下文。
 type ScriptFrame struct {
-	Self RobotView   // 本机机器人（未裁剪，自身恒可见）
-	Obs  Observation // AOI 裁剪后的外部世界
+	ShieldReady   uint32
+	ShieldStarted uint32
+	Self          RobotView   // 本机机器人（未裁剪，自身恒可见）
+	Obs           Observation // AOI 裁剪后的外部世界
+	Upg           UpgradeState
 }
 
 // ScriptCommands 是脚本的单 tick 输出意图。指针语义 = 本 tick 脚本
@@ -221,6 +245,7 @@ type ScriptCommands struct {
 	Interact  *bool
 	Say       *string // 3s 冷却、自由文本
 	PulseScan bool    // 主动脉冲（12 能量、2s CD、32m、不穿墙）
+	Upgrades  []uint8 `json:"upgrades,omitempty"`
 
 	SnippetAxes AxisMask // 本 tick 由 Snippet 模块操作过的轴（归因用，不参与序列化）
 }

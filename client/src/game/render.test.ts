@@ -334,6 +334,93 @@ describe('drawVisionMask exact projected wall shadows', () => {
 })
 // Uplink 锚定 def.pos：进度变化不改变实体坐标（进度环与交互圈同坐标），
 // lift 恒为 0（悬浮表现归 art.ts 内部，不改变实体位置）。
+describe('render() local map terrain', () => {
+  it('draws floor, grid and readable wall faces, then opaque fog without global arena geometry', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx, ops } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera()
+    cam.resize(800, 500, Infinity)
+    cam.follow(140, 0)
+    expect(cam.cx).toBe(140)
+    const local = map(2, [wall(146, -3, 146, 3)])
+    local.partial = true
+    local.arenaRadius = 0
+    local.coreZone.radius = 0
+    const world = worldAt(1, 140, 0)
+    world.localMap = local
+    const feedback = { cameraShake: () => undefined, drawTrails: () => {}, delayedHealth: () => 100,
+      draw: (_context: unknown, _camera: unknown, layer: string) => ops.push({ op: 'feedback', args: [layer] }) }
+    renderer.render(world, local, cam, { bubbles: [], feedback: feedback as never })
+    const floor = ops.findIndex(operation => operation.op === 'fillStyle' && operation.args[0] === '#101b25')
+    expect(floor).toBeGreaterThan(0)
+    expect(ops.slice(floor + 1).find(operation => operation.op === 'fillRect')?.args).toEqual([0, 0, 800, 500])
+    expect(ops.some(operation => operation.op === 'strokeStyle' && operation.args[0] === '#263b4760')).toBe(true)
+    expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === '#293e4c')).toBe(true)
+    expect(ops.some(operation => operation.op === 'arc' && Number(operation.args[2]) >= 28 * cam.scale)).toBe(false)
+    expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === 'rgb(5, 9, 14)')).toBe(true)
+    expect(ops.some(operation => operation.op === 'fillText' && String(operation.args[0]).startsWith('出生区'))).toBe(false)
+    const fog = ops.findIndex(operation => operation.op === 'fill' && operation.args[0] === 'evenodd')
+    expect(ops.findIndex(operation => operation.op === 'feedback' && operation.args[0] === 'world')).toBeLessThan(fog)
+    expect(ops.findIndex(operation => operation.op === 'feedback' && operation.args[0] === 'screen')).toBeGreaterThan(fog)
+    expect(ops.slice(fog).some(operation => operation.op === 'fillStyle' && operation.args[0] === '#293e4c')).toBe(true)
+  })
+
+  it('keeps complete terrain while local observations change and hides unobserved uplinks', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx, ops } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const terrain = map(2, [wall(46, -3, 49, 3)])
+    terrain.uplinks = [{ id: 10, pos: { x: 44, y: 6 }, main: false, activePhase: 1, interactR: 2.5 }]
+    const local = map(2, [wall(46, -2, 46, 2)])
+    local.partial = true
+    local.arenaRadius = 0
+    local.coreZone.radius = 0
+    const world = worldAt(1)
+    world.localMap = local
+    world.visionRadius = 20
+    const cam = new Camera()
+    cam.resize(800, 500, terrain.extent)
+    cam.follow(40, 0)
+    for (const walls of [local.walls, []]) {
+      local.walls = walls
+      ops.length = 0
+      renderer.render(world, terrain, cam, { bubbles: [] })
+      expect(ops.some(operation => operation.op === 'fillRect'
+        && operation.args[0] === cam.toPxX(46) && operation.args[1] === cam.toPxY(-3)
+        && operation.args[2] === 3 * cam.scale && operation.args[3] === 6 * cam.scale)).toBe(true)
+      expect(ops.some(operation => operation.op === 'arc' && operation.args[2] === terrain.arenaRadius * cam.scale)).toBe(true)
+      expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === 'rgb(5, 9, 14)')).toBe(false)
+      expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === 'rgba(5, 9, 14, 0.78)')).toBe(true)
+      expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === '#1c343a')).toBe(false)
+    }
+    local.uplinks = terrain.uplinks
+    ops.length = 0
+    renderer.render(world, terrain, cam, { bubbles: [] })
+    expect(ops.some(operation => operation.op === 'fillStyle' && operation.args[0] === '#1c343a')).toBe(true)
+  })
+})
+
+describe('local wall contact surface', () => {
+  it.each([
+    { face: wall(6, -3, 6, 3), contact: [6, -3], back: [6.45, -3] },
+    { face: wall(-6, -3, -6, 3), contact: [-6, -3], back: [-6.45, -3] },
+    { face: wall(-3, 6, 3, 6), contact: [-3, 6], back: [-3, 6.45] },
+    { face: wall(-3, -6, 3, -6), contact: [-3, -6], back: [-3, -6.45] },
+  ])('keeps decorative wall depth behind the collision face at $contact', async ({ face, contact, back }) => {
+    const { drawCover } = await import('./art')
+    const { ctx, ops } = recordingCtx()
+    const camera = new Camera(); camera.resize(800, 500, Infinity); camera.follow(0, 0)
+    const local = map(2, [face]); local.partial = true
+    drawCover(ctx as unknown as CanvasRenderingContext2D, local, camera, { x: 0, y: 0 })
+    const firstPath = ops.slice(0, ops.findIndex(operation => operation.op === 'closePath'))
+    expect(firstPath.find(operation => operation.op === 'moveTo')?.args).toEqual([camera.toPxX(contact[0]!), camera.toPxY(contact[1]!)])
+    const lastVertex = firstPath.filter(operation => operation.op === 'lineTo').at(-1)!
+    expect(lastVertex.args[0]).toBeCloseTo(camera.toPxX(back[0]!), 6)
+    expect(lastVertex.args[1]).toBeCloseTo(camera.toPxY(back[1]!), 6)
+  })
+})
+
 describe('render() uplink anchoring', () => {
   /** 全路径 render()：记录 art 绘制序列，从进度环/阴影椭圆反推实体坐标。 */
   async function renderUplink(progressX10: number, self = { x: 40, y: 0 }): Promise<{ ops: Op[]; cam: Camera }> {
@@ -398,6 +485,31 @@ describe('render() uplink anchoring', () => {
 
 // 64 人房间固定相机夹具：世界状态可含 64 台，但机器人本体/白条热路径只处理
 // 当前画布附近的实体。20m 视野与阴影仍由 render() 的统一遮罩在后续层约束。
+describe('render() local health-pack visibility', () => {
+  it('does not treat an unobserved bootstrap health pack as available', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx, ops } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera()
+    cam.resize(800, 500, 80)
+    cam.follow(40, 0)
+    const world = worldAt(2, 40, 0)
+    world.localMap = { ...map(2), partial: true }
+    const terrain = map(2)
+    renderer.render(world, terrain, cam, { bubbles: [] })
+    const baseline = [...ops]
+    ops.length = 0
+    terrain.healthPacks = [{ id: 5, pos: { x: 36, y: 0 } }]
+    renderer.render(world, terrain, cam, { bubbles: [] })
+    expect(ops).toEqual(baseline)
+    world.localMap.healthPacks = terrain.healthPacks
+    world.healthPacks.set(5, { available: false, respawnInS: 9, seenAt: 0 } as never)
+    ops.length = 0
+    renderer.render(world, terrain, cam, { bubbles: [] })
+    expect(ops.some(operation => operation.op === 'fillText' && operation.args[0] === '9s')).toBe(true)
+  })
+})
+
 describe('render() 64-player viewport work budget', () => {
   it('draws and samples delayed health only for the visible robot subset', async () => {
     const { Renderer } = await import('./render')

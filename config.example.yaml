@@ -27,10 +27,12 @@ auth:
   # bypass_proxy: true                         # OIDC 出站强制直连（本机代理到 IdP 不可达/EOF 时用）
 
 # Go runtime GC tuning (see server/internal/ai/config.go GCConfig for rationale:
-# 64-script 60Hz matches produce ~9MB/tick short-lived goja objects; default
+# 64-script 60Hz matches produce ~9MB/tick short-lived goja objects; standard
 # GOGC=100 burns ~40% of frame budget on GC assist. Measured on the 8-core
 # target host: gc.percent=400 -> frame time -34%, script deferrals 1.4% -> 0%).
-# Env overrides: OMB_GC_PERCENT / OMB_GC_MEMORY_LIMIT.
+# 400 is also the in-code default (bare deployments need no config); this block
+# just pins it for discoverability. Override via env: OMB_GC_PERCENT (0 =
+# process default / external GOGC), OMB_GC_MEMORY_LIMIT.
 gc:
   percent: 400
   # memory_limit: 1GiB   # soft limit backstop (GOMEMLIMIT); optional

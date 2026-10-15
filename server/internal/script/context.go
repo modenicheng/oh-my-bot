@@ -20,6 +20,7 @@ type commandSink interface {
 	setInteract()
 	setSay(text string)
 	setPulseScan()
+	setBuyUpgrade(track uint8)
 }
 
 var (
@@ -50,14 +51,22 @@ type tickHooks struct {
 // 行为只依赖 hooks 指针。Hot Swap（loadLocked 成功）时随候选 VM 整体
 // 重建，杜绝跨 VM 借用（goja 禁止 Object 跨 Runtime）。
 type vmBindings struct {
-	hooks *tickHooks
-	fns   map[string]goja.Value
+	hooks        *tickHooks
+	fns          map[string]goja.Value
+	freeze       goja.Callable
+	upgradeCosts *goja.Object
 }
 
-// newVMBindings 在候选 VM 校验通过后调用（调用方持 r.mu）。
+// newVMBindings 在候选 VM 执行玩家源码前调用（调用方持 r.mu）。
 func newVMBindings(vm *goja.Runtime) *vmBindings {
 	h := &tickHooks{vm: vm}
 	b := &vmBindings{hooks: h, fns: make(map[string]goja.Value, 20)}
+	b.freeze, _ = goja.AssertFunction(vm.Get("Object").ToObject(vm).Get("freeze"))
+	costs := make([]interface{}, len(sim.UpgradeCosts))
+	for index, cost := range sim.UpgradeCosts {
+		costs[index] = cost
+	}
+	b.upgradeCosts = freezeObject(b.freeze, vm.NewArray(costs...))
 	vmToFns := b.fns
 
 	vmToFns["move"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -103,6 +112,30 @@ func newVMBindings(vm *goja.Runtime) *vmBindings {
 		return goja.Undefined()
 	})
 
+	vmToFns["buyUpgrade"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		track, ok := call.Argument(0).(goja.String)
+		if !ok {
+			throwValue(vm, "buyUpgrade: expected hp, speed, shield, attack, or energy")
+		}
+		var wireTrack uint8
+		switch track.String() {
+		case "hp":
+			wireTrack = sim.TrackHP + 1
+		case "speed":
+			wireTrack = sim.TrackSpeed + 1
+		case "shield":
+			wireTrack = sim.TrackShield + 1
+		case "attack":
+			wireTrack = sim.TrackAttack + 1
+		case "energy":
+			wireTrack = sim.TrackEnergy + 1
+		default:
+			throwValue(vm, "buyUpgrade: expected hp, speed, shield, attack, or energy")
+		}
+		h.cmd.setBuyUpgrade(wireTrack)
+		return goja.Undefined()
+	})
+
 	// moveTo(pos: Vec2)：保持历史直线语义，仅转为单位向量 move 输出。
 	vmToFns["moveTo"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		pos, ok := argToVec2(call.Argument(0))
@@ -123,6 +156,10 @@ func newVMBindings(vm *goja.Runtime) *vmBindings {
 			throwValue(vm, "navigateTo: expected { x, y }")
 		}
 		obs := &h.frame.Obs
+		if obs.Frame.Map != nil && obs.Frame.Map.Partial && pos.Sub(h.frame.Self.Pos).Len() > obs.VisionRadius {
+			h.cmd.setMove(0, 0)
+			return goja.Undefined()
+		}
 		d := nav.Direction(obs.Frame.Map, obs.Frame.Phase, h.frame.Self.Pos, pos)
 		h.cmd.setMove(d.X, d.Y)
 		return goja.Undefined()
@@ -190,9 +227,24 @@ func newVMBindings(vm *goja.Runtime) *vmBindings {
 		return toJSVec2(vm, *best)
 	})
 
+	vmToFns["nearestPointDrop"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		var best *sim.PointDropView
+		bestDistance := math.Inf(1)
+		for index := range h.frame.Obs.PointDrops {
+			drop := &h.frame.Obs.PointDrops[index]
+			if distance := drop.Pos.Sub(h.frame.Self.Pos).Len(); distance < bestDistance {
+				bestDistance, best = distance, drop
+			}
+		}
+		if best == nil {
+			return goja.Null()
+		}
+		return toJSPointDropRef(vm, *best, b.freeze)
+	})
+
 	// scan()：每调用返回独立新快照（手册契约：「每次调用都给新对象」）。
 	vmToFns["scan"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return toJSObservation(vm, &h.frame.Obs, h.frame.Self.ID)
+		return toJSObservation(vm, &h.frame.Obs, h.frame.Self.ID, b.freeze)
 	})
 
 	// pulseScan()：请求主动脉冲（12 能量/2s CD/32m 由 sim 校验），
@@ -201,7 +253,7 @@ func newVMBindings(vm *goja.Runtime) *vmBindings {
 	vmToFns["pulseScan"] = vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		h.cmd.setPulseScan()
 		if h.scanMemo == nil {
-			h.scanMemo = toJSObservation(vm, &h.frame.Obs, h.frame.Self.ID)
+			h.scanMemo = toJSObservation(vm, &h.frame.Obs, h.frame.Self.ID, b.freeze)
 		}
 		return h.scanMemo
 	})
@@ -241,13 +293,18 @@ func (b *vmBindings) buildTickContext(frame sim.ScriptFrame, cmd commandSink) *g
 	defineReadonly(selfObj, "energy", vm.ToValue(sim.FromX10(self.EnergyX10)))
 	defineReadonly(selfObj, "position", readonlyVec2(vm, self.Pos))
 	defineReadonly(selfObj, "velocity", readonlyVec2(vm, self.Vel))
+	defineReadonly(selfObj, "shieldOn", vm.ToValue(self.ShieldOn))
+	defineReadonly(selfObj, "shieldReadyTick", vm.ToValue(frame.ShieldReady))
+	defineReadonly(selfObj, "shieldStartedTick", vm.ToValue(frame.ShieldStarted))
+	defineReadonly(selfObj, "upgrade", readonlyUpgrade(vm, frame.Upg, b.freeze))
 
 	// ---- game: GameInfo { time, timeLeft, phase, mapSeed } ----
 	gameObj := vm.NewObject()
 	defineReadonly(gameObj, "time", vm.ToValue(float64(obs.Frame.Tick)/60))
 	defineReadonly(gameObj, "timeLeft", vm.ToValue(float64(obs.Frame.TimeLeftS)))
 	defineReadonly(gameObj, "phase", vm.ToValue(phaseName(obs.Frame.Phase)))
-	defineReadonly(gameObj, "mapSeed", vm.ToValue(mapSeedOf(obs.Frame.Map)))
+	defineReadonly(gameObj, "mapSeed", vm.ToValue(0))
+	defineReadonly(gameObj, "upgradeCosts", b.upgradeCosts)
 
 	bot := vm.NewObject()
 	for name, fn := range b.fns {
@@ -263,6 +320,28 @@ func (b *vmBindings) buildTickContext(frame sim.ScriptFrame, cmd commandSink) *g
 
 func defineReadonly(obj *goja.Object, name string, value goja.Value) {
 	_ = obj.DefineDataProperty(name, value, goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+}
+
+func freezeObject(freeze goja.Callable, object *goja.Object) *goja.Object {
+	if _, err := freeze(goja.Undefined(), object); err != nil {
+		panic(err)
+	}
+	return object
+}
+
+func readonlyUpgrade(vm *goja.Runtime, upgrade sim.UpgradeState, freeze goja.Callable) *goja.Object {
+	levels := vm.NewObject()
+	bounty := false
+	for index, name := range [...]string{"hp", "speed", "shield", "attack", "energy"} {
+		level := upgrade.Levels[index]
+		defineReadonly(levels, name, vm.ToValue(level))
+		bounty = bounty || level >= sim.BountyStateLevel
+	}
+	object := vm.NewObject()
+	defineReadonly(object, "points", vm.ToValue(upgrade.Points))
+	defineReadonly(object, "levels", freezeObject(freeze, levels))
+	defineReadonly(object, "bounty", vm.ToValue(bounty))
+	return freezeObject(freeze, object)
 }
 
 func readonlyVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {

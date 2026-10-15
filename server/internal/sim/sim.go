@@ -27,7 +27,7 @@ import (
 // five tracks derive per-robot HP/energy caps, move speed, shield scale and shot
 // damage from levels, and bounty deaths scatter PointDrop pickups. Zero levels
 // equal the v4 constants exactly; pre-v5 replays carry no upgrade records.
-const SimulationVersion = 5
+const SimulationVersion = 7
 
 const (
 	TickRate                   = 60
@@ -458,7 +458,7 @@ func (s *Sim) moveAndCollide() {
 			// v4：冲刺同样受加速度约束——朝冲刺向量以 DashAcceleration 逼近。
 			// 起步是加速爬坡、换向经过减速-过零-再加速、松开后由常规加速度
 			// 平滑衰减回 MaxSpeed；三种瞬时速率跳变都不复存在。
-			target, accel = r.Combat.DashDirection.Scale(s.dashSpeed()), DashAcceleration
+			target, accel = r.Combat.DashDirection.Scale(s.dashSpeed()), s.dashAcceleration()
 		} else {
 			target, accel = Vec2{direction.X * speed, direction.Y * speed}, Acceleration
 		}

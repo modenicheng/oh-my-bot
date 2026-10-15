@@ -91,6 +91,20 @@ func Direction(m *sim.MapDef, phase sim.Phase, from, target sim.Vec2) sim.Vec2 {
 	if pointFree(m, locked, target) && segmentFree(m, locked, from, target) {
 		return unit(delta)
 	}
+	if m != nil && m.Partial {
+		bestCost := math.Inf(1)
+		var best sim.Vec2
+		for _, wall := range m.Walls {
+			padding := sim.RobotRadius + 0.15
+			for _, corner := range []sim.Vec2{{X: wall.Min.X - padding, Y: wall.Min.Y - padding}, {X: wall.Min.X - padding, Y: wall.Max.Y + padding}, {X: wall.Max.X + padding, Y: wall.Min.Y - padding}, {X: wall.Max.X + padding, Y: wall.Max.Y + padding}} {
+				cost := corner.Sub(from).Len() + corner.Sub(target).Len()
+				if cost < bestCost && corner.Sub(from).Len() > 0.1 && segmentFree(m, locked, from, corner) {
+					best, bestCost = unit(corner.Sub(from)), cost
+				}
+			}
+		}
+		return best
+	}
 	g := gridFor(m, locked)
 	if g == nil || len(g.validIDs) == 0 {
 		return sim.Vec2{}

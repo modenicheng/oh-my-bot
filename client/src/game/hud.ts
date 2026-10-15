@@ -124,6 +124,7 @@ export class Hud {
 
   /** map 为可选：mapBootstrap 完成前也能渲染基础状态。 */
   update(world: WorldState, map?: MapDefParsed, scores?: Scoreboard, aimCapable = false, delayedHp?: number): void {
+    map = world.localMap ?? map
     if (!world.initialized) { this.clearMsg(); this.killFeed.clear(); this.clearInnerRing(); this.clearCountdown() }
     const selfId = world.self?.robotId ?? -1
     const self = world.robots.get(selfId)
@@ -306,6 +307,7 @@ export class Hud {
     // 护盾：按住持续，无假 CD；开盾期间禁开火
     if (dead) this.setCard(this.skills.shield, 'off', '阵亡')
     else if (self.shieldOn) this.setCard(this.skills.shield, 'active', '开启中')
+    else if ((world.self?.shieldReadyTick ?? 0) > world.tick) this.setCard(this.skills.shield, 'cooling', `${((world.self!.shieldReadyTick! - world.tick) / tuning.tickRate).toFixed(2)}s`)
     else if (self.energyX10 < 3) this.setCard(this.skills.shield, 'off', '能量低')
     else this.setCard(this.skills.shield, 'ready', '按住')
   }

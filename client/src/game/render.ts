@@ -4,10 +4,12 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawPointDrop, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
-import { appendWallShadow } from './shadow'
+import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawPointDrop, drawUplink, drawProjectile, drawVitals, visibleWorld, reducedMotion, type PointDropIntro } from './art'
+import { appendSurfaceShadow, appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
 const VISION_FEATHER = 3.5
+/** 晶片散开入场时长：从阵亡点飞至落点 + 淡入放大（reduced-motion 直接落定）。 */
+const POINT_DROP_INTRO_MS = 460
 
 // 旧 512 射线采样 + 多 band 填充已被逐墙精确投影取代（shadow.ts）：每帧每墙
 // 常数次几何运算 + 单次非零填充，墙影轮廓不再受射线角分辨率限制。
@@ -44,6 +46,8 @@ export class Renderer {
     resizeCanvas2d(this.canvas, w, h, dpr)
   }
   render(world: WorldState, map: MapDefParsed, cam: Camera, extras: RenderExtras): void {
+    const observation = world.localMap ?? map
+    if (map.partial) map = observation
     const ctx = this.ctx
     const stats = this.lastFrameStats
     stats.robots = 0; stats.culledRobots = 0; stats.drawnRobots = 0; stats.delayedHealthReads = 0
@@ -54,7 +58,9 @@ export class Renderer {
     const shake = extras.feedback?.cameraShake(world.tick)
     if (shake && (shake.x || shake.y)) ctx.translate(shake.x, shake.y)
     drawArena(ctx, map, cam, world.phase)
-    for (const def of map.uplinks) {
+    const now = performance.now()
+    const introOff = reducedMotion()
+    for (const def of observation.uplinks) {
       const st = world.uplinks.get(def.id)
       const progress = st?.progressX10 ? st.progressX10 / hackMaxX10(world.tuning) : 0
       // Uplink 锚定 def.pos（进度环/交互圈同坐标）：悬浮表现归 art.ts 内部处理，
@@ -74,19 +80,35 @@ export class Renderer {
     }
     for (const drop of world.pointDrops.values()) {
       const p = drop.base?.pos
-      if (p) drawPointDrop(ctx, cam, p.x, p.y, drop.points, world.tick)
+      if (!p) continue
+      let x = p.x, y = p.y
+      let intro: PointDropIntro | undefined
+      if (drop.bornAt !== undefined) {
+        const t = (now - drop.bornAt) / POINT_DROP_INTRO_MS
+        if (introOff || t >= 1) {
+          drop.bornAt = undefined; drop.introFrom = undefined
+        } else if (t >= 0) {
+          // 原点懒解析一次（事件与快照到达顺序不定，检索窗口覆盖两种顺序）。
+          if (drop.introFrom === undefined) drop.introFrom = extras.feedback?.nearestDropOrigin(p.x, p.y, now) ?? null
+          const from = drop.introFrom ?? p
+          const e = 1 - (1 - t) ** 3 // easeOutCubic：先快后缓地滑向落点
+          x = from.x + (p.x - from.x) * e
+          y = from.y + (p.y - from.y) * e
+          intro = { p: e, fromX: from.x, fromY: from.y }
+        }
+      }
+      drawPointDrop(ctx, cam, x, y, drop.points, world.tick, intro)
     }
-    for (const def of map.healthPacks) {
+    for (const def of observation.healthPacks) {
       const state = world.healthPacks.get(def.id)
       drawHealthPack(ctx, cam, def.pos.x, def.pos.y, state?.available ?? true, state?.respawnInS ?? 0, world.tick)
     }
-    drawCover(ctx, map, cam)
+    if (!map.partial) drawCover(ctx, map, cam)
     for (const p of world.projectiles.values()) {
       const b = p.base
       if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan)
     }
     extras.feedback?.drawTrails(ctx, cam, world.tick)
-    const now = performance.now()
     for (const r of world.robots.values()) {
       stats.robots++
       const b = r.base
@@ -111,8 +133,17 @@ export class Renderer {
       drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable, delayedHp, maxHp, maxEn)
     }
     // Dim the rendered world itself; HUD feedback and speech stay above the fog.
+    extras.feedback?.draw(ctx, cam, 'world')
     this.drawVisionMask(world, map, cam)
-    extras.feedback?.draw(ctx, cam)
+    if (map.partial) {
+      const observer = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
+      if (observer) {
+        ctx.save(); ctx.beginPath()
+        ctx.arc(cam.toPxX(observer.x), cam.toPxY(observer.y), (world.visionRadius ?? world.tuning.visionRadius) * cam.scale, 0, Math.PI * 2)
+        ctx.clip(); drawCover(ctx, map, cam, observer); ctx.restore()
+      }
+    }
+    extras.feedback?.draw(ctx, cam, 'screen')
     this.drawBubbles(world, cam, extras)
   }
 
@@ -127,21 +158,21 @@ export class Renderer {
     const ctx = this.ctx
     const x = cam.toPxX(self.x)
     const y = cam.toPxY(self.y)
-    const radius = world.tuning.visionRadius * cam.scale
+    const radius = (world.visionRadius ?? world.tuning.visionRadius) * cam.scale
     const feather = Math.min(VISION_FEATHER * cam.scale, radius * 0.28)
     const clearRadius = Math.max(0, radius - feather)
 
     ctx.save()
     // Fill only outside the 20m circle. Do not use destination-out here:
     // erasing the canvas would reveal the page background, not the world below.
-    ctx.fillStyle = 'rgba(5, 9, 14, 0.78)'
+    ctx.fillStyle = map.partial ? 'rgb(5, 9, 14)' : 'rgba(5, 9, 14, 0.78)'
 
     // X-9：未解锁核心区整体压黑（服务器裁剪区内实体，但雾不能「照亮」本应
     // 全黑的锁区——与弹丸撞锁区消失的体验对齐）。圆心与 drawArena 的锁区
     // 圈同为场地原点（非自机），直接填充锁区内部；解锁判定与 drawArena 的
     // unlocked（phase >= unlock_phase && phase > 0）互补。墙影/边缘渐变随后
     // 叠加只会更暗，不会重新「照亮」锁区。
-    if (world.phase > 0 && world.phase < map.coreZone.unlockPhase) {
+    if (!map.partial && world.phase > 0 && world.phase < map.coreZone.unlockPhase) {
       ctx.beginPath()
       ctx.arc(cam.toPxX(0), cam.toPxY(0), map.coreZone.radius * cam.scale, 0, Math.PI * 2)
       ctx.fill()
@@ -158,10 +189,13 @@ export class Renderer {
     // 投影在世界坐标系完成后按 cam 变换到像素。每墙独立子路径（首顶点
     // moveTo）：子路径间的连线会在可见区拉出伪影边。
     const pts = this.shadowPts
-    const range = world.tuning.visionRadius
+    const range = world.visionRadius ?? world.tuning.visionRadius
     pts.length = 0
     for (let i = 0; i < map.walls.length; i++) {
       if (appendWallShadow(pts, self.x, self.y, map.walls[i]!, range) > 0) pts.push(Number.NaN, Number.NaN)
+    }
+    for (const boundary of map.boundaries ?? []) {
+      if (appendSurfaceShadow(pts, self.x, self.y, boundary.start, boundary.end, range) > 0) pts.push(Number.NaN, Number.NaN)
     }
     if (pts.length > 0) {
       ctx.save()
@@ -177,7 +211,7 @@ export class Renderer {
         if (pen) ctx.lineTo(cx, cy)
         else { ctx.moveTo(cx, cy); pen = true }
       }
-      ctx.fillStyle = SHADOW_FILL
+      ctx.fillStyle = map.partial ? 'rgb(5, 9, 14)' : SHADOW_FILL
       ctx.fill()
       ctx.restore()
     }

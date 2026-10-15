@@ -12,8 +12,8 @@ import (
 // 派生值表（docs/plans/upgrade-system.md 数值冻结）：L1–5 满步长、L6–10 半步长。
 func TestUpgradeDerivedValues(t *testing.T) {
 	s := NewSim(1, []uint32{1}, nil)
-	if s.simulationVersion != 5 {
-		t.Fatalf("simulation version = %d, want 5", s.simulationVersion)
+	if s.simulationVersion != 7 {
+		t.Fatalf("simulation version = %d, want 7", s.simulationVersion)
 	}
 	cases := []struct {
 		level                                              int
@@ -60,6 +60,31 @@ func TestUpgradeDerivedValues(t *testing.T) {
 	}
 }
 
+func TestLegacyPointDropSplitPreservesRNG(t *testing.T) {
+	for _, version := range []int{4, 5} {
+		for _, total := range []int32{7, 31, 64} {
+			world := NewSim(42, nil, nil)
+			world.simulationVersion = version
+			reference := NewSim(42, nil, nil)
+			reference.simulationVersion = version
+			count := max(1, min(4, int(math.Ceil(float64(total)/15))))
+			base, remainder := total/int32(count), total%int32(count)
+			for index := 0; index < count; index++ {
+				points := base
+				if index == count-1 {
+					points += remainder
+				}
+				reference.pointDrops = append(reference.pointDrops, PointDrop{ID: reference.nextProjectile, Pos: reference.scatterPosition(Vec2{}), Points: points, GoneAt: PointDropTTL})
+				reference.nextProjectile++
+			}
+			world.spawnPointDrops(Vec2{}, total)
+			if !reflect.DeepEqual(world.Snapshot(), reference.Snapshot()) {
+				t.Fatalf("v%d total=%d: historical bounty split or RNG changed", version, total)
+			}
+		}
+	}
+}
+
 func TestUpgradeCostCurveFrozen(t *testing.T) {
 	want := [UpgradeMaxLevel]int32{2, 3, 5, 8, 12, 18, 27, 40, 60, 90}
 	if UpgradeCosts != want {
@@ -72,7 +97,7 @@ func TestUpgradeCostCurveFrozen(t *testing.T) {
 	if total != 265 {
 		t.Fatalf("per-track total = %d, want 265", total)
 	}
-	if UpgradePointsFor(10) != 5 || UpgradePointsFor(25) != 10 {
+	if UpgradePointsFor(10) != 2 || UpgradePointsFor(25) != 5 {
 		t.Fatalf("core point mapping drifted: %d/%d", UpgradePointsFor(10), UpgradePointsFor(25))
 	}
 }
@@ -143,8 +168,8 @@ func TestCorePickupAwardsPoints(t *testing.T) {
 	}
 	s.Tick()
 	r, _ := s.Robot(1)
-	if r.Upg.Points != 15 { // 普通 5 + Mega 10
-		t.Fatalf("pickup points = %d, want 15", r.Upg.Points)
+	if r.Upg.Points != 7 {
+		t.Fatalf("pickup points = %d, want 7", r.Upg.Points)
 	}
 	// 计分语义不受影响：事件载荷仍为 core 原值。
 	found := false
@@ -153,6 +178,9 @@ func TestCorePickupAwardsPoints(t *testing.T) {
 			found = true
 			if p.Value != 10 && p.Value != 25 {
 				t.Fatalf("core value mutated: %d", p.Value)
+			}
+			if p.SkillPoints == nil || p.GetSkillPoints() != UpgradePointsFor(p.Value) {
+				t.Fatalf("missing authoritative SP reward: %+v", p)
 			}
 		}
 	}
@@ -248,6 +276,19 @@ func dropTotal(drops []PointDrop) int32 {
 	return total
 }
 
+// 拆分不变量：总量守恒、单只 1..PointDropPerOrbMax。
+func assertSplitInvariants(t *testing.T, drops []PointDrop, total int32) {
+	t.Helper()
+	if got := dropTotal(drops); got != total {
+		t.Fatalf("split total = %d, want %d", got, total)
+	}
+	for _, d := range drops {
+		if d.Points < 1 || d.Points > int32(PointDropPerOrbMax) {
+			t.Fatalf("orb points = %d, want 1..%d", d.Points, PointDropPerOrbMax)
+		}
+	}
+}
+
 // 晶片：拆分上限、30s 到期、第三方/复活本人拾取、锁区限制。
 func TestPointDropLifecycle(t *testing.T) {
 	s := NewSim(11, []uint32{1, 2}, nil)
@@ -258,18 +299,18 @@ func TestPointDropLifecycle(t *testing.T) {
 	victim.State, victim.Position = Dead, Vec2{30, 50}
 	victim.Upg = UpgradeState{Points: 7, Levels: [UpgradeTrackCount]uint8{4, 0, 0, 0, 0}}
 	s.applyBountyPenalty(victim)
-	if n := len(s.pointDrops); n != 1 { // 7+8=15 → k=1
-		t.Fatalf("orb count = %d, want 1", n)
+	// 7 点（情形 A 只散钱包）→ 随机 6..7 只、单只 ≤4。
+	if n := len(s.pointDrops); n < 6 || n > 7 {
+		t.Fatalf("orb count = %d, want 6..7", n)
 	}
-	// 大额拆分：64 → k=ceil(64/15)=5 → 钳到 4；余数归末只。
+	assertSplitInvariants(t, s.pointDrops, 7)
+	// 大额拆分：64 → 单只上限推导 k=ceil(64/4)=16。
 	s.pointDrops = nil
 	s.spawnPointDrops(victim.Position, 64)
-	if n := len(s.pointDrops); n != PointDropMaxOrbs {
-		t.Fatalf("orb split = %d, want %d", n, PointDropMaxOrbs)
+	if n := len(s.pointDrops); n != 16 {
+		t.Fatalf("orb split = %d, want 16", n)
 	}
-	if total := dropTotal(s.pointDrops); total != 64 {
-		t.Fatalf("split total = %d, want 64", total)
-	}
+	assertSplitInvariants(t, s.pointDrops, 64)
 	for _, d := range s.pointDrops {
 		if dist := d.Pos.Sub(victim.Position).Len(); dist > PointDropScatterMax+1e-9 {
 			t.Fatalf("orb scattered beyond ring: %v", dist)
@@ -280,16 +321,25 @@ func TestPointDropLifecycle(t *testing.T) {
 	robber.State = Alive
 	first := s.pointDrops[0]
 	robber.PathStart, robber.Position = first.Pos, first.Pos
+	// 多只散落后邻片可能同帧进入拾取半径：预期取所有可达片之和。
+	want := int32(0)
+	for _, d := range s.pointDrops {
+		if d.Pos.Sub(first.Pos).Len() <= PointDropRadius {
+			want += d.Points
+		}
+	}
 	s.stepPointDrops()
-	if robber.Upg.Points != first.Points {
-		t.Fatalf("robber points = %d, want %d", robber.Upg.Points, first.Points)
+	if robber.Upg.Points != want {
+		t.Fatalf("robber points = %d, want %d", robber.Upg.Points, want)
 	}
 	hasPickup := false
 	for _, ev := range s.events {
 		if p := ev.GetPointDropPickup(); p != nil && p.By == 2 {
-			hasPickup = true
-			if p.DropId != first.ID || p.Points != first.Points {
-				t.Fatalf("pickup event drifted: %+v", p)
+			if p.DropId == first.ID {
+				hasPickup = true
+				if p.Points != first.Points {
+					t.Fatalf("pickup event drifted: %+v", p)
+				}
 			}
 		}
 		if ev.GetCorePickup() != nil {
@@ -318,6 +368,23 @@ func TestPointDropLifecycle(t *testing.T) {
 		t.Fatalf("expired drops must vanish: %d", len(s.pointDrops))
 	}
 	// 复活本人可回拾：victim 复活后再经过晶片位置即可拾取（同拾取路径）。
+}
+
+// 随机只数下限：小总额落在 [min(6,total), total]、单只 ≤4、总量守恒（多种子）。
+func TestPointDropSplitRandomBounds(t *testing.T) {
+	for seed := uint64(1); seed <= 8; seed++ {
+		s := NewSim(seed, []uint32{1}, nil)
+		if err := s.SetMap(gameMap()); err != nil {
+			t.Fatal(err)
+		}
+		const total = int32(9)
+		s.spawnPointDrops(Vec2{30, 50}, total)
+		n := len(s.pointDrops)
+		if n < min(PointDropOrbsMin, int(total)) || n > int(total) {
+			t.Fatalf("seed %d: orb count = %d, want %d..%d", seed, n, min(PointDropOrbsMin, int(total)), total)
+		}
+		assertSplitInvariants(t, s.pointDrops, total)
+	}
 }
 
 func TestUpgradeCheckpointRoundtripAndValidation(t *testing.T) {
@@ -383,6 +450,7 @@ func TestUpgradeReplayDeterminism(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewSim(77, []uint32{1, 2}, log)
+	s.simulationVersion = 6
 	m := gameMap()
 	// 十只 25 分 Mega pad 密集排在受害者出生点 0.8m 内（接触半径 0.95m）：
 	// 开局补给 10×10 = 100 点。

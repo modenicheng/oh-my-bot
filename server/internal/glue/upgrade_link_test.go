@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modenicheng/oh-my-bot/server/internal/nav"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -74,10 +75,10 @@ func (h *upgradeLinkHarness) steerToPickCore(m *Match, host *Session, rid uint32
 			}
 		}
 		if best.ID != 0 {
-			d := best.Pos.Sub(robot.Pos)
-			if n := d.Len(); n > 0.05 {
+			direction := nav.Direction(wv.Frame.Map, wv.Frame.Phase, robot.Pos, best.Pos)
+			if direction.Len() > 0 {
 				seq++
-				host.RouteInput(&ombv1.ClientInput{Seq: seq, MoveX: int32(1000 * d.X / n), MoveY: int32(1000 * d.Y / n), AxisMask: uint32(sim.AxisMove)})
+				host.RouteInput(&ombv1.ClientInput{Seq: seq, MoveX: int32(1000 * direction.X), MoveY: int32(1000 * direction.Y), AxisMask: uint32(sim.AxisMove)})
 			}
 		}
 		if up := selfUpgradeScan(h.drain()); up != nil && up.GetPoints() >= sim.UpgradePointsCore {
@@ -120,7 +121,7 @@ func TestUpgradeFullLink(t *testing.T) {
 		t.Fatalf("upgrade costs drifted from sim: %v", boot.Costs)
 	}
 
-	// 真实拾取一只 core（普通 5 / Mega 10）。
+	// 真实拾取一只 core（普通 2 / Mega 5）。
 	hn.steerToPickCore(m, host, rid, 20*time.Second)
 	picked := hn.awaitUpgrade(2*time.Second, func(up *ombv1.UpgradeSelf) bool {
 		return up.GetPoints() >= sim.UpgradePointsCore

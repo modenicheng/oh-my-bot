@@ -13,13 +13,16 @@ export interface MapSector { id: number; spawnArea: MapRect; center: MapVec2 }
 export interface MapUplink { id: number; pos: MapVec2; main: boolean; interactR: number; activePhase: number }
 export interface MapCorePad { id: number; pos: MapVec2; group: number; value: number }
 export interface MapHealthPack { id: number; pos: MapVec2 }
+export interface MapBoundary { kind: 'arena' | 'lock'; start: MapVec2; end: MapVec2 }
 
 export interface MapDefParsed {
+  partial?: boolean
   version: number
   generatorVer: number
   seed: number
   mapHash: string
   walls: MapWall[]
+  boundaries?: MapBoundary[]
   sectors: MapSector[]
   uplinks: MapUplink[]
   corePads: MapCorePad[]
@@ -77,6 +80,10 @@ export function parseMapDef(json: string): MapDefParsed {
     const o = asRaw(s)
     return { id: goNum(o['id'], i), spawnArea: rect(o['spawn_area']), center: goVec2(o['center']) }
   })
+  const boundaries: MapBoundary[] = arr(r['boundaries']).map(boundary => {
+    const edge = asRaw(boundary)
+    return { kind: edge['kind'] === 'lock' ? 'lock' : 'arena', start: goVec2(edge['start']), end: goVec2(edge['end']) }
+  })
   const uplinks: MapUplink[] = arr(r['uplinks']).map((u, i) => {
     const o = asRaw(u)
     return {
@@ -96,11 +103,12 @@ export function parseMapDef(json: string): MapDefParsed {
     return { id: goNum(o['id'], i + 1), pos: goVec2(o['pos']) }
   })
   const cz = asRaw(r['core_zone'])
-  const coreZone = { radius: goNum(cz['radius'], RING_CORE), unlockPhase: goNum(cz['unlock_phase'], 2) }
-  const arenaRadius = goNum(r['arena_radius'], RING_OUTER)
+  const partial = r['partial'] === true
+  const coreZone = { radius: goNum(cz['radius'], partial ? 0 : RING_CORE), unlockPhase: goNum(cz['unlock_phase'], 2) || 2 }
+  const arenaRadius = goNum(r['arena_radius'], partial ? 0 : RING_OUTER)
 
-  if (walls.length === 0) throw new Error('地图缺少墙体数据')
-  if (uplinks.length === 0) throw new Error('地图缺少 Uplink 数据')
+  if (r['partial'] !== true && walls.length === 0) throw new Error('地图缺少墙体数据')
+  if (r['partial'] !== true && uplinks.length === 0) throw new Error('地图缺少 Uplink 数据')
 
   // 外接半径：竞技场圆盘与所有实体坐标的最大值
   let maxC = arenaRadius
@@ -112,17 +120,19 @@ export function parseMapDef(json: string): MapDefParsed {
   for (const h of healthPacks) maxC = Math.max(maxC, Math.abs(h.pos.x), Math.abs(h.pos.y))
 
   return {
+    partial: r['partial'] === true,
     version: goNum(r['version'], 1),
     generatorVer: goNum(r['generator_ver']),
     seed: goNum(r['seed']),
     mapHash: typeof r['map_hash'] === 'string' ? r['map_hash'] : '',
     walls,
+    boundaries,
     sectors,
     uplinks,
     corePads,
     healthPacks,
     coreZone,
     arenaRadius,
-    extent: maxC,
+    extent: partial ? Infinity : maxC,
   }
 }

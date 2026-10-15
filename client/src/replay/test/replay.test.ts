@@ -15,6 +15,24 @@ const fixturePath = fileURLToPath(
 const fixture = readFileSync(fixturePath, 'utf8')
 
 describe('parseReplayNDJSON', () => {
+
+  it('uses sampled random resources without interpolating respawn locations or retaining vanished chips', () => {
+    const data = parseReplayNDJSON([
+      JSON.stringify({ type: 'match_start', tick: 0, state: { tick: 0, robots: [] } }),
+      JSON.stringify({ type: 'visual', v: 2, tick: 0, resources: { cores: [{ base: { id: 7, pos: { x: 20, y: 0 } }, value: 10 }], pointDrops: [{ base: { id: 8, pos: { x: 21, y: 2 } }, points: 1 }] } }),
+      JSON.stringify({ type: 'visual', v: 2, tick: 6, resources: { cores: [{ base: { id: 7, pos: { x: -25, y: 10 } }, value: 10 }], pointDrops: [] } }),
+    ].join('\n'))
+    const replay = new ReplayIndex(data)
+    expect(replay.frameAt(3).cores[0]?.pos).toEqual({ x: 20, y: 0 })
+    expect(replay.frameAt(3).pointDrops).toEqual([{ id: 8, pos: { x: 21, y: 2 }, points: 1 }])
+    expect(replay.frameAt(6).cores[0]?.pos).toEqual({ x: -25, y: 10 })
+    expect(replay.frameAt(6).pointDrops).toEqual([])
+    replay.frameAt(3).cores[0]!.pos.x = 900
+    replay.frameAt(3).pointDrops[0]!.pos.x = 900
+    expect(replay.frameAt(3).cores[0]?.pos.x).toBe(20)
+    expect(replay.frameAt(3).pointDrops[0]?.pos.x).toBe(21)
+  })
+
   it('解析头部/schema/事件/checkpoint', () => {
     const data = parseReplayNDJSON(fixture)
     expect(data.records.length).toBeGreaterThan(0)

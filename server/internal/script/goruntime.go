@@ -163,6 +163,7 @@ func (r *GojaRuntime) loadLocked(baseSource string, snips []snippet.Setting) err
 
 	// 候选 VM 全链路成功才替换现役 VM——原子 Hot Swap。
 	vm := goja.New()
+	bindings := newVMBindings(vm)
 	nextRevision := r.rev + 1
 	candidateConsole := &consoleState{}
 	candidateConsole.reset(nextRevision)
@@ -207,7 +208,7 @@ func (r *GojaRuntime) loadLocked(baseSource string, snips []snippet.Setting) err
 	}
 
 	r.vm = vm
-	r.bindings = newVMBindings(vm)
+	r.bindings = bindings
 	r.tickFn = tickFn
 	r.snipFns = snipFns
 	r.rev = nextRevision
@@ -389,6 +390,7 @@ func (r *GojaRuntime) tickLockedHeld(frame sim.ScriptFrame, quota time.Duration)
 				if isQuotaErr(classifyErr(err, r.interruptVal)) {
 					return sim.ScriptCommands{}, ErrQuotaExceeded // 配额耗尽仍全清
 				}
+				snipCmd = newSnippetCollector(playerAxes)
 				break
 			}
 		}
@@ -430,6 +432,9 @@ func mergeSnippetInto(dst *sim.ScriptCommands, snip sim.ScriptCommands, snipAxes
 	}
 	if !dst.PulseScan && snip.PulseScan {
 		dst.PulseScan = true
+	}
+	if remaining := sim.MaxUpgradeBuysPerTick - len(dst.Upgrades); remaining > 0 {
+		dst.Upgrades = append(dst.Upgrades, snip.Upgrades[:min(remaining, len(snip.Upgrades))]...)
 	}
 	dst.SnippetAxes = snipAxes & effectiveAxes(*dst)
 }

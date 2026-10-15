@@ -9,6 +9,23 @@
 
 export interface ShadowAABB { min: { x: number; y: number }; max: { x: number; y: number } }
 
+export function appendSurfaceShadow(pts: number[], sx: number, sy: number,
+  first: { x: number; y: number }, second: { x: number; y: number }, range: number): number {
+  const cross = (first.x - sx) * (second.y - sy) - (first.y - sy) * (second.x - sx)
+  if (Math.abs(cross) < 1e-9 || !Number.isFinite(cross) || range <= 0) return 0
+  const start = cross > 0 ? first : second, end = cross > 0 ? second : first
+  const startDistance = Math.hypot(start.x - sx, start.y - sy)
+  const endDistance = Math.hypot(end.x - sx, end.y - sy)
+  const centerX = (first.x + second.x) / 2, centerY = (first.y + second.y) / 2
+  const centerDistance = Math.hypot(centerX - sx, centerY - sy)
+  const reach = range * 2.5 + Math.hypot(first.x - second.x, first.y - second.y)
+  pts.push(start.x, start.y, end.x, end.y,
+    end.x + (end.x - sx) / endDistance * reach, end.y + (end.y - sy) / endDistance * reach,
+    centerX + (centerX - sx) / centerDistance * reach, centerY + (centerY - sy) / centerDistance * reach,
+    start.x + (start.x - sx) / startDistance * reach, start.y + (start.y - sy) / startDistance * reach)
+  return 10
+}
+
 /** 自机落入墙 AABB（含该 epsilon 外扩，含贴边/贴角）即视为「在墙内」。 */
 const INSIDE_EPS = 1e-9
 
@@ -26,13 +43,18 @@ function cornerY(i: number, miny: number, maxy: number): number { return i === 0
 export function appendWallShadow(pts: number[], sx: number, sy: number, wall: ShadowAABB, range: number): number {
   const minx = wall.min.x, miny = wall.min.y, maxx = wall.max.x, maxy = wall.max.y
   const w = maxx - minx, h = maxy - miny
-  // 零面积/退化（含 NaN 坐标：比较全 false）不投影。
-  if (!(w > 0) || !(h > 0)) return 0
+  if (!Number.isFinite(minx) || !Number.isFinite(miny) || !Number.isFinite(maxx) || !Number.isFinite(maxy)
+    || !Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(range)
+    || w < 0 || h < 0 || w + h === 0 || range <= 0) return 0
 
   // 影多边形整体位于远侧链之外：与墙的最近距离 ≥ 视野半径时整块在视野圆外。
   const ddx = sx < minx ? minx - sx : sx > maxx ? sx - maxx : 0
   const ddy = sy < miny ? miny - sy : sy > maxy ? sy - maxy : 0
   if (ddx * ddx + ddy * ddy >= range * range) return 0
+
+  if (w === 0 || h === 0) {
+    return appendSurfaceShadow(pts, sx, sy, wall.min, wall.max, range)
+  }
 
   if (sx > minx - INSIDE_EPS && sx < maxx + INSIDE_EPS && sy > miny - INSIDE_EPS && sy < maxy + INSIDE_EPS) {
     // 自机在墙内：视野圆内除墙身外全暗 —— 正向大框 − 逆向墙身。等价旧射线法

@@ -1,6 +1,7 @@
 package glue
 
 import (
+	"bytes"
 	"math"
 	"os"
 	"reflect"
@@ -20,7 +21,7 @@ func TestSoloBotIdentityCapacity(t *testing.T) {
 			pid := uint64(0xffff_ffff_ffff_f000) + uint64(i) // deliberately overlaps reserved candidates
 			players[pid] = SessionInfo{PlayerID: pid, Nick: "human"}
 		}
-		addSoloBots(players, 100)
+		addSoloBots(players, uint32(room.MaxSoloBots+1)) // 超额请求，验证钳到满员填坑。
 		want := min(room.MaxPlayers, humans+room.MaxSoloBots)
 		if len(players) != want {
 			t.Fatalf("%d humans: got %d total, want %d", humans, len(players), want)
@@ -103,13 +104,19 @@ func TestSoloBotScriptIntents(t *testing.T) {
 			Map:   &sim.MapDef{GeneratorVer: 2, CoreZone: sim.CoreZoneDef{Radius: 28, UnlockPhase: sim.PhaseCoreOpen}},
 		}},
 	}
+	// 规划 4Hz（scan() 是 200 人局最大单笔开销，只允许低频调用）：观测变化
+	// 在一个规划窗口（16 tick ≥ PLAN_EVERY）内必须生效。
 	run := func() sim.ScriptCommands {
 		t.Helper()
-		cmd, err := rt.Tick(frame)
-		if err != nil {
-			t.Fatal(err)
+		var cmd sim.ScriptCommands
+		var err error
+		for i := 0; i < 16; i++ {
+			cmd, err = rt.Tick(frame)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame.Obs.Frame.Tick++
 		}
-		frame.Obs.Frame.Tick++
 		return soloBotCommands(cmd)
 	}
 	frame.Obs.Cores = []sim.CoreView{{ID: 1, Pos: sim.Vec2{X: 50}, Alive: true}}
@@ -153,6 +160,173 @@ func TestSoloBotScriptIntents(t *testing.T) {
 	frame.Obs.Frame.Phase = sim.PhaseCoreOpen
 	if c := run(); c.Move.X >= 0 || c.Move.Y != 0 {
 		t.Fatal("bot cannot use newly opened inner region")
+	}
+}
+
+func TestSoloBotUpgradePurchases(t *testing.T) {
+	maxLevel := uint8(sim.UpgradeMaxLevel)
+	for _, test := range []struct {
+		name   string
+		points int32
+		levels [sim.UpgradeTrackCount]uint8
+		want   []uint8
+	}{
+		{name: "hp first", points: 2, want: []uint8{sim.TrackHP + 1}},
+		{name: "attack second", points: 2, levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: maxLevel}, want: []uint8{sim.TrackAttack + 1}},
+		{name: "speed third", points: 2, levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: maxLevel, sim.TrackAttack: maxLevel}, want: []uint8{sim.TrackSpeed + 1}},
+		{name: "shield fourth", points: 2, levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: maxLevel, sim.TrackAttack: maxLevel, sim.TrackSpeed: maxLevel}, want: []uint8{sim.TrackShield + 1}},
+		{name: "energy last", points: 2, levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: maxLevel, sim.TrackAttack: maxLevel, sim.TrackSpeed: maxLevel, sim.TrackShield: maxLevel}, want: []uint8{sim.TrackEnergy + 1}},
+		{name: "skip unaffordable hp", points: 2, levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: 1}, want: []uint8{sim.TrackAttack + 1}},
+		{name: "no points"},
+		{name: "below cheapest cost", points: 1},
+		{name: "predict remaining points", points: 3, want: []uint8{sim.TrackHP + 1}},
+		{name: "predict increasing costs", points: 5, want: []uint8{sim.TrackHP + 1, sim.TrackHP + 1}},
+		{name: "spend remainder on cheaper track", points: 12, want: []uint8{sim.TrackHP + 1, sim.TrackHP + 1, sim.TrackHP + 1, sim.TrackAttack + 1}},
+		{name: "eight buy cap", points: 1000, want: []uint8{1, 1, 1, 1, 1, 1, 1, 1}},
+		{name: "finish tracks in priority order", points: 1000, levels: [sim.UpgradeTrackCount]uint8{maxLevel - 1, maxLevel - 1, maxLevel - 1, maxLevel - 1, maxLevel - 1}, want: []uint8{sim.TrackHP + 1, sim.TrackAttack + 1, sim.TrackSpeed + 1, sim.TrackShield + 1, sim.TrackEnergy + 1}},
+		{name: "all tracks maxed", points: 1000, levels: [sim.UpgradeTrackCount]uint8{maxLevel, maxLevel, maxLevel, maxLevel, maxLevel}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+			defer rt.Close()
+			if err := rt.Load(soloBotSource(3)); err != nil {
+				t.Fatal(err)
+			}
+			frame := sim.ScriptFrame{
+				Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 40}, HpX10: 1000, EnergyX10: 1000},
+				Upg:  sim.UpgradeState{Points: test.points, Levels: test.levels},
+				Obs:  sim.Observation{Frame: sim.FrameView{Phase: sim.PhaseCoreOpen}},
+			}
+			cmd, err := rt.Tick(frame)
+			if err != nil {
+				t.Fatal(err)
+			}
+			buys := soloBotCommands(cmd).Upgrades
+			if len(buys) != len(test.want) || (len(buys) > 0 && !reflect.DeepEqual(buys, test.want)) {
+				t.Fatalf("upgrades = %v, want %v", buys, test.want)
+			}
+			points, levels := test.points, test.levels
+			for _, track := range buys {
+				index := int(track) - 1
+				level := levels[index]
+				if level >= maxLevel || sim.UpgradeCosts[level] > points {
+					t.Fatalf("unaffordable or maxed purchase: track=%d points=%d levels=%v", track, points, levels)
+				}
+				points -= sim.UpgradeCosts[level]
+				levels[index]++
+			}
+		})
+	}
+}
+
+func TestSoloBotUpgradesOnlyOnReplan(t *testing.T) {
+	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+	defer rt.Close()
+	if err := rt.Load(soloBotSource(3)); err != nil {
+		t.Fatal(err)
+	}
+	frame := sim.ScriptFrame{
+		Self: sim.RobotView{ID: 3, Pos: sim.Vec2{X: 40}, HpX10: 1000, EnergyX10: 1000},
+		Obs:  sim.Observation{Frame: sim.FrameView{Phase: sim.PhaseCoreOpen}},
+	}
+	for tick := uint32(0); tick <= sim.TickRate/2; tick++ {
+		frame.Obs.Frame.Tick = tick
+		if tick == 1 {
+			frame.Upg.Points = 5
+		}
+		if tick == sim.TickRate/4+1 {
+			frame.Upg = sim.UpgradeState{Points: 2, Levels: [sim.UpgradeTrackCount]uint8{sim.TrackHP: sim.UpgradeMaxLevel}}
+		}
+		var want []uint8
+		switch tick {
+		case sim.TickRate / 4:
+			want = []uint8{sim.TrackHP + 1, sim.TrackHP + 1}
+		case sim.TickRate / 2:
+			want = []uint8{sim.TrackAttack + 1}
+		}
+		cmd, err := rt.Tick(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cmd.Upgrades) != len(want) || (len(want) > 0 && !reflect.DeepEqual(cmd.Upgrades, want)) {
+			t.Fatalf("tick %d: upgrades = %v, want %v", tick, cmd.Upgrades, want)
+		}
+	}
+}
+
+func TestSoloBotUpgradesReplay(t *testing.T) {
+	const rid = uint32(4)
+	var recorded bytes.Buffer
+	log, err := sim.NewMatchEventLogWriter(&recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	world := sim.NewSim(42, []uint32{rid}, log)
+	def := &sim.MapDef{
+		CoreZone:  sim.CoreZoneDef{Radius: 28, UnlockPhase: sim.PhaseCoreOpen},
+		CorePads:  []sim.CorePadDef{{ID: 100, Pos: sim.Vec2{X: 40}, Group: 0, Value: 10}},
+		CoreRules: sim.CoreRulesDef{TargetAlive: 1, PeriodTicks: 3600, GroupWeights: map[sim.Phase][]float64{sim.PhaseOuterRing: {1}, sim.PhaseCoreOpen: {1}}},
+	}
+	for index := range def.Sectors {
+		def.Sectors[index] = sim.Sector{ID: uint32(index), Center: sim.Vec2{X: 40}, SpawnArea: sim.Rect{Min: sim.Vec2{X: 40}, Max: sim.Vec2{X: 40}}}
+	}
+	if err := world.SetMap(def); err != nil {
+		t.Fatal(err)
+	}
+	world.AssistToggle(rid)
+	rt := script.NewGojaRuntime(script.Config{TickTimeout: time.Second})
+	defer rt.Close()
+	if err := rt.Load(soloBotSource(rid)); err != nil {
+		t.Fatal(err)
+	}
+	for tick := 0; tick < int(sim.TickRate/2); tick++ {
+		world.Tick()
+		view := world.WorldView()
+		obs, ok := view.Observe(rid)
+		if !ok {
+			t.Fatal("missing bot observation")
+		}
+		robot, ok := world.Robot(rid)
+		if !ok {
+			t.Fatal("missing bot upgrade state")
+		}
+		cmd, err := rt.Tick(sim.ScriptFrame{Self: view.Robots[0], Upg: robot.Upg, Obs: obs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		world.ApplyScriptCommands(rid, soloBotCommands(cmd))
+	}
+	world.Tick()
+	want := world.Snapshot()
+	if upg := want.Robots[0].Upg; upg.Points != 0 || upg.Levels[sim.TrackHP] != 1 {
+		t.Fatalf("bot did not spend collected core points: %+v", upg)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := sim.ReadMatchEventLog(bytes.NewReader(recorded.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buys []uint8
+	for _, record := range records {
+		if record.Type == sim.RecordControl && record.RobotID == rid && len(record.Control.Upgrades) > 0 {
+			if record.Control.Script == nil {
+				t.Fatal("bot purchases missing recorded script commands")
+			}
+			buys = append(buys, record.Control.Upgrades...)
+		}
+	}
+	if !reflect.DeepEqual(buys, []uint8{sim.TrackHP + 1}) {
+		t.Fatalf("recorded upgrades = %v, want one hp buy", buys)
+	}
+	replayed, err := sim.ReplayTo(bytes.NewReader(recorded.Bytes()), want.Tick, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, replayed.Snapshot()) {
+		t.Fatal("recorded bot upgrades do not reproduce the exact simulation state")
 	}
 }
 
@@ -336,7 +510,11 @@ func TestSoloBotActuallyCollectsCoreAndCompletesHack(t *testing.T) {
 	for i := 0; i < 900; i++ {
 		world.Tick()
 		wv := world.WorldView()
-		frame := sim.ScriptFrame{Self: wv.Robots[0], Obs: sim.Observation{Frame: wv.Frame, Cores: wv.Cores, Uplinks: wv.Uplinks}}
+		robot, ok := world.Robot(rid)
+		if !ok {
+			t.Fatal("missing bot upgrade state")
+		}
+		frame := sim.ScriptFrame{Self: wv.Robots[0], Upg: robot.Upg, Obs: sim.Observation{Frame: wv.Frame, Cores: wv.Cores, Uplinks: wv.Uplinks}}
 		cmd, err := rt.Tick(frame)
 		if err != nil {
 			t.Fatal(err)
@@ -422,7 +600,11 @@ func TestSoloBotNavigatesAroundWallWithRealCollision(t *testing.T) {
 		if !ok {
 			t.Fatal("missing bot observation")
 		}
-		cmd, err := rt.Tick(sim.ScriptFrame{Self: self, Obs: obs})
+		robot, ok := world.Robot(rid)
+		if !ok {
+			t.Fatal("missing bot upgrade state")
+		}
+		cmd, err := rt.Tick(sim.ScriptFrame{Self: self, Upg: robot.Upg, Obs: obs})
 		if err != nil {
 			t.Fatal(err)
 		}

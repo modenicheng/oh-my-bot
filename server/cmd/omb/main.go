@@ -95,9 +95,11 @@ const frontendMissingHTML = `<!doctype html>
 `
 
 // applyGCSettings 应用 gc.* 运行时调优（config.yaml / 环境变量，见
-// ai.GCConfig 文档）。必须在第一个房间创建（即第一台 goja VM 分配）之前
-// 调用；放在 main 早期保证这一点。解析失败记日志并保留原值——GC 调优
-// 失效不应阻止服务器启动。
+// ai.GCConfig 文档）。Percent 无配置时已是代码内默认（ai.GCPercentDefault，
+// 2026-10 压测口径：GOGC=100 下 GC assist 吞 ~40% 帧预算），此函数只负责
+// 应用与钳制；显式 0 = 沿用进程默认/外部 GOGC。必须在第一个房间创建（即
+// 第一台 goja VM 分配）之前调用；放在 main 早期保证这一点。解析失败记
+// 日志并保留原值——GC 调优失效不应阻止服务器启动。
 func applyGCSettings(cfg ai.ServerConfig) {
 	if cfg.GC.Percent > 0 {
 		p := cfg.GC.Percent
@@ -105,7 +107,7 @@ func applyGCSettings(cfg ai.ServerConfig) {
 			p = ai.GCPercentMax
 		}
 		debug.SetGCPercent(p)
-		log.Printf("gc: GOGC=%d (from config)", p)
+		log.Printf("gc: GOGC=%d (from config or in-code default)", p)
 	}
 	if cfg.GC.MemoryLimit != "" {
 		if limit, err := parseByteSize(cfg.GC.MemoryLimit); err == nil {
@@ -184,8 +186,8 @@ func envDefaultSoloBots() uint32 {
 	return uint32(n)
 }
 
-// envMaxPlayers 启动期应用 OMB_MAX_PLAYERS（单房间席位上限，默认 64；
-// 上界由 room.SetMaxPlayers 钳制到 256——200 为已压测目标，余量防配置错字）。
+// envMaxPlayers 启动期应用 OMB_MAX_PLAYERS（单房间席位上限，代码默认 200；
+// 范围 1–256，由 room.SetMaxPlayers 钳制——上界余量防配置错字，可下调回小房）。
 // 必须在第一间房间创建前调用——main 里位于 hub 装配之前，满足该约束。
 // 解析失败回退默认值并记日志。
 func envMaxPlayers() {
@@ -260,7 +262,7 @@ func main() {
 	}
 
 	hub := glue.NewHub()
-	// 席位上限先于一切房间装配（env OMB_MAX_PLAYERS，默认 64）。
+	// 席位上限先于一切房间装配（env OMB_MAX_PLAYERS，代码默认 200）。
 	envMaxPlayers()
 	// 空房间清道夫（审计 S-26）：空置停 warmup 对局、久置逐出房间；阈值经
 	// OMB_WARMUP_IDLE_STOP / OMB_ROOM_EVICT_AFTER 配置（未设置=默认）。

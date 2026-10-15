@@ -22,9 +22,10 @@ func (s *Sim) prepareCombat() {
 			continue
 		}
 		r.Energy = math.Min(s.maxEnergyOf(r), r.Energy+EnergyRegen*DT)
-		c.ShieldOn = in.Shield && r.Energy+collisionEpsilon >= ShieldDrain*DT
-		if c.ShieldOn {
-			r.Energy = math.Max(0, r.Energy-ShieldDrain*DT)
+		s.prepareShield(r, in.Shield)
+		shieldBlocksDash := in.Shield
+		if s.simulationVersion >= 6 {
+			shieldBlocksDash = c.ShieldOn
 		}
 		if s.simulationVersion < 2 {
 			// Recorded v0/v1 inputs allowed shield and timed Dash together.
@@ -37,7 +38,7 @@ func (s *Sim) prepareCombat() {
 			if !in.Dash {
 				c.DashExhausted = false
 			}
-			if !in.Shield && in.Dash && !c.DashExhausted && r.Energy+collisionEpsilon >= DashCost*DT {
+			if !shieldBlocksDash && in.Dash && !c.DashExhausted && r.Energy+collisionEpsilon >= DashCost*DT {
 				// Held Dash is continuous: every active tick pays the per-second
 				// drain, refreshes direction, and remains active for exactly this tick.
 				r.Energy = math.Max(0, r.Energy-DashCost*DT)
@@ -46,7 +47,7 @@ func (s *Sim) prepareCombat() {
 				// Release, shield intent, or insufficient energy stops the dash.
 				// Exhaustion requires a release before Dash may start again, avoiding
 				// one-tick cue flicker as passive regeneration crosses the threshold.
-				if in.Dash && !in.Shield && r.Energy+collisionEpsilon < DashCost*DT {
+				if in.Dash && !shieldBlocksDash && r.Energy+collisionEpsilon < DashCost*DT {
 					c.DashExhausted = true
 				}
 				// v4 keeps the residual speed: the normal acceleration approach
@@ -67,6 +68,26 @@ func (s *Sim) prepareCombat() {
 			c.PulseTick, c.PulseReady = s.tick, s.tick+PulseCooldown
 		}
 		c.PulseRequested = false
+	}
+}
+
+func (s *Sim) prepareShield(robot *Robot, requested bool) {
+	combat := &robot.Combat
+	affordable := robot.Energy+collisionEpsilon >= ShieldDrain*DT
+	if s.simulationVersion < 6 {
+		combat.ShieldOn = requested && affordable
+	} else if combat.ShieldOn {
+		duration := s.tick - combat.ShieldStarted
+		if !affordable || (!requested && duration >= ShieldMinimumTicks) {
+			combat.ShieldOn = false
+			combat.ShieldReady = s.tick + ShieldCooldownTicks(duration)
+		}
+	} else if requested && robot.Energy+collisionEpsilon >= ShieldDrain*DT*float64(ShieldMinimumTicks)-EnergyRegen*DT*float64(ShieldMinimumTicks-1) && s.tick >= combat.ShieldReady {
+		combat.ShieldOn = true
+		combat.ShieldStarted = s.tick
+	}
+	if combat.ShieldOn {
+		robot.Energy = math.Max(0, robot.Energy-ShieldDrain*DT)
 	}
 }
 

@@ -35,6 +35,10 @@ const DENY_THROTTLE_MS = 700
 const WALL_HIT_MIN_IMPACT = 1.5
 const WALL_HIT_IMPACT_SCALE = 8
 const WALL_HIT_COLOR = '#9bafbd'
+/** 晶片散开入场原点的检索窗口与匹配半径（散布环带 1–4m + 余量）。 */
+const DROP_ORIGIN_WINDOW_MS = 1500
+const DROP_ORIGIN_RANGE = 4.6
+const DROP_ORIGIN_MAX = 16
 
 /** Transient presentation follows confirmed events/state transitions; resyncs establish a quiet baseline. */
 export class GameFeedback {
@@ -58,6 +62,8 @@ export class GameFeedback {
   private held = { fire: false, shield: false, interact: false }
   private lastDenied = -Infinity
   private hitChain = { at: -Infinity, count: 0 }
+  /** pointDropSpawn 原点记录：散开入场动画的出发原点（render 懒检索）。 */
+  private dropOrigins: { x: number; y: number; at: number }[] = []
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
   constructor(
@@ -79,12 +85,14 @@ export class GameFeedback {
     this.seconds = undefined; this.countdownWarned = false; this.countdownTicks.clear()
     this.held = { fire: false, shield: false, interact: false }
     this.hitChain = { at: -Infinity, count: 0 }
+    this.dropOrigins.length = 0
     audio.stopGame()
   }
 
-  pause(): void { this.fx.clear(); this.vitals.clearPopups(); this.trails.clear(); this.near = 0; this.baseline = false; this.camFeel.calm(); audio.stopGame() }
+  pause(): void { this.fx.clear(); this.vitals.clearPopups(); this.trails.clear(); this.near = 0; this.baseline = false; this.camFeel.calm(); this.dropOrigins.length = 0; audio.stopGame() }
 
   snapshot(world: WorldState, map: MapDefParsed, snap: SnapshotDelta, active: boolean): void {
+    map = world.localMap ?? map
     const transitions = this.baseline && !snap.full && active && !document.hidden
     const selfId = world.self?.robotId
     if (!transitions) this.quietThroughTick = Math.max(this.quietThroughTick, snap.tick)
@@ -143,6 +151,7 @@ export class GameFeedback {
   }
 
   ambience(world: WorldState, map: MapDefParsed, active: boolean, transitions = this.baseline): void {
+    map = world.localMap ?? map
     const self = world.robots.get(world.self?.robotId ?? 0), pos = self?.base?.pos
     if (!active || document.hidden) { this.baseline = false; this.near = 0; audio.setUplink('off'); return }
     if (!pos || self?.dead) { this.near = 0; audio.setUplink('off'); return }
@@ -166,6 +175,7 @@ export class GameFeedback {
   }
 
   event(ev: ServerEvent, world: WorldState, map: MapDefParsed, active: boolean): void {
+    map = world.localMap ?? map
     const k = ev.kind
     const opening = k.case === 'phaseChange' && k.value.to >= map.coreZone.unlockPhase
     if (!active) { if (opening) this.innerOpened = true; return }
@@ -179,7 +189,8 @@ export class GameFeedback {
     const selfId = world.self?.robotId
     switch (k.case) {
       case 'shot':
-        if (!world.robots.has(k.value.owner)) break
+        if (!map.partial && !world.robots.has(k.value.owner)) break
+        if (map.partial && (!k.value.at || !visibleImpact(k.value.at, world, map, k.value.projectile))) break
         if (k.value.at) { this.fx.add('shot', k.value.at, k.value.color || world.robots.get(k.value.owner)?.color || white, k.value.projectile, EFFECT_MS.shot, k.value.heading); this.sound('shot', k.value.at, world, 1, k.value.owner === selfId) }
         break
       case 'projectileImpact':
@@ -196,6 +207,11 @@ export class GameFeedback {
         break
       case 'pointDropSpawn': {
         // 赏金阵亡散落：本人得到明确的损失反馈；他人在散落点看到 amber 提示。
+        // 阵亡点兼作散开入场的出发原点（事件与快照增量到达顺序不定，render 懒检索）。
+        if (k.value.at) {
+          this.dropOrigins.push({ x: k.value.at.x, y: k.value.at.y, at: performance.now() })
+          if (this.dropOrigins.length > DROP_ORIGIN_MAX) this.dropOrigins.shift()
+        }
         if (k.value.fromRobot === selfId) {
           this.message(k.value.levelLost ? '赏金阵亡 · 掉落 1 级与全部自由点数' : '赏金阵亡 · 散落全部自由点数')
         } else if (k.value.at) {
@@ -205,14 +221,20 @@ export class GameFeedback {
       }
       case 'pointDropPickup': {
         const own = k.value.by === selfId
-        const p = world.pointDrops.get(k.value.dropId)?.base?.pos ?? world.robots.get(k.value.by)?.base?.pos
+        const p = k.value.at ?? world.pointDrops.get(k.value.dropId)?.base?.pos ?? world.robots.get(k.value.by)?.base?.pos
         if (p) this.fx.add('pickup', p, amber, k.value.dropId, EFFECT_MS.corePickup)
-        if (own) { audio.play('corePickup'); this.message(`拾取技能点晶片 · +${k.value.points}`) }
-        else if (p) this.sound('corePickup', p, world)
+        if (own) {
+          // 单次阵亡散落多只小晶片：拾取改空间飘字（amber +N），消息流不再刷屏。
+          audio.play('corePickup')
+          if (p) this.vitals.popup(0, p, k.value.points * 10, performance.now(), k.value.dropId, amber, '+')
+        } else if (p) {
+          this.sound('corePickup', p, world)
+        }
         break
       }
       case 'wallHit':
-        if (!world.robots.has(k.value.robot)) break
+        if (!map.partial && !world.robots.has(k.value.robot)) break
+        if (map.partial && (!k.value.at || !visibleImpact(k.value.at, world, map, 0))) break
         if (k.value.at && k.value.impact >= WALL_HIT_MIN_IMPACT) {
           this.fx.add('impact', k.value.at, WALL_HIT_COLOR, k.value.robot, EFFECT_MS.wallImpact)
           this.sound('wallHit', k.value.at, world, Math.min(1, k.value.impact / WALL_HIT_IMPACT_SCALE))
@@ -220,11 +242,11 @@ export class GameFeedback {
         break
       case 'corePickup': {
         const own = k.value.by === selfId
-        const p = world.cores.get(k.value.coreId)?.base?.pos ?? map.corePads.find(p => p.id === k.value.coreId)?.pos
+        const p = k.value.at ?? world.cores.get(k.value.coreId)?.base?.pos ?? map.corePads.find(p => p.id === k.value.coreId)?.pos
           ?? world.robots.get(k.value.by)?.base?.pos
         if (p) this.fx.add('pickup', p, green, k.value.coreId, EFFECT_MS.corePickup)
         // A delta can remove the core before its pickup event, including all position data for self.
-        if (own) { audio.play('corePickup'); this.message(`拾取 Core · +${k.value.value} 分 · +${k.value.value >= 25 ? 10 : 5} 技能点`) }
+        if (own) { audio.play('corePickup'); this.message(`拾取 Core · +${k.value.value} 分 · +${k.value.skillPoints ?? (k.value.value >= 25 ? 10 : 5)} 技能点`) }
         else if (p) this.sound('corePickup', p, world)
         break
       }
@@ -240,7 +262,7 @@ export class GameFeedback {
         break
       }
       case 'uplinkHack': {
-        const p = map.uplinks.find(u => u.id === k.value.uplinkId)?.pos
+        const p = k.value.at ?? world.uplinks.get(k.value.uplinkId)?.base?.pos ?? map.uplinks.find(u => u.id === k.value.uplinkId)?.pos
         if (p) { this.fx.add('uplink', p, green, k.value.uplinkId, EFFECT_MS.uplinkRing); this.fx.add('splash', p, cyan, k.value.uplinkId + ev.tick, EFFECT_MS.uplinkSplash) }
         if (k.value.by === selfId) {
           audio.play('uplinkSuccess')
@@ -273,6 +295,7 @@ export class GameFeedback {
   }
 
   input(input: ClientInput, world: WorldState, map: MapDefParsed): void {
+    map = world.localMap ?? map
     const self = world.robots.get(world.self?.robotId ?? 0)
     if (!self || self.dead) return
     let reason = ''
@@ -312,6 +335,22 @@ export class GameFeedback {
     return Math.min(1, progress)
   }
 
+  /** 散开入场原点检索（render 对每只新晶片懒调用一次）：窗口内最近的阵亡点，
+   *  顺带清理过期条目；无匹配返回 undefined（调用方退化为原地弹出）。 */
+  nearestDropOrigin(x: number, y: number, now = performance.now()): MapVec2 | undefined {
+    let kept = 0
+    let best: MapVec2 | undefined
+    let bestD = DROP_ORIGIN_RANGE * DROP_ORIGIN_RANGE
+    for (const o of this.dropOrigins) {
+      if (now - o.at > DROP_ORIGIN_WINDOW_MS) continue
+      this.dropOrigins[kept++] = o
+      const d = (o.x - x) * (o.x - x) + (o.y - y) * (o.y - y)
+      if (d < bestD) { bestD = d; best = o }
+    }
+    this.dropOrigins.length = kept
+    return best
+  }
+
   delayedHealth(robot: number, actualX10: number, now = performance.now()): number {
     return this.vitals.delayedHealth(robot, actualX10, now)
   }
@@ -327,10 +366,10 @@ export class GameFeedback {
       && !this.camFeel.shaking(tick) && this.camFeel.settled
   }
 
-  draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+  draw(ctx: CanvasRenderingContext2D, cam: Camera, layer?: 'world' | 'screen'): void {
     ctx.save()
-    this.fx.draw(ctx, cam)
-    this.vitals.draw(ctx, cam)
+    if (layer !== 'screen') this.fx.draw(ctx, cam)
+    this.vitals.draw(ctx, cam, layer)
     ctx.restore()
   }
 
@@ -371,8 +410,9 @@ export class GameFeedback {
     const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
     if (!self) return
     const distance = Math.hypot(pos.x - self.x, pos.y - self.y)
-    if (distance > SOUND_RANGE) return
-    const gain = intensity * Math.max(0, 1 - distance / SOUND_RANGE)
+    const soundRange = Math.max(SOUND_RANGE, world.visionRadius ?? 0, world.localMap?.partial ? 32 : 0)
+    if (distance > soundRange) return
+    const gain = intensity * Math.max(0, 1 - distance / soundRange)
     const pan = Math.max(-SOUND_PAN_LIMIT, Math.min(SOUND_PAN_LIMIT, (pos.x - self.x) / SOUND_PAN_DIVISOR))
     if (pitch !== 1) audio.play(cue, gain, pan, priority, pitch)
     else if (priority || cue === 'corePickup' || cue === 'uplinkSuccess') audio.play(cue, gain, pan, priority)

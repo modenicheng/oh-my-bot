@@ -50,7 +50,7 @@ function tick(bot) {
 |---|---|
 | `import type { BotContext } ...` | 只给编辑器看类型。服务器跑的是编译后的 JS，这行会被剥掉 |
 | `function tick(bot: BotContext) {` | 每帧游戏调用这个函数，`bot` 是当帧的控制对象 |
-| `bot.nearestCore()` | 问一句"全图最近的 Core 在哪"，没有就返回 `null` |
+| `bot.nearestCore()` | 问一句"当前观察里最近的存活 Core 在哪"，没有就返回 `null`，不代表全图没有 Core |
 | `if (core) ...` | 找到了才走 |
 | `bot.navigateTo(core)` | 沿服务器算好的路线走过去。碰到 Core 自动拾取 |
 
@@ -69,8 +69,8 @@ function tick(bot) {
 ## `bot` 是每帧递给你的东西
 
 ```js
-bot.self   // 你自己：id、血量、能量、位置、速度（当帧快照）
-bot.game   // 对局：已进行时间、剩余时间、当前阶段、地图种子
+bot.self   // 你自己：id、血量、能量、位置、速度、upgrade（当帧快照）
+bot.game   // 对局：已进行时间、剩余时间、当前阶段、upgradeCosts；mapSeed 已弃用且恒为 0
 bot.scan() // 感知快照，免费，每帧随便读
 bot.move() // 动作和便利方法都挂在同一个 bot 上
 ```
@@ -85,57 +85,98 @@ bot.move() // 动作和便利方法都挂在同一个 bot 上
 
 ## 感知：`scan()` 不要钱
 
-服务器每帧替你算好一张快照：半径 20m 内、不被墙挡的机器人和炮弹，加上全图公开的 Core、Uplink 和血包。
+服务器每帧替你算好一张局部快照：机器人、炮弹、Core、Uplink、血包和技能点晶片，都按当前感知半径与视线遮挡裁剪。普通视野为 20m，成功执行脉冲的帧为 32m；墙体和未开放锁区会遮挡视线。
 
-![感知：20m 视野加墙体遮挡，Core 和 Uplink 全图公开](../reference/images/diagrams/vision.png)
+![感知示意：当前半径与视线遮挡共同限制观察](../reference/images/diagrams/vision.png)
+
+图中如仍标有 Core / Uplink 全图公开，那是旧规则；以本节的局部感知规则为准，图片尚未重绘。浏览器可靠引导包仍携带完整静态地形，供稳定绘制墙、地板、竞技场边界与相机范围，并用半透明雾保留地形参照；这不表示动态实体或资源状态全图可见，也不会让脚本得到隐藏几何、生成参数或种子。观战与离线回放使用独立的全知数据流。
 
 ```js
 const obs = bot.scan()
-obs.robots       // 看得见的机器人：{ id, position, hp }
-obs.cores        // 全图 Core：{ id, x, y }
-obs.uplinks      // 全图 Uplink：{ id, x, y, ready, holder? }
+obs.robots       // 看得见的机器人：{ id, position, hp, velocity, maxHp, maxEnergy }
+obs.cores        // 当前可见的存活 Core：{ id, x, y, value? }
+obs.uplinks      // 当前可见的 Uplink：{ id, x, y, ready, holder? }
 obs.projectiles  // 看得见的炮弹：{ id, x, y }
+obs.healthPacks  // 当前可见的固定血包点及状态：{ id, x, y, available, respawnInS }
+obs.pointDrops   // 当前可见的存活技能点晶片：{ id, x, y, points }
+obs.walls        // 可见墙面片段：{ id, min, max }，可为零厚度 AABB，不含隐藏墙背面
+obs.boundaries   // 可见边界线段：{ kind: 'arena' | 'lock', start, end }
 obs.tick         // 快照对应的帧号
 ```
 
 - `scan()` 零能量、零动作成本，每帧读多少次都行。
-- 看不见的敌人不在这张表里。被墙挡住或超过 20m 的机器人就是不可见，**看不见不等于不存在**。
+- 看不见的实体和资源不在这张表里。离开当前半径或被遮挡后消失，**不等于被拾取、死亡或全图不存在**。
 - 你自己不在 `robots` 里，用 `bot.self`；已阵亡的会被过滤。
 - `bot.pulseScan()` 花 12 能量、冷却 2 秒，成功执行的那一帧视野扩到 32m。它返回的仍是调用前的快照，别拿返回值判断成功。
+- `pointDrops` 与其他资源一样受当前距离和视线遮挡裁剪，`scan()` / `pulseScan()` 同享当前观察；环境晶片每只 1 点，赏金晶片每只 1–4 点，生成 30 秒后过期，接触拾取谁碰归谁，只给技能点不给计分。未开放锁区不会因扫描而变成可见、可通行或可拾取区域。
+- `walls` 只给可见墙面，片段 id 只在该快照内有效；`boundaries` 只给可见竞技场或锁区表面，不是完整地图轮廓。`game.mapSeed` 已弃用，恒为 `0`，不能用来重建隐藏地图。
 
 逐字段说明在[数据结构参考](../reference/data.md)。
 
 ## 动作速查
 
-原语七个，自己组合策略：
+原语八个，自己组合策略：
 
 | 方法 | 一句话 |
 |---|---|
 | `move(vx, vy)` | 表达移动方向和力度，满速 8 m/s |
 | `aimAt(angle)` | 炮塔转向，单位弧度 |
 | `fire()` | 开火，250ms 一发，耗能 5 |
-| `dash()` | 按住式冲刺：15 m/s（加速度 96 m/s² 渐变），耗能 20/秒 |
+| `dash()` | 按住式冲刺：15 m/s（加速度 60 m/s² 渐变），耗能 20/秒 |
 | `shield(on)` | 开关护盾：减伤 65%，不能开火，耗能 18/秒 |
 | `interact()` | 按住引导，黑入 Uplink |
 | `say(text)` | 全场喊话，3 秒冷却 |
+| `buyUpgrade(track)` | 排队购买一级升级，返回 `void`，下一帧快照确认结果 |
 
-便利层七个，省掉重复代码：
+便利层八个，省掉重复代码：
 
 | 方法 | 一句话 |
 |---|---|
 | `moveTo(pos)` | 直线走向目标点，不绕障碍 |
-| `navigateTo(pos)` | 服务器确定性 A*，绕墙、边界和未开放区域 |
+| `navigateTo(pos)` | 基于当前局部观察寻路，不使用隐藏地图，不能代替探索 |
 | `aimAt(target)` | 直接瞄一个看得见的机器人 |
 | `nearestEnemy()` | 视野内最近的敌人，没有返回 `null` |
-| `nearestCore()` | 全图最近的存活 Core |
-| `nearestUplink()` | 全图最近的激活 Uplink |
+| `nearestCore()` | 当前观察里最近的存活 Core，没有返回 `null` |
+| `nearestPointDrop()` | 当前观察里最近的存活晶片，含 `id` / `points`；没有返回 `null` |
+| `nearestUplink()` | 当前观察里最近的激活 Uplink，没有返回 `null` |
 | `pulseScan()` | 花能量的增强感知 |
 
 每个动作的参数、判定和坑，见[动作参考](../reference/actions.md)与[便利层参考](../reference/helpers.md)。
 
-## 能量是唯一的钱
+## 技能点：脚本也能买升级
 
-能量上限 100，每秒回 10。所有动作都花它：
+拾取普通 Core 得 2 技能点，Mega 得 5；每颗新增普通/Mega Core 在同环带附带最多 1/2 只各 1 点的环境晶片，还受全场环境晶片存量上限 `ceil(参赛机器人席位数 / 4)` 约束。参赛者含 bot，死亡者仍计席位；4/64/200/256 人分别最多 1/16/50/64 只。剩余额度不足时只发可容纳的只数，满额时只生 Core；拾取或 30 秒过期释放额度，后续新增 Core 才补充。赏金晶片不占环境额度、不受该上限约束；不保证固定的每颗总收益，也不再守恒旧 5/10 点预算。
+
+存活 Core 不搬家，也不重复生成晶片。Core 每次重生换位置，不要守着旧刷点；血包仍固定。这是与计分、能量分开的货币。`bot.self.upgrade` 给出仅自己可见的 `points`、五轨 `levels` 和服务端派生的赏金标志 `bounty`。轨名是 `'hp' | 'speed' | 'shield' | 'attack' | 'energy'`，当前每轨 0–10 级。
+
+`bot.game.upgradeCosts[L]` 是从 L 升到 L+1 的成本，数组长度就是满级。当前曲线为 `[2, 3, 5, 8, 12, 18, 27, 40, 60, 90]`，开局冻结，脚本应读取它而不是硬编码价格。只在买得起时排队买一级血量：
+
+```ts
+import type { BotContext } from '@omb/bot-api'
+
+function tick(bot: BotContext) {
+  const upgrade = bot.self.upgrade
+  const cost = bot.game.upgradeCosts[upgrade.levels.hp]
+  if (cost !== undefined && upgrade.points >= cost) bot.buyUpgrade('hp')
+}
+```
+
+**快照是真相，不是购物车。** `self.upgrade`、嵌套 `levels`、`game.upgradeCosts` 与 `obs.pointDrops` 的数组及晶片对象均为只读、冻结数据；不能通过改写它们改世界，旧快照也不会自动更新。成本曲线可跨帧复用，其余每帧重取。`buyUpgrade()` 返回 `void`，不会立刻扣掉你正在读的快照点数或改等级，也不返回成功与否；结果以下一 tick 的 `self.upgrade` 为准。同一帧循环购买时必须自己预扣预算，不能用未更新的快照写 `while`。
+
+购买管线：`buyUpgrade(track)` 校验字符串（非法值抛 `TypeError`）→ 追加本 tick collector 队列 → `ScriptCommands.Upgrades` → `ApplyScriptCommands` 克隆到 `PendingScript` → `consumeInputs` 在死亡分支前追加到 `PendingUpgrades` → 逐条校验、扣点，并记入同一条 `ControlRecord.Upgrades` 供回放。
+
+- **按次累积，不是最后一次覆盖。** 人类购买先入队，脚本购买随后按调用顺序追加；两者共享每 tick 最多 8 次的上限，超出丢弃。每次购买都按前面购买后的余额与等级重新判定。
+- **仅正式局可买。** 点数不足、已满级或热身期请求均静默无效，没有 nack。热身期由 glue 剥离购买队列；`game.phase` 只是地图阶段，不是热身标志。
+- **死亡期间也能买。** 复活按新上限恢复；购买不参与手操/脚本的分轴仲裁，也不算打破复活无敌的操作。
+- **异常和超时不能偷花钱。** 这一 tick 的购买队列与其他脚本意图一并清空；人的购买不受影响。
+
+当前任一轨达到 L4 就进入赏金状态：阵亡散落全部自由点数，余额低时还可能掉 1 级。**自己的赏金状态只读 `self.upgrade.bounty`**，不要硬编码 L4，门槛可能调参。他人的五轨 build 不公开；只能从可见 `RobotRef.maxHp` / `maxEnergy` 反推血量/能量等级，不能推断其余三轨。完整映射见[数据结构参考](../reference/data.md)。
+
+抢晶片可用 `bot.nearestPointDrop()`（没有返回 `null`）或自己筛 `bot.scan().pointDrops`；环境晶片每只 1 点，赏金晶片每只 1–4 点，30 秒未捡消失，无剩余寿命字段。它们只搜索当前半径与视线内的晶片，不探测隐藏或锁区内不可见的晶片；最近不等于可达，离开视野也不等于被拾取。
+
+## 能量：动作的消耗
+
+基础能量上限 100，能量轨升级后最高 300，每秒回复始终 10。以下动作消耗能量；买升级只花技能点：
 
 | 动作 | 消耗 |
 |---|---|
@@ -153,6 +194,8 @@ obs.tick         // 快照对应的帧号
 ![四根控制轴：人一碰就抢占，按 Space 交还](../reference/images/diagrams/control-axes.png)
 
 人被抢走的轴，你的指令自动失效，你不需要配合。别想着"检测玩家在开车然后让位"，脚本**看不到**手操状态，游戏也没打算让你看。每帧照常发全部指令就行。
+
+升级购买不属于这四根轴：人类和脚本请求按前述顺序合并，不会互相抢占。
 
 ## 提交契约：JS 直提，TS 先编译
 

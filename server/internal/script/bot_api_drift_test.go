@@ -179,6 +179,8 @@ func TestBotApiRuntimeSignaturesCallable(t *testing.T) {
 			switch name {
 			case "shield":
 				args[i] = vm.ToValue(false)
+			case "buyUpgrade":
+				args[i] = vm.ToValue("hp")
 			case "moveTo", "navigateTo", "aimAt", "move":
 				args[i] = vm.ToValue(map[string]float64{"x": 0, "y": 0})
 			default:
@@ -198,7 +200,7 @@ func TestBotApiRuntimeSignaturesCallable(t *testing.T) {
 func TestBotContextReadonlySurfaces(t *testing.T) {
 	vm := goja.New()
 	bindings := newVMBindings(vm)
-	bot := bindings.buildTickContext(testFrame(), newCommandCollector())
+	bot := bindings.buildTickContext(upgradeTestFrame(), newCommandCollector())
 	for _, prop := range []string{"self", "game", "api"} {
 		v := bot.Get(prop)
 		if v == nil || goja.IsUndefined(v) {
@@ -211,18 +213,52 @@ func TestBotContextReadonlySurfaces(t *testing.T) {
 			continue
 		}
 		if prop == "self" {
-			for _, f := range []string{"id", "hp", "energy", "position", "velocity"} {
+			for _, f := range []string{"id", "hp", "energy", "position", "velocity", "upgrade"} {
 				if goja.IsUndefined(o.Get(f)) {
 					t.Errorf("bot.self.%s missing at runtime", f)
 				}
 			}
 		}
 		if prop == "game" {
-			for _, f := range []string{"time", "timeLeft", "phase", "mapSeed"} {
+			for _, f := range []string{"time", "timeLeft", "phase", "mapSeed", "upgradeCosts"} {
 				if goja.IsUndefined(o.Get(f)) {
 					t.Errorf("bot.game.%s missing at runtime", f)
 				}
 			}
 		}
+	}
+	if err := vm.Set("bot", bot); err != nil {
+		t.Fatal(err)
+	}
+	_, err := vm.RunString(`
+function assertFrozen(value, fields, label) {
+  if (!value || !Object.isFrozen(value)) throw new Error(label + " is not frozen");
+  for (const field of fields) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    if (!descriptor || descriptor.writable || descriptor.configurable) throw new Error(label + "." + field + " is not readonly");
+    let rejected = false;
+    try { (function() { "use strict"; value[field] = null; })(); }
+    catch (error) { if (!(error instanceof TypeError)) throw error; rejected = true; }
+    if (!rejected) throw new Error(label + "." + field + " accepted assignment");
+  }
+  if (Reflect.defineProperty(value, "extra", {value: true})) throw new Error(label + " accepted extension");
+}
+assertFrozen(bot.self.upgrade, ["points", "levels", "bounty"], "self.upgrade");
+assertFrozen(bot.self.upgrade.levels, ["hp", "speed", "shield", "attack", "energy"], "self.upgrade.levels");
+assertFrozen(bot.game.upgradeCosts, ["0", "length"], "game.upgradeCosts");
+for (const [parent, field] of [[bot.self, "upgrade"], [bot.game, "upgradeCosts"]]) {
+  const descriptor = Object.getOwnPropertyDescriptor(parent, field);
+  if (!descriptor || descriptor.writable || descriptor.configurable) throw new Error(field + " is replaceable");
+}
+for (const method of ["scan", "pulseScan"]) {
+  const observation = bot[method]();
+  const descriptor = Object.getOwnPropertyDescriptor(observation, "pointDrops");
+  if (!descriptor || descriptor.writable || descriptor.configurable) throw new Error(method + ".pointDrops is replaceable");
+  assertFrozen(observation.pointDrops, ["0", "length"], method + ".pointDrops");
+  for (const drop of observation.pointDrops) assertFrozen(drop, ["id", "x", "y", "points"], method + ".pointDrops entry");
+}
+`)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

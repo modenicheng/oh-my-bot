@@ -47,19 +47,19 @@ function tick(bot: BotContext) {
 
 `bot.scan()` 返回游戏裁剪好的可见实体集合，零成本，每帧可读，每次调用都给新对象。
 
-- 可见性规则，对机器人和弹丸一致：中心距 ≤ 20m，且视线不被墙拦截。
-- <img class="inline-icon" src="../reference/images/icons/target.png" alt=""> cores 与 uplinks 恒全量：不受距离和墙限制，全图目标位置都查得到。这是全局导航（`nearestCore` / `nearestUplink`）的底气。
+- 可见性规则对机器人、弹丸和全部资源一致：中心距 ≤ 20m，且视线不被墙或未开放锁区拦截。
+- <img class="inline-icon" src="../reference/images/icons/target.png" alt=""> `cores` 与 `uplinks` 只含当前观察到的目标；`nearestCore` / `nearestUplink` 不会探测隐藏资源，无候选时返回 `null`。
 - 自己不在 `robots` 里，用 `bot.self`；已死的被过滤。
 - `pulseScan()` 耗 12 能量，冷却 2 秒。执行成功的帧用 32m 感知，普通帧仍是 20m，同样受墙体遮挡。请求执行成功才扣能量、进冷却；调用始终返回请求前已有的当前快照。
 
 陷阱：
 
-- 20m 外的敌人不可见，不等于不存在。贴墙走位能减少暴露面；cores / uplinks 恒全量，拿来做全局导航。
+- 20m 外的敌人或资源不可见，不等于不存在；没有目标时需要探索，离开视野也不代表目标已被拾取。
 - 弹丸与机器人同规则裁剪。你看到弹丸时，它可能已经在 20m 内飞了几帧。侧移比硬吃划算。
 
 ## 3. 移动与战斗
 
-`move` 表达期望速度方向，`aimAt` 定炮口，`fire` 发射；`moveTo` 沿直线朝点走，`navigateTo` 用服务器确定性的静态 A*。
+`move` 表达期望速度方向，`aimAt` 定炮口，`fire` 发射；`moveTo` 沿直线朝点走，`navigateTo` 只基于当前观察中的墙面和边界确定性寻路，不读取隐藏地图。
 
 - `move(vx, vy)` 是期望速度向量，不是位移。两个数合起来 ≤1 按比例走，>1 自动归一成满速。实际速度受加速度 24 m/s² 与限速 8 m/s 约束，起步和转向有惯性，没有瞬移。
 - `moveTo` 是直线移动；`navigateTo` 是服务器确定性的静态 A*，避开实体墙、竞技场边界和尚未解锁的中央区。它不做动态机器人避障，不做威胁评估，不做弹道预测。

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { create } from '@bufbuild/protobuf'
-import { SnapshotDeltaSchema, RobotStateSchema, EntityBaseSchema, ProjectileStateSchema } from '@omb/protocol'
+import { SnapshotDeltaSchema, RobotStateSchema, EntityBaseSchema, ProjectileStateSchema, PointDropStateSchema } from '@omb/protocol'
 import { emptyWorld, applySnapshot } from './world'
 
 const snapshot = (tick: number, baseTick: number, full = false) => create(SnapshotDeltaSchema, {
@@ -106,5 +106,26 @@ describe('projectile color continuity', () => {
     const resync = snapshot(4, 0, true); resync.robots = []; resync.projectiles = full.projectiles
     applySnapshot(world, resync)
     expect(world.projectiles.get(99)?.color).toBe('')
+  })
+})
+
+describe('point drop intro eligibility', () => {
+  const drops = (tick: number, baseTick: number, full: boolean, ids: number[]) => create(SnapshotDeltaSchema, {
+    tick, baseTick, full, phase: 1, timeLeftS: 480,
+    robots: [create(RobotStateSchema, { base: create(EntityBaseSchema, { id: 1 }), hpX10: 1000 })],
+    pointDrops: ids.map(id => create(PointDropStateSchema, { base: create(EntityBaseSchema, { id, pos: { x: 3, y: 4 } }), points: 2 })),
+  })
+
+  it('marks first-seen delta drops as born, keeps the stamp, and skips full rebuilds', () => {
+    const world = emptyWorld()
+    applySnapshot(world, drops(10, 0, true, []))
+    applySnapshot(world, drops(11, 10, false, [7]))
+    expect(world.pointDrops.get(7)?.bornAt).toBeTypeOf('number')
+    applySnapshot(world, drops(12, 11, false, [7]))
+    const stamp = world.pointDrops.get(7)?.bornAt
+    applySnapshot(world, drops(13, 12, false, [7]))
+    expect(world.pointDrops.get(7)?.bornAt).toBe(stamp)
+    applySnapshot(world, drops(20, 0, true, [7]))
+    expect(world.pointDrops.get(7)?.bornAt).toBeUndefined()
   })
 })

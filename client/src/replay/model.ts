@@ -110,6 +110,10 @@ export interface ReplayVisualFrame {
   phase: number
   robots: ReplayVisualRobot[]
   projectiles: ReplayVisualProjectile[]
+  resources?: {
+    cores: ReplayCheckpoint['cores']
+    pointDrops: Array<{ id: number; pos: { x: number; y: number }; points: number }>
+  }
 }
 
 /** HUD 展示用机器人摘要。 */
@@ -381,6 +385,10 @@ function normalizeVisualFrame(obj: any, lineNo: number): ReplayVisualFrame {
       projectiles: frame.projectiles.map((p) => ({
         id: p.id, owner: p.owner, pos: { x: p.pos?.x ?? 0, y: p.pos?.y ?? 0 }, heading: p.heading,
       })),
+      ...(frame.resources ? { resources: {
+        cores: frame.resources.cores.map(core => ({ id: core.base?.id ?? 0, pos: { x: core.base?.pos?.x ?? 0, y: core.base?.pos?.y ?? 0 }, value: core.value, taken: false })),
+        pointDrops: frame.resources.pointDrops.map(drop => ({ id: drop.base?.id ?? 0, pos: { x: drop.base?.pos?.x ?? 0, y: drop.base?.pos?.y ?? 0 }, points: drop.points })),
+      } } : {}),
     }
   }
   if (version !== ReplayVisualVersion.REPLAY_VISUAL_V1) {

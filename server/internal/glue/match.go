@@ -351,7 +351,7 @@ func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
 	g.m.proj.OnEventRecord(g.m.eventSeq, tick, ev)
 	// Sim emits under rc.mu; never reacquire it from the sink.
 	if g.m.activeLocked() {
-		g.m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}})
+		g.m.broadcastPerceivedEventLocked(ev)
 	}
 }
 
@@ -639,10 +639,11 @@ func (m *Match) restoreSavedAssist(players map[uint64]SessionInfo) {
 }
 
 func (m *Match) sendMapBootstrapLocked(s *Session) {
-	data, _ := json.Marshal(m.mapDef)
+	definition := m.mapDef
+	data, _ := json.Marshal(definition)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
-	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(m.mapDef.GeneratorVer), Tuning: simTuning()}}}}})
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(definition.GeneratorVer), Tuning: simTuning()}}}}})
 }
 
 // simTuning 下发客户端可见的对局数值（审计 X-3）：仅漂移高危集（HUD/渲染/
@@ -736,16 +737,18 @@ func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInp
 	ctrl := wv.Controls[rv.ID]
 	robot, _ := m.sim.Robot(rv.ID)
 	self := snapshot.SelfInput{
-		Robot:         rv,
-		MoveSrc:       ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
-		TurretSrc:     ctrl.TurretSrc,
-		FireSrc:       ctrl.FireSrc,
-		AbilitySrc:    ctrl.AbilitySrc,
-		ManualAxes:    uint32(robot.Control.HumanAxes),
-		AssistOn:      robot.Control.Assist,
-		DashReadyTick: robot.Combat.DashReady,
-		FireReadyTick: robot.Combat.FireReady,
-		Upg:           robot.Upg, // 私密升级状态（ADR-0016）：点数 + 五维等级
+		Robot:             rv,
+		MoveSrc:           ctrl.MoveSrc, // 仲裁标记直传（'H'/'S'/'-'，契约一致）
+		TurretSrc:         ctrl.TurretSrc,
+		FireSrc:           ctrl.FireSrc,
+		AbilitySrc:        ctrl.AbilitySrc,
+		ManualAxes:        uint32(robot.Control.HumanAxes),
+		AssistOn:          robot.Control.Assist,
+		DashReadyTick:     robot.Combat.DashReady,
+		FireReadyTick:     robot.Combat.FireReady,
+		ShieldReadyTick:   robot.Combat.ShieldReady,
+		ShieldStartedTick: robot.Combat.ShieldStarted,
+		Upg:               robot.Upg, // 私密升级状态（ADR-0016）：点数 + 五维等级
 	}
 	if m.ai != nil && m.ai.quota != nil {
 		if pid, ok := m.playerOf[rv.ID]; ok {
@@ -1049,12 +1052,21 @@ func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 }
 
 // runScripts 并行执行全部已装载脚本（deadline 内），结果投回 sim（下一 tick 消费）。
-// 遍历注册表（scriptPool 是运行时唯一权威）；id 升序保证 Submit 顺序确定化。
+// 遍历注册表（scriptPool 是运行时唯一权威）；起点按 tick 轮转——升序保证
+// 同一 tick 内 Submit 顺序确定化，轮转保证帧预算不足时是全员公平降频而非
+// 固定饿死排序尾部（2026-10 200 人 solo 局实测：固定升序时排名 100+ 的
+// bot 整场一个 tick 都分不到，表现为大半 bot 站桩）。
 // obsByRobot 由 step() 统一构建（审计 S-6），脚本与快照共享同一观测。
 func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observation) {
 	ids := m.scriptPool.IDs()
 	if len(ids) == 0 {
 		return
+	}
+	if off := int(m.tick % uint32(len(ids))); off > 0 {
+		rot := make([]uint32, 0, len(ids))
+		rot = append(rot, ids[off:]...)
+		rot = append(rot, ids[:off]...)
+		ids = rot
 	}
 	deadline := time.Now().Add(sim.FrameBudget)
 	for _, rid := range ids {
@@ -1066,7 +1078,8 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 		if !ok {
 			continue
 		}
-		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs}, deadline)
+		robot, _ := m.sim.Robot(rid)
+		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs, Upg: robot.Upg, ShieldReady: robot.Combat.ShieldReady, ShieldStarted: robot.Combat.ShieldStarted}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {
 		rt := m.scriptPool.RuntimeOf(res.ID)
@@ -1080,6 +1093,9 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 		}
 		if m.botRobots[res.ID] {
 			res.Commands = soloBotCommands(res.Commands)
+		}
+		if m.warmup {
+			res.Commands.Upgrades = nil
 		}
 		m.sim.ApplyScriptCommands(res.ID, res.Commands)
 		if rt != nil {

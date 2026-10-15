@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 9 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 10 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {

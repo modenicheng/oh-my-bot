@@ -51,7 +51,7 @@ tags: [总览]
 | Robot / Player | Robot 是场上的机器人，Player 是操作它的人 |
 | Bot Script | 你写或 AI 改的控制程序，JS/TS，跑在服务器上 |
 | Snippet | 官方预置的 Bot Script 模块，源码可查，勾选即用 |
-| Observation | 你的感知快照：视野里的机器人和炮弹，加上全图公开的 Core 和 Uplink |
+| Observation | 你的局部感知快照：机器人、炮弹、Core、Uplink、血包与 SP 都按距离和视线裁剪 |
 | `scan()` | 读取感知快照，免费，每帧都能读 |
 | Core | 碰一下就捡的得分资源，顺带回能量。Mega Core 更值钱 |
 | Uplink | 站桩引导 4 秒的得分设备，玩家习惯叫"桩" |

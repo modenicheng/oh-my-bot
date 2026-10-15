@@ -47,6 +47,7 @@ export interface ReplayFrame {
   bubbles: SayMark[]
   /** 最近关键帧携带的核心/弹丸（仅 checkpoint 粒度，供参考渲染）。 */
   cores: Array<{ id: number; pos: { x: number; y: number }; value: number; taken: boolean }>
+  pointDrops: Array<{ id: number; pos: { x: number; y: number }; points: number }>
   healthPacks: ReplayCheckpoint['healthPacks']
   projectiles: Array<{ id: number; owner: number; pos: { x: number; y: number }; heading: number }>
 }
@@ -257,13 +258,14 @@ export class ReplayIndex {
       scores: cloneScores(kf.scores),
       finalScores: kf.finalScores?.map(row => ({ ...row, titles: [...(row.titles ?? [])] })) ?? null,
       bubbles: kf.bubbles.filter((b) => q - b.tick <= BUBBLE_TTL),
-      cores: kf.cores.map((c) => ({ ...c, pos: { ...c.pos } })),
+      cores: (visual?.resources?.cores ?? kf.cores).map((c) => ({ ...c, pos: { ...c.pos } })),
+      pointDrops: (visual?.resources?.pointDrops ?? []).map(drop => ({ ...drop, pos: { ...drop.pos } })),
       healthPacks: kf.healthPacks.map((pack) => ({ ...pack, pos: { ...pack.pos } })),
       projectiles: visual?.projectiles ?? kf.projectiles.map((p) => ({ ...p, pos: { ...p.pos } })),
     }
   }
 
-  private visualAt(tick: number): { phase: number; robots: RobotTickState[]; projectiles: ReplayFrame['projectiles'] } | null {
+  private visualAt(tick: number): { phase: number; robots: RobotTickState[]; projectiles: ReplayFrame['projectiles']; resources?: ReplayVisualFrame['resources'] } | null {
     if (this.visualFrames.length === 0) return null
     let lo = 0
     let hi = this.visualTicks.length - 1
@@ -311,7 +313,7 @@ export class ReplayIndex {
       }
       for (const projectile of b.projectiles) if (!projectiles.some(current => current.id === projectile.id)) projectiles.push({ ...projectile, pos: { ...projectile.pos } })
     }
-    return { phase: mix < 1 ? a.phase : b.phase, robots, projectiles }
+    return { phase: mix < 1 ? a.phase : b.phase, robots, projectiles, resources: (mix < 1 ? a : b).resources }
   }
 }
 

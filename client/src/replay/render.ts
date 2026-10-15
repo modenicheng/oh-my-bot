@@ -4,7 +4,7 @@ import type { MapDefParsed } from '../game/mapdef'
 import type { ReplayFrame } from './index'
 import { phaseNum } from './index'
 import { drawIcon } from '../icons'
-import { ink, mono, ROBOT_R, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
+import { ink, mono, ROBOT_R, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawPointDrop, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
 
 export class ReplayRenderer {
   private ctx: CanvasRenderingContext2D
@@ -26,6 +26,7 @@ export class ReplayRenderer {
     for (const core of frame.cores) {
       if (!core.taken) drawCore(ctx, cam, core.pos.x, core.pos.y, core.value >= 25, frame.tick)
     }
+    for (const drop of frame.pointDrops) drawPointDrop(ctx, cam, drop.pos.x, drop.pos.y, drop.points, frame.tick)
     for (const pack of frame.healthPacks) {
       const respawnInS = Math.ceil(Math.max(0, pack.readyAt - frame.tick) / 60)
       drawHealthPack(ctx, cam, pack.pos.x, pack.pos.y, pack.readyAt <= frame.tick, respawnInS, frame.tick)

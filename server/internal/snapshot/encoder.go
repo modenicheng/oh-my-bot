@@ -6,6 +6,7 @@
 package snapshot
 
 import (
+	"encoding/json"
 	"sort"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -15,17 +16,19 @@ import (
 // SelfInput 是 Encode 的自机参数：自机 RobotView + 分轴仲裁结果（ADR-0009，
 // 下发 SelfState.move_src/turret_src 供 UI 显示）。
 type SelfInput struct {
-	Robot         sim.RobotView
-	MoveSrc       byte // 'H' human / 'S' script / '-' none
-	TurretSrc     byte
-	FireSrc       byte   // 开火轴来源（ADR-0009 分轴仲裁）
-	AbilitySrc    byte   // 技能轴来源
-	ManualAxes    uint32 // 当前被人工接管的轴位图（bit0 move/bit1 aim/bit2 fire/bit3 ability）
-	AiRounds      uint32
-	AiTokensK     uint32
-	AssistOn      bool
-	DashReadyTick uint32
-	FireReadyTick uint32
+	Robot             sim.RobotView
+	MoveSrc           byte // 'H' human / 'S' script / '-' none
+	TurretSrc         byte
+	FireSrc           byte   // 开火轴来源（ADR-0009 分轴仲裁）
+	AbilitySrc        byte   // 技能轴来源
+	ManualAxes        uint32 // 当前被人工接管的轴位图（bit0 move/bit1 aim/bit2 fire/bit3 ability）
+	AiRounds          uint32
+	AiTokensK         uint32
+	AssistOn          bool
+	DashReadyTick     uint32
+	FireReadyTick     uint32
+	ShieldReadyTick   uint32
+	ShieldStartedTick uint32
 	// Upg 局内升级状态（ADR-0016）：私密下发 SelfState.upgrade（点数 + 五维等级）。
 	Upg sim.UpgradeState
 }
@@ -40,6 +43,8 @@ type DeltaEncoder struct {
 	lastCores   map[uint32]coreStamp
 	lastUplinks map[uint32]uplinkStamp
 	lastDrops   map[uint32]dropStamp
+	lastPacks   map[uint32]bool
+	lastMap     string
 	lastTick    uint32
 	hasBaseline bool // 是否已发过 full（首帧或 ForceFull）
 	forceFull   bool
@@ -119,6 +124,16 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	}
 	delta.Phase = phaseToProto(phase)
 	delta.TimeLeftS = timeLeftS
+	if obs.Frame.Map != nil && obs.Frame.Map.Partial {
+		data, _ := json.Marshal(obs.Frame.Map)
+		mapJSON := string(data)
+		if full || mapJSON != e.lastMap {
+			delta.MapJson = &mapJSON
+		}
+		e.lastMap = mapJSON
+		radius := obs.VisionRadius
+		delta.VisionRadius = &radius
+	}
 
 	// ---- Robots ----
 	nextRobots := make(map[uint32]robotStamp, len(obs.Robots))
@@ -195,12 +210,14 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 
 	// Health packs are four public map objects. Send the complete state every frame
 	// so reconnect and resync never depend on a missing tombstone.
+	nextPacks := make(map[uint32]bool, len(obs.HealthPacks))
 	for i := range obs.HealthPacks {
+		nextPacks[obs.HealthPacks[i].ID] = true
 		delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(&obs.HealthPacks[i]))
 	}
 
-	// ---- PointDrops（ADR-0016）：公共对象、有界集合（≤4 只/次死亡、30s TTL），
-	// 恒全量集合内的增量；消失（拾取/到期）以 gone 表达。 ----
+	// ---- PointDrops（ADR-0016）：公共对象、有界集合（单只 ≤4 点、每次死亡
+	// 随机多只、30s TTL），恒全量集合内的增量；消失（拾取/到期）以 gone 表达。 ----
 	nextDrops := make(map[uint32]dropStamp, len(obs.PointDrops))
 	for i := range obs.PointDrops {
 		d := &obs.PointDrops[i]
@@ -221,6 +238,8 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		delta.ProjectileGone = goneIDs(e.lastProjs, nextProjs)
 		delta.CoreGone = goneIDs(e.lastCores, nextCores)
 		delta.PointDropGone = goneIDs(e.lastDrops, nextDrops)
+		delta.UplinkGone = goneIDs(e.lastUplinks, nextUplinks)
+		delta.HealthPackGone = goneIDs(e.lastPacks, nextPacks)
 	}
 
 	// 提交基线。
@@ -229,6 +248,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	e.lastCores = nextCores
 	e.lastUplinks = nextUplinks
 	e.lastDrops = nextDrops
+	e.lastPacks = nextPacks
 	e.lastTick = tick
 	if full {
 		e.hasBaseline = true
@@ -362,18 +382,20 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 		points = uint32(s.Upg.Points)
 	}
 	return &ombv1.SelfState{
-		RobotId:        s.Robot.ID,
-		MoveSrc:        ctrlSrc(s.MoveSrc),
-		TurretSrc:      ctrlSrc(s.TurretSrc),
-		AiRoundsLeft:   s.AiRounds,
-		AiTokensLeftK:  s.AiTokensK,
-		AssistOn:       &assist,
-		DashReadyTick:  &dashReady,
-		FireReadyTick:  &fireReady,
-		FireSrc:        &fireSrc,
-		AbilitySrc:     &abilitySrc,
-		ManualAxesMask: &manualAxes,
-		Upgrade:        &ombv1.UpgradeSelf{Points: points, Levels: levels},
+		RobotId:           s.Robot.ID,
+		MoveSrc:           ctrlSrc(s.MoveSrc),
+		TurretSrc:         ctrlSrc(s.TurretSrc),
+		AiRoundsLeft:      s.AiRounds,
+		AiTokensLeftK:     s.AiTokensK,
+		AssistOn:          &assist,
+		DashReadyTick:     &dashReady,
+		FireReadyTick:     &fireReady,
+		FireSrc:           &fireSrc,
+		AbilitySrc:        &abilitySrc,
+		ManualAxesMask:    &manualAxes,
+		Upgrade:           &ombv1.UpgradeSelf{Points: points, Levels: levels},
+		ShieldReadyTick:   &s.ShieldReadyTick,
+		ShieldStartedTick: &s.ShieldStartedTick,
 	}
 }
 

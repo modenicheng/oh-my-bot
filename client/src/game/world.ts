@@ -8,6 +8,7 @@ import {
 import { create } from '@bufbuild/protobuf'
 import { encodeClient } from '@omb/protocol'
 import { FALLBACK_TUNING, invulnWindowMs } from './tuning'
+import { parseMapDef, type MapDefParsed } from './mapdef'
 
 export interface RobotEnt extends RobotState {
   /** 本地渲染帧时间戳（无敌闪烁等动画用） */
@@ -21,9 +22,17 @@ export interface ProjEnt extends ProjectileState { seenAt: number }
 export interface CoreEnt extends CoreState { seenAt: number }
 export interface UplinkEnt extends UplinkState { seenAt: number }
 export interface HealthPackEnt extends HealthPackState { seenAt: number }
-export interface PointDropEnt extends PointDropState { seenAt: number }
+export interface PointDropEnt extends PointDropState {
+  seenAt: number
+  /** 首见于增量帧的本地时间戳（散开入场动画起点）；full 重建不带、动画结束清除。 */
+  bornAt?: number
+  /** 懒解析的入场原点（pointDropSpawn 事件的阵亡点；null=无原点，原地弹出）。 */
+  introFrom?: { x: number; y: number } | null
+}
 
 export interface WorldState {
+  localMap?: MapDefParsed
+  visionRadius?: number
   tick: number
   initialized: boolean
   phase: number
@@ -62,6 +71,10 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
 
   if (world.initialized && snap.tick < world.tick) return 'stale'
   if (!snap.full && (!world.initialized || snap.baseTick !== world.tick)) return 'resync-needed'
+  if (snap.mapJson !== undefined) world.localMap = parseMapDef(snap.mapJson)
+  if (snap.visionRadius !== undefined) world.visionRadius = snap.visionRadius
+  for (const id of snap.uplinkGone) world.uplinks.delete(id)
+  for (const id of snap.healthPackGone) world.healthPacks.delete(id)
   if (snap.full) {
     world.robots.clear()
     world.projectiles.clear()
@@ -143,9 +156,12 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
 
   for (const drop of snap.pointDrops) {
     const id = drop.base?.id ?? 0
-    const ent = world.pointDrops.get(id) ?? ({} as PointDropEnt)
+    const prev = world.pointDrops.get(id)
+    const ent = prev ?? ({} as PointDropEnt)
     Object.assign(ent, drop)
     ent.seenAt = now
+    // full（首连/重连/resync）重建不播入场动画：只有增量帧首见的晶片才算「新生」。
+    if (!prev && !snap.full) ent.bornAt = now
     world.pointDrops.set(id, ent)
   }
   for (const id of snap.pointDropGone) world.pointDrops.delete(id)

@@ -15,7 +15,11 @@ const (
 	DashCooldown       uint32 = 150
 	DashDuration       uint32 = 18
 	DashSpeed                 = 15.0
-	DashAcceleration          = 96.0
+	DashAcceleration          = 60.0
+	ShieldMinimumTicks uint32 = 3
+	ShieldMinCooldown  uint32 = 12
+	ShieldMaxCooldown  uint32 = 180
+	ShieldCurveTicks   uint32 = 600
 	ShieldDrain               = 18.0
 	ShieldDamageScale         = 0.35
 	ShieldSpeedScale          = 0.8
@@ -68,6 +72,24 @@ func (s *Sim) dashSpeed() float64 {
 	return DashSpeed
 }
 
+func (s *Sim) dashAcceleration() float64 {
+	if s.simulationVersion < 6 {
+		return 96
+	}
+	return DashAcceleration
+}
+
+func ShieldCooldownTicks(duration uint32) uint32 {
+	if duration <= ShieldMinimumTicks {
+		return ShieldMinCooldown
+	}
+	if duration >= ShieldCurveTicks {
+		return ShieldMaxCooldown
+	}
+	span := ShieldCurveTicks - ShieldMinimumTicks
+	return ShieldMinCooldown + ((duration-ShieldMinimumTicks)*(ShieldMaxCooldown-ShieldMinCooldown)+span-1)/span
+}
+
 type ControlState struct {
 	Assist        bool            `json:"assist"`
 	HumanAxes     AxisMask        `json:"human_axes"`
@@ -94,6 +116,8 @@ type CombatState struct {
 	DashDirection  Vec2               `json:"dash_direction"`
 	DashExhausted  bool               `json:"dash_exhausted"`
 	ShieldOn       bool               `json:"shield_on"`
+	ShieldStarted  uint32             `json:"shield_started,omitempty"`
+	ShieldReady    uint32             `json:"shield_ready,omitempty"`
 	PulseReady     uint32             `json:"pulse_ready"`
 	PulseTick      uint32             `json:"pulse_tick"`
 	SayReady       uint32             `json:"say_ready"`

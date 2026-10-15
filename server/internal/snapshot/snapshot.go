@@ -67,63 +67,14 @@ func BuildObservation(w World, ix *WallIndex, observerID, _ uint32, radii ...flo
 	if len(radii) > 0 && radii[0] > 0 && !math.IsNaN(radii[0]) && !math.IsInf(radii[0], 0) {
 		visionRadius = radii[0]
 	}
-	visionRadiusSq := visionRadius * visionRadius
-	obs := sim.Observation{
-		Frame:       w.FrameView,
-		Cores:       append([]sim.CoreView(nil), w.Cores...),
-		HealthPacks: append([]sim.HealthPackView(nil), w.HealthPacks...),
-		PointDrops:  append([]sim.PointDropView(nil), w.PointDrops...),
+	world := sim.WorldView{Frame: w.FrameView, Robots: w.Robots, Projectiles: w.Projectiles, Cores: w.Cores, HealthPacks: w.HealthPacks, Uplinks: w.Uplinks, PointDrops: w.PointDrops}
+	var visibility func(sim.Vec2, sim.Vec2) bool
+	if ix != nil && (w.Map == nil || w.Map.CoreZone.Radius == 0 || w.Phase >= w.Map.CoreZone.UnlockPhase) {
+		visibility = ix.Visible
 	}
-
-	// Uplink 恒全量，PersonalCDs 收敛到观察者。
-	for _, u := range w.Uplinks {
-		cu := u
-		cu.PersonalCDs = nil
-		if cd, ok := u.PersonalCDs[observerID]; ok {
-			cu.PersonalCDs = map[uint32]uint32{observerID: cd}
-		}
-		obs.Uplinks = append(obs.Uplinks, cu)
-	}
-
-	// 观察者位置（自身视图不受裁剪，先定位）。
-	var center sim.Vec2
-	for i := range w.Robots {
-		if w.Robots[i].ID == observerID {
-			r := w.Robots[i]
-			center = r.Pos
-			obs.Robots = append(obs.Robots, r) // 自身恒可见
-			break
-		}
-	}
-
-	for i := range w.Robots {
-		r := &w.Robots[i]
-		if r.ID == observerID {
-			continue
-		}
-		if !inVision(center, r.Pos, ix, visionRadiusSq) {
-			continue
-		}
-		obs.Robots = append(obs.Robots, *r)
-	}
-
-	for i := range w.Projectiles {
-		p := &w.Projectiles[i]
-		if inVision(center, p.Pos, ix, visionRadiusSq) {
-			obs.Projectiles = append(obs.Projectiles, *p)
-		}
+	obs, found := world.ObserveLocal(observerID, visionRadius, visibility)
+	if !found {
+		return sim.Observation{Frame: sim.FrameView{Tick: w.Tick, Phase: w.Phase, TimeLeftS: w.TimeLeftS, Map: &sim.MapDef{Version: 1, Partial: true}}, VisionRadius: visionRadius}
 	}
 	return obs
-}
-
-// inVision：中心距 ≤ 本 tick 感知半径且视线未被墙拦截（先廉价距离筛，再遮挡精确测试）。
-func inVision(from, to sim.Vec2, ix *WallIndex, visionRadiusSq float64) bool {
-	dx, dy := to.X-from.X, to.Y-from.Y
-	if dx*dx+dy*dy > visionRadiusSq {
-		return false
-	}
-	if ix == nil {
-		return true
-	}
-	return ix.Visible(from, to)
 }

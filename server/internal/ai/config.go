@@ -61,8 +61,9 @@ type AuthConfig struct {
 // script deferred 1.4%→0%。这些对象是 tick 级垃圾，加大触发间隔
 // 只影响峰值堆（几百 MB 量级），不影响稳态内存。
 type GCConfig struct {
-	// Percent 等价 GOGC：触发下次 GC 的堆增长百分比。0 = 不调整
-	//（沿用进程默认 100 或外部 GOGC 环境变量）。
+	// Percent 等价 GOGC：触发下次 GC 的堆增长百分比。LoadServerConfig 未
+	// 显式配置时代码内置 GCPercentDefault（2026-10 压测口径），无需部署侧
+	// 再设环境变量；显式 0 = 不调整（沿用进程默认 100 或外部 GOGC 环境变量）。
 	Percent int
 	// MemoryLimit 等价 GOMEMLIMIT（如 "512MiB"）。空 = 不设置。
 	// 与 Percent 配合使用可在拿到 GC 收益的同时给内存兜底。
@@ -70,7 +71,8 @@ type GCConfig struct {
 }
 
 const (
-	// GCPercentDefault 生产推荐值（见 GCConfig 文档）。
+	// GCPercentDefault 代码内默认（LoadServerConfig 裸加载即生效）；
+	// env OMB_GC_PERCENT / config gc.percent 可覆盖。
 	GCPercentDefault = 400
 	// GCPercentMax 防御上限：>2000 后收益趋平、风险（堆溢出 OOM）上升。
 	GCPercentMax = 2000
@@ -105,6 +107,9 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 			Timeout:  DeepSeekDefaultTimeout,
 		},
 		Quota: DefaultQuotaConfig(),
+		// GC 默认即压测口径（ADR-0015：GOGC=100 下 GC assist 吞 ~40% 帧预算）；
+		// 以下 env / config.yaml / .env 任一显式值仍可覆盖，0 = 沿用进程默认。
+		GC: GCConfig{Percent: GCPercentDefault},
 		// auth 默认开启：配齐 issuer/client_id/client_secret 即生效；残缺时
 		// setupAuth 降级并打日志。显式关闭用 auth.enabled: false / AUTH_ENABLED=false。
 		Auth: AuthConfig{Enabled: true, TokenTTL: AuthDefaultTokenTTL},

@@ -230,12 +230,18 @@
           <p class="game-options-note">仅释放你的操作输入，对局仍在服务器继续。</p>
           <button type="button" id="options-continue" class="game-options-action primary">继续</button>
           <fieldset class="game-options-audio">
-            <legend>共享音频</legend>
+            <legend>音频</legend>
             <div>
-              <button type="button" id="options-audio-mute" aria-pressed="false">静音</button>
-              <label for="options-audio-volume">音量</label>
-              <input type="range" id="options-audio-volume" min="0" max="100" value="45">
-              <output id="options-volume-value" for="options-audio-volume">45%</output>
+              <button type="button" id="options-sfx-mute" aria-pressed="false">静音</button>
+              <label for="options-sfx-volume">音效音量</label>
+              <input type="range" id="options-sfx-volume" min="0" max="100" value="45">
+              <output id="options-sfx-value" for="options-sfx-volume">45%</output>
+            </div>
+            <div>
+              <button type="button" id="options-bgm-mute" aria-pressed="false">静音</button>
+              <label for="options-bgm-volume">音乐音量</label>
+              <input type="range" id="options-bgm-volume" min="0" max="100" value="45">
+              <output id="options-bgm-value" for="options-bgm-volume">45%</output>
             </div>
           </fieldset>
           <fieldset class="game-options-host" id="options-host" hidden>
@@ -341,10 +347,18 @@
   </div>
   <!-- 同一组音频设置由 main 移到当前视图工具栏，audio 保持绑定与用户偏好。 -->
   <details id="audio-settings" inert>
-    <summary>音效</summary>
-    <div class="audio-row">
-      <button type="button" id="audio-mute" aria-label="静音切换"><span data-icon="sound"></span></button>
-      <input type="range" id="audio-volume" min="0" max="100" value="45" aria-label="音量">
+    <summary>音频</summary>
+    <div class="audio-panel">
+      <div class="audio-row">
+        <span class="audio-tag">音效</span>
+        <button type="button" id="audio-sfx-mute" aria-label="音效静音切换"><span data-icon="sound"></span></button>
+        <input type="range" id="audio-sfx-volume" min="0" max="100" value="45" aria-label="音效音量">
+      </div>
+      <div class="audio-row">
+        <span class="audio-tag">音乐</span>
+        <button type="button" id="audio-bgm-mute" aria-label="音乐静音切换"><span data-icon="music"></span></button>
+        <input type="range" id="audio-bgm-volume" min="0" max="100" value="45" aria-label="音乐音量">
+      </div>
     </div>
   </details>
   <!-- 全局连接横幅（视图外，main 显示/隐藏并绑定按钮） -->

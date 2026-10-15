@@ -1,5 +1,7 @@
 package sim
 
+import "math"
+
 // WorldView supplements the frozen FrameView, which intentionally contains no
 // entity table. Published data never aliases live simulation state. Readers
 // may retain or mutate returned values, even while the owner advances Tick.
@@ -169,9 +171,36 @@ func (v WorldView) LineOfSight(from, to Vec2) bool {
 	return true
 }
 
+func (v WorldView) SurfaceVisible(from, to Vec2) bool {
+	if !from.finite() || !to.finite() {
+		return false
+	}
+	if v.Frame.Map == nil {
+		return true
+	}
+	delta := to.Sub(from)
+	tolerance := 1e-7 / math.Max(1, delta.Len())
+	for _, wall := range v.Frame.Map.Walls {
+		if fraction, hit := segmentWall(from, delta, wall); hit && fraction < 1-tolerance {
+			return false
+		}
+	}
+	zone := v.Frame.Map.CoreZone
+	if zone.Radius > 0 && v.Frame.Phase < zone.UnlockPhase {
+		if fraction, hit := sweepCircle(from, delta, Vec2{}, zone.Radius); hit && fraction < 1-tolerance {
+			return false
+		}
+	}
+	return true
+}
+
 // Observe is a standalone convenience for integrations without a T3 builder.
-// Core/Uplink stay global; robots and projectiles require range and line of sight.
+// All entities and map surfaces require range and line of sight.
 func (v WorldView) Observe(id uint32) (Observation, bool) {
+	return v.ObserveLocal(id, v.ScanRadius(id), nil)
+}
+
+func (v WorldView) ObserveLocal(id uint32, radius float64, visible func(Vec2, Vec2) bool) (Observation, bool) {
 	var self RobotView
 	found := false
 	for _, r := range v.Robots {
@@ -184,17 +213,47 @@ func (v WorldView) Observe(id uint32) (Observation, bool) {
 		return Observation{}, false
 	}
 	frame := v.Frame
-	frame.Map = cloneMap(frame.Map)
-	obs := Observation{Frame: frame, Cores: append([]CoreView{}, v.Cores...), HealthPacks: append([]HealthPackView{}, v.HealthPacks...), Uplinks: cloneUplinkViews(v.Uplinks)}
+	if visible == nil {
+		visible = v.LineOfSight
+	}
+	canSee := func(position Vec2) bool { return self.Pos.Sub(position).Len() <= radius && visible(self.Pos, position) }
+	frame.Map = v.localMap(self.Pos, radius, visible)
+	obs := Observation{Frame: frame, VisionRadius: radius}
 	for _, r := range v.Robots {
-		if r.ID == id || (self.Pos.Sub(r.Pos).Len() <= v.ScanRadius(id) && v.LineOfSight(self.Pos, r.Pos)) {
+		if r.ID == id || canSee(r.Pos) {
 			obs.Robots = append(obs.Robots, r)
 		}
 	}
 	for _, p := range v.Projectiles {
-		if self.Pos.Sub(p.Pos).Len() <= v.ScanRadius(id) && v.LineOfSight(self.Pos, p.Pos) {
+		if canSee(p.Pos) {
 			obs.Projectiles = append(obs.Projectiles, p)
 		}
+	}
+	for _, core := range v.Cores {
+		if canSee(core.Pos) {
+			obs.Cores = append(obs.Cores, core)
+		}
+	}
+	for _, pack := range v.HealthPacks {
+		if canSee(pack.Pos) {
+			obs.HealthPacks = append(obs.HealthPacks, pack)
+		}
+	}
+	for _, drop := range v.PointDrops {
+		if canSee(drop.Pos) {
+			obs.PointDrops = append(obs.PointDrops, drop)
+		}
+	}
+	for _, uplink := range v.Uplinks {
+		if !canSee(uplink.Pos) {
+			continue
+		}
+		cooldown, exists := uplink.PersonalCDs[id]
+		uplink.PersonalCDs = nil
+		if exists {
+			uplink.PersonalCDs = map[uint32]uint32{id: cooldown}
+		}
+		obs.Uplinks = append(obs.Uplinks, uplink)
 	}
 	return obs, true
 }

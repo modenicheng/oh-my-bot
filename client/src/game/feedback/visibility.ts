@@ -1,5 +1,4 @@
-// 撞击可见性判定（C-17 拆分自 feedback.ts，纯函数）：事件为全房间广播；
-// 颜色元数据不能使视野外或掩体后的撞击凭空可见。
+// 局部地图的可靠事件已经过服务器可见性过滤；完整地图的旧协议事件在此裁剪。
 import type { MapDefParsed, MapVec2 } from '../mapdef'
 import type { WorldState } from '../world'
 
@@ -11,6 +10,7 @@ const WALL_TRACE_END = 0.03
 const PARALLEL_EPS = 1e-8
 
 export function visibleImpact(at: MapVec2, world: WorldState, map: MapDefParsed, projectileId: number): boolean {
+  if (map.partial) return true
   const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
   if (!self) return false
   const dx = at.x - self.x, dy = at.y - self.y, distance = Math.hypot(dx, dy)
@@ -34,7 +34,7 @@ export function visibleImpact(at: MapVec2, world: WorldState, map: MapDefParsed,
         const a = (wall.min.y - self.y) / dy, b = (wall.max.y - self.y) / dy
         enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b))
       }
-      if (enter <= exit) return false
+      if (!parallelOutside && enter <= exit) return false
     }
   }
   return true

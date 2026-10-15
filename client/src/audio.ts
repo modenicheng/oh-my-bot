@@ -1,8 +1,10 @@
 // WebAudio 合成音效：无外部素材，短促提示音由振荡器 + 滤波噪声构成，Uplink 近距为持续低鸣、
 // 破解为门控蜂鸣 + 信息噪声流。AudioContext 只在可信指针/按键时懒创建；静音、切后台、离开对局
-// 时持续声部立即断开，不排队过期声音。样式令牌见 client/STYLE.md；HUD 提供 #audio-mute / #audio-volume。
-import { iconButton } from './icons'
+// 时持续声部立即断开，不排队过期声音。样式令牌见 client/STYLE.md；音效/音乐分轨独立音量与静音，
+// HUD 提供 audio-sfx-* / audio-bgm-* 两行控件（见 audioSettings.ts 的状态与持久化格式）。
+import { iconButton, type IconName } from './icons'
 import { bgm } from './music/bgm'
+import { AUDIO_TRACKS, parseAudioSettings, serializeAudioSettings, type AudioTrack, type TrackSettings } from './audioSettings'
 
 export type SoundCue =
   | 'shot' | 'hit' | 'shieldHit' | 'wallHit' | 'dash' | 'shieldOn' | 'shieldOff'
@@ -137,6 +139,12 @@ function buildNote(n: Note, bus: Bus, gain: number, pan: number, pitch = 1): { s
 
 interface Loop { mode: 'near' | 'hacking'; tune(progress: number): void; stop(): void }
 
+/** HUD 两轨控件的 id 与图标映射；reflectUI/installUI 共用。 */
+const TRACK_UI: Record<AudioTrack, { mute: string; range: string; on: IconName; off: IconName; name: string }> = {
+  sfx: { mute: 'audio-sfx-mute', range: 'audio-sfx-volume', on: 'sound', off: 'soundOff', name: '音效' },
+  bgm: { mute: 'audio-bgm-mute', range: 'audio-bgm-volume', on: 'music', off: 'musicOff', name: '音乐' },
+}
+
 class AudioEngine {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
@@ -146,28 +154,23 @@ class AudioEngine {
   private desired: UplinkMode = 'off'
   private loop: Loop | null = null
   private ui = false
-  private vol: number
-  private mute: boolean
+  private tracks: Record<AudioTrack, TrackSettings>
 
   constructor() {
-    let vol = 0.45, mute = false
+    let raw: string | null = null
     try {
-      const raw = localStorage.getItem('omb.audio')
-      if (raw) {
-        const s = JSON.parse(raw) as { v?: unknown; m?: unknown }
-        if (typeof s.v === 'number' && Number.isFinite(s.v)) vol = Math.min(1, Math.max(0, s.v))
-        if (typeof s.m === 'boolean') mute = s.m
-      }
+      raw = localStorage.getItem('omb.audio')
     } catch { /* 隐私模式或存储被禁用时保持默认 */ }
-    this.vol = vol; this.mute = mute
-    bgm.setLevel(vol, mute)
+    this.tracks = parseAudioSettings(raw)
+    if (raw !== serializeAudioSettings(this.tracks)) this.persist() // 旧格式迁移后立即归一
+    bgm.setLevel(this.tracks.bgm.volume, this.tracks.bgm.muted) // attach 前先交初始电平
   }
 
-  get muted(): boolean { return this.mute }
-  get volume(): number { return this.vol }
+  volumeOf(track: AudioTrack): number { return this.tracks[track].volume }
+  mutedOf(track: AudioTrack): boolean { return this.tracks[track].muted }
 
   play(cue: SoundCue, gain = 1, pan = 0, priority = PRIORITY_CUES.has(cue), pitch = 1): void {
-    if (this.mute || document.hidden || gain <= 0.01) return
+    if (this.tracks.sfx.muted || document.hidden || gain <= 0.01) return
     if (!this.ctx || this.ctx.state !== 'running') return
     const now = performance.now()
     // A distant cue cannot throttle a confirmed self cue of the same kind.
@@ -198,7 +201,7 @@ class AudioEngine {
   setUplink(mode: UplinkMode, progress = 0): void {
     this.desired = mode
     const p = Math.min(1, Math.max(0, progress))
-    if (mode === 'off' || this.mute || document.hidden || !this.ctx || this.ctx.state !== 'running') { this.stopLoop(); return }
+    if (mode === 'off' || this.tracks.sfx.muted || document.hidden || !this.ctx || this.ctx.state !== 'running') { this.stopLoop(); return }
     if (!this.loop || this.loop.mode !== mode) { this.stopLoop(); this.startLoop(mode, p) }
     else this.loop.tune(p)
   }
@@ -209,23 +212,29 @@ class AudioEngine {
     this.lastAt.clear()
   }
 
-  setMuted(muted: boolean): void {
-    if (this.mute === muted) return
-    this.mute = muted
-    bgm.setLevel(this.vol, muted)
-    if (this.master) this.master.gain.setTargetAtTime(muted ? 0 : this.vol, this.ctx!.currentTime, 0.01)
-    if (muted) this.stopLoop()
-    else if (this.desired !== 'off' && !document.hidden && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
+  /** 静音只作用于单轨：音效静音不影响音乐，反之亦然。 */
+  setMuted(track: AudioTrack, muted: boolean): void {
+    const t = this.tracks[track]
+    if (t.muted === muted) return
+    t.muted = muted
+    if (track === 'bgm') {
+      bgm.setLevel(t.volume, muted)
+    } else {
+      if (this.master) this.master.gain.setTargetAtTime(muted ? 0 : t.volume, this.ctx!.currentTime, 0.01)
+      if (muted) this.stopLoop()
+      else if (this.desired !== 'off' && !document.hidden && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
+    }
     this.persist(); this.reflectUI()
   }
 
-  setVolume(volume: number): void {
+  setVolume(track: AudioTrack, volume: number): void {
     if (!Number.isFinite(volume)) return
     const v = Math.min(1, Math.max(0, volume))
-    if (Math.abs(v - this.vol) < 1e-3) return
-    this.vol = v
-    bgm.setLevel(v, this.mute)
-    if (this.master && !this.mute) this.master.gain.setTargetAtTime(v, this.ctx!.currentTime, 0.01)
+    const t = this.tracks[track]
+    if (Math.abs(v - t.volume) < 1e-3) return
+    t.volume = v
+    if (track === 'bgm') bgm.setLevel(v, t.muted)
+    else if (this.master && !t.muted) this.master.gain.setTargetAtTime(v, this.ctx!.currentTime, 0.01)
     this.persist(); this.reflectUI()
   }
 
@@ -258,10 +267,12 @@ class AudioEngine {
       const el = pick(e.target)
       if (el && !off(el)) this.play('click')
     })
-    const muteBtn = document.getElementById('audio-mute')
-    if (muteBtn) muteBtn.addEventListener('click', () => this.setMuted(!this.mute))
-    const range = document.getElementById('audio-volume') as HTMLInputElement | null
-    if (range) range.addEventListener('input', () => this.setVolume(Number(range.value) / 100))
+    for (const track of AUDIO_TRACKS) {
+      const ui = TRACK_UI[track]
+      document.getElementById(ui.mute)?.addEventListener('click', () => this.setMuted(track, !this.mutedOf(track)))
+      const range = document.getElementById(ui.range) as HTMLInputElement | null
+      if (range) range.addEventListener('input', () => this.setVolume(track, Number(range.value) / 100))
+    }
     this.reflectUI()
   }
 
@@ -277,7 +288,7 @@ class AudioEngine {
       const comp = ctx.createDynamicsCompressor()
       comp.threshold.value = -12; comp.ratio.value = 6
       const master = ctx.createGain()
-      master.gain.value = this.mute ? 0 : this.vol
+      master.gain.value = this.tracks.sfx.muted ? 0 : this.tracks.sfx.volume
       master.connect(comp); comp.connect(ctx.destination)
       this.ctx = ctx; this.master = master
       // WebKit 即使在可信手势内新建 AudioContext 也起始 suspended（审计 C-43）：
@@ -290,7 +301,7 @@ class AudioEngine {
       document.addEventListener('visibilitychange', () => {
         bgm.setVisible(!document.hidden)
         if (document.hidden) this.stopLoop()
-        else if (this.desired !== 'off' && !this.mute && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
+        else if (this.desired !== 'off' && !this.tracks.sfx.muted && this.ctx?.state === 'running') this.startLoop(this.desired, 0)
       })
       return true
     } catch { return false }
@@ -363,19 +374,23 @@ class AudioEngine {
   }
 
   private persist(): void {
-    try { localStorage.setItem('omb.audio', JSON.stringify({ v: this.vol, m: this.mute })) } catch { /* 忽略存储失败 */ }
+    try { localStorage.setItem('omb.audio', serializeAudioSettings(this.tracks)) } catch { /* 忽略存储失败 */ }
   }
 
   private reflectUI(): void {
-    const muteBtn = document.getElementById('audio-mute')
-    if (muteBtn) {
-      iconButton(muteBtn, this.mute ? 'soundOff' : 'sound', this.mute ? '取消静音' : '静音')
-      muteBtn.setAttribute('aria-pressed', String(this.mute))
-    }
-    const range = document.getElementById('audio-volume') as HTMLInputElement | null
-    if (range) {
-      range.value = String(Math.round(this.vol * 100))
-      range.setAttribute('aria-label', '音量')
+    for (const track of AUDIO_TRACKS) {
+      const ui = TRACK_UI[track]
+      const { muted, volume } = this.tracks[track]
+      const muteBtn = document.getElementById(ui.mute)
+      if (muteBtn) {
+        iconButton(muteBtn, muted ? ui.off : ui.on, muted ? `取消${ui.name}静音` : `${ui.name}静音`)
+        muteBtn.setAttribute('aria-pressed', String(muted))
+      }
+      const range = document.getElementById(ui.range) as HTMLInputElement | null
+      if (range) {
+        range.value = String(Math.round(volume * 100))
+        range.setAttribute('aria-label', `${ui.name}音量`)
+      }
     }
   }
 }

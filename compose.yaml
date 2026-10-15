@@ -14,8 +14,8 @@ services:
     ports:
       - "127.0.0.1:27182:27182"
     environment:
-      OMB_MAX_PLAYERS: "200"    # 单房席位上限（1–256；回退小房改 64）
-      OMB_GC_PERCENT: "400"     # GC 调优：200 人房 tick 墙钟减半（压测实测）
+      OMB_MAX_PLAYERS: "200"    # 单房席位上限（与代码默认一致；回退小房改 64）
+      OMB_GC_PERCENT: "400"     # GC 调优：200 人房 tick 墙钟减半（与代码默认一致；回退标准 GC 改 100）
       # OMB_PPROF: "1"          # 需要抓 CPU/堆画像时打开 /debug/pprof（默认关）
     volumes:
       - omb-data:/app/data      # 对局事件日志持久化（data/matches）

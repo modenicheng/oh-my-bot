@@ -2516,21 +2516,23 @@ func (x *UpgradeSelf) GetLevels() []uint32 {
 
 // 自机私有状态（不下发他机）
 type SelfState struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	RobotId        uint32                 `protobuf:"varint,1,opt,name=robot_id,json=robotId,proto3" json:"robot_id,omitempty"`
-	MoveSrc        ControlSource          `protobuf:"varint,2,opt,name=move_src,json=moveSrc,proto3,enum=omb.v1.ControlSource" json:"move_src,omitempty"` // 分轴仲裁结果（ADR-0009）
-	TurretSrc      ControlSource          `protobuf:"varint,3,opt,name=turret_src,json=turretSrc,proto3,enum=omb.v1.ControlSource" json:"turret_src,omitempty"`
-	AiRoundsLeft   uint32                 `protobuf:"varint,4,opt,name=ai_rounds_left,json=aiRoundsLeft,proto3" json:"ai_rounds_left,omitempty"`
-	AiTokensLeftK  uint32                 `protobuf:"varint,5,opt,name=ai_tokens_left_k,json=aiTokensLeftK,proto3" json:"ai_tokens_left_k,omitempty"`     // 千 token
-	AssistOn       *bool                  `protobuf:"varint,6,opt,name=assist_on,json=assistOn,proto3,oneof" json:"assist_on,omitempty"`                  // 权威辅助状态；缺失表示旧服务器
-	DashReadyTick  *uint32                `protobuf:"varint,7,opt,name=dash_ready_tick,json=dashReadyTick,proto3,oneof" json:"dash_ready_tick,omitempty"` // 绝对 60Hz tick，重连后仍准确
-	FireReadyTick  *uint32                `protobuf:"varint,8,opt,name=fire_ready_tick,json=fireReadyTick,proto3,oneof" json:"fire_ready_tick,omitempty"`
-	FireSrc        *ControlSource         `protobuf:"varint,9,opt,name=fire_src,json=fireSrc,proto3,enum=omb.v1.ControlSource,oneof" json:"fire_src,omitempty"`           // 分轴仲裁结果：开火轴当前来源（ADR-0009）
-	AbilitySrc     *ControlSource         `protobuf:"varint,10,opt,name=ability_src,json=abilitySrc,proto3,enum=omb.v1.ControlSource,oneof" json:"ability_src,omitempty"` // 分轴仲裁结果：技能轴当前来源（ADR-0009）
-	ManualAxesMask *uint32                `protobuf:"varint,11,opt,name=manual_axes_mask,json=manualAxesMask,proto3,oneof" json:"manual_axes_mask,omitempty"`             // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
-	Upgrade        *UpgradeSelf           `protobuf:"bytes,12,opt,name=upgrade,proto3,oneof" json:"upgrade,omitempty"`                                                    // 局内升级状态；缺失表示旧服务器（=0 点全零级）
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RobotId           uint32                 `protobuf:"varint,1,opt,name=robot_id,json=robotId,proto3" json:"robot_id,omitempty"`
+	MoveSrc           ControlSource          `protobuf:"varint,2,opt,name=move_src,json=moveSrc,proto3,enum=omb.v1.ControlSource" json:"move_src,omitempty"` // 分轴仲裁结果（ADR-0009）
+	TurretSrc         ControlSource          `protobuf:"varint,3,opt,name=turret_src,json=turretSrc,proto3,enum=omb.v1.ControlSource" json:"turret_src,omitempty"`
+	AiRoundsLeft      uint32                 `protobuf:"varint,4,opt,name=ai_rounds_left,json=aiRoundsLeft,proto3" json:"ai_rounds_left,omitempty"`
+	AiTokensLeftK     uint32                 `protobuf:"varint,5,opt,name=ai_tokens_left_k,json=aiTokensLeftK,proto3" json:"ai_tokens_left_k,omitempty"`     // 千 token
+	AssistOn          *bool                  `protobuf:"varint,6,opt,name=assist_on,json=assistOn,proto3,oneof" json:"assist_on,omitempty"`                  // 权威辅助状态；缺失表示旧服务器
+	DashReadyTick     *uint32                `protobuf:"varint,7,opt,name=dash_ready_tick,json=dashReadyTick,proto3,oneof" json:"dash_ready_tick,omitempty"` // 绝对 60Hz tick，重连后仍准确
+	FireReadyTick     *uint32                `protobuf:"varint,8,opt,name=fire_ready_tick,json=fireReadyTick,proto3,oneof" json:"fire_ready_tick,omitempty"`
+	FireSrc           *ControlSource         `protobuf:"varint,9,opt,name=fire_src,json=fireSrc,proto3,enum=omb.v1.ControlSource,oneof" json:"fire_src,omitempty"`           // 分轴仲裁结果：开火轴当前来源（ADR-0009）
+	AbilitySrc        *ControlSource         `protobuf:"varint,10,opt,name=ability_src,json=abilitySrc,proto3,enum=omb.v1.ControlSource,oneof" json:"ability_src,omitempty"` // 分轴仲裁结果：技能轴当前来源（ADR-0009）
+	ManualAxesMask    *uint32                `protobuf:"varint,11,opt,name=manual_axes_mask,json=manualAxesMask,proto3,oneof" json:"manual_axes_mask,omitempty"`             // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
+	Upgrade           *UpgradeSelf           `protobuf:"bytes,12,opt,name=upgrade,proto3,oneof" json:"upgrade,omitempty"`                                                    // 局内升级状态；缺失表示旧服务器（=0 点全零级）
+	ShieldReadyTick   *uint32                `protobuf:"varint,13,opt,name=shield_ready_tick,json=shieldReadyTick,proto3,oneof" json:"shield_ready_tick,omitempty"`
+	ShieldStartedTick *uint32                `protobuf:"varint,14,opt,name=shield_started_tick,json=shieldStartedTick,proto3,oneof" json:"shield_started_tick,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SelfState) Reset() {
@@ -2647,6 +2649,20 @@ func (x *SelfState) GetUpgrade() *UpgradeSelf {
 	return nil
 }
 
+func (x *SelfState) GetShieldReadyTick() uint32 {
+	if x != nil && x.ShieldReadyTick != nil {
+		return *x.ShieldReadyTick
+	}
+	return 0
+}
+
+func (x *SelfState) GetShieldStartedTick() uint32 {
+	if x != nil && x.ShieldStartedTick != nil {
+		return *x.ShieldStartedTick
+	}
+	return 0
+}
+
 type SnapshotDelta struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Tick           uint32                 `protobuf:"varint,1,opt,name=tick,proto3" json:"tick,omitempty"`
@@ -2666,6 +2682,10 @@ type SnapshotDelta struct {
 	HealthPacks    []*HealthPackState     `protobuf:"bytes,15,rep,name=health_packs,json=healthPacks,proto3" json:"health_packs,omitempty"`
 	PointDrops     []*PointDropState      `protobuf:"bytes,16,rep,name=point_drops,json=pointDrops,proto3" json:"point_drops,omitempty"`                    // 恒全量（同 Core/HealthPack 通道）
 	PointDropGone  []uint32               `protobuf:"varint,17,rep,packed,name=point_drop_gone,json=pointDropGone,proto3" json:"point_drop_gone,omitempty"` // tombstone：消失的晶片 id（拾取/到期）
+	UplinkGone     []uint32               `protobuf:"varint,18,rep,packed,name=uplink_gone,json=uplinkGone,proto3" json:"uplink_gone,omitempty"`
+	HealthPackGone []uint32               `protobuf:"varint,19,rep,packed,name=health_pack_gone,json=healthPackGone,proto3" json:"health_pack_gone,omitempty"`
+	MapJson        *string                `protobuf:"bytes,20,opt,name=map_json,json=mapJson,proto3,oneof" json:"map_json,omitempty"`
+	VisionRadius   *float64               `protobuf:"fixed64,21,opt,name=vision_radius,json=visionRadius,proto3,oneof" json:"vision_radius,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2819,6 +2839,34 @@ func (x *SnapshotDelta) GetPointDropGone() []uint32 {
 	return nil
 }
 
+func (x *SnapshotDelta) GetUplinkGone() []uint32 {
+	if x != nil {
+		return x.UplinkGone
+	}
+	return nil
+}
+
+func (x *SnapshotDelta) GetHealthPackGone() []uint32 {
+	if x != nil {
+		return x.HealthPackGone
+	}
+	return nil
+}
+
+func (x *SnapshotDelta) GetMapJson() string {
+	if x != nil && x.MapJson != nil {
+		return *x.MapJson
+	}
+	return ""
+}
+
+func (x *SnapshotDelta) GetVisionRadius() float64 {
+	if x != nil && x.VisionRadius != nil {
+		return *x.VisionRadius
+	}
+	return 0
+}
+
 type EvKill struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Killer uint32                 `protobuf:"varint,1,opt,name=killer,proto3" json:"killer,omitempty"`
@@ -2910,6 +2958,8 @@ type EvCorePickup struct {
 	By            uint32                 `protobuf:"varint,1,opt,name=by,proto3" json:"by,omitempty"`
 	CoreId        uint32                 `protobuf:"varint,2,opt,name=core_id,json=coreId,proto3" json:"core_id,omitempty"`
 	Value         int32                  `protobuf:"zigzag32,3,opt,name=value,proto3" json:"value,omitempty"`
+	At            *Vec2                  `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
+	SkillPoints   *int32                 `protobuf:"zigzag32,5,opt,name=skill_points,json=skillPoints,proto3,oneof" json:"skill_points,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2961,6 +3011,20 @@ func (x *EvCorePickup) GetCoreId() uint32 {
 func (x *EvCorePickup) GetValue() int32 {
 	if x != nil {
 		return x.Value
+	}
+	return 0
+}
+
+func (x *EvCorePickup) GetAt() *Vec2 {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *EvCorePickup) GetSkillPoints() int32 {
+	if x != nil && x.SkillPoints != nil {
+		return *x.SkillPoints
 	}
 	return 0
 }
@@ -3038,6 +3102,7 @@ type EvPointDropPickup struct {
 	By            uint32                 `protobuf:"varint,1,opt,name=by,proto3" json:"by,omitempty"`
 	DropId        uint32                 `protobuf:"varint,2,opt,name=drop_id,json=dropId,proto3" json:"drop_id,omitempty"`
 	Points        int32                  `protobuf:"zigzag32,3,opt,name=points,proto3" json:"points,omitempty"`
+	At            *Vec2                  `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3093,11 +3158,19 @@ func (x *EvPointDropPickup) GetPoints() int32 {
 	return 0
 }
 
+func (x *EvPointDropPickup) GetAt() *Vec2 {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
 type EvUplinkHack struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	By            uint32                 `protobuf:"varint,1,opt,name=by,proto3" json:"by,omitempty"`
 	UplinkId      uint32                 `protobuf:"varint,2,opt,name=uplink_id,json=uplinkId,proto3" json:"uplink_id,omitempty"`
 	Value         int32                  `protobuf:"zigzag32,3,opt,name=value,proto3" json:"value,omitempty"`
+	At            *Vec2                  `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3151,6 +3224,13 @@ func (x *EvUplinkHack) GetValue() int32 {
 		return x.Value
 	}
 	return 0
+}
+
+func (x *EvUplinkHack) GetAt() *Vec2 {
+	if x != nil {
+		return x.At
+	}
+	return nil
 }
 
 type EvPhaseChange struct {
@@ -5764,6 +5844,7 @@ type ReplayVisualFrame struct {
 	Phase         Phase                     `protobuf:"varint,3,opt,name=phase,proto3,enum=omb.v1.Phase" json:"phase,omitempty"`
 	Robots        []*ReplayVisualRobot      `protobuf:"bytes,4,rep,name=robots,proto3" json:"robots,omitempty"`
 	Projectiles   []*ReplayVisualProjectile `protobuf:"bytes,5,rep,name=projectiles,proto3" json:"projectiles,omitempty"`
+	Resources     *ReplayVisualResources    `protobuf:"bytes,6,opt,name=resources,proto3" json:"resources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5833,6 +5914,65 @@ func (x *ReplayVisualFrame) GetProjectiles() []*ReplayVisualProjectile {
 	return nil
 }
 
+func (x *ReplayVisualFrame) GetResources() *ReplayVisualResources {
+	if x != nil {
+		return x.Resources
+	}
+	return nil
+}
+
+type ReplayVisualResources struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cores         []*CoreState           `protobuf:"bytes,1,rep,name=cores,proto3" json:"cores,omitempty"`
+	PointDrops    []*PointDropState      `protobuf:"bytes,2,rep,name=point_drops,json=pointDrops,proto3" json:"point_drops,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayVisualResources) Reset() {
+	*x = ReplayVisualResources{}
+	mi := &file_proto_omb_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayVisualResources) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayVisualResources) ProtoMessage() {}
+
+func (x *ReplayVisualResources) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_omb_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayVisualResources.ProtoReflect.Descriptor instead.
+func (*ReplayVisualResources) Descriptor() ([]byte, []int) {
+	return file_proto_omb_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *ReplayVisualResources) GetCores() []*CoreState {
+	if x != nil {
+		return x.Cores
+	}
+	return nil
+}
+
+func (x *ReplayVisualResources) GetPointDrops() []*PointDropState {
+	if x != nil {
+		return x.PointDrops
+	}
+	return nil
+}
+
 type ReplayVisualRobot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -5848,7 +5988,7 @@ type ReplayVisualRobot struct {
 
 func (x *ReplayVisualRobot) Reset() {
 	*x = ReplayVisualRobot{}
-	mi := &file_proto_omb_proto_msgTypes[63]
+	mi := &file_proto_omb_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5860,7 +6000,7 @@ func (x *ReplayVisualRobot) String() string {
 func (*ReplayVisualRobot) ProtoMessage() {}
 
 func (x *ReplayVisualRobot) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[63]
+	mi := &file_proto_omb_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5873,7 +6013,7 @@ func (x *ReplayVisualRobot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayVisualRobot.ProtoReflect.Descriptor instead.
 func (*ReplayVisualRobot) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{63}
+	return file_proto_omb_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ReplayVisualRobot) GetId() uint32 {
@@ -5937,7 +6077,7 @@ type ReplayVisualProjectile struct {
 
 func (x *ReplayVisualProjectile) Reset() {
 	*x = ReplayVisualProjectile{}
-	mi := &file_proto_omb_proto_msgTypes[64]
+	mi := &file_proto_omb_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5949,7 +6089,7 @@ func (x *ReplayVisualProjectile) String() string {
 func (*ReplayVisualProjectile) ProtoMessage() {}
 
 func (x *ReplayVisualProjectile) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_omb_proto_msgTypes[64]
+	mi := &file_proto_omb_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5962,7 +6102,7 @@ func (x *ReplayVisualProjectile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayVisualProjectile.ProtoReflect.Descriptor instead.
 func (*ReplayVisualProjectile) Descriptor() ([]byte, []int) {
-	return file_proto_omb_proto_rawDescGZIP(), []int{64}
+	return file_proto_omb_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ReplayVisualProjectile) GetId() uint32 {
@@ -6132,7 +6272,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x06points\x18\x02 \x01(\x11R\x06points\"=\n" +
 	"\vUpgradeSelf\x12\x16\n" +
 	"\x06points\x18\x01 \x01(\rR\x06points\x12\x16\n" +
-	"\x06levels\x18\x02 \x03(\rR\x06levels\"\xa4\x05\n" +
+	"\x06levels\x18\x02 \x03(\rR\x06levels\"\xb8\x06\n" +
 	"\tSelfState\x12\x19\n" +
 	"\brobot_id\x18\x01 \x01(\rR\arobotId\x120\n" +
 	"\bmove_src\x18\x02 \x01(\x0e2\x15.omb.v1.ControlSourceR\amoveSrc\x124\n" +
@@ -6148,7 +6288,9 @@ const file_proto_omb_proto_rawDesc = "" +
 	" \x01(\x0e2\x15.omb.v1.ControlSourceH\x04R\n" +
 	"abilitySrc\x88\x01\x01\x12-\n" +
 	"\x10manual_axes_mask\x18\v \x01(\rH\x05R\x0emanualAxesMask\x88\x01\x01\x122\n" +
-	"\aupgrade\x18\f \x01(\v2\x13.omb.v1.UpgradeSelfH\x06R\aupgrade\x88\x01\x01B\f\n" +
+	"\aupgrade\x18\f \x01(\v2\x13.omb.v1.UpgradeSelfH\x06R\aupgrade\x88\x01\x01\x12/\n" +
+	"\x11shield_ready_tick\x18\r \x01(\rH\aR\x0fshieldReadyTick\x88\x01\x01\x123\n" +
+	"\x13shield_started_tick\x18\x0e \x01(\rH\bR\x11shieldStartedTick\x88\x01\x01B\f\n" +
 	"\n" +
 	"_assist_onB\x12\n" +
 	"\x10_dash_ready_tickB\x12\n" +
@@ -6157,7 +6299,9 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\f_ability_srcB\x13\n" +
 	"\x11_manual_axes_maskB\n" +
 	"\n" +
-	"\b_upgrade\"\x9a\x05\n" +
+	"\b_upgradeB\x14\n" +
+	"\x12_shield_ready_tickB\x16\n" +
+	"\x14_shield_started_tick\"\xce\x06\n" +
 	"\rSnapshotDelta\x12\x12\n" +
 	"\x04tick\x18\x01 \x01(\rR\x04tick\x12\x17\n" +
 	"\aack_seq\x18\x02 \x01(\rR\x06ackSeq\x12#\n" +
@@ -6178,7 +6322,14 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\fhealth_packs\x18\x0f \x03(\v2\x17.omb.v1.HealthPackStateR\vhealthPacks\x127\n" +
 	"\vpoint_drops\x18\x10 \x03(\v2\x16.omb.v1.PointDropStateR\n" +
 	"pointDrops\x12&\n" +
-	"\x0fpoint_drop_gone\x18\x11 \x03(\rR\rpointDropGone\"\xab\x01\n" +
+	"\x0fpoint_drop_gone\x18\x11 \x03(\rR\rpointDropGone\x12\x1f\n" +
+	"\vuplink_gone\x18\x12 \x03(\rR\n" +
+	"uplinkGone\x12(\n" +
+	"\x10health_pack_gone\x18\x13 \x03(\rR\x0ehealthPackGone\x12\x1e\n" +
+	"\bmap_json\x18\x14 \x01(\tH\x00R\amapJson\x88\x01\x01\x12(\n" +
+	"\rvision_radius\x18\x15 \x01(\x01H\x01R\fvisionRadius\x88\x01\x01B\v\n" +
+	"\t_map_jsonB\x10\n" +
+	"\x0e_vision_radius\"\xab\x01\n" +
 	"\x06EvKill\x12\x16\n" +
 	"\x06killer\x18\x01 \x01(\rR\x06killer\x12\x16\n" +
 	"\x06victim\x18\x02 \x01(\rR\x06victim\x12\x1a\n" +
@@ -6186,26 +6337,31 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\x12\x18\n" +
 	"\aassists\x18\x05 \x03(\rR\aassists\x12\x1d\n" +
 	"\n" +
-	"kill_steal\x18\x06 \x01(\bR\tkillSteal\"M\n" +
+	"kill_steal\x18\x06 \x01(\bR\tkillSteal\"\xa4\x01\n" +
 	"\fEvCorePickup\x12\x0e\n" +
 	"\x02by\x18\x01 \x01(\rR\x02by\x12\x17\n" +
 	"\acore_id\x18\x02 \x01(\rR\x06coreId\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\x11R\x05value\"\x91\x01\n" +
+	"\x05value\x18\x03 \x01(\x11R\x05value\x12\x1c\n" +
+	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\x12&\n" +
+	"\fskill_points\x18\x05 \x01(\x11H\x00R\vskillPoints\x88\x01\x01B\x0f\n" +
+	"\r_skill_points\"\x91\x01\n" +
 	"\x10EvPointDropSpawn\x12\x1d\n" +
 	"\n" +
 	"from_robot\x18\x01 \x01(\rR\tfromRobot\x12\x1c\n" +
 	"\x02at\x18\x02 \x01(\v2\f.omb.v1.Vec2R\x02at\x12!\n" +
 	"\ftotal_points\x18\x03 \x01(\x11R\vtotalPoints\x12\x1d\n" +
 	"\n" +
-	"level_lost\x18\x04 \x01(\bR\tlevelLost\"T\n" +
+	"level_lost\x18\x04 \x01(\bR\tlevelLost\"r\n" +
 	"\x11EvPointDropPickup\x12\x0e\n" +
 	"\x02by\x18\x01 \x01(\rR\x02by\x12\x17\n" +
 	"\adrop_id\x18\x02 \x01(\rR\x06dropId\x12\x16\n" +
-	"\x06points\x18\x03 \x01(\x11R\x06points\"Q\n" +
+	"\x06points\x18\x03 \x01(\x11R\x06points\x12\x1c\n" +
+	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\"o\n" +
 	"\fEvUplinkHack\x12\x0e\n" +
 	"\x02by\x18\x01 \x01(\rR\x02by\x12\x1b\n" +
 	"\tuplink_id\x18\x02 \x01(\rR\buplinkId\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\x11R\x05value\"Q\n" +
+	"\x05value\x18\x03 \x01(\x11R\x05value\x12\x1c\n" +
+	"\x02at\x18\x04 \x01(\v2\f.omb.v1.Vec2R\x02at\"Q\n" +
 	"\rEvPhaseChange\x12!\n" +
 	"\x04from\x18\x01 \x01(\x0e2\r.omb.v1.PhaseR\x04from\x12\x1d\n" +
 	"\x02to\x18\x02 \x01(\x0e2\r.omb.v1.PhaseR\x02to\"9\n" +
@@ -6442,13 +6598,18 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\tServerMsg\x123\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x15.omb.v1.SnapshotDeltaH\x00R\bsnapshot\x12+\n" +
 	"\x05event\x18\x02 \x01(\v2\x13.omb.v1.ServerEventH\x00R\x05eventB\t\n" +
-	"\apayload\"\xec\x01\n" +
+	"\apayload\"\xa9\x02\n" +
 	"\x11ReplayVisualFrame\x12)\n" +
 	"\x01v\x18\x01 \x01(\x0e2\x1b.omb.v1.ReplayVisualVersionR\x01v\x12\x12\n" +
 	"\x04tick\x18\x02 \x01(\rR\x04tick\x12#\n" +
 	"\x05phase\x18\x03 \x01(\x0e2\r.omb.v1.PhaseR\x05phase\x121\n" +
 	"\x06robots\x18\x04 \x03(\v2\x19.omb.v1.ReplayVisualRobotR\x06robots\x12@\n" +
-	"\vprojectiles\x18\x05 \x03(\v2\x1e.omb.v1.ReplayVisualProjectileR\vprojectiles\"\xbf\x01\n" +
+	"\vprojectiles\x18\x05 \x03(\v2\x1e.omb.v1.ReplayVisualProjectileR\vprojectiles\x12;\n" +
+	"\tresources\x18\x06 \x01(\v2\x1d.omb.v1.ReplayVisualResourcesR\tresources\"y\n" +
+	"\x15ReplayVisualResources\x12'\n" +
+	"\x05cores\x18\x01 \x03(\v2\x11.omb.v1.CoreStateR\x05cores\x127\n" +
+	"\vpoint_drops\x18\x02 \x03(\v2\x16.omb.v1.PointDropStateR\n" +
+	"pointDrops\"\xbf\x01\n" +
 	"\x11ReplayVisualRobot\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1e\n" +
 	"\x03pos\x18\x02 \x01(\v2\f.omb.v1.Vec2R\x03pos\x12\x18\n" +
@@ -6558,7 +6719,7 @@ func file_proto_omb_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_omb_proto_enumTypes = make([]protoimpl.EnumInfo, 14)
-var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 65)
+var file_proto_omb_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
 var file_proto_omb_proto_goTypes = []any{
 	(Phase)(0),                     // 0: omb.v1.Phase
 	(ControlSource)(0),             // 1: omb.v1.ControlSource
@@ -6637,9 +6798,10 @@ var file_proto_omb_proto_goTypes = []any{
 	(*EvSnippetUsage)(nil),         // 74: omb.v1.EvSnippetUsage
 	(*ServerMsg)(nil),              // 75: omb.v1.ServerMsg
 	(*ReplayVisualFrame)(nil),      // 76: omb.v1.ReplayVisualFrame
-	(*ReplayVisualRobot)(nil),      // 77: omb.v1.ReplayVisualRobot
-	(*ReplayVisualProjectile)(nil), // 78: omb.v1.ReplayVisualProjectile
-	(*timestamppb.Timestamp)(nil),  // 79: google.protobuf.Timestamp
+	(*ReplayVisualResources)(nil),  // 77: omb.v1.ReplayVisualResources
+	(*ReplayVisualRobot)(nil),      // 78: omb.v1.ReplayVisualRobot
+	(*ReplayVisualProjectile)(nil), // 79: omb.v1.ReplayVisualProjectile
+	(*timestamppb.Timestamp)(nil),  // 80: google.protobuf.Timestamp
 }
 var file_proto_omb_proto_depIdxs = []int32{
 	10,  // 0: omb.v1.RoomAction.kind:type_name -> omb.v1.RoomAction.Kind
@@ -6681,72 +6843,78 @@ var file_proto_omb_proto_depIdxs = []int32{
 	35,  // 36: omb.v1.SnapshotDelta.health_packs:type_name -> omb.v1.HealthPackState
 	36,  // 37: omb.v1.SnapshotDelta.point_drops:type_name -> omb.v1.PointDropState
 	14,  // 38: omb.v1.EvKill.at:type_name -> omb.v1.Vec2
-	14,  // 39: omb.v1.EvPointDropSpawn.at:type_name -> omb.v1.Vec2
-	0,   // 40: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
-	0,   // 41: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
-	14,  // 42: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
-	14,  // 43: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
-	14,  // 44: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
-	14,  // 45: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
-	56,  // 46: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
-	6,   // 47: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
-	56,  // 48: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
-	2,   // 49: omb.v1.EvScriptResult.origin:type_name -> omb.v1.ScriptOrigin
-	2,   // 50: omb.v1.EvScriptVersion.origin:type_name -> omb.v1.ScriptOrigin
-	3,   // 51: omb.v1.EvScriptVersion.language:type_name -> omb.v1.ScriptLanguage
-	59,  // 52: omb.v1.EvScriptVersions.versions:type_name -> omb.v1.EvScriptVersion
-	3,   // 53: omb.v1.EvScriptRollbackResult.language:type_name -> omb.v1.ScriptLanguage
-	5,   // 54: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
-	23,  // 55: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
-	62,  // 56: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
-	66,  // 57: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
-	65,  // 58: omb.v1.SimTuning.upgrade:type_name -> omb.v1.UpgradeTuning
-	11,  // 59: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
-	12,  // 60: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
-	13,  // 61: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
-	79,  // 62: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
-	40,  // 63: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
-	41,  // 64: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
-	44,  // 65: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
-	45,  // 66: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
-	46,  // 67: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
-	48,  // 68: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
-	49,  // 69: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
-	55,  // 70: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
-	69,  // 71: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
-	70,  // 72: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
-	58,  // 73: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
-	52,  // 74: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
-	53,  // 75: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
-	54,  // 76: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
-	64,  // 77: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
-	68,  // 78: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
-	50,  // 79: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
-	51,  // 80: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
-	57,  // 81: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
-	73,  // 82: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
-	47,  // 83: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
-	74,  // 84: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
-	63,  // 85: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
-	71,  // 86: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
-	67,  // 87: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
-	60,  // 88: omb.v1.ServerEvent.script_versions:type_name -> omb.v1.EvScriptVersions
-	61,  // 89: omb.v1.ServerEvent.script_rollback_result:type_name -> omb.v1.EvScriptRollbackResult
-	42,  // 90: omb.v1.ServerEvent.point_drop_spawn:type_name -> omb.v1.EvPointDropSpawn
-	43,  // 91: omb.v1.ServerEvent.point_drop_pickup:type_name -> omb.v1.EvPointDropPickup
-	39,  // 92: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
-	72,  // 93: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
-	9,   // 94: omb.v1.ReplayVisualFrame.v:type_name -> omb.v1.ReplayVisualVersion
-	0,   // 95: omb.v1.ReplayVisualFrame.phase:type_name -> omb.v1.Phase
-	77,  // 96: omb.v1.ReplayVisualFrame.robots:type_name -> omb.v1.ReplayVisualRobot
-	78,  // 97: omb.v1.ReplayVisualFrame.projectiles:type_name -> omb.v1.ReplayVisualProjectile
-	14,  // 98: omb.v1.ReplayVisualRobot.pos:type_name -> omb.v1.Vec2
-	14,  // 99: omb.v1.ReplayVisualProjectile.pos:type_name -> omb.v1.Vec2
-	100, // [100:100] is the sub-list for method output_type
-	100, // [100:100] is the sub-list for method input_type
-	100, // [100:100] is the sub-list for extension type_name
-	100, // [100:100] is the sub-list for extension extendee
-	0,   // [0:100] is the sub-list for field type_name
+	14,  // 39: omb.v1.EvCorePickup.at:type_name -> omb.v1.Vec2
+	14,  // 40: omb.v1.EvPointDropSpawn.at:type_name -> omb.v1.Vec2
+	14,  // 41: omb.v1.EvPointDropPickup.at:type_name -> omb.v1.Vec2
+	14,  // 42: omb.v1.EvUplinkHack.at:type_name -> omb.v1.Vec2
+	0,   // 43: omb.v1.EvPhaseChange.from:type_name -> omb.v1.Phase
+	0,   // 44: omb.v1.EvPhaseChange.to:type_name -> omb.v1.Phase
+	14,  // 45: omb.v1.EvHeal.at:type_name -> omb.v1.Vec2
+	14,  // 46: omb.v1.EvShot.at:type_name -> omb.v1.Vec2
+	14,  // 47: omb.v1.EvProjectileImpact.at:type_name -> omb.v1.Vec2
+	14,  // 48: omb.v1.EvWallHit.at:type_name -> omb.v1.Vec2
+	56,  // 49: omb.v1.EvMatchEnd.scores:type_name -> omb.v1.ScoreRow
+	6,   // 50: omb.v1.ScoreRow.titles:type_name -> omb.v1.Title
+	56,  // 51: omb.v1.EvScoreboard.rows:type_name -> omb.v1.ScoreRow
+	2,   // 52: omb.v1.EvScriptResult.origin:type_name -> omb.v1.ScriptOrigin
+	2,   // 53: omb.v1.EvScriptVersion.origin:type_name -> omb.v1.ScriptOrigin
+	3,   // 54: omb.v1.EvScriptVersion.language:type_name -> omb.v1.ScriptLanguage
+	59,  // 55: omb.v1.EvScriptVersions.versions:type_name -> omb.v1.EvScriptVersion
+	3,   // 56: omb.v1.EvScriptRollbackResult.language:type_name -> omb.v1.ScriptLanguage
+	5,   // 57: omb.v1.SnippetSourceView.kind:type_name -> omb.v1.SnippetKind
+	23,  // 58: omb.v1.EvSnippetResult.applied:type_name -> omb.v1.SnippetSetting
+	62,  // 59: omb.v1.EvSnippetResult.sources:type_name -> omb.v1.SnippetSourceView
+	66,  // 60: omb.v1.EvMapBootstrap.tuning:type_name -> omb.v1.SimTuning
+	65,  // 61: omb.v1.SimTuning.upgrade:type_name -> omb.v1.UpgradeTuning
+	11,  // 62: omb.v1.EvControlNotice.code:type_name -> omb.v1.EvControlNotice.Code
+	12,  // 63: omb.v1.EvRoomState.state:type_name -> omb.v1.EvRoomState.State
+	13,  // 64: omb.v1.EvAiStream.kind:type_name -> omb.v1.EvAiStream.Kind
+	80,  // 65: omb.v1.ServerEvent.wall:type_name -> google.protobuf.Timestamp
+	40,  // 66: omb.v1.ServerEvent.kill:type_name -> omb.v1.EvKill
+	41,  // 67: omb.v1.ServerEvent.core_pickup:type_name -> omb.v1.EvCorePickup
+	44,  // 68: omb.v1.ServerEvent.uplink_hack:type_name -> omb.v1.EvUplinkHack
+	45,  // 69: omb.v1.ServerEvent.phase_change:type_name -> omb.v1.EvPhaseChange
+	46,  // 70: omb.v1.ServerEvent.respawn:type_name -> omb.v1.EvRespawn
+	48,  // 71: omb.v1.ServerEvent.say:type_name -> omb.v1.EvSay
+	49,  // 72: omb.v1.ServerEvent.hit:type_name -> omb.v1.EvHit
+	55,  // 73: omb.v1.ServerEvent.match_end:type_name -> omb.v1.EvMatchEnd
+	69,  // 74: omb.v1.ServerEvent.room_state:type_name -> omb.v1.EvRoomState
+	70,  // 75: omb.v1.ServerEvent.ai_quota:type_name -> omb.v1.EvAiQuota
+	58,  // 76: omb.v1.ServerEvent.script_result:type_name -> omb.v1.EvScriptResult
+	52,  // 77: omb.v1.ServerEvent.match_start:type_name -> omb.v1.EvMatchStart
+	53,  // 78: omb.v1.ServerEvent.wall_hit:type_name -> omb.v1.EvWallHit
+	54,  // 79: omb.v1.ServerEvent.script_error:type_name -> omb.v1.EvScriptError
+	64,  // 80: omb.v1.ServerEvent.map_bootstrap:type_name -> omb.v1.EvMapBootstrap
+	68,  // 81: omb.v1.ServerEvent.ai_usage:type_name -> omb.v1.EvAiUsage
+	50,  // 82: omb.v1.ServerEvent.shot:type_name -> omb.v1.EvShot
+	51,  // 83: omb.v1.ServerEvent.projectile_impact:type_name -> omb.v1.EvProjectileImpact
+	57,  // 84: omb.v1.ServerEvent.scoreboard:type_name -> omb.v1.EvScoreboard
+	73,  // 85: omb.v1.ServerEvent.script_log:type_name -> omb.v1.EvScriptLog
+	47,  // 86: omb.v1.ServerEvent.heal:type_name -> omb.v1.EvHeal
+	74,  // 87: omb.v1.ServerEvent.snippet_usage:type_name -> omb.v1.EvSnippetUsage
+	63,  // 88: omb.v1.ServerEvent.snippet_result:type_name -> omb.v1.EvSnippetResult
+	71,  // 89: omb.v1.ServerEvent.ai_stream:type_name -> omb.v1.EvAiStream
+	67,  // 90: omb.v1.ServerEvent.control_notice:type_name -> omb.v1.EvControlNotice
+	60,  // 91: omb.v1.ServerEvent.script_versions:type_name -> omb.v1.EvScriptVersions
+	61,  // 92: omb.v1.ServerEvent.script_rollback_result:type_name -> omb.v1.EvScriptRollbackResult
+	42,  // 93: omb.v1.ServerEvent.point_drop_spawn:type_name -> omb.v1.EvPointDropSpawn
+	43,  // 94: omb.v1.ServerEvent.point_drop_pickup:type_name -> omb.v1.EvPointDropPickup
+	39,  // 95: omb.v1.ServerMsg.snapshot:type_name -> omb.v1.SnapshotDelta
+	72,  // 96: omb.v1.ServerMsg.event:type_name -> omb.v1.ServerEvent
+	9,   // 97: omb.v1.ReplayVisualFrame.v:type_name -> omb.v1.ReplayVisualVersion
+	0,   // 98: omb.v1.ReplayVisualFrame.phase:type_name -> omb.v1.Phase
+	78,  // 99: omb.v1.ReplayVisualFrame.robots:type_name -> omb.v1.ReplayVisualRobot
+	79,  // 100: omb.v1.ReplayVisualFrame.projectiles:type_name -> omb.v1.ReplayVisualProjectile
+	77,  // 101: omb.v1.ReplayVisualFrame.resources:type_name -> omb.v1.ReplayVisualResources
+	33,  // 102: omb.v1.ReplayVisualResources.cores:type_name -> omb.v1.CoreState
+	36,  // 103: omb.v1.ReplayVisualResources.point_drops:type_name -> omb.v1.PointDropState
+	14,  // 104: omb.v1.ReplayVisualRobot.pos:type_name -> omb.v1.Vec2
+	14,  // 105: omb.v1.ReplayVisualProjectile.pos:type_name -> omb.v1.Vec2
+	106, // [106:106] is the sub-list for method output_type
+	106, // [106:106] is the sub-list for method input_type
+	106, // [106:106] is the sub-list for extension type_name
+	106, // [106:106] is the sub-list for extension extendee
+	0,   // [0:106] is the sub-list for field type_name
 }
 
 func init() { file_proto_omb_proto_init() }
@@ -6773,6 +6941,8 @@ func file_proto_omb_proto_init() {
 	}
 	file_proto_omb_proto_msgTypes[17].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[24].OneofWrappers = []any{}
+	file_proto_omb_proto_msgTypes[25].OneofWrappers = []any{}
+	file_proto_omb_proto_msgTypes[27].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[44].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[45].OneofWrappers = []any{}
 	file_proto_omb_proto_msgTypes[47].OneofWrappers = []any{}
@@ -6818,7 +6988,7 @@ func file_proto_omb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_omb_proto_rawDesc), len(file_proto_omb_proto_rawDesc)),
 			NumEnums:      14,
-			NumMessages:   65,
+			NumMessages:   66,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -11,7 +11,7 @@ import (
 // commandCollector 把 bot（以及兼容的 bot.api）调用折叠为
 // sim.ScriptCommands。每个结果都是一个完整的单 tick 意图：调用过某轴
 // 对应指针非 nil，未调用就是本 tick 中立，不会沿用上一 tick 脚本动作。
-// 重复调用同一轴 = 后者覆盖（脚本最后意志）。
+// 重复调用同一轴 = 后者覆盖；购买按调用顺序追加。
 type commandCollector struct {
 	out sim.ScriptCommands
 }
@@ -144,6 +144,12 @@ func (c *commandCollector) setSay(text string) {
 // setPulseScan 主动脉冲请求；12 能量/2s CD/32m 由 sim 校验。
 func (c *commandCollector) setPulseScan() { c.out.PulseScan = true }
 
+func (c *commandCollector) setBuyUpgrade(track uint8) {
+	if len(c.out.Upgrades) < sim.MaxUpgradeBuysPerTick {
+		c.out.Upgrades = append(c.out.Upgrades, track)
+	}
+}
+
 // ============ JS 值构建辅助 ============
 
 // toJSVec2 sim.Vec2 → { x, y }。
@@ -154,12 +160,14 @@ func toJSVec2(vm *goja.Runtime, v sim.Vec2) *goja.Object {
 	return o
 }
 
-// toJSRobotRef RobotView → RobotRef { id, position, hp, velocity }。
+// toJSRobotRef RobotView → RobotRef { id, position, hp, maxHp, maxEnergy, velocity }。
 func toJSRobotRef(vm *goja.Runtime, ro sim.RobotView) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("id", float64(ro.ID))
 	_ = o.Set("position", toJSVec2(vm, ro.Pos))
 	_ = o.Set("hp", sim.FromX10(ro.HpX10))
+	_ = o.Set("maxHp", sim.FromX10(ro.MaxHpX10))
+	_ = o.Set("maxEnergy", sim.FromX10(ro.MaxEnergyX10))
 	_ = o.Set("velocity", toJSVec2(vm, ro.Vel))
 	return o
 }
@@ -204,14 +212,6 @@ func phaseName(p sim.Phase) string {
 	default:
 		return "OUTER_RING"
 	}
-}
-
-// mapSeedOf nil-safe 取 MapDef.Seed。
-func mapSeedOf(m *sim.MapDef) float64 {
-	if m == nil {
-		return 0
-	}
-	return float64(m.Seed)
 }
 
 // throwValue 在 VM 内抛 JS 异常（L1 参数校验失败等）。

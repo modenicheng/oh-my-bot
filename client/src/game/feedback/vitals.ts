@@ -67,9 +67,9 @@ export class Vitals {
     return transitions && prevX10 !== undefined && hpX10 < prevX10
   }
 
-  popup(robot: number, pos: MapVec2, amountX10: number, at: number, seed: number): void {
+  popup(robot: number, pos: MapVec2, amountX10: number, at: number, seed: number, color = red, prefix = '-'): void {
     if (this.popups.length >= MAX_POPUPS) this.popups.shift()
-    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed })
+    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed, color, prefix })
   }
 
   /** 低血状态下再次被确认命中：短暂增亮并外扩同一边框。 */
@@ -92,7 +92,7 @@ export class Vitals {
   forget(robot: number): void { this.health.delete(robot) }
 
   /** 飘字 + 低血边框（原 draw() 的 popups/low-frame 段，行为保持）。 */
-  draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+  draw(ctx: CanvasRenderingContext2D, cam: Camera, layer?: 'world' | 'screen'): void {
     const now = performance.now()
     let damageKept = 0
     for (let i = 0; i < this.popups.length; i++) {
@@ -103,16 +103,17 @@ export class Vitals {
     ctx.globalAlpha = 1
     ctx.font = POPUP_FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     for (const popup of this.popups) {
+      if (layer === 'screen') continue
       const t = Math.min(1, (now - popup.at) / DAMAGE_POPUP_MS)
       const drift = this.reduced.matches ? 0 : (POPUP_DRIFT_BASE + (popup.seed % POPUP_DRIFT_SEED)) * t
       const x = cam.toPxX(popup.pos.x) + ((popup.seed % POPUP_X_SEED) - POPUP_X_OFFSET)
       const y = cam.toPxY(popup.pos.y) - POPUP_RISE - drift
-      const text = `-${(popup.amountX10 / 10).toFixed(popup.amountX10 % 10 ? 1 : 0)}`
+      const text = `${popup.prefix}${(popup.amountX10 / 10).toFixed(popup.amountX10 % 10 ? 1 : 0)}`
       ctx.globalAlpha = t < POPUP_FULL_UNTIL ? 1 : (1 - t) / (1 - POPUP_FULL_UNTIL)
       ctx.fillStyle = POPUP_SHADOW_COLOR; ctx.fillText(text, x + POPUP_SHADOW_OFFSET, y + POPUP_SHADOW_OFFSET)
-      ctx.fillStyle = red; ctx.fillText(text, x, y)
+      ctx.fillStyle = popup.color; ctx.fillText(text, x, y)
     }
-    if (this.selfLow) {
+    if (this.selfLow && layer !== 'world') {
       const hit = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / LOW_HIT_FLASH_MS)
       const pulse = this.reduced.matches ? LOW_PULSE_BASE : LOW_PULSE_BASE + Math.sin(now / LOW_PULSE_PERIOD_MS) * LOW_PULSE_SWING
       const alpha = Math.min(LOW_ALPHA_CAP, pulse + hit * LOW_HIT_BRIGHTEN)

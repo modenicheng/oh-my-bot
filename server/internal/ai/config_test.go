@@ -36,6 +36,48 @@ func TestLoadServerConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigGCDefaultAndOverrides(t *testing.T) {
+	// 裸加载即压测口径（ADR-0015），部署侧无需再设 OMB_GC_PERCENT。
+	t.Setenv("OMB_GC_PERCENT", "")
+	bare, err := LoadServerConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare.GC.Percent != GCPercentDefault {
+		t.Fatalf("bare gc.percent = %d, want in-code default %d", bare.GC.Percent, GCPercentDefault)
+	}
+
+	// 进程环境显式值覆盖默认。
+	t.Setenv("OMB_GC_PERCENT", "600")
+	envCfg, err := LoadServerConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envCfg.GC.Percent != 600 {
+		t.Fatalf("env override gc.percent = %d, want 600", envCfg.GC.Percent)
+	}
+
+	// yaml 显式值同样覆盖；显式 0 = 沿用进程默认/外部 GOGC（逃生口）。
+	t.Setenv("OMB_GC_PERCENT", "")
+	dir := t.TempDir()
+	writeConfig(t, dir, map[string]string{"config.yaml": "gc:\n  percent: 150\n"})
+	yamlCfg, err := LoadServerConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yamlCfg.GC.Percent != 150 {
+		t.Fatalf("yaml override gc.percent = %d, want 150", yamlCfg.GC.Percent)
+	}
+	t.Setenv("OMB_GC_PERCENT", "0")
+	zeroCfg, err := LoadServerConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zeroCfg.GC.Percent != 0 {
+		t.Fatalf("explicit zero gc.percent = %d, want 0 (process default)", zeroCfg.GC.Percent)
+	}
+}
+
 func TestLoadServerConfigYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, map[string]string{

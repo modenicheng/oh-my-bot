@@ -1,4 +1,5 @@
 import { audio } from '../audio'
+import { AUDIO_TRACKS, type AudioTrack } from '../audioSettings'
 
 const EDITING_TARGETS = 'input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor, #workbench, #game-chat'
 const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
@@ -37,13 +38,36 @@ interface GameOptionsDeps {
   onFinish: () => void
 }
 
+interface TrackControls {
+  mute: HTMLButtonElement
+  volume: HTMLInputElement
+  value: HTMLOutputElement
+}
+
+/** 绑定一条音轨的选项面板控件；id 约定 options-{track}-mute/volume/value。 */
+function bindAudioControls(track: AudioTrack, onChange: () => void): TrackControls {
+  const mute = document.getElementById(`options-${track}-mute`) as HTMLButtonElement
+  const volume = document.getElementById(`options-${track}-volume`) as HTMLInputElement
+  const value = document.getElementById(`options-${track}-value`) as HTMLOutputElement
+  mute.addEventListener('click', () => {
+    audio.setMuted(track, !audio.mutedOf(track))
+    onChange()
+  })
+  volume.addEventListener('input', () => {
+    audio.setVolume(track, Number(volume.value) / 100)
+    onChange()
+  })
+  return { mute, volume, value }
+}
+
 /** 对局内 Esc 选项层：只释放本机输入，服务器模拟与画面仍继续。 */
 export class GameOptions {
   private readonly root = document.getElementById('game-options') as HTMLElement
   private readonly continueButton = document.getElementById('options-continue') as HTMLButtonElement
-  private readonly muteButton = document.getElementById('options-audio-mute') as HTMLButtonElement
-  private readonly volume = document.getElementById('options-audio-volume') as HTMLInputElement
-  private readonly volumeValue = document.getElementById('options-volume-value') as HTMLOutputElement
+  private readonly audioControls = {
+    sfx: bindAudioControls('sfx', () => this.reflectAudio()),
+    bgm: bindAudioControls('bgm', () => this.reflectAudio()),
+  }
   private readonly hostPanel = document.getElementById('options-host') as HTMLFieldSetElement
   private readonly pauseButton = document.getElementById('options-pause') as HTMLButtonElement
   private readonly finishButton = document.getElementById('options-finish') as HTMLButtonElement
@@ -63,14 +87,6 @@ export class GameOptions {
     this.finishButton.addEventListener('click', () => {
       this.close(false, false)
       deps.onFinish()
-    })
-    this.muteButton.addEventListener('click', () => {
-      audio.setMuted(!audio.muted)
-      this.reflectAudio()
-    })
-    this.volume.addEventListener('input', () => {
-      audio.setVolume(Number(this.volume.value) / 100)
-      this.reflectAudio()
     })
     this.root.addEventListener('keydown', event => this.onDialogKey(event))
   }
@@ -140,12 +156,15 @@ export class GameOptions {
   }
 
   private reflectAudio(): void {
-    const muted = audio.muted
-    const volume = Math.round(audio.volume * 100)
-    this.muteButton.textContent = muted ? '取消静音' : '静音'
-    this.muteButton.setAttribute('aria-pressed', String(muted))
-    this.volume.value = String(volume)
-    this.volumeValue.value = `${volume}%`
-    this.volumeValue.textContent = `${volume}%`
+    for (const track of AUDIO_TRACKS) {
+      const c = this.audioControls[track]
+      const muted = audio.mutedOf(track)
+      const volume = Math.round(audio.volumeOf(track) * 100)
+      c.mute.textContent = muted ? '取消静音' : '静音'
+      c.mute.setAttribute('aria-pressed', String(muted))
+      c.volume.value = String(volume)
+      c.value.value = `${volume}%`
+      c.value.textContent = `${volume}%`
+    }
   }
 }

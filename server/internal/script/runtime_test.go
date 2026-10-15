@@ -115,7 +115,7 @@ func TestSelfAndGame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	want := "10|10|10|2|OUTER_RING|42"
+	want := "10|10|10|2|OUTER_RING|0"
 	if cmds.Say == nil || *cmds.Say != want {
 		t.Fatalf("self/game mapping: got %v want %q", cmds.Say, want)
 	}

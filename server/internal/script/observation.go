@@ -16,7 +16,7 @@ import (
 //
 // 可见机器人不含自己。健康包与静态墙是公开地图结构，不随视野半径/
 // 遮挡裁剪，也不含任何动态机器人信息。每次调用均构建独立 JS 快照。
-func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goja.Object {
+func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32, freeze goja.Callable) *goja.Object {
 	o := vm.NewObject()
 	_ = o.Set("tick", float64(obs.Frame.Tick))
 
@@ -48,6 +48,7 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		_ = co.Set("id", float64(c.ID))
 		_ = co.Set("x", c.Pos.X)
 		_ = co.Set("y", c.Pos.Y)
+		_ = co.Set("value", c.Value)
 		cores = append(cores, co)
 	}
 	_ = o.Set("cores", vm.NewArray(cores...))
@@ -94,6 +95,12 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 	}
 	_ = o.Set("healthPacks", vm.NewArray(healthPacks...))
 
+	pointDrops := make([]interface{}, len(obs.PointDrops))
+	for index, drop := range obs.PointDrops {
+		pointDrops[index] = toJSPointDropRef(vm, drop, freeze)
+	}
+	defineReadonly(o, "pointDrops", freezeObject(freeze, vm.NewArray(pointDrops...)))
+
 	// 静态墙恒全量公开：每次调用新建 JS 对象，脚本改写不影响共享地图。
 	var walls []interface{}
 	if obs.Frame.Map != nil {
@@ -108,6 +115,26 @@ func toJSObservation(vm *goja.Runtime, obs *sim.Observation, selfID uint32) *goj
 		}
 	}
 	_ = o.Set("walls", vm.NewArray(walls...))
+	boundaries := make([]interface{}, 0)
+	if obs.Frame.Map != nil {
+		for _, edge := range obs.Frame.Map.Boundaries {
+			boundary := vm.NewObject()
+			_ = boundary.Set("kind", edge.Kind)
+			_ = boundary.Set("start", toJSVec2(vm, edge.Start))
+			_ = boundary.Set("end", toJSVec2(vm, edge.End))
+			boundaries = append(boundaries, boundary)
+		}
+	}
+	_ = o.Set("boundaries", vm.NewArray(boundaries...))
 
 	return o
+}
+
+func toJSPointDropRef(vm *goja.Runtime, drop sim.PointDropView, freeze goja.Callable) *goja.Object {
+	object := vm.NewObject()
+	defineReadonly(object, "id", vm.ToValue(drop.ID))
+	defineReadonly(object, "x", vm.ToValue(drop.Pos.X))
+	defineReadonly(object, "y", vm.ToValue(drop.Pos.Y))
+	defineReadonly(object, "points", vm.ToValue(drop.Points))
+	return freezeObject(freeze, object)
 }

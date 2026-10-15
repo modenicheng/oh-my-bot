@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { BotContext, Observation, Vec2, WallRef } from '@omb/bot-api'
-import { __resetState, buildNodes, healthWeight, leadAngle, shotBlocked, solveRoute, tick } from './oracle'
+import { __resetState, buildNodes, healthWeight, leadAngle, shotBlocked, solveRoute, tick, incomingThreat } from './oracle'
 import type { NodeBuildInput, PlanNode } from './oracle'
 
 function node(kind: PlanNode['kind'], id: number, x: number, y: number, value: number, extraCostM = 0, reachR = 2): PlanNode {
@@ -55,7 +55,7 @@ describe('buildNodes —— 节点抽象', () => {
   it('Mega Core：仅中心垫 ID 29/30 记 25 分，其余中心垫仍 10 分', () => {
     const obs = frame({
       tick: 1000,
-      cores: [ { id: 29, x: 12, y: 0 }, { id: 30, x: -12, y: 0 }, { id: 31, x: 0, y: 12 } ],
+      cores: [ { id: 29, x: 12, y: 0, value: 25 }, { id: 30, x: -12, y: 0, value: 25 }, { id: 31, x: 0, y: 12, value: 10 } ],
     })
     const nodes = buildNodes(input({ obs, phase: 'CORE_OPEN' }))
     expect(nodes).toHaveLength(3)
@@ -158,22 +158,22 @@ describe('leadAngle —— 二阶提前量', () => {
   it('静止目标：直指目标，t = 距离/弹速', () => {
     const r = leadAngle(0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0)
     expect(r.angle).toBeCloseTo(0, 12)
-    expect(r.t).toBeCloseTo(10 / 30, 12)
+    expect(r.t).toBeCloseTo(10 / 36, 12)
     expect(r.px).toBeCloseTo(10, 12)
   })
   it('管线延迟：出膛点随自机速度前移', () => {
     const pipe = 1 / 60
     const r = leadAngle(0, 0, 8, 0, 10, 0, 0, 0, 0, 0, pipe)
     expect(r.angle).toBeCloseTo(0, 12)
-    expect(r.t).toBeCloseTo(pipe + (10 - 8 * pipe) / 30, 12)
+    expect(r.t).toBeCloseTo(pipe + (10 - 8 * pipe) / 36, 12)
   })
   it('匀速横移目标：与解析解一致（一阶提前量）', () => {
     // 目标 12m 外以 (0,8) 匀速移动，弹速 30，τ0=1/60：
     // 由 |P+Vt| = 30(t−τ0) 展开整理得 836t² − 30t − 143.75 = 0
     const tau0 = 1 / 60
-    const a = 836
-    const b = -1800 * tau0
-    const c = 900 * tau0 * tau0 - 144
+    const a = 36 ** 2 - 8 ** 2
+    const b = -2 * 36 ** 2 * tau0
+    const c = 36 ** 2 * tau0 * tau0 - 144
     const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a)
     const expected = Math.atan2(8 * t, 12)
     const r = leadAngle(0, 0, 0, 0, 12, 0, 0, 8, 0, 0)
@@ -182,7 +182,7 @@ describe('leadAngle —— 二阶提前量', () => {
   })
   it('加速目标：二阶项生效，与数值求根一致', () => {
     // 目标 (16,0)、V=(0,8)、A=(0,24)：拦截方程 √(256+(8t+12t²)²) = 30t
-    const f = (t: number): number => Math.sqrt(256 + (8 * t + 12 * t * t) ** 2) - 30 * t
+    const f = (t: number): number => Math.sqrt(256 + (8 * t + 12 * t * t) ** 2) - 36 * t
     let lo = 0.3
     let hi = 1.2
     for (let i = 0; i < 80; i++) {
@@ -270,6 +270,8 @@ function frame(over: Partial<Observation> & { tick: number }): Observation {
     projectiles: over.projectiles ?? [],
     healthPacks: over.healthPacks ?? [],
     walls: over.walls ?? [],
+    pointDrops: over.pointDrops ?? [],
+    boundaries: over.boundaries ?? [],
     tick: over.tick,
   }
 }
@@ -303,7 +305,7 @@ describe('tick —— 执行器', () => {
     const state: BotState = {
       obs: frame({
         tick: 1,
-        robots: [{ id: 3, position: { x: 52, y: 0 }, hp: 80, velocity: { x: 0, y: 8 } }],
+        robots: [{ id: 3, position: { x: 52, y: 0 }, hp: 80, maxHp: 100, maxEnergy: 100, velocity: { x: 0, y: 8 } }],
       }),
       self: { ...baseSelf, position: { x: 40, y: 0 } },
       phase: 'OUTER_RING',
@@ -316,9 +318,9 @@ describe('tick —— 执行器', () => {
     expect(calls.aims[0]).toBeGreaterThan(direct + 0.05) // 明显往移动方向抬
     // 与解析解一致（相对几何与纯函数测试相同：12m 间距 + (0,8) 横移）
     const tau0 = 1 / 60
-    const a = 836
-    const b = -1800 * tau0
-    const c = 900 * tau0 * tau0 - 144
+    const a = 36 ** 2 - 8 ** 2
+    const b = -2 * 36 ** 2 * tau0
+    const c = 36 ** 2 * tau0 * tau0 - 144
     const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a)
     expect(calls.aims[0]).toBeCloseTo(Math.atan2(8 * t, 12), 3)
   })
@@ -327,7 +329,7 @@ describe('tick —— 执行器', () => {
     const state: BotState = {
       obs: frame({
         tick: 1,
-        robots: [{ id: 3, position: { x: 52, y: 0 }, hp: 80, velocity: { x: 0, y: 0 } }],
+        robots: [{ id: 3, position: { x: 52, y: 0 }, hp: 80, maxHp: 100, maxEnergy: 100, velocity: { x: 0, y: 0 } }],
         walls: [{ id: 1, min: { x: 45, y: -2 }, max: { x: 46, y: 2 } }],
       }),
       self: { ...baseSelf, position: { x: 40, y: 0 } },
@@ -344,7 +346,7 @@ describe('tick —— 执行器', () => {
       obs: frame({
         tick: 1,
         uplinks: [{ id: 1, x: 5, y: 0, ready: true }],
-        robots: [{ id: 3, position: { x: 18, y: 0 }, hp: 80, velocity: { x: 0, y: 0 } }],
+        robots: [{ id: 3, position: { x: 18, y: 0 }, hp: 80, maxHp: 100, maxEnergy: 100, velocity: { x: 0, y: 0 } }],
       }),
       self: { ...baseSelf, position: { x: 4, y: 0 } },
       phase: 'OUTER_RING',
@@ -368,8 +370,8 @@ describe('tick —— 执行器', () => {
     }
     const { bot, calls } = makeBot(state)
     runTicks(state, bot, 600)
-    expect(calls.interacts).toBeGreaterThanOrEqual(470)
-    expect(calls.interacts).toBeLessThanOrEqual(485)
+    expect(calls.interacts).toBeGreaterThanOrEqual(235)
+    expect(calls.interacts).toBeLessThanOrEqual(245)
     const after = calls.interacts
     runTicks(state, bot, 60)
     expect(calls.interacts).toBe(after) // 冷却中不再站桩
@@ -401,7 +403,7 @@ describe('tick —— 执行器', () => {
     const state: BotState = {
       obs: frame({
         tick: 1,
-        robots: [{ id: 3, position: { x: 50, y: 0 }, hp: 80, velocity: { x: 0, y: 0 } }],
+        robots: [{ id: 3, position: { x: 50, y: 0 }, hp: 80, maxHp: 100, maxEnergy: 100, velocity: { x: 0, y: 0 } }],
       }),
       self: { ...baseSelf, position: { x: 40, y: 0 }, hp: 0 },
       phase: 'OUTER_RING',

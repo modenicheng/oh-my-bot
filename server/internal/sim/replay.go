@@ -71,6 +71,9 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 		if robot.Upg.Points < 0 {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d upgrade points", robot.ID)
 		}
+		if robot.Control.PendingScript != nil && !validUpgradeQueue(robot.Control.PendingScript.Upgrades) {
+			return nil, fmt.Errorf("sim: invalid checkpoint robot %d script upgrades", robot.ID)
+		}
 		for _, level := range robot.Upg.Levels {
 			if level > UpgradeMaxLevel {
 				return nil, fmt.Errorf("sim: invalid checkpoint robot %d upgrade level", robot.ID)
@@ -117,7 +120,15 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 		}
 		for i, core := range cp.Cores {
 			want := check.cores[i]
-			if core.ID != want.ID || core.Pos != want.Pos || core.Value != want.Value {
+			validPosition := core.Pos == want.Pos
+			if cp.SimulationVersion >= 7 && len(cp.Map.CoreRules.SpawnBands) > 0 {
+				band := cp.Map.CoreRules.SpawnBands[cp.Map.CorePads[i].Group]
+				validPosition = band.contains(core.Pos) && checkpointPositionValid(cp, core.Pos)
+				if core.Alive && cp.Phase < ombv1.Phase(cp.Map.CoreZone.UnlockPhase) && core.Pos.Len() < cp.Map.CoreZone.Radius+RobotRadius {
+					validPosition = false
+				}
+			}
+			if core.ID != want.ID || !validPosition || core.Value != want.Value {
 				return nil, fmt.Errorf("sim: checkpoint core differs from map")
 			}
 		}
@@ -146,7 +157,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	// ID 必须来自当时的实体分配器（< NextProjectile），否则可能与后续弹丸撞号。
 	dropIDs := make(map[uint32]bool, len(cp.PointDrops))
 	for _, d := range cp.PointDrops {
-		if d.ID == 0 || d.ID >= cp.NextProjectile || dropIDs[d.ID] || d.Points <= 0 || d.GoneAt <= cp.Tick || !checkpointPositionValid(cp, d.Pos) {
+		if d.ID == 0 || d.ID >= cp.NextProjectile || dropIDs[d.ID] || d.Points <= 0 || (d.Ambient && d.Points != 1) || d.GoneAt <= cp.Tick || !checkpointPositionValid(cp, d.Pos) {
 			return nil, fmt.Errorf("sim: invalid checkpoint point drop %d", d.ID)
 		}
 		dropIDs[d.ID] = true

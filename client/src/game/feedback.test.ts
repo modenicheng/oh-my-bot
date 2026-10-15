@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
-import { ServerEventSchema, SnapshotDeltaSchema, RobotStateSchema, SelfStateSchema, UplinkStateSchema, CoreStateSchema } from '@omb/protocol'
+import { ServerEventSchema, SnapshotDeltaSchema, RobotStateSchema, SelfStateSchema, UplinkStateSchema, CoreStateSchema, PointDropStateSchema } from '@omb/protocol'
 import { emptyWorld, applySnapshot } from './world'
 import { GameFeedback, canvasAwake } from './feedback'
+import { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 
 const sound = vi.hoisted(() => ({ play: vi.fn(), setUplink: vi.fn(), stopGame: vi.fn() }))
@@ -217,6 +218,12 @@ describe('confirmed feedback transitions', () => {
     f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'corePickup', value: { by: 2, coreId: 9020, value: 10 } } }), f.world, map, true)
     expect(sound.play).toHaveBeenCalledExactlyOnceWith('corePickup', expect.any(Number), expect.any(Number), false)
     expect(f.message).not.toHaveBeenCalled()
+  })
+
+  it.each([[10, 2], [25, 5]])('shows the authoritative SP reward for a %d-point core', (value, skillPoints) => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'corePickup', value: { by: 1, coreId: 20, value, skillPoints } } }), f.world, map, true)
+    expect(f.message).toHaveBeenCalledExactlyOnceWith(`拾取 Core · +${value} 分 · +${skillPoints} 技能点`)
   })
 
   it('keeps full resyncs quiet even when entering range and consuming reliable events at the resync tick', () => {
@@ -504,6 +511,37 @@ describe('projectile impact presentation', () => {
     feedback.draw(ctx as unknown as CanvasRenderingContext2D, camera as Parameters<GameFeedback['draw']>[1])
     return colors
   }
+  it.each(['shot', 'wallHit'] as const)('retains visible %s feedback when its robot is absent from the previous snapshot', kind => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const local = { ...map, partial: true }
+    f.world.localMap = local
+    const event = kind === 'shot'
+      ? create(ServerEventSchema, { tick: 11, kind: { case: 'shot', value: { owner: 42, projectile: 99, at: { x: 42, y: 0 }, color: '#a78bfa' } } })
+      : create(ServerEventSchema, { tick: 11, kind: { case: 'wallHit', value: { robot: 42, at: { x: 42, y: 0 }, impact: 8 } } })
+    f.feedback.event(event, f.world, map, true)
+    expect(cueCount(kind)).toBe(1)
+    expect(f.feedback.quiet(11)).toBe(false)
+  })
+  it('retains an authorized pulse impact arriving before the expanded-radius snapshot', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    const local = { ...map, partial: true }
+    f.world.localMap = local
+    const event = (tick: number) => create(ServerEventSchema, { tick, kind: { case: 'projectileImpact', value: { projectile: 99, at: { x: 65, y: 0 } } } })
+    f.world.visionRadius = 20
+    f.feedback.event(event(11), f.world, map, true)
+    expect(f.feedback.quiet(11)).toBe(false)
+    expect(cueCount('hit')).toBe(1)
+    f.world.visionRadius = 32
+    expect(f.feedback.quiet(11)).toBe(false)
+  })
+  it.each(['corePickup', 'pointDropPickup', 'uplinkHack'] as const)('keeps %s effects anchored after local entity removal', kind => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.world.robots.delete(1); f.world.uplinks.clear()
+    const local = { ...map, partial: true, corePads: [], uplinks: [] }
+    const event = create(ServerEventSchema, { tick: 11, kind: { case: kind, value: { by: 1, at: { x: 42, y: 0 }, coreId: 99, dropId: 99, uplinkId: 99, points: 2, value: 15 } as never } } as never)
+    f.feedback.event(event, f.world, local, true)
+    expect(f.feedback.quiet(11)).toBe(false)
+  })
   it.each(['#a78bfa', '#fbbf24'])('uses %s at a visible wall even when owner and projectile are absent', color => {
     const f = fixture(); f.consume(snap(10, 0, true)); f.feedback.reset()
     const event = create(ServerEventSchema, { tick: 11, kind: { case: 'projectileImpact', value: { projectile: 99, owner: 42, at: { x: 42, y: 0 }, color } } })
@@ -629,5 +667,45 @@ describe('canvas quiescence gate (C-26 idle skip)', () => {
     expect(canvasAwake(f.feedback, 10, { aimPreview: false, bubbles: 2 })).toBe(true)
     f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'shot', value: { owner: 1, projectile: 11, at: { x: 41, y: 0 }, color: '#a78bfa', heading: 0 } } }), f.world, map, true)
     expect(canvasAwake(f.feedback, 11, { aimPreview: false, bubbles: 0 })).toBe(true)
+  })
+})
+
+describe('point drop scatter and pickup feedback', () => {
+  beforeEach(() => {
+    stubFeedbackEnv()
+  })
+
+  it('records spawn origins for the scatter intro within range and window', () => {
+    const f = fixture(); f.consume(snap(10, 0, true))
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'pointDropSpawn', value: { fromRobot: 2, at: { x: 30, y: 5 }, totalPoints: 9, levelLost: false } } }), f.world, map, true)
+    expect(f.feedback.nearestDropOrigin(31, 5)).toMatchObject({ x: 30, y: 5 })
+    // 超出散布环带匹配半径：不认领。
+    expect(f.feedback.nearestDropOrigin(45, 45)).toBeUndefined()
+    // 窗口过期后原点被清理。
+    expect(f.feedback.nearestDropOrigin(31, 5, performance.now() + 2000)).toBeUndefined()
+    expect(f.feedback.nearestDropOrigin(31, 5)).toBeUndefined()
+  })
+
+  it('turns own pickups into amber popups instead of feed messages', () => {
+    const f = fixture()
+    const world = f.world
+    applySnapshot(world, create(SnapshotDeltaSchema, { tick: 10, baseTick: 0, full: true, phase: 1, timeLeftS: 480,
+      self: create(SelfStateSchema, { robotId: 1, assistOn: false }),
+      robots: [create(RobotStateSchema, { base: { id: 1, pos: { x: 30, y: 5 } }, hpX10: 1000 })],
+      pointDrops: [create(PointDropStateSchema, { base: { id: 77, pos: { x: 31, y: 5 } }, points: 2 })],
+    }))
+    f.feedback.event(create(ServerEventSchema, { tick: 11, kind: { case: 'pointDropPickup', value: { by: 1, dropId: 77, points: 2 } } }), world, map, true)
+    expect(f.message).not.toHaveBeenCalled()
+    expect(sound.play).toHaveBeenCalledWith('corePickup')
+    // 飘字层可见 amber +2：录制 ctx 断言 fillText。
+    const ops: Array<{ op: string; args: unknown[]; fillStyle: unknown }> = []
+    const target: Record<string, unknown> = { fillStyle: '', strokeStyle: '', lineWidth: 1, globalAlpha: 1, font: '', textAlign: 'left', textBaseline: 'alphabetic' }
+    for (const op of ['fillRect', 'fillText', 'beginPath', 'rect', 'arc', 'moveTo', 'lineTo', 'closePath', 'fill', 'stroke', 'save', 'restore']) {
+      target[op] = (...args: unknown[]) => ops.push({ op, args, fillStyle: target.fillStyle })
+    }
+    const cam = new Camera(); cam.resize(200, 200, 1); cam.follow(31, 5)
+    f.feedback.draw(target as unknown as CanvasRenderingContext2D, cam)
+    const label = ops.find(o => o.op === 'fillText' && o.args[0] === '+2' && o.fillStyle === '#fbbf24')
+    expect(label).toBeDefined()
   })
 })

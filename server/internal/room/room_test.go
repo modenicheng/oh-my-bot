@@ -122,6 +122,9 @@ func TestJoinLeave(t *testing.T) {
 }
 
 func TestJoinCap64(t *testing.T) {
+	orig := MaxPlayers
+	t.Cleanup(func() { SetMaxPlayers(orig) })
+	SetMaxPlayers(64)      // 钉在小房口径；默认值守卫见 TestDefaultSeatCapIs200。
 	r, _ := newTestRoom(t) // player 1 already seated
 	for id := uint64(2); id <= 64; id++ {
 		if err := r.Join(id, fmt.Sprintf("p%d", id), "#000000"); err != nil {
@@ -776,6 +779,13 @@ func TestUnsupportedSoloBotsKeepStateAndHandle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDefaultSeatCapIs200(t *testing.T) {
+	// 未设 OMB_MAX_PLAYERS 的裸进程默认即 200（2026-10 压测口径），防止回退。
+	if MaxPlayers != 200 || MaxSoloBots != 199 {
+		t.Fatalf("default seat cap = %d/%d, want 200/199", MaxPlayers, MaxSoloBots)
 	}
 }
 

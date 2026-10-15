@@ -13,6 +13,12 @@ type ReplayVisualFrame struct {
 	Phase       Phase                    `json:"phase"`
 	Robots      []ReplayVisualRobot      `json:"robots"`
 	Projectiles []ReplayVisualProjectile `json:"projectiles"`
+	Resources   *ReplayVisualResources   `json:"resources,omitempty"`
+}
+
+type ReplayVisualResources struct {
+	Cores      []CoreView
+	PointDrops []PointDropView
 }
 
 type ReplayVisualRobot struct {
@@ -96,6 +102,9 @@ func visualFrame(view WorldView) ReplayVisualFrame {
 		frame.Projectiles[i] = ReplayVisualProjectile{
 			ID: projectile.ID, Owner: projectile.Owner, Pos: projectile.Pos, Heading: projectile.Heading,
 		}
+	}
+	if view.Frame.Map != nil && len(view.Frame.Map.CoreRules.SpawnBands) > 0 {
+		frame.Resources = &ReplayVisualResources{Cores: view.Cores, PointDrops: view.PointDrops}
 	}
 	return frame
 }

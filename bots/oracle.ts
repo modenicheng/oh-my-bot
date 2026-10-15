@@ -16,7 +16,7 @@
  * 用法：编辑器 TS 模式整页粘贴提交，保持辅助（Assist）开启。
  * 全部可调参数集中在下方 CONFIG 区。
  */
-import type { BotContext, HealthPackRef, Observation, RobotRef, Vec2, WallRef } from '@omb/bot-api'
+import type { BotContext, HealthPackRef, Observation, ProjectileRef, RobotRef, Vec2, WallRef, UpgradeTrack } from '@omb/bot-api'
 
 // ============================== CONFIG ==============================
 
@@ -25,7 +25,7 @@ const REPLAN_TICKS = 30 // 每 0.5s 重排路线
 const LAMBDA = 0.25 // 「汇率」：每多走 1m，需要 ≥ 0.25 分才值得绕路
 const MAX_ROUTE_M = 90 // 单条路线硬上限（米），防止规划出横穿全图的死路线
 const MAX_DP_NODES = 9 // 进入精确 DP 的节点上限（超出按性价比预选）
-const UPLINK_STAND_COST_M = 16 // 站桩 8s 折算里程（约半个 Core 的机会成本）
+const UPLINK_STAND_COST_M = 8
 const CORE_ZONE_R = 28 // 锁区半径（mapgen coreZoneR；区内 = 主桩 / Mega Core）
 const CORE_VALUE = 10
 const MEGA_VALUE = 25
@@ -42,16 +42,16 @@ const HEALTH_MIN_VALUE = 1.5 // 低于该权重的血包不进节点（hp ≥ 95
 const EMERGENCY_HP = 22 // 危急血量：无视路线直接奔最近可用血包
 
 // ---- 站桩（Uplink 黑入）----
-const HACK_DURATION_TICKS = 480 // 8s
+const HACK_DURATION_TICKS = 240
 const HACK_COOLDOWN_TICKS = 1800 // 完成后该桩 30s 个人冷却
-const HACK_GRACE_TICKS = 45 // 中断断档 ≤ 此值视为连续（服务器 0.5s 宽限保留进度）
+const HACK_GRACE_TICKS = 30
 const HACK_BREAK_HP_LOSS = 18 // 站桩期间掉血超过此值 → 放弃去应付
 const SELF_DEFENSE_R = 12 // 近敌自卫半径：站桩被逼近到此距离就打断开火
 const BACKOFF_TICKS = 150 // 打断后 2.5s 内不再选这个桩
 
 // ---- 火控 ----
 const DT = 1 / 60
-const BULLET_SPEED = 30 // m/s（ProjectileSpeed）
+const BULLET_SPEED = 36
 const FIRE_PIPELINE_TICKS = 1 // 脚本帧 T 的指令在 T+1 生效（服务器排队语义）
 const FIRE_RANGE = 16 // ≤16m 无散布（accuracy falloff 从 16m 才开始）
 const AIM_RANGE = 19 // 可见即预瞄；>16m 不开火
@@ -190,8 +190,7 @@ export function buildNodes(input: NodeBuildInput): PlanNode[] {
     const c = obs.cores[i]
     const r = Math.sqrt(c.x * c.x + c.y * c.y)
     if (phase !== 'CORE_OPEN' && r < CORE_ZONE_R) continue // 锁区未开，中心 Core 触碰无效
-    const mega = r < CORE_ZONE_R && MEGA_PAD_IDS[c.id] === true
-    nodes.push({ kind: 'core', id: c.id, x: c.x, y: c.y, value: mega ? MEGA_VALUE : CORE_VALUE, extraCostM: 0, reachR: 1.5 })
+    nodes.push({ kind: 'core', id: c.id, x: c.x, y: c.y, value: c.value ?? CORE_VALUE, extraCostM: 0, reachR: 1.5 })
   }
 
   for (let i = 0; i < obs.uplinks.length; i++) {
@@ -644,15 +643,55 @@ function aimWithLead(
 
 /** 无节点可规划的待机行为：CORE_OPEN 向中心压近蹲 Mega 刷新，否则原地等刷新 */
 function idleWander(bot: BotContext, self: Vec2): void {
-  if (bot.game.phase === 'CORE_OPEN') {
-    const r = Math.sqrt(self.x * self.x + self.y * self.y)
-    if (r > 26) {
-      const scale = 22 / r
-      bot.navigateTo({ x: self.x * scale, y: self.y * scale })
+  const observation = bot.scan()
+  const heading = Math.atan2(self.y, self.x) + Math.PI / 2 + Math.floor(observation.tick / 180) * 0.7 + bot.self.id * 0.31
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const angle = heading + attempt * Math.PI / 6
+    const target = { x: self.x + Math.cos(angle) * 8, y: self.y + Math.sin(angle) * 8 }
+    if (!shotBlocked(self.x, self.y, target.x, target.y, observation.walls, bot.game.phase !== 'CORE_OPEN', CORE_ZONE_R)) {
+      bot.navigateTo(target)
       return
     }
   }
   bot.move(0, 0)
+}
+
+export function incomingThreat(position: Vec2, velocity: Vec2, projectiles: readonly ProjectileRef[], selfId: number): { time: number; heading: number; id: number } | null {
+  let nearest: { time: number; heading: number; id: number } | null = null
+  for (const projectile of projectiles) {
+    if (projectile.owner === selfId) continue
+    const relativeX = projectile.x - position.x, relativeY = projectile.y - position.y
+    const speedX = Math.cos(projectile.heading) * BULLET_SPEED - velocity.x
+    const speedY = Math.sin(projectile.heading) * BULLET_SPEED - velocity.y
+    const time = -(relativeX * speedX + relativeY * speedY) / (speedX * speedX + speedY * speedY)
+    if (time < 0 || time > 0.45) continue
+    if (Math.hypot(relativeX + speedX * time, relativeY + speedY * time) > 0.85) continue
+    if (nearest === null || time < nearest.time) nearest = { time, heading: projectile.heading, id: projectile.id }
+  }
+  return nearest
+}
+
+function defend(bot: BotContext, observation: Observation, anchored: boolean): void {
+  const threat = incomingThreat(bot.self.position, bot.self.velocity, observation.projectiles, bot.self.id)
+  const ready = observation.tick + 1 >= (bot.self.shieldReadyTick ?? 0)
+  const entryTime = threat === null ? Infinity : threat.time - 0.6 / BULLET_SPEED
+  bot.shield(threat !== null && ready && entryTime <= 2 / 60 && bot.self.energy >= 0.9)
+  if (threat === null || anchored || entryTime <= 2 / 60 || threat.time > 0.3) return
+  const normalX = -Math.sin(threat.heading), normalY = Math.cos(threat.heading)
+  const side = bot.self.velocity.x * normalX + bot.self.velocity.y * normalY >= 0 ? 1 : -1
+  bot.move(normalX * side, normalY * side)
+  if (bot.self.energy > 25 && !bot.self.shieldOn) bot.dash()
+}
+
+function buyUpgrades(bot: BotContext): void {
+  if (!bot.self.upgrade || !bot.game.upgradeCosts) return
+  const tracks: UpgradeTrack[] = ['speed', 'hp', 'shield', 'attack', 'energy']
+  let points = bot.self.upgrade.points
+  for (const track of tracks) {
+    const level = bot.self.upgrade.levels[track]
+    const cost = bot.game.upgradeCosts[level]
+    if (cost !== undefined && points >= cost) { bot.buyUpgrade(track); points -= cost }
+  }
 }
 
 export function tick(bot: BotContext): void {
@@ -680,6 +719,8 @@ export function tick(bot: BotContext): void {
   }
   prevHp = self.hp
 
+  buyUpgrades(bot)
+
   updateKinematics(obs, now)
 
   const enemy = nearestEnemy(obs, self.position)
@@ -692,6 +733,7 @@ export function tick(bot: BotContext): void {
     }
     bot.interact()
     bot.move(0, 0)
+    defend(bot, obs, true)
     return
   }
 
@@ -737,4 +779,5 @@ export function tick(bot: BotContext): void {
     const canFire = !interacting && now >= respawnGuardUntil && energyOk(bot.self.energy, eDist)
     aimWithLead(bot, obs, self.position, enemy, canFire)
   }
+  defend(bot, obs, interacting)
 }
