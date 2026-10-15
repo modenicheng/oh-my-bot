@@ -189,6 +189,9 @@ type Observation struct {
 	HealthPacks []HealthPackView
 	Uplinks     []UplinkView
 	Projectiles []ProjView
+	// PointDrops 公共世界对象（快照/观战通道消费；ADR-0016）。刻意不经
+	// script/observation.go 暴露给 bot 脚本——v1 不向脚本开放升级面。
+	PointDrops []PointDropView
 }
 
 // IsPartner is retained for source compatibility; live observations have no partner.

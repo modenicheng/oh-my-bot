@@ -599,6 +599,20 @@ func (s *Session) ScriptRollback(rb *ombv1.ScriptRollback) {
 		m.rollbackScriptLocked(s.playerID, rb.GetVersionId())
 	})
 }
+
+// BuyUpgrade 购买升级（ADR-0016）：事件语义低频直投，不走 60Hz 输入队列。
+// 仅激活的正式局路由进 sim 排队；非激活窗口/热身场静默丢弃（客户端以随
+// 后快照为准，无 nack 回执——升级 UI 不因拒绝进入 pending 态）。
+func (s *Session) BuyUpgrade(track uint32) {
+	s.withRoom(func(rc *RoomConn) {
+		m := rc.match
+		if m == nil || !m.activeLocked() {
+			return
+		}
+		m.buyUpgradeLocked(s.playerID, track)
+	})
+}
+
 func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
 	if p == nil {
 		return

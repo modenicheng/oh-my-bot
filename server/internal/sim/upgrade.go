@@ -135,6 +135,39 @@ func UpgradePointsFor(value int32) int32 {
 	return UpgradePointsCore
 }
 
+// UpgradeCostsFlat 是 SimTuning.UpgradeTuning.costs 的唯一来源（50 项
+// track-major：下标 = track*10 + levelIdx）。glue 下发、客户端只读显示。
+func UpgradeCostsFlat() [UpgradeTrackCount * UpgradeMaxLevel]int32 {
+	var flat [UpgradeTrackCount * UpgradeMaxLevel]int32
+	for tr := 0; tr < UpgradeTrackCount; tr++ {
+		for l := 0; l < UpgradeMaxLevel; l++ {
+			flat[tr*UpgradeMaxLevel+l] = UpgradeCosts[l]
+		}
+	}
+	return flat
+}
+
+// UpgradeStepsX10 是 SimTuning.UpgradeTuning.steps_x10 的唯一来源（每轨每级
+// 增量，track-major）。单位按轨：hp/attack/energy ×10、speed ×10 m/s、
+// shield ×1000 承伤减量（50=承伤系数 −0.05）。
+var UpgradeStepsX10 = func() [UpgradeTrackCount * UpgradeMaxLevel]int32 {
+	type trackScale struct{ full, half, scale float64 }
+	scales := [UpgradeTrackCount]trackScale{
+		{StepHPFull, StepHPHalf, 10},
+		{StepSpeedFull, StepSpeedHalf, 10},
+		{StepShieldFull, StepShieldHalf, 1000},
+		{StepAtkFull, StepAtkHalf, 10},
+		{StepEnergyFull, StepEnergyHalf, 10},
+	}
+	var t [UpgradeTrackCount * UpgradeMaxLevel]int32
+	for tr := 0; tr < UpgradeTrackCount; tr++ {
+		for l := 1; l <= UpgradeMaxLevel; l++ {
+			t[tr*UpgradeMaxLevel+l-1] = int32(math.Round(stepAt(l, scales[tr].full, scales[tr].half) * scales[tr].scale))
+		}
+	}
+	return t
+}()
+
 // BuyUpgrade 排队一次购买，下一 tick 在 consumeInputs 内消费（与 AssistToggle
 // 同族的低频事件语义）。track 为 1–5；点数不足/满级在消费时静默拒绝——
 // 客户端以随后快照的 SelfState.upgrade 为准，不做乐观更新。

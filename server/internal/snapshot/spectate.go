@@ -16,6 +16,7 @@ func BuildSpectatorObservation(w World) sim.Observation {
 		Projectiles: append([]sim.ProjView(nil), w.Projectiles...),
 		Cores:       append([]sim.CoreView(nil), w.Cores...),
 		HealthPacks: append([]sim.HealthPackView(nil), w.HealthPacks...),
+		PointDrops:  append([]sim.PointDropView(nil), w.PointDrops...),
 	}
 	for _, u := range w.Uplinks {
 		cu := u

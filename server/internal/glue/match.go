@@ -495,6 +495,18 @@ func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
 	}
 }
 
+// buyUpgradeLocked 购买一条升级轨的下一级（ADR-0016）。仅正式局（Running）
+// 生效：热身场/已结束静默丢弃——客户端以随后快照的 SelfState.upgrade 为准。
+// 点数不足/满级由 sim 在消费时静默拒绝，无回执消息。Caller holds rc.mu.
+func (m *Match) buyUpgradeLocked(pid uint64, track uint32) {
+	if m.warmup {
+		return
+	}
+	if rid, ok := m.robotOf[pid]; ok {
+		m.sim.BuyUpgrade(rid, uint8(track))
+	}
+}
+
 // tickStatWindowLen 可观测性窗口：600 tick ≈ 10s。
 const tickStatWindowLen = 600
 
@@ -638,6 +650,8 @@ func (m *Match) sendMapBootstrapLocked(s *Session) {
 // 由 glue 的 SimTuning golden 测试与客户端 FALLBACK_TUNING_HEX 互钉：服务器改
 // 常量而不动此函数（或反之）两侧测试即刻失败。
 func simTuning() *ombv1.SimTuning {
+	costs := sim.UpgradeCostsFlat()
+	steps := sim.UpgradeStepsX10
 	return &ombv1.SimTuning{
 		TickRate:            uint32(sim.TickRate),
 		MaxHpX10:            sim.ToX10(sim.MaxHP),
@@ -646,6 +660,10 @@ func simTuning() *ombv1.SimTuning {
 		HackDurationTicks:   sim.HackDuration,
 		InvulnDurationTicks: sim.InvulnDuration,
 		VisionRadius:        sim.VisionRadius,
+		Upgrade: &ombv1.UpgradeTuning{
+			Costs:    costs[:],
+			StepsX10: steps[:],
+		},
 	}
 }
 
@@ -727,6 +745,7 @@ func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInp
 		AssistOn:      robot.Control.Assist,
 		DashReadyTick: robot.Combat.DashReady,
 		FireReadyTick: robot.Combat.FireReady,
+		Upg:           robot.Upg, // 私密升级状态（ADR-0016）：点数 + 五维等级
 	}
 	if m.ai != nil && m.ai.quota != nil {
 		if pid, ok := m.playerOf[rv.ID]; ok {

@@ -39,6 +39,7 @@ type World struct {
 	Cores       []sim.CoreView
 	HealthPacks []sim.HealthPackView
 	Uplinks     []sim.UplinkView
+	PointDrops  []sim.PointDropView
 }
 
 // WorldOf 把 sim 的冻结 WorldView 转为本包 World（逐字段拷贝，不共享底层
@@ -52,6 +53,7 @@ func WorldOf(wv sim.WorldView) World {
 		Cores:       wv.Cores,
 		HealthPacks: wv.HealthPacks,
 		Uplinks:     wv.Uplinks,
+		PointDrops:  wv.PointDrops,
 	}
 }
 
@@ -70,6 +72,7 @@ func BuildObservation(w World, ix *WallIndex, observerID, _ uint32, radii ...flo
 		Frame:       w.FrameView,
 		Cores:       append([]sim.CoreView(nil), w.Cores...),
 		HealthPacks: append([]sim.HealthPackView(nil), w.HealthPacks...),
+		PointDrops:  append([]sim.PointDropView(nil), w.PointDrops...),
 	}
 
 	// Uplink 恒全量，PersonalCDs 收敛到观察者。

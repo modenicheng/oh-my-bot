@@ -593,7 +593,7 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			*ombv1.ClientMsg_RoomAction, *ombv1.ClientMsg_ScriptSubmit,
 			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
 			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig,
-			*ombv1.ClientMsg_ScriptRollback:
+			*ombv1.ClientMsg_ScriptRollback, *ombv1.ClientMsg_UpgradeRequest:
 			// X-4：结构化 notice 在前、兼容 join-failed say 在后（旧客户端前缀解析）。
 			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "readonly spectator connection"))
 			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
@@ -647,6 +647,10 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	case *ombv1.ClientMsg_SnippetConfig:
 		if cur := (*sess); cur != nil {
 			cur.ConfigureSnippets(p.SnippetConfig)
+		}
+	case *ombv1.ClientMsg_UpgradeRequest:
+		if cur := (*sess); cur != nil {
+			cur.BuyUpgrade(p.UpgradeRequest.GetTrack())
 		}
 	case *ombv1.ClientMsg_ResyncRequest:
 		if cur := (*sess); cur != nil {

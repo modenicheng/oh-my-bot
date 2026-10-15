@@ -26,6 +26,8 @@ type SelfInput struct {
 	AssistOn      bool
 	DashReadyTick uint32
 	FireReadyTick uint32
+	// Upg 局内升级状态（ADR-0016）：私密下发 SelfState.upgrade（点数 + 五维等级）。
+	Upg sim.UpgradeState
 }
 
 // DeltaEncoder 把某观察者的逐 tick Observation 编成 SnapshotDelta。
@@ -37,6 +39,7 @@ type DeltaEncoder struct {
 	lastProjs   map[uint32]projStamp
 	lastCores   map[uint32]coreStamp
 	lastUplinks map[uint32]uplinkStamp
+	lastDrops   map[uint32]dropStamp
 	lastTick    uint32
 	hasBaseline bool // 是否已发过 full（首帧或 ForceFull）
 	forceFull   bool
@@ -48,13 +51,15 @@ type robotStamp struct {
 	pos                   sim.Vec2
 	heading               float32
 	hpX10, energyX10      int32
+	maxHpX10, maxEnX10    int32 // 升级后上限（购买/掉级才变化；ADR-0016）
 	shield, dashing, dead bool
 	respawn, invuln       uint32
 }
 
 func stampRobot(r *sim.RobotView) robotStamp {
 	return robotStamp{pos: r.Pos, heading: float32(r.Turret), hpX10: r.HpX10,
-		energyX10: r.EnergyX10, shield: r.ShieldOn, dashing: r.Dashing,
+		energyX10: r.EnergyX10, maxHpX10: r.MaxHpX10, maxEnX10: r.MaxEnergyX10,
+		shield: r.ShieldOn, dashing: r.Dashing,
 		dead: r.Dead, respawn: r.RespawnInS, invuln: r.InvulnS}
 }
 
@@ -77,6 +82,12 @@ type uplinkStamp struct {
 	myCD        uint32
 }
 
+// dropStamp：晶片位置/数值（生成即静态；消失以 point_drop_gone 表达）。
+type dropStamp struct {
+	pos    sim.Vec2
+	points int32
+}
+
 // NewEncoder 创建编码器；首次 Encode 必为 full。
 func NewEncoder() *DeltaEncoder {
 	return &DeltaEncoder{
@@ -84,6 +95,7 @@ func NewEncoder() *DeltaEncoder {
 		lastProjs:   make(map[uint32]projStamp),
 		lastCores:   make(map[uint32]coreStamp),
 		lastUplinks: make(map[uint32]uplinkStamp),
+		lastDrops:   make(map[uint32]dropStamp),
 	}
 }
 
@@ -187,12 +199,28 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 		delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(&obs.HealthPacks[i]))
 	}
 
+	// ---- PointDrops（ADR-0016）：公共对象、有界集合（≤4 只/次死亡、30s TTL），
+	// 恒全量集合内的增量；消失（拾取/到期）以 gone 表达。 ----
+	nextDrops := make(map[uint32]dropStamp, len(obs.PointDrops))
+	for i := range obs.PointDrops {
+		d := &obs.PointDrops[i]
+		nextDrops[d.ID] = dropStamp{pos: d.Pos, points: d.Points}
+		if full {
+			delta.PointDrops = append(delta.PointDrops, encodePointDrop(d))
+			continue
+		}
+		if prev, seen := e.lastDrops[d.ID]; !seen || prev != nextDrops[d.ID] {
+			delta.PointDrops = append(delta.PointDrops, encodePointDrop(d))
+		}
+	}
+
 	delta.Self = encodeSelf(self)
 
 	if !full {
 		delta.RobotGone = goneIDs(e.lastRobots, nextRobots)
 		delta.ProjectileGone = goneIDs(e.lastProjs, nextProjs)
 		delta.CoreGone = goneIDs(e.lastCores, nextCores)
+		delta.PointDropGone = goneIDs(e.lastDrops, nextDrops)
 	}
 
 	// 提交基线。
@@ -200,6 +228,7 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	e.lastProjs = nextProjs
 	e.lastCores = nextCores
 	e.lastUplinks = nextUplinks
+	e.lastDrops = nextDrops
 	e.lastTick = tick
 	if full {
 		e.hasBaseline = true
@@ -253,6 +282,8 @@ func encodeRobot(r *sim.RobotView, withMeta bool) *ombv1.RobotState {
 	}
 	invuln := r.InvulnS
 	rs.InvulnS = &invuln
+	maxHP, maxEnergy := r.MaxHpX10, r.MaxEnergyX10
+	rs.MaxHpX10, rs.MaxEnergyX10 = &maxHP, &maxEnergy
 	if withMeta {
 		rs.Nick = r.Nick
 		rs.Color = r.Color
@@ -279,6 +310,16 @@ func encodeCore(c *sim.CoreView) *ombv1.CoreState {
 			Pos: &ombv1.Vec2{X: c.Pos.X, Y: c.Pos.Y},
 		},
 		Value: c.Value,
+	}
+}
+
+func encodePointDrop(d *sim.PointDropView) *ombv1.PointDropState {
+	return &ombv1.PointDropState{
+		Base: &ombv1.EntityBase{
+			Id:  d.ID,
+			Pos: &ombv1.Vec2{X: d.Pos.X, Y: d.Pos.Y},
+		},
+		Points: d.Points,
 	}
 }
 
@@ -312,6 +353,14 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 	}
 	assist, dashReady, fireReady := s.AssistOn, s.DashReadyTick, s.FireReadyTick
 	fireSrc, abilitySrc, manualAxes := ctrlSrc(s.FireSrc), ctrlSrc(s.AbilitySrc), s.ManualAxes
+	levels := make([]uint32, len(s.Upg.Levels))
+	for i, l := range s.Upg.Levels {
+		levels[i] = uint32(l)
+	}
+	points := uint32(0)
+	if s.Upg.Points > 0 {
+		points = uint32(s.Upg.Points)
+	}
 	return &ombv1.SelfState{
 		RobotId:        s.Robot.ID,
 		MoveSrc:        ctrlSrc(s.MoveSrc),
@@ -324,6 +373,7 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 		FireSrc:        &fireSrc,
 		AbilitySrc:     &abilitySrc,
 		ManualAxesMask: &manualAxes,
+		Upgrade:        &ombv1.UpgradeSelf{Points: points, Levels: levels},
 	}
 }
 
