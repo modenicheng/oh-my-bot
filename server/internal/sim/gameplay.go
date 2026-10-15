@@ -54,13 +54,6 @@ func hackDurationFor(version int) uint32 {
 
 func (s *Sim) hackDuration() uint32 { return hackDurationFor(s.simulationVersion) }
 
-func (s *Sim) shotDamage() float64 {
-	if s.simulationVersion < 4 {
-		return legacyShotDamage
-	}
-	return ShotDamage
-}
-
 func (s *Sim) projectileSpeed() float64 {
 	if s.simulationVersion < 4 {
 		return legacyProjectileSpeed
