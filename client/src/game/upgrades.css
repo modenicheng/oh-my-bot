@@ -43,10 +43,6 @@
   100% { transform: scale(1); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hud-upgrades[data-pop] .hud-up-points { animation: none; }
-}
-
 .hud-up-bounty {
   font: 11px var(--mono);
   color: #fbbf24;
@@ -56,6 +52,9 @@
 }
 
 .hud-up-row {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: grid;
   grid-template-columns: auto 18px 34px 1fr auto auto;
   align-items: center;
@@ -69,6 +68,41 @@
   cursor: pointer;
   pointer-events: auto;
   text-align: left;
+}
+
+.hud-up-row[data-state="buy"] {
+  border-left-color: #b8860b88;
+  background: #fbbf2408;
+}
+
+.hud-up-row[data-state="buy"]::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent, #fbbf2418 30%, #fef3c735 50%, #fbbf2418 70%, transparent);
+  opacity: 0;
+  transform: translateX(-120%) skewX(-18deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud-up-row[data-state="buy"]::before {
+    animation: hud-up-shimmer 5.2s ease-in-out infinite;
+  }
+}
+
+@keyframes hud-up-shimmer {
+  0% { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+  6% { opacity: 1; }
+  30% { opacity: 1; }
+  36%, 100% { transform: translateX(440%) skewX(-18deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-upgrades[data-pop] .hud-up-points { animation: none; }
+  .hud-up-row[data-state="buy"]::before { display: none; }
 }
 
 .hud-up-row kbd {
@@ -89,6 +123,8 @@
   letter-spacing: .2em;
   white-space: nowrap;
 }
+
+.hud-up-row[data-state="buy"] .hud-up-name { color: var(--fg); }
 
 .hud-up-pips {
   display: inline-flex;
@@ -112,6 +148,12 @@
 .hud-up-pips i.on:nth-child(n + 6) {
   background: #0a121c;
   border-color: #fbbf24;
+}
+
+.hud-up-row[data-state="buy"] .hud-up-pips i:first-child:not(.on),
+.hud-up-row[data-state="buy"] .hud-up-pips i.on + i:not(.on) {
+  background: #fbbf241a;
+  border: 1px dashed #d99e0b;
 }
 
 .hud-up-delta {
@@ -145,3 +187,10 @@
   background: #fbbf240d;
   outline: none;
 }
+
+.hud-up-row[data-state="buy"]:focus-visible {
+  outline: 1px solid #fbbf24;
+  outline-offset: -1px;
+}
+
+.hud-up-row[data-state="buy"]:active { background: #fbbf241a; }

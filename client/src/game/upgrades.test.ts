@@ -82,6 +82,28 @@ describe('UpgradePanel', () => {
     expect(returnFocus).toHaveBeenCalledExactlyOnceWith()
   })
 
+  it('可购买提示随快照中的点数、等级及费用变化而切换', () => {
+    const { panel, host } = panelWith()
+    const world = worldWithUpgrade(1, [0, 0, 0, 0, 0])
+    const rows = [...host.querySelectorAll<HTMLButtonElement>('.hud-up-row')]
+    panel.update(world)
+    expect(rows.every(row => row.dataset.state === 'wait')).toBe(true)
+
+    world.self!.upgrade!.points = 2
+    panel.update(world)
+    expect(rows.every(row => row.dataset.state === 'buy')).toBe(true)
+
+    world.self!.upgrade!.levels = [1, 10, 0, 0, 0]
+    panel.update(world)
+    expect(rows.map(row => row.dataset.state)).toEqual(['wait', 'max', 'buy', 'buy', 'buy'])
+    expect(rows[0]!.querySelector('.hud-up-cost b')?.textContent).toBe('3')
+
+    world.self!.upgrade!.points = 0
+    panel.update(world)
+    expect(rows.map(row => row.dataset.state)).toEqual(['wait', 'max', 'wait', 'wait', 'wait'])
+    panel.dispose()
+  })
+
   it('BOUNTY_LEVEL 门=4：低于门槛不显示赏金标', () => {
     expect(BOUNTY_LEVEL).toBe(4)
     const { panel, host } = panelWith()
