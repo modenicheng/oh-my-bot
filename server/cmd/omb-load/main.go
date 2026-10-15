@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	frameUp    byte = 2
-	frameDown  byte = 3
-	framePing  byte = 0x00
-	framePong  byte = 0x01
+	frameUp   byte = 2
+	frameDown byte = 3
+	framePing byte = 0x00
+	framePong byte = 0x01
 )
 
 // 每连接的典型脚本（与 glue 性能门同型：scan→aim→fire→move）。
