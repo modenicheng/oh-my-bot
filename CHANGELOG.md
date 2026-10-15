@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0-rc.2](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.1...v1.1.0-rc.2) (2026-10-15)
+
+
+### Features
+
+* **client:** 为可购买升级添加轻量扫光提示 ([6cd267d](https://github.com/modenicheng/oh-my-bot/commit/6cd267d2d9e30a14bb06d021c6f91368d1f10dfe))
+* **client:** 升级玩法 UI——黄色菱形技能点/五行升级面板/晶片渲染/按键购买 ([69c010e](https://github.com/modenicheng/oh-my-bot/commit/69c010e360709b128c32c841b1016dc72de35123))
+* **game:** 随机资源供给、人数自适应 SP 与局部感知 ([94abd9e](https://github.com/modenicheng/oh-my-bot/commit/94abd9ea05f2ea7edaac0139f774517c572769d0))
+* **glue,snapshot:** 升级玩法传输层——SelfState.upgrade 私密下发/RobotState 公开上限/PointDrop 通道/UpgradeRequest 路由 ([9ed1962](https://github.com/modenicheng/oh-my-bot/commit/9ed19620b48be033d74c1dcd8fdfe5d9223861da))
+* **mapgen:** v9 外环 pad 配额保底 ≥ TargetAlive——大房升级点数经济不再被面积配额封顶 ([b6f01d2](https://github.com/modenicheng/oh-my-bot/commit/b6f01d2c24c7daaafbb808367606dd4b049516f5))
+* **protocol:** 升级玩法消息——UpgradeRequest/UpgradeSelf/PointDrop/UpgradeTuning 与双侧 golden 互钉 ([6e409c7](https://github.com/modenicheng/oh-my-bot/commit/6e409c74f6a09986071abf096b4c54a2ac0d7950))
+* **sim:** 局内升级系统——五维成长/技能点经济/赏金阵亡散落 PointDrop（SimulationVersion 5） ([a4a2828](https://github.com/modenicheng/oh-my-bot/commit/a4a2828c3efa129a0a5cfa22e141310d55826ab3))
+* **tools:** omb-load WAN entry, pong reply and per-conn read diagnostics ([2679afd](https://github.com/modenicheng/oh-my-bot/commit/2679afdb5afbeea2f40e3facf42a913ff0d1255b))
+
+
+### Bug Fixes
+
+* **sim:** 移除被 shotDamageOf 取代的旧 shotDamage 访问器（golangci unused） ([2ad49be](https://github.com/modenicheng/oh-my-bot/commit/2ad49bee630d3421d39885052f0d8fc0aa21bd61))
+
 ## [1.1.0-rc.1](https://github.com/modenicheng/oh-my-bot/compare/v1.0.1-rc.1...v1.1.0-rc.1) (2026-10-14)
 
 
