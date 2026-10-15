@@ -9,6 +9,8 @@ option go_package = "github.com/modenicheng/oh-my-bot/server/internal/protocol/g
 // AOI：Robot/Projectile 按 20m 视野+墙体遮挡裁剪（与 scan() 同一规则）；
 //      HealthPack/Core/Uplink are public map objects; Robot/Projectile use standard AOI only.
 //      Core/Uplink 为地图对象，恒全量下发（数量小、状态稀疏变化）。
+//      PointDrop（技能点晶片）同走全量列表+tombstone 通道：有界生成（≤4 只/次死亡、
+//      30s TTL），变化稀疏（生成/拾取/到期）。
 
 import "google/protobuf/timestamp.proto";
 
@@ -155,6 +157,12 @@ message AiPrompt { string text = 1; } // AI Agent 配额内改码请求
 message Say { string text = 1; } // 手动全场发言；与脚本 say 共用 3s 冷却，最多 160 字符
 message ResyncRequest {} // 客户端检测快照缺口（base_tick 断链）时请求全量重同步
 
+// 购买一条升级轨的下一级（ADR-0016 局内成长）。事件语义、低频直投，不走 60Hz
+// 输入队列；仅房间玩家在正式局（Running）有效，观战/热身/已结束静默拒绝。
+// track：1 hp / 2 speed / 3 shield / 4 attack / 5 energy；点数不足或已满级=无变化
+// （客户端以随后快照的 SelfState.upgrade 为准，不做乐观更新）。
+message UpgradeRequest { uint32 track = 1; }
+
 message ClientMsg {
   oneof payload {
     ClientInput input = 1;
@@ -170,6 +178,7 @@ message ClientMsg {
     SpectateRoom spectate = 11;
     SnippetConfig snippet_config = 12; // 驾驶辅助配置（仅房间玩家、active match）
     ScriptRollback script_rollback = 13; // 脚本版本回退（仅房间玩家；观战拒绝）
+    UpgradeRequest upgrade_request = 14; // 购买升级（仅房间玩家、Running；观战拒绝）
   }
 }
 
@@ -193,6 +202,11 @@ message RobotState {
   string color = 9;        // 仅 full 快照携带
   bool is_partner = 10 [deprecated = true]; // 旧客户端兼容；新对局恒 false
   optional uint32 invuln_s = 11; // 权威无敌剩余秒数；缺失表示旧服务器，0=无
+  // 升级后的当前上限（ADR-0016）：公开仅为头顶血条/能量条分母（满条变长是天然
+  // 泄露，接受）；五维等级本身走 SelfState 私密下发。缺失 = 旧服务器/未升级（=
+  // SimTuning 基础值）。仅购买/掉级时变化，delta 帧稀疏携带。
+  optional int32 max_hp_x10 = 12;
+  optional int32 max_energy_x10 = 13;
 }
 
 message ProjectileState {
@@ -220,6 +234,19 @@ message HealthPackState {
   uint32 respawn_in_s = 3;
 }
 
+// 技能点晶片：赏金玩家阵亡散落的点数掉落物（ADR-0016）。非 core——只给点数、
+// 不给计分；接触拾取、谁碰归谁（含复活本人）；30s 未拾取消失（tombstone 下发）。
+message PointDropState {
+  EntityBase base = 1;
+  sint32 points = 2; // 拾取所得技能点（整数，可为任意正数）
+}
+
+// 自机私有升级状态（ADR-0016；build 私密，不下发他机）。
+message UpgradeSelf {
+  uint32 points = 1;          // 自由点数（未花费）
+  repeated uint32 levels = 2; // 定长 5，下标即轨：0 hp / 1 speed / 2 shield / 3 attack / 4 energy；0–10
+}
+
 // 自机私有状态（不下发他机）
 message SelfState {
   uint32 robot_id = 1;
@@ -233,6 +260,7 @@ message SelfState {
   optional ControlSource fire_src = 9;    // 分轴仲裁结果：开火轴当前来源（ADR-0009）
   optional ControlSource ability_src = 10; // 分轴仲裁结果：技能轴当前来源（ADR-0009）
   optional uint32 manual_axes_mask = 11; // 当前被人工接管的轴位图：bit0 move / bit1 aim / bit2 fire / bit3 ability；缺失表示旧服务器
+  optional UpgradeSelf upgrade = 12; // 局内升级状态；缺失表示旧服务器（=0 点全零级）
 }
 
 message SnapshotDelta {
@@ -251,6 +279,8 @@ message SnapshotDelta {
   repeated UplinkState uplinks = 13;
   SelfState self = 14;
   repeated HealthPackState health_packs = 15;
+  repeated PointDropState point_drops = 16; // 恒全量（同 Core/HealthPack 通道）
+  repeated uint32 point_drop_gone = 17;     // tombstone：消失的晶片 id（拾取/到期）
 }
 
 // ============ 事件（Match Event Log 的线上投影，ADR-0006） ============
@@ -263,7 +293,18 @@ message EvKill {
   repeated uint32 assists = 5; // 按 robot id 升序，允许多人
   bool kill_steal = 6; // 终结者本生命伤害份额严格小于 50%
 }
-message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; }
+message EvCorePickup { uint32 by = 1; uint32 core_id = 2; sint32 value = 3; } // 价值 +10/+25；技能点奖励由 value 确定性推导（5/10）
+message EvPointDropSpawn { // 赏金玩家阵亡散落（每次死亡一条，非每晶片一条）；落 Match Event Log 供回放/分析
+  uint32 from_robot = 1;
+  Vec2 at = 2;            // 死亡点（晶片散布中心）
+  sint32 total_points = 3; // 本次散落总量 = 自由点数 (+ 掉级退款)
+  bool level_lost = 4;    // true = 情形 B（等级最高轨掉了 1 级）
+}
+message EvPointDropPickup { // 晶片被拾取（每晶片一条）；只给点数不给计分
+  uint32 by = 1;
+  uint32 drop_id = 2;
+  sint32 points = 3;
+}
 message EvUplinkHack { uint32 by = 1; uint32 uplink_id = 2; sint32 value = 3; } // 引导 8s 完成
 message EvPhaseChange { Phase from = 1; Phase to = 2; }
 message EvRespawn { uint32 robot = 1; uint32 sector = 2; }
@@ -380,6 +421,16 @@ message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务�
 // （审计 D3/D5），不倾倒内部专用常量；不落 Match Event Log，回放不消费
 // （回放积分走事件流 EvMatchEnd.scores，旧录像用客户端兜底值）。
 // 定点约定与线上一致：hp/energy ×10；时长一律 tick（60Hz），客户端按 tick_rate 换算。
+// 升级曲线（ADR-0016）：服务器从 sim 常量投影、客户端只读显示（成本/下一级增量）。
+// 数组均 50 项 track-major：下标 = track*10 + levelIdx，track 顺序 hp/speed/shield/
+// attack/energy，levelIdx 0–9 对应买 L1..L10。steps 的单位按轨文档化：
+// hp/attack/energy ×10（200=+20 HP / 10=+1.0 伤 / 250=+25 能量）、speed ×10 m/s
+// （4=+0.4）、shield ×1000 承伤系数（−50=−0.05，负值=减伤增强）。
+message UpgradeTuning {
+  repeated int32 costs = 1;     // 每级购入成本（正整数点数）
+  repeated int32 steps_x10 = 2; // 每级增量（按轨单位；shield 为负）
+}
+
 message SimTuning {
   uint32 tick_rate = 1;              // 服务器固定 tick 频率（HUD 冷却换算分母）
   sint32 max_hp_x10 = 2;             // HP 条分母（×10）
@@ -388,6 +439,7 @@ message SimTuning {
   uint32 hack_duration_ticks = 5;    // Uplink 引导总时长；progress_x10 满值 = ticks×10/tick_rate
   uint32 invuln_duration_ticks = 6;  // 重生无敌时长（客户端无敌闪烁窗口）
   double vision_radius = 7;          // 视野/战争雾半径（米）
+  optional UpgradeTuning upgrade = 8; // 升级曲线（缺失 = 旧服务器，客户端隐藏升级 UI）
 }
 
 // EvControlNotice（审计 X-4）：结构化控制通知，取代 "join failed:" / "AI …"
@@ -478,6 +530,8 @@ message ServerEvent {
     EvControlNotice control_notice = 34; // 结构化控制通知（审计 X-4；不落事件日志）
     EvScriptVersions script_versions = 35; // 脚本版本链 owner-only 快照（不落事件日志）
     EvScriptRollbackResult script_rollback_result = 36; // 版本回退定向回执（不落事件日志）
+    EvPointDropSpawn point_drop_spawn = 37; // 赏金阵亡散落（全场可见，落事件日志）
+    EvPointDropPickup point_drop_pickup = 38; // 晶片拾取（全场可见，落事件日志）
   }
 }
 

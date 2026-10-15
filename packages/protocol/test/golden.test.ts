@@ -312,6 +312,78 @@ describe('script versions (AI apply + rollback)', () => {
   })
 })
 
+// ---- 升级玩法（ADR-0016）：字段挂载、黄金字节、往返与旧服务器兼容 ----
+// Go 侧断言：server/internal/protocol/protocol_test.go 的 upgrade system 两个测试。
+
+import {
+  UpgradeRequestSchema, UpgradeSelfSchema, SelfStateSchema, PointDropStateSchema,
+  EvPointDropSpawnSchema, EvPointDropPickupSchema, UpgradeTuningSchema,
+} from '../src/gen/proto/omb_pb'
+
+// 跨语言黄金字节：ClientMsg{upgrade_request:{track:3}}。
+export const UPGRADE_REQUEST_GOLDEN = '72020803'
+
+describe('upgrade system (ADR-0016)', () => {
+  it('golden bytes 与 Go 生成一致（upgrade_request 挂载 case 14）', () => {
+    const msg = create(ClientMsgSchema, { payload: { case: 'upgradeRequest', value: create(UpgradeRequestSchema, { track: 3 }) } })
+    expect(Buffer.from(toBinary(ClientMsgSchema, msg)).toString('hex')).toBe(UPGRADE_REQUEST_GOLDEN)
+    const back = fromBinary(ClientMsgSchema, toBinary(ClientMsgSchema, msg))
+    if (back.payload.case !== 'upgradeRequest') throw new Error(`case ${back.payload.case}`)
+    expect(back.payload.value.track).toBe(3)
+  })
+
+  it('SnapshotDelta 携带 point_drops 与 tombstone（往返）', () => {
+    const snap = create(SnapshotDeltaSchema, {
+      tick: 100, pointDrops: [create(PointDropStateSchema, { base: { id: 9, pos: { x: 1, y: -2 }, heading: 0.5 }, points: 7 })],
+      pointDropGone: [9],
+    })
+    const back = fromBinary(SnapshotDeltaSchema, toBinary(SnapshotDeltaSchema, snap))
+    expect(back.pointDrops).toHaveLength(1)
+    expect(back.pointDrops[0]?.points).toBe(7)
+    expect(back.pointDrops[0]?.base?.pos?.y).toBe(-2)
+    expect(back.pointDropGone).toEqual([9])
+  })
+
+  it('EvPointDropSpawn / EvPointDropPickup 往返（ServerEvent case 37/38）', () => {
+    const spawn = create(ServerEventSchema, {
+      kind: { case: 'pointDropSpawn', value: create(EvPointDropSpawnSchema, { fromRobot: 4, at: { x: 3, y: 4 }, totalPoints: 19, levelLost: true }) },
+    })
+    const backSpawn = fromBinary(ServerEventSchema, toBinary(ServerEventSchema, spawn))
+    if (backSpawn.kind.case !== 'pointDropSpawn') throw new Error(`case ${backSpawn.kind.case}`)
+    expect(backSpawn.kind.value.totalPoints).toBe(19)
+    expect(backSpawn.kind.value.levelLost).toBe(true)
+
+    const pickup = create(ServerEventSchema, {
+      kind: { case: 'pointDropPickup', value: create(EvPointDropPickupSchema, { by: 5, dropId: 9, points: 7 }) },
+    })
+    const backPickup = fromBinary(ServerEventSchema, toBinary(ServerEventSchema, pickup))
+    if (backPickup.kind.case !== 'pointDropPickup') throw new Error(`case ${backPickup.kind.case}`)
+    expect(backPickup.kind.value.points).toBe(7)
+  })
+
+  it('SelfState.upgrade 私密下发；旧服务器缺省可探测', () => {
+    const self = create(SelfStateSchema, { robotId: 1, upgrade: create(UpgradeSelfSchema, { points: 12, levels: [4, 2, 0, 0, 0] }) })
+    const back = fromBinary(SelfStateSchema, toBinary(SelfStateSchema, self))
+    expect(back.upgrade?.points).toBe(12)
+    expect(back.upgrade?.levels).toEqual([4, 2, 0, 0, 0])
+    const legacy = fromBinary(SelfStateSchema, toBinary(SelfStateSchema, create(SelfStateSchema, { robotId: 1 })))
+    expect(legacy.upgrade).toBeUndefined() // 旧服务器：客户端隐藏升级 UI
+  })
+
+  it('UpgradeTuning 曲线数组往返；SimTuning 缺省可探测', () => {
+    const costs = [2, 3, 5, 8, 12, 18, 27, 40, 60, 90]
+    const tuning = create(UpgradeTuningSchema, { costs, stepsX10: costs.map((_, i) => (i < 5 ? 200 : 100)) })
+    const back = fromBinary(UpgradeTuningSchema, toBinary(UpgradeTuningSchema, tuning))
+    expect(back.costs).toEqual(costs)
+    expect(back.stepsX10).toHaveLength(10)
+    const withTuning = create(SimTuningSchema, { tickRate: 60, upgrade: tuning })
+    const backT = fromBinary(SimTuningSchema, toBinary(SimTuningSchema, withTuning))
+    expect(backT.upgrade?.costs).toEqual(costs)
+    const legacy = fromBinary(SimTuningSchema, toBinary(SimTuningSchema, create(SimTuningSchema, { tickRate: 60 })))
+    expect(legacy.upgrade).toBeUndefined()
+  })
+})
+
 // ---- 回放 JSONL schema（X-6）：权威枚举与 .proto 源互拍 ----
 // Go 侧断言：server/internal/sim/log_schema_test.go TestReplaySchemaPinnedToProto。
 // 改 protocol/proto/omb.proto 忘跑 pnpm --filter @omb/protocol gen 时，
