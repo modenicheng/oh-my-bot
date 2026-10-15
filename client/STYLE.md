@@ -28,7 +28,7 @@
 | `neon-lime` | `#a3e635` | 成功 / 上行 |
 | `health` | `#b9d985` | 常态生命条 / 搭档指示（低饱和） |
 | `neon-red` | `#ff5c5c` | 危险 / 受击 |
-| `neon-amber` | `#fbbf24` | 警告；能量条统一使用 cyan |
+| `neon-amber` | `#fbbf24` | 警告；技能点/成长（菱形语义形状，ADR-0016）；能量条统一使用 cyan |
 
 ## 形状
 

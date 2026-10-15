@@ -68,13 +68,14 @@ TTK 验算（持续火力无盾）：基线 2.8s；攻5→基础 1.8s；攻5→�
 
 ## 实施清单
 
-- [ ] 批1 协议：UpgradeRequest（ClientMsg case 14，观战拒绝）、UpgradeSelf（SelfState 12）、RobotState max_hp_x10/max_energy_x10（12/13）、PointDropState（SnapshotDelta 16/17）、EvPointDropSpawn(37)/EvPointDropPickup(38)、SimTuning.UpgradeTuning（costs/steps_x10 各 50 项 track-major）；buf generate + 双侧 golden。
-- [ ] 批2 sim：upgrade.go（成本/步长/UpgradePointsFor/UpgradeState/赏金计算）、Robot.Upg 进 Checkpoint、派生访问器 + SimulationVersion 4→5、BuyUpgrade 排队（ControlRecord 落回放）、core 拾取奖励、PointDrop 实体 + Kill 路径赏金分支；单测全变体 + 回放确定性。
-- [ ] 批2 mapgen：外/中环 pad 配额保底 ≥TA（n≤49 不变）+ golden 断点更新。
-- [ ] 批3 传输：encoder robotStamp 纳入 maxHp/maxEnergy、SelfInput 增 upgrade、point_drops AOI/tombstone；glue Session.BuyUpgrade + handleUpstream case + 观战拒绝清单；全链路测试。
-- [ ] 批4 客户端：skill-point/speed 图标、ink+feedback 增 amber #fbbf24、tuning FALLBACK、world 合并、HUD 点数计数器+赏金标+五行升级条（10 段 pip）、Digit1-5 路由、drawPointDrop 晶片渲染、拾取/击碎飘字、drawVitals 分母参数化；vitest。
-- [ ] 批5 文档：game_design v0.4 增补节、CONTEXT.md 术语（技能点/点数晶片/赏金状态）、TODO.md 台账、help 面板与玩家手册、STYLE.md amber 语义色。
-- [ ] 收尾：go test ./... + pnpm test 全绿；200 人压测复验（omb-load：tick p95、stepCores 碰撞增量、AOI 带宽；超预算则照墙索引先例为拾取判定加空间索引）。
+- [x] 批1 协议：UpgradeRequest（ClientMsg case 14，观战拒绝）、UpgradeSelf（SelfState 12）、RobotState max_hp_x10/max_energy_x10（12/13）、PointDropState（SnapshotDelta 16/17）、EvPointDropSpawn(37)/EvPointDropPickup(38)、SimTuning.UpgradeTuning（costs/steps_x10 各 50 项 track-major）；buf generate + 双侧 golden。
+- [x] 批2 sim：upgrade.go（成本/步长/UpgradePointsFor/UpgradeState/赏金计算）、Robot.Upg 进 Checkpoint、派生访问器 + SimulationVersion 4→5、BuyUpgrade 排队（ControlRecord 落回放）、core 拾取奖励、PointDrop 实体 + Kill 路径赏金分支；单测全变体 + 回放确定性。
+- [x] 批2 mapgen：外/中环 pad 配额保底 ≥TA（n≤49 不变）+ golden 断点更新。
+- [x] 批3 传输：encoder robotStamp 纳入 maxHp/maxEnergy、SelfInput 增 upgrade、point_drops AOI/tombstone；glue Session.BuyUpgrade + handleUpstream case + 观战拒绝清单；全链路测试。
+- [x] 批4 客户端：skill-point/speed 图标、ink+feedback 增 amber #fbbf24、tuning FALLBACK、world 合并、HUD 点数计数器+赏金标+五行升级条（10 段 pip）、Digit1-5 路由、drawPointDrop 晶片渲染、拾取/击碎飘字、drawVitals 分母参数化；vitest。
+- [x] 批5 文档：game_design v0.4 增补节、CONTEXT.md 术语（技能点/点数晶片/赏金状态）、TODO.md 台账、help 面板与玩家手册、STYLE.md amber 语义色。
+- [x] 收尾：go test ./... + pnpm test 全绿（服务端含 race；客户端 590 用例）
+- [ ] 200 人压测复验（见 TODO 跟进项）（omb-load：tick p95、stepCores 碰撞增量、AOI 带宽；超预算则照墙索引先例为拾取判定加空间索引）。
 
 ## v1 明确不做
 
