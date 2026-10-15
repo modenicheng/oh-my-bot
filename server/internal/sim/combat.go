@@ -21,7 +21,7 @@ func (s *Sim) prepareCombat() {
 			}
 			continue
 		}
-		r.Energy = math.Min(MaxEnergy, r.Energy+EnergyRegen*DT)
+		r.Energy = math.Min(s.maxEnergyOf(r), r.Energy+EnergyRegen*DT)
 		c.ShieldOn = in.Shield && r.Energy+collisionEpsilon >= ShieldDrain*DT
 		if c.ShieldOn {
 			r.Energy = math.Max(0, r.Energy-ShieldDrain*DT)
@@ -168,7 +168,7 @@ func (s *Sim) stepProjectiles() {
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_ProjectileImpact{ProjectileImpact: &ombv1.EvProjectileImpact{
 				Projectile: p.ID, Owner: p.Owner, Color: s.robots[owner].Color, Target: v.ID, At: &ombv1.Vec2{X: p.Pos.X, Y: p.Pos.Y},
 				Shield: v.Combat.ShieldOn, Invulnerable: v.Combat.Invulnerable}}})
-			s.damage(p.Owner, v, s.shotDamage())
+			s.damage(p.Owner, v, s.shotDamageOf(&s.robots[owner]))
 			continue
 		}
 		if blocked || p.Distance >= ProjectileRange-collisionEpsilon {
@@ -191,7 +191,7 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 		return
 	}
 	if r.Combat.ShieldOn {
-		amount *= ShieldDamageScale
+		amount *= s.shieldScaleOf(r)
 	}
 	amount = math.Min(amount, r.HP)
 	r.HP = math.Max(0, r.HP-amount)
@@ -231,6 +231,9 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 	r.Control = ControlState{Assist: r.Control.Assist}
 	r.Combat.ShieldOn, r.Combat.DashUntil, r.Combat.RespawnAt = false, 0, s.tick+RespawnDelay
 	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Kill{Kill: &ombv1.EvKill{Killer: attacker, Victim: r.ID, Assists: assists, KillSteal: killSteal, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}}}})
+	// 赏金惩罚（ADR-0016）：任一轨 ≥4 的阵亡者散落自由点数（不足基准 50% 时
+	// 连带掉 1 级）。死因不影响（kill 事件之后、同 tick 内确定性执行）。
+	s.applyBountyPenalty(r)
 }
 
 func (s *Sim) respawnRobot(r *Robot) {
@@ -240,10 +243,12 @@ func (s *Sim) respawnRobot(r *Robot) {
 			pos = next
 		}
 	}
-	r.Position, r.Velocity, r.HP, r.Energy = pos, Vec2{}, MaxHP, MaxEnergy
+	// 复活按当前升级后的上限满状态；等级/点数跨死亡保留（赏金惩罚除外）。
+	r.Position, r.Velocity, r.HP, r.Energy = pos, Vec2{}, s.maxHPOf(r), s.maxEnergyOf(r)
 	r.State, r.Heading, r.RespawnPending = Alive, 0, false
 	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false
-	r.Control = ControlState{Assist: r.Control.Assist}
+	// 排队中的升级购买跨越复活 tick 保留（本 tick 内随即消费）。
+	r.Control = ControlState{Assist: r.Control.Assist, PendingUpgrades: r.Control.PendingUpgrades}
 	// Personal station cooldowns survive death; combat cooldowns and controls do
 	// not. The 4s protection timer starts only after a new effective operation.
 	r.Combat = CombatState{Invulnerable: true, SayReady: r.Combat.SayReady}

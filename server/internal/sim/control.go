@@ -26,6 +26,9 @@ type ControlRecord struct {
 	Toggles      uint32          `json:"toggles,omitempty"`
 	Respawn      bool            `json:"respawn,omitempty"`
 	Say          string          `json:"say,omitempty"`
+	// Upgrades 记录本 tick 待消费的升级购买（轨号 1–5，按序逐次校验/扣点）；
+	// 上限 MaxUpgradeBuysPerTick（S-29 同思路防回放空转）。
+	Upgrades []uint8 `json:"upgrades,omitempty"`
 }
 type controlRecord struct {
 	RobotID uint32
@@ -242,8 +245,8 @@ func (s *Sim) consumeInputs() {
 	for i := range s.robots {
 		r := &s.robots[i]
 		c := &r.Control
-		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" {
-			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay}})
+		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" || len(c.PendingUpgrades) != 0 {
+			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay, Upgrades: append([]uint8(nil), c.PendingUpgrades...)}})
 		}
 		// Log even an input discarded by a same-tick respawn: its sequence guard
 		// has already advanced and must be reproducible from the replay stream.
@@ -261,6 +264,14 @@ func (s *Sim) consumeInputs() {
 				setAxes(&c.Human, ArbitratedInput{Move: Vec2{float64(r.Input.MoveX) / 1000, float64(r.Input.MoveY) / 1000}, Aim: r.Input.Aim, Fire: r.Input.Fire, Dash: r.Input.Dash, Shield: r.Input.Shield, Interact: r.Input.Interact}, r.Input.AxisMask)
 				s.operated(r, r.Input.AxisMask != 0)
 			}
+		}
+		// 升级购买在死亡分支之前消费：死亡期间同样可以加点（复活按新上限）。
+		// 不算「操作」——不破除复活无敌。
+		if len(c.PendingUpgrades) != 0 && s.simulationVersion >= 5 {
+			for _, track := range c.PendingUpgrades {
+				s.applyUpgrade(r, int(track))
+			}
+			c.PendingUpgrades = nil
 		}
 		if r.State == Dead {
 			r.Control = ControlState{Assist: c.Assist}

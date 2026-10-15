@@ -61,14 +61,22 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d", robot.ID)
 		}
 		// 装配入口与运行时物理共同维护的不变量（S-28）：位置永不进墙、
-		// gen>=2 时必在竞技场圆盘内，HP 始终落在 [0, MaxHP]。合法 checkpoint
-		// 不会违反；违反者只能来自被篡改/手工编辑的日志——例如卡墙位置会造
-		// 出 slideRobot 接触清速、sweepWall t=0 推不动、traceSolid 先挡射线
-		// 的不可交互机器人。
+		// gen>=2 时必在竞技场圆盘内，HP 始终落在 [0, 当前升级上限]。合法
+		// checkpoint 不会违反；违反者只能来自被篡改/手工编辑的日志——例如
+		// 卡墙位置会造出 slideRobot 接触清速、sweepWall t=0 推不动、
+		// traceSolid 先挡射线的不可交互机器人。
 		if !checkpointPositionValid(cp, robot.Position) {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d position", robot.ID)
 		}
-		if robot.HP < 0 || robot.HP > MaxHP {
+		if robot.Upg.Points < 0 {
+			return nil, fmt.Errorf("sim: invalid checkpoint robot %d upgrade points", robot.ID)
+		}
+		for _, level := range robot.Upg.Levels {
+			if level > UpgradeMaxLevel {
+				return nil, fmt.Errorf("sim: invalid checkpoint robot %d upgrade level", robot.ID)
+			}
+		}
+		if robot.HP < 0 || robot.HP > maxHPFor(cp.SimulationVersion, &robot.Upg) {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d hp", robot.ID)
 		}
 		known[robot.ID], ids[i] = true, robot.ID
@@ -134,6 +142,18 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	} else if len(cp.Cores) != 0 || len(cp.HealthPacks) != 0 || len(cp.Uplinks) != 0 {
 		return nil, fmt.Errorf("sim: objectives require checkpoint map")
 	}
+	// 散落晶片（v5+）：位置/寿命/数值不变式，防手工编辑日志造出永久晶片；
+	// ID 必须来自当时的实体分配器（< NextProjectile），否则可能与后续弹丸撞号。
+	dropIDs := make(map[uint32]bool, len(cp.PointDrops))
+	for _, d := range cp.PointDrops {
+		if d.ID == 0 || d.ID >= cp.NextProjectile || dropIDs[d.ID] || d.Points <= 0 || d.GoneAt <= cp.Tick || !checkpointPositionValid(cp, d.Pos) {
+			return nil, fmt.Errorf("sim: invalid checkpoint point drop %d", d.ID)
+		}
+		dropIDs[d.ID] = true
+	}
+	if len(cp.PointDrops) != 0 && cp.Map == nil {
+		return nil, fmt.Errorf("sim: point drops require checkpoint map")
+	}
 	s := NewSim(cp.Seed, ids, sink)
 	s.simulationVersion = cp.SimulationVersion
 	s.tick, s.phase, s.ended = cp.Tick, cp.Phase, cp.Ended
@@ -143,6 +163,7 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	s.rebuildWallIndex()
 	s.rng, s.nextProjectile = cp.RNG, cp.NextProjectile
 	s.projectiles, s.cores, s.healthPacks, s.uplinks = cp.Projectiles, cp.Cores, cp.HealthPacks, cp.Uplinks
+	s.pointDrops = append([]PointDrop{}, cp.PointDrops...)
 	s.publishView()
 	return s, nil
 }
@@ -291,6 +312,7 @@ func (s *Sim) applyReplayRecord(record LogRecord) error {
 		r.Control.ToggleCount = c.Toggles
 		r.RespawnPending = c.Respawn
 		r.Control.PendingSay = c.Say
+		r.Control.PendingUpgrades = append([]uint8(nil), c.Upgrades...)
 	}
 	return nil
 }

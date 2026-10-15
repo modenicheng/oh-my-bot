@@ -472,6 +472,16 @@ func validateRecord(r diskRecord) error {
 		if r.Control.Toggles > MaxControlToggles {
 			return fmt.Errorf("sim: control toggles %d exceed %d", r.Control.Toggles, MaxControlToggles)
 		}
+		// 升级购买同族防回放空转：单 tick 每机器人最多 MaxUpgradeBuysPerTick 次，
+		// 且轨号必须落在 1–5（consumeInputs 逐次校验，这里先拒绝明显坏值）。
+		if len(r.Control.Upgrades) > MaxUpgradeBuysPerTick {
+			return fmt.Errorf("sim: control upgrades %d exceed %d", len(r.Control.Upgrades), MaxUpgradeBuysPerTick)
+		}
+		for _, track := range r.Control.Upgrades {
+			if track == 0 || track > UpgradeTrackCount {
+				return fmt.Errorf("sim: control upgrade track %d out of range", track)
+			}
+		}
 	case RecordTypeDiskName(RecordEvent):
 		if len(r.Event) == 0 || r.State != nil || len(r.Input) != 0 || r.RobotID != 0 || r.Tick == 0 {
 			return errors.New("sim: invalid event record")

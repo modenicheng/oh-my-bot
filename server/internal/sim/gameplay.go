@@ -88,6 +88,9 @@ type ControlState struct {
 	ScriptPending bool            `json:"script_pending"`
 	ScriptFailed  bool            `json:"script_failed"`
 	ToggleCount   uint32          `json:"toggle_count"`
+	// PendingUpgrades 排队下一 tick 消费的升级购买（ADR-0016；死亡期间同样
+	// 有效）。与 ToggleCount/PendingSay 同族：排队 API 写入、consumeInputs 消费。
+	PendingUpgrades []uint8 `json:"pending_upgrades,omitempty"`
 }
 
 type CombatState struct {

@@ -305,10 +305,11 @@ func (s *Sim) stepHealthPacks() {
 			if s.simulationVersion >= 2 {
 				reached = s.sweptReach(r.PathStart, r.Position, pack.Pos, HealthPackRadius)
 			}
-			if r.State != Alive || r.HP >= MaxHP || !reached {
+			maxHP := s.maxHPOf(r)
+			if r.State != Alive || r.HP >= maxHP || !reached {
 				continue
 			}
-			heal := math.Min(HealthPackHeal, MaxHP-r.HP)
+			heal := math.Min(HealthPackHeal, maxHP-r.HP)
 			r.HP += heal
 			pack.ReadyAt = s.tick + HealthPackCooldown
 			s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Heal{Heal: &ombv1.EvHeal{
@@ -339,6 +340,11 @@ func (s *Sim) stepCores() {
 			}
 			if r.State == Alive && reached {
 				core.Alive = false
+				if s.simulationVersion >= 5 {
+					// 技能点奖励（ADR-0016）：普通 5 / Mega 10，与计分并行的货币；
+					// pre-v5 回放不含升级状态，保持零值以复现录制 checkpoint。
+					r.Upg.Points += UpgradePointsFor(core.Value)
+				}
 				s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_CorePickup{CorePickup: &ombv1.EvCorePickup{By: r.ID, CoreId: core.ID, Value: core.Value}}})
 				break
 			}

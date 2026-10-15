@@ -117,6 +117,9 @@ type RobotView struct {
 	RespawnInS  uint32
 	InvulnS     uint32 // 无敌剩余（0=无）
 	Nick, Color string
+	// 升级后上限（ADR-0016 公开仅为头顶条分母；五维等级走 SelfState 私密）。
+	MaxHpX10     int32
+	MaxEnergyX10 int32
 }
 
 type ProjView struct {
@@ -137,6 +140,22 @@ type CoreView struct {
 	Pos   Vec2
 	Value int32
 	Alive bool
+}
+
+// PointDrop：赏金阵亡散落的技能点晶片（ADR-0016）。只给点数不给计分；
+// GoneAt 是到期 tick（stepPointDrops 到期移除，走 tombstone 下发）。
+type PointDrop struct {
+	ID     uint32 `json:"id"`
+	Pos    Vec2   `json:"pos"`
+	Points int32  `json:"points"`
+	GoneAt uint32 `json:"gone_at"`
+}
+
+// PointDropView：晶片公开状态（观察者无关，恒全量下发）。
+type PointDropView struct {
+	ID     uint32
+	Pos    Vec2
+	Points int32
 }
 
 type HealthPackView struct {

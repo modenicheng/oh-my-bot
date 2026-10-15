@@ -23,7 +23,11 @@ import (
 // 12→9, uplink hack 8s→4s) and replaces the pinned dash velocity with an
 // acceleration-limited approach, removing instantaneous speed jumps at dash
 // start/steer/release; pre-v4 replays keep the recorded constants and physics.
-const SimulationVersion = 4
+// Version 5 adds in-match upgrade growth (ADR-0016): cores award skill points,
+// five tracks derive per-robot HP/energy caps, move speed, shield scale and shot
+// damage from levels, and bounty deaths scatter PointDrop pickups. Zero levels
+// equal the v4 constants exactly; pre-v5 replays carry no upgrade records.
+const SimulationVersion = 5
 
 const (
 	TickRate                   = 60
@@ -131,6 +135,9 @@ type Robot struct {
 	// Snippet 埋点节流：与 WallHit 同粒度思路，避免 60Hz 刷屏事件。
 	LastSnippetUseTick uint32 `json:"last_snippet_use_tick"`
 	HasSnippetUse      bool   `json:"has_snippet_use"`
+	// Upg 局内升级状态（ADR-0016）：随 Robot 整体进 Checkpoint，旧日志缺省
+	// 反序列化为零值（=无升级），回放天然兼容。
+	Upg UpgradeState `json:"upg"`
 }
 
 // Checkpoint is the complete state of this stage, including static geometry,
@@ -160,6 +167,7 @@ type Checkpoint struct {
 	Cores          []CoreView   `json:"cores"`
 	HealthPacks    []HealthPack `json:"health_packs"`
 	Uplinks        []Uplink     `json:"uplinks"`
+	PointDrops     []PointDrop  `json:"point_drops"`
 }
 
 type consumedInput struct {
@@ -198,6 +206,7 @@ type Sim struct {
 	cores          []CoreView
 	healthPacks    []HealthPack
 	uplinks        []Uplink
+	pointDrops     []PointDrop
 	view           atomic.Pointer[WorldView]
 	controlEvents  []controlRecord
 }
@@ -310,7 +319,8 @@ func (s *Sim) Snapshot() Checkpoint {
 		MatchTicks: s.matchTicks, CoreOpenTick: s.coreOpenTick,
 		Robots: robots, Walls: append([]Wall{}, s.walls...), Map: cloneMap(s.mapDef), RNG: s.rng,
 		NextProjectile: s.nextProjectile, Projectiles: append([]Projectile{}, s.projectiles...),
-		Cores: append([]CoreView{}, s.cores...), HealthPacks: append([]HealthPack{}, s.healthPacks...), Uplinks: cloneUplinks(s.uplinks)}
+		Cores: append([]CoreView{}, s.cores...), HealthPacks: append([]HealthPack{}, s.healthPacks...), Uplinks: cloneUplinks(s.uplinks),
+		PointDrops: append([]PointDrop{}, s.pointDrops...)}
 }
 
 // SetSpawn configures initial/respawn positions before the match starts.
@@ -403,6 +413,7 @@ func (s *Sim) Tick() {
 	s.stepUplinks()
 	s.stepCores()
 	s.stepHealthPacks()
+	s.stepPointDrops()
 	s.publishView()
 	s.emit(initial)
 	// 终局（自然到点或提前结算）强制落最后一拍 checkpoint：结算投影与回放
@@ -426,7 +437,7 @@ func (s *Sim) moveAndCollide() {
 			continue
 		}
 		direction := r.Control.Output.Move
-		speed := MaxSpeed
+		speed := s.moveSpeedOf(r)
 		if r.Combat.ShieldOn {
 			speed *= ShieldSpeedScale
 		}

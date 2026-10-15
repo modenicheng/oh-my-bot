@@ -10,6 +10,7 @@ type WorldView struct {
 	Cores       []CoreView
 	HealthPacks []HealthPackView
 	Uplinks     []UplinkView
+	PointDrops  []PointDropView
 	Controls    map[uint32]ArbitratedInput
 	PulseScans  map[uint32]bool // active only on the successful pulse tick
 	AckSeqs     map[uint32]uint32
@@ -40,7 +41,9 @@ func cloneUplinks(src []Uplink) []Uplink {
 func (s *Sim) publishView() {
 	v := &WorldView{Frame: FrameView{Tick: s.tick, Phase: Phase(s.phase), TimeLeftS: secondsLeft(s.tick, s.matchTicks), Map: s.mapDef},
 		Robots: make([]RobotView, len(s.robots)), Projectiles: make([]ProjView, len(s.projectiles)), Cores: append([]CoreView{}, s.cores...),
-		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)), Controls: make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
+		HealthPacks: make([]HealthPackView, len(s.healthPacks)), Uplinks: make([]UplinkView, len(s.uplinks)),
+		PointDrops: make([]PointDropView, len(s.pointDrops)),
+		Controls:   make(map[uint32]ArbitratedInput), PulseScans: make(map[uint32]bool), AckSeqs: make(map[uint32]uint32)}
 	if v.Frame.Map == nil && len(s.walls) != 0 {
 		v.Frame.Map = &MapDef{Walls: s.walls}
 	}
@@ -53,7 +56,8 @@ func (s *Sim) publishView() {
 			}
 		}
 		v.Robots[i] = RobotView{ID: r.ID, Pos: r.Position, Vel: r.Velocity, Turret: r.Heading, HpX10: ToX10(r.HP), EnergyX10: ToX10(r.Energy),
-			ShieldOn: r.Combat.ShieldOn, Dashing: r.Combat.DashUntil > s.tick, Dead: r.State == Dead, RespawnInS: secondsLeft(s.tick, r.Combat.RespawnAt), InvulnS: invuln, Nick: r.Nick, Color: r.Color}
+			ShieldOn: r.Combat.ShieldOn, Dashing: r.Combat.DashUntil > s.tick, Dead: r.State == Dead, RespawnInS: secondsLeft(s.tick, r.Combat.RespawnAt), InvulnS: invuln, Nick: r.Nick, Color: r.Color,
+			MaxHpX10: ToX10(s.maxHPOf(&r)), MaxEnergyX10: ToX10(s.maxEnergyOf(&r))}
 		v.Controls[r.ID] = r.Control.Output
 		v.AckSeqs[r.ID] = r.ConsumedSeq
 		if r.Combat.PulseTick == s.tick && s.tick != 0 && r.State != Dead {
@@ -68,6 +72,9 @@ func (s *Sim) publishView() {
 	}
 	for i, pack := range s.healthPacks {
 		v.HealthPacks[i] = HealthPackView{ID: pack.ID, Pos: pack.Pos, Available: pack.ReadyAt <= s.tick, RespawnInS: secondsLeft(s.tick, pack.ReadyAt)}
+	}
+	for i, d := range s.pointDrops {
+		v.PointDrops[i] = PointDropView{ID: d.ID, Pos: d.Pos, Points: d.Points}
 	}
 	for i, u := range s.uplinks {
 		cds := make(map[uint32]uint32, len(u.ReadyAt))
@@ -116,6 +123,7 @@ func (s *Sim) WorldView() WorldView {
 	out.Cores = append([]CoreView{}, src.Cores...)
 	out.HealthPacks = append([]HealthPackView{}, src.HealthPacks...)
 	out.Uplinks = cloneUplinkViews(src.Uplinks)
+	out.PointDrops = append([]PointDropView{}, src.PointDrops...)
 	out.Controls = make(map[uint32]ArbitratedInput, len(src.Controls))
 	for id, c := range src.Controls {
 		out.Controls[id] = c
