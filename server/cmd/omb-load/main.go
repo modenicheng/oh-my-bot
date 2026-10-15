@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,8 +27,10 @@ import (
 )
 
 const (
-	frameUp   byte = 2
-	frameDown byte = 3
+	frameUp    byte = 2
+	frameDown  byte = 3
+	framePing  byte = 0x00
+	framePong  byte = 0x01
 )
 
 // 每连接的典型脚本（与 glue 性能门同型：scan→aim→fire→move）。
@@ -54,6 +58,8 @@ type connStats struct {
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:27182", "omb HTTP 地址")
+	url := flag.String("url", "", "完整 WS 基址（含 scheme，如 wss://omb.example.com）；留空则用 -addr 拼 ws://")
+	dialAddr := flag.String("dialaddr", "", "覆盖 TCP 拨号目标 host:port；TLS SNI/HTTP Host 仍用 -url 域名。用于 v4/v6 路径对照")
 	room := flag.String("room", "LOAD", "房间码")
 	n := flag.Int("n", 64, "玩家连接数")
 	scriptFrac := flag.Float64("scripts", 0, "提交脚本的玩家比例 [0,1]")
@@ -61,9 +67,20 @@ func main() {
 	inputHz := flag.Float64("input", 30, "每连接上行输入频率 Hz")
 	flag.Parse()
 
-	log.Printf("load: addr=%s room=%s n=%d scripts=%.0f%% duration=%s input=%.0fHz",
-		*addr, *room, *n, *scriptFrac*100, *duration, *inputHz)
-	fetchStats(*addr, "start")
+	// -url 用于经反代的公网入口：stats 接口与 WS 同域，scheme 换成 http(s) 即可。
+	wsBase, statsBase := "ws://"+*addr, "http://"+*addr
+	if *url != "" {
+		wsBase = strings.TrimSuffix(*url, "/")
+		if strings.HasPrefix(wsBase, "wss://") {
+			statsBase = "https://" + strings.TrimPrefix(wsBase, "wss://")
+		} else {
+			statsBase = "http://" + strings.TrimPrefix(wsBase, "ws://")
+		}
+	}
+
+	log.Printf("load: ws=%s room=%s n=%d scripts=%.0f%% duration=%s input=%.0fHz",
+		wsBase, *room, *n, *scriptFrac*100, *duration, *inputHz)
+	fetchStats(statsBase, "start")
 
 	var stats []*connStats
 	var wg sync.WaitGroup
@@ -78,7 +95,7 @@ func main() {
 		withScript := i < int(*scriptFrac*float64(*n))
 		go func(idx int, st *connStats, withScript bool) {
 			defer wg.Done()
-			runClient(ctx, *addr, *room, idx, withScript, *inputHz, st)
+			runClient(ctx, wsBase, *dialAddr, *room, idx, withScript, *inputHz, st)
 		}(i, st, withScript)
 	}
 
@@ -93,21 +110,40 @@ func main() {
 			goto report
 		case <-ticker.C:
 			log.Printf("t+%.0fs: %s", time.Since(start).Seconds(), aggregate(stats, time.Since(start)))
-			fetchStats(*addr, "live")
+			fetchStats(statsBase, "live")
 		}
 	}
 report:
 	elapsed := time.Since(start)
 	log.Printf("done in %s: %s", elapsed, aggregate(stats, elapsed))
-	fetchStats(*addr, "end")
+	fetchStats(statsBase, "end")
 }
 
-func runClient(ctx context.Context, addr, room string, idx int, withScript bool, inputHz float64, st *connStats) {
-	c, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws", nil)
+// connected 记录成功建立 WS 的连接数（公网入口下个别拨号可能失败）。
+var connected atomic.Uint64
+
+func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, withScript bool, inputHz float64, st *connStats) {
+	// 单连接握手限时：200 并发过公网时个别超时不该拖住整个进程的统计周期。
+	dialCtx, cancelDial := context.WithTimeout(ctx, 15*time.Second)
+	var opts *websocket.DialOptions
+	if dialAddr != "" {
+		// 只改写 TCP 拨号目标；TLS SNI 与 HTTP Host 仍取 URL 域名，证书校验不变。
+		opts = &websocket.DialOptions{HTTPClient: &http.Client{Transport: &http.Transport{
+			DialContext: func(c context.Context, network, addr string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(c, "tcp", dialAddr)
+			},
+		}}}
+	}
+	c, _, err := websocket.Dial(dialCtx, wsBase+"/ws", opts)
+	cancelDial()
 	if err != nil {
 		log.Printf("client %d: dial: %v", idx, err)
 		return
 	}
+	connected.Add(1)
+	connStart := time.Now()
+	// coder/websocket 的 Write 非并发安全：读循环回 pong 与输入/warmup 写并发，统一串行化。
+	var wmu sync.Mutex
 	defer func() { _ = c.CloseNow() }()
 	c.SetReadLimit(1 << 20)
 
@@ -116,6 +152,8 @@ func runClient(ctx context.Context, addr, room string, idx int, withScript bool,
 		if err != nil {
 			return
 		}
+		wmu.Lock()
+		defer wmu.Unlock()
 		wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		_ = c.Write(wctx, websocket.MessageBinary, append([]byte{frameUp}, body...))
@@ -149,10 +187,20 @@ func runClient(ctx context.Context, addr, room string, idx int, withScript bool,
 		for {
 			_, data, err := c.Read(ctx)
 			if err != nil {
+				// 退出原因：CloseError=对端优雅关闭（服务端主动），EOF/RST=路径或本机异常
+				log.Printf("client %d: read end (age %s): %v", idx, time.Since(connStart).Round(time.Second), err)
 				return
 			}
 			st.frames.Add(1)
 			st.bytes.Add(uint64(len(data)))
+			if len(data) > 0 && data[0] == framePing {
+				// 按协议回 pong（载荷回显时间戳）；服务端虽不强制，保持客户端语义完整。
+				wmu.Lock()
+				wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				_ = c.Write(wctx, websocket.MessageBinary, append([]byte{framePong}, data[1:]...))
+				cancel()
+				wmu.Unlock()
+			}
 			if len(data) == 0 || data[0] != frameDown {
 				continue
 			}
@@ -204,12 +252,12 @@ func aggregate(stats []*connStats, elapsed time.Duration) string {
 		snaps += s.snapshots.Load()
 	}
 	mbps := float64(bytes) / elapsed.Seconds() / 1e6
-	return fmt.Sprintf("conns=%d frames=%d snapshots=%d gaps=%d down=%.1f Mbps",
-		len(stats), frames, snaps, gaps, mbps)
+	return fmt.Sprintf("dialed=%d connected=%d frames=%d snapshots=%d gaps=%d down=%.1f Mbps",
+		len(stats), connected.Load(), frames, snaps, gaps, mbps)
 }
 
-func fetchStats(addr, phase string) {
-	resp, err := http.Get(fmt.Sprintf("http://%s/api/stats", addr))
+func fetchStats(base, phase string) {
+	resp, err := http.Get(base + "/api/stats")
 	if err != nil {
 		log.Printf("stats[%s]: %v", phase, err)
 		return
