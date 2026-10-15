@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 8 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 9 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -227,10 +227,14 @@ func TestTopologyInvariants(t *testing.T) {
 
 func TestCoreSupplyScalesWithParticipants(t *testing.T) {
 	cases := []struct{ players, period, target int }{
-		{1, 1200, 4}, {5, 900, 6}, {12, 720, 10}, {24, 600, 16}, {40, 480, 24}, {50, 480, 28},
+		{1, 1200, 4}, {5, 900, 6}, {12, 720, 10}, {24, 600, 16}, {40, 480, 24}, {50, 480, 29},
 	}
 	for _, tc := range cases {
-		period, target := coreSupply(tc.players, 16, 12)
+		padsOuter, padsMid := 16, 12
+		if tc.players >= 50 {
+			padsOuter = 18 // v9 TA 保底：n≥50 的外环配额被抬高（50 人档 16→18）
+		}
+		period, target := coreSupply(tc.players, padsOuter, padsMid)
 		if period != tc.period || target != tc.target {
 			t.Fatalf("players %d: period/target = %d/%d, want %d/%d", tc.players, period, target, tc.period, tc.target)
 		}
@@ -242,13 +246,19 @@ func TestCoreSupplyScalesWithParticipants(t *testing.T) {
 			t.Fatalf("players %d map rules = %+v", tc.players, def.CoreRules)
 		}
 	}
+	// v9 TA 保底：n=49 仍是「只有供给规则随人数变」的几何冻结上界；
+	// n=50 起 pad 配额被保底抬高（18+12=30），TA=29 不再被 pad 总数封顶。
 	one, _ := GenerateForPlayers(42, 1)
-	fifty, _ := GenerateForPlayers(42, 50)
-	if one.MapHash == fifty.MapHash {
+	fortyNine, _ := GenerateForPlayers(42, 49)
+	if one.MapHash == fortyNine.MapHash {
 		t.Fatal("participant-scaled rules must be part of the authoritative map hash")
 	}
-	if !reflect.DeepEqual(one.Walls, fifty.Walls) || !reflect.DeepEqual(one.CorePads, fifty.CorePads) {
+	if !reflect.DeepEqual(one.Walls, fortyNine.Walls) || !reflect.DeepEqual(one.CorePads, fortyNine.CorePads) {
 		t.Fatal("participant count changed deterministic geometry instead of only supply rules")
+	}
+	fifty, _ := GenerateForPlayers(42, 50)
+	if len(fifty.CorePads) != 18+12+6 {
+		t.Fatalf("n=50 pads = %d, want 36 (TA floor active)", len(fifty.CorePads))
 	}
 	ids := make([]uint32, 50)
 	for i := range ids {
@@ -265,8 +275,8 @@ func TestCoreSupplyScalesWithParticipants(t *testing.T) {
 			alive++
 		}
 	}
-	if alive != 28 {
-		t.Fatalf("50-player first wave has %d live cores, want 28", alive)
+	if alive != 29 {
+		t.Fatalf("50-player first wave has %d live cores, want 29", alive)
 	}
 }
 
@@ -619,13 +629,13 @@ func TestLargeRoomLayoutBreakpoints(t *testing.T) {
 		n, uplinks, pads, packs int
 	}{
 		{1, 6, 34, 4},
-		{64, 6, 34, 4},
-		{65, 6, 34, 4}, // 65 人：scale>1 但 pad 面积配额四舍五入后未过阈值
-		{96, 8, 52, 8}, // s²=1.5：24+18+10
-		{100, 8, 56, 8},
-		{150, 8, 80, 8},
-		{200, 8, 108, 12},
-		{256, 8, 136, 12},
+		{64, 6, 42, 4},    // v9：TA=36 → 外24+中12+心6（差额全补外环）
+		{65, 6, 42, 4},    // 同 64：TA 仍是 36
+		{96, 8, 62, 8},    // TA=52 → 外34+中18+心10
+		{100, 8, 64, 8},   // TA=54 → 外34+中20+心10
+		{150, 8, 94, 8},   // TA=79 → 外52+中28+心14
+		{200, 8, 124, 12}, // TA=104 → 外66+中38+心20
+		{256, 8, 156, 12}, // TA=132 → 外84+中48+心24
 	} {
 		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
 			def, err := GenerateForPlayers(42, tc.n)
@@ -667,22 +677,23 @@ func TestLargeRoomLayoutBreakpoints(t *testing.T) {
 	}
 }
 
-// TestGeometryStableBelowCapacityFloor：n≤64 骨架冻结——同 seed 下 1 人与
-// 64 人产出除 CoreRules（供给曲线）外完全一致的几何。这是"小房不变"的
-// 回归锚：任何波及小图布局的改动都会在此失败。
+// TestGeometryStableBelowCapacityFloor：n≤49 骨架冻结——同 seed 下 1 人与
+// 49 人产出除 CoreRules（供给曲线）外完全一致的几何。这是"小房不变"的
+// 回归锚：任何波及小图布局的改动都会在此失败。（v8 时代上界是 64；v9 起
+// pad 配额 TA 保底从 n=50 生效，冻结上界前移到 49。）
 func TestGeometryStableBelowCapacityFloor(t *testing.T) {
 	one, err := GenerateForPlayers(42, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	full, err := GenerateForPlayers(42, 64)
+	full, err := GenerateForPlayers(42, 49)
 	if err != nil {
 		t.Fatal(err)
 	}
 	one.CoreRules, full.CoreRules = sim.CoreRulesDef{}, sim.CoreRulesDef{}
 	one.MapHash, full.MapHash = "", ""
 	if !reflect.DeepEqual(one, full) {
-		t.Fatal("n=1 and n=64 maps diverge outside CoreRules; capacity-floor geometry is not frozen")
+		t.Fatal("n=1 and n=49 maps diverge outside CoreRules; capacity-floor geometry is not frozen")
 	}
 }
 

@@ -78,8 +78,6 @@ func layoutFor(participants int) layout {
 		uplinkRLo:   40 * s,
 		uplinkRHi:   45 * s,
 		uplinkPairs: uplinkNormSteps / 2,
-		padOuterN:   evenPadCount(16, s),
-		padMidN:     evenPadCount(12, s),
 		padCenterN:  evenPadCount(6, s),
 		packRadii:   []float64{43 * s},
 	}
@@ -90,12 +88,31 @@ func layoutFor(participants int) layout {
 	if participants >= packWidestN {
 		l.packRadii = append(l.packRadii, 69*s)
 	}
+	// padTargetFloor（v9）：外/中环 pad 配额保底 ≥ TargetAlive（4+n/2）。
+	// 面积配额 28/64×n 在 n≥50 后低于 TA，coreSupply 的封顶（=外+中 pad 数）
+	// 会咬住，把大房人均 core 上限压到 ~26——升级点数经济随之枯竭。差额全部
+	// 补到外环（周长最长、双径向轨道交错角距宽裕）；中环保留面积配额不动，
+	// 贴中环 Pad 带的追加掩体层（extraCoverCells 30–49m）不因此加密。n≤49
+	// 配额已达 TA，几何与 v8 逐点一致。
+	l.padOuterN = evenPadCount(16, s)
+	l.padMidN = evenPadCount(12, s)
+	if ta := 4 + participants/2; l.padOuterN+l.padMidN < ta {
+		l.padOuterN = evenPadQuota(float64(l.padOuterN)+float64(ta-l.padOuterN-l.padMidN), 16)
+		if l.padOuterN+l.padMidN < ta { // 取整偶化后仍不足：成对补外环
+			l.padOuterN += 2
+		}
+	}
 	return l
 }
 
 // evenPadCount 面积配额取整并偶数化（Pad 以对径对放置，奇数会丢一只）。
 func evenPadCount(base int, s float64) int {
-	n := int(math.Round(float64(base) * s * s))
+	return evenPadQuota(float64(base)*s*s, base)
+}
+
+// evenPadQuota 对（可能被保底加成过的）配额取整并偶数化，下界为基数。
+func evenPadQuota(quota float64, base int) int {
+	n := int(math.Round(quota))
 	if n < base {
 		n = base
 	}
@@ -187,7 +204,10 @@ func (l layout) coverCells() []coverCell {
 
 // GeneratorVer 是 mapgen 算法版本；布局算法任何变更必须递增。
 // 8：人数自适应骨架（场地/资源随 participants 缩放，MapDef.ArenaRadius 进图）。
-const GeneratorVer = 8
+// 9：外/中环 pad 配额保底 ≥ TargetAlive——升级玩法（ADR-0016）的点数经济
+//
+//	在大房不被 pad 面积配额封顶；n≤49 配额已达 TA，几何与 v8 完全一致。
+const GeneratorVer = 9
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (
