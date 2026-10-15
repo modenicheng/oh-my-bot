@@ -2,7 +2,8 @@
 // resolveTuning 的旧服务器回退、world/HUD 派生量（无敌窗口/黑入满值）换算。
 import { describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
-import { SimTuningSchema } from '@omb/protocol'
+import { SimTuningSchema, UpgradeTuningSchema } from '@omb/protocol'
+import { FALLBACK_UPGRADE_COSTS, FALLBACK_UPGRADE_STEPS } from './tuning'
 import { FALLBACK_TUNING, FALLBACK_TUNING_HEX, invulnWindowMs, hackMaxX10, resolveTuning } from './tuning'
 import { emptyWorld, applySnapshot } from './world'
 import { SnapshotDeltaSchema, RobotStateSchema, EntityBaseSchema } from '@omb/protocol'
@@ -10,7 +11,7 @@ import { SnapshotDeltaSchema, RobotStateSchema, EntityBaseSchema } from '@omb/pr
 // 与 server/internal/glue/simtuning_notice_test.go TestSimTuningGoldenBytes 同一 hex
 // （即 server sim.TickRate=60 / MaxHP=MaxEnergy=100 / FireCost=5 / HackDuration=240 /
 //  InvulnDuration=240 / VisionRadius=20 的编码）。两侧任一改值即失败。
-const SERVER_GOLDEN = '083c10d00f18d00f21000000000000144028f00130f001390000000000003440'
+const SERVER_GOLDEN = '083c10d00f18d00f21000000000000144028f00130f00139000000000000344042770a32020305080c121b283c5a020305080c121b283c5a020305080c121b283c5a020305080c121b283c5a020305080c121b283c5a1241c801c801c801c801c80164646464640404040404020202020232323232320a0a0a0a0a0a0a0a0a0a0505050505fa01fa01fa01fa01fa0196019601960196019601'
 
 describe('SimTuning 兜底值（X-3）', () => {
   it('FALLBACK_TUNING 黄金字节与 Go 侧 simTuning() 一致', () => {
@@ -41,12 +42,20 @@ describe('resolveTuning 旧服务器回退（X-3）', () => {
     expect(partial.visionRadius).toBe(FALLBACK_TUNING.visionRadius)
   })
 
-  it('完整下发值原样通过', () => {
+  it('完整下发值原样通过（含升级曲线）', () => {
     const wire = create(SimTuningSchema, {
       tickRate: 60, maxHpX10: 800, maxEnergyX10: 1200, fireCost: 8,
       hackDurationTicks: 300, invulnDurationTicks: 120, visionRadius: 25,
+      upgrade: create(UpgradeTuningSchema, { costs: [...FALLBACK_UPGRADE_COSTS], stepsX10: [...FALLBACK_UPGRADE_STEPS] }),
     })
     expect(resolveTuning(wire)).toEqual(wire)
+    // 旧服务器缺 upgrade：回退兜底曲线（升级 UI 判定显隐的依据）。
+    const legacy = create(SimTuningSchema, {
+      tickRate: 60, maxHpX10: 800, maxEnergyX10: 1200, fireCost: 8,
+      hackDurationTicks: 300, invulnDurationTicks: 120, visionRadius: 25,
+    })
+    const resolved = resolveTuning(legacy)
+    expect(resolved.upgrade).toEqual(FALLBACK_TUNING.upgrade)
   })
 })
 

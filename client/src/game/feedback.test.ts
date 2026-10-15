@@ -205,7 +205,7 @@ describe('confirmed feedback transitions', () => {
     const ev = create(ServerEventSchema, { tick: 11, kind: { case: 'corePickup', value: { by: 1, coreId: 9020, value: 10 } } })
     f.feedback.event(ev, f.world, map, true); f.feedback.event(ev, f.world, map, true)
     expect(sound.play).toHaveBeenCalledExactlyOnceWith('corePickup')
-    expect(f.message).toHaveBeenCalledExactlyOnceWith('拾取 Core · +10 分')
+    expect(f.message).toHaveBeenCalledExactlyOnceWith('拾取 Core · +10 分 · +5 技能点')
     f.world.robots.clear()
     f.feedback.event(create(ServerEventSchema, { tick: 12, kind: { case: 'corePickup', value: { by: 1, coreId: 9021, value: 10 } } }), f.world, map, true)
     expect(cueCount('corePickup')).toBe(2)

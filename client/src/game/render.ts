@@ -4,7 +4,7 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
+import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawPointDrop, drawUplink, drawProjectile, drawVitals, visibleWorld } from './art'
 import { appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
 const VISION_FEATHER = 3.5
@@ -72,6 +72,10 @@ export class Renderer {
       const p = core.base?.pos
       if (p) drawCore(ctx, cam, p.x, p.y, core.value >= 25, world.tick)
     }
+    for (const drop of world.pointDrops.values()) {
+      const p = drop.base?.pos
+      if (p) drawPointDrop(ctx, cam, p.x, p.y, drop.points, world.tick)
+    }
     for (const def of map.healthPacks) {
       const state = world.healthPacks.get(def.id)
       drawHealthPack(ctx, cam, def.pos.x, def.pos.y, state?.available ?? true, state?.respawnInS ?? 0, world.tick)
@@ -101,7 +105,10 @@ export class Renderer {
       const delayedHp = extras.feedback
         ? (stats.delayedHealthReads++, extras.feedback.delayedHealth(b.id, r.hpX10, now))
         : r.hpX10 / 10
-      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable, delayedHp)
+      // 头顶条分母走 per-robot 上限（ADR-0016）；缺失（旧服务器）回退 100。
+      const maxHp = r.maxHpX10 ? r.maxHpX10 / 10 : 100
+      const maxEn = r.maxEnergyX10 ? r.maxEnergyX10 / 10 : 100
+      drawVitals(ctx, cam, b.pos.x, b.pos.y, r.hpX10 / 10, r.energyX10 / 10, r.nick, self, r.shieldOn || invulnerable, delayedHp, maxHp, maxEn)
     }
     // Dim the rendered world itself; HUD feedback and speech stay above the fog.
     this.drawVisionMask(world, map, cam)

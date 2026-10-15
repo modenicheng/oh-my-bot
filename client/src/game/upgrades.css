@@ -1,0 +1,147 @@
+/* 升级面板（ADR-0016）：hud-left 顶部的自身成长簇。像素纪律：radius 0、
+   1px 描边、荧光仅 amber 微光（同屏主色仍 cyan+lime）。 */
+.hud-upgrades {
+  margin: -14px -18px 12px;
+  padding: 8px 10px 9px;
+  background: #0a121cd8;
+  border-bottom: 1px solid #29414f;
+  border-left: 2px solid #b8860b66;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hud-up-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.hud-up-points {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #fbbf24;
+  font-family: var(--pixel);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.hud-up-points .pixel-icon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 4px #fbbf2440);
+}
+
+.hud-upgrades[data-pop] .hud-up-points {
+  animation: hud-up-pop 180ms steps(3);
+}
+
+@keyframes hud-up-pop {
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-upgrades[data-pop] .hud-up-points { animation: none; }
+}
+
+.hud-up-bounty {
+  font: 11px var(--mono);
+  color: #fbbf24;
+  border: 1px solid #b8860b88;
+  padding: 1px 5px;
+  letter-spacing: .2em;
+}
+
+.hud-up-row {
+  display: grid;
+  grid-template-columns: auto 18px 34px 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  font: 12px var(--mono);
+  color: var(--fg);
+  cursor: pointer;
+  pointer-events: auto;
+  text-align: left;
+}
+
+.hud-up-row kbd {
+  font: 10px var(--mono);
+  border: 1px solid #476171;
+  padding: 0 4px;
+  margin-left: 0;
+  color: var(--fg-dim);
+}
+
+.hud-up-row[data-state="buy"] kbd { color: #fbbf24; border-color: #b8860b66; }
+
+.hud-up-icon { color: var(--fg); display: inline-flex; }
+.hud-up-icon .pixel-icon { width: 16px; height: 16px; }
+
+.hud-up-name {
+  color: var(--fg-dim);
+  letter-spacing: .2em;
+  white-space: nowrap;
+}
+
+.hud-up-pips {
+  display: inline-flex;
+  gap: 2px;
+  justify-content: flex-end;
+}
+
+.hud-up-pips i {
+  width: 7px;
+  height: 8px;
+  background: #263441;
+  border: 1px solid #31424f;
+}
+
+.hud-up-pips i.on {
+  background: #fbbf24;
+  border-color: #d99e0b;
+}
+
+/* L6+ 为「减半档」：后半 pip 用描边填充区分（信息而非纯装饰）。 */
+.hud-up-pips i.on:nth-child(n + 6) {
+  background: #0a121c;
+  border-color: #fbbf24;
+}
+
+.hud-up-delta {
+  color: var(--fg-dim);
+  font-size: 11px;
+  min-width: 42px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hud-up-row[data-state="buy"] .hud-up-delta { color: var(--fg); }
+.hud-up-row[data-state="max"] .hud-up-delta { color: #fbbf24; }
+
+.hud-up-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fbbf24;
+  min-width: 34px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.hud-up-cost .pixel-icon { width: 11px; height: 11px; }
+
+.hud-up-row[data-state="wait"] { opacity: .45; cursor: default; }
+
+.hud-up-row[data-state="buy"]:hover,
+.hud-up-row[data-state="buy"]:focus-visible {
+  border-left-color: #fbbf24;
+  background: #fbbf240d;
+  outline: none;
+}

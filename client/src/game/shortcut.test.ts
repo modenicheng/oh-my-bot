@@ -2,7 +2,7 @@
 // R 夺回炮塔轴（辅助脚本正在瞄准时鼠标不抢轴）。
 // 修饰键/输入法/焦点守卫在 main.ts 全局 keydown 先行过滤，不属本纯函数职责。
 import { describe, expect, it } from 'vitest'
-import { battleKeyAction } from './shortcut'
+import { battleKeyAction, upgradeTrackKey } from './shortcut'
 
 describe('battleKeyAction', () => {
   it('Space 与小键盘 Enter 都映射为辅助总开关', () => {
@@ -22,5 +22,20 @@ describe('battleKeyAction', () => {
     expect(battleKeyAction('KeyW')).toBeUndefined()
     expect(battleKeyAction('Escape')).toBeUndefined()
     expect(battleKeyAction('')).toBeUndefined()
+  })
+})
+
+describe('upgradeTrackKey（ADR-0016 升级购买键）', () => {
+  it('Digit/Numpad 1–5 映射为对应轨', () => {
+    expect(upgradeTrackKey('Digit1')).toBe(1)
+    expect(upgradeTrackKey('Digit5')).toBe(5)
+    expect(upgradeTrackKey('Numpad3')).toBe(3)
+  })
+
+  it('6–0 与其他按键不拦截', () => {
+    expect(upgradeTrackKey('Digit6')).toBeUndefined()
+    expect(upgradeTrackKey('Digit0')).toBeUndefined()
+    expect(upgradeTrackKey('KeyW')).toBeUndefined()
+    expect(upgradeTrackKey('')).toBeUndefined()
   })
 })

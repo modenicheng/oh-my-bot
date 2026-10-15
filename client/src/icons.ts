@@ -32,6 +32,9 @@ const paths = {
   uplink: 'M5 1h6v5H5ZM3 3h1v3H3ZM12 3h1v3h-1ZM7 6h2v7H7ZM4 13h8v2H4Z',
   sound: 'M2 5h3v6H2ZM5 3h2v10H5ZM9 6h1v4H9ZM11 4h1v8h-1Z',
   soundOff: 'M2 5h3v6H2ZM5 3h2v10H5ZM10 6h1v1h-1ZM14 6h1v1h-1ZM11 7h1v1h-1ZM13 7h1v1h-1ZM12 8h1v1h-1ZM11 9h1v1h-1ZM13 9h1v1h-1ZM10 10h1v1h-1ZM14 10h1v1h-1Z',
+  // 升级玩法（ADR-0016）：菱形=技能点；双箭头=移速轨。
+  skillPoint: 'M8 1h1v1h1v1h1v1h1v1h1v1h1v1h1v1h1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1ZM8 4h1v1h1v1h1v1h1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h-1v-1h-1v-1h-1v-1h-1Z',
+  speed: 'M1 3h2v2h2v2h2v2H5v2H3v2H1ZM7 3h2v2h2v2h2v2h-2v2H9v2H7Z',
 } as const
 export type IconName = keyof typeof paths
 

@@ -2,6 +2,7 @@
 // - Space：驾驶辅助总开关（三分支，权威在服务器）。
 // - NumpadEnter：Space 的无冲突备用（普通 Enter 保留给全场发言）。
 // - R：炮塔轴人工夺取（瞄准 guard 生效时鼠标不再抢炮塔轴，R 是显式入口）。
+// - Digit/Numpad 1–5：购买对应升级轨（ADR-0016；拒绝=服务器静默，UI 以快照为准）。
 // 修饰键/输入法/焦点守卫由调用方（main.ts 全局 keydown）先行过滤。
 
 export type BattleKeyAction = 'assist' | 'chat' | 'aim'
@@ -12,4 +13,10 @@ export function battleKeyAction(code: string): BattleKeyAction | undefined {
   if (code === 'Enter') return 'chat'
   if (code === 'KeyR') return 'aim'
   return undefined
+}
+
+/** 战场画布获焦时的升级购买键（1–5）；其余按键返回 undefined（不拦截）。 */
+export function upgradeTrackKey(code: string): number | undefined {
+  const m = /^(?:Digit|Numpad)([1-5])$/.exec(code)
+  return m ? Number(m[1]) : undefined
 }

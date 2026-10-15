@@ -11,7 +11,7 @@ import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
 import { Workbench } from './workbench/workbench'
-import { battleKeyAction } from './game/shortcut'
+import { battleKeyAction, upgradeTrackKey } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra, type JoinProfile } from './route'
 import { consumeTokenFromURL, fetchAuthEnabled, validClaims, clearToken, isAuthRejection } from './auth'
@@ -523,6 +523,10 @@ window.addEventListener('keydown', (e) => {
     if (action === 'assist') { e.preventDefault(); game.toggleAssist() }
     else if (action === 'chat') { e.preventDefault(); game.openChat() }
     else if (action === 'aim') { e.preventDefault(); game.seizeAim() }
+    else {
+      const track = upgradeTrackKey(e.code)
+      if (track) { e.preventDefault(); game.buyUpgrade(track) }
+    }
   }
 })
 

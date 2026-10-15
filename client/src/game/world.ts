@@ -3,7 +3,7 @@
 import {
   ResyncRequestSchema, ClientMsgSchema,
   type ServerMsg, type SnapshotDelta, type SelfState,
-  type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState, type SimTuning,
+  type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState, type SimTuning, type PointDropState,
 } from '@omb/protocol'
 import { create } from '@bufbuild/protobuf'
 import { encodeClient } from '@omb/protocol'
@@ -21,6 +21,7 @@ export interface ProjEnt extends ProjectileState { seenAt: number }
 export interface CoreEnt extends CoreState { seenAt: number }
 export interface UplinkEnt extends UplinkState { seenAt: number }
 export interface HealthPackEnt extends HealthPackState { seenAt: number }
+export interface PointDropEnt extends PointDropState { seenAt: number }
 
 export interface WorldState {
   tick: number
@@ -33,6 +34,8 @@ export interface WorldState {
   cores: Map<number, CoreEnt>
   healthPacks: Map<number, HealthPackEnt>
   uplinks: Map<number, UplinkEnt>
+  /** 技能点晶片（ADR-0016）：公共对象，恒全量列表 + tombstone 删除 */
+  pointDrops: Map<number, PointDropEnt>
   /** 最近 ack 的 input seq（服务器确认到哪） */
   ackSeq: number
   /** 服务器下发的对局数值（X-3）；未收到 bootstrap 时为兜底值（旧服务器） */
@@ -42,7 +45,7 @@ export interface WorldState {
 export function emptyWorld(): WorldState {
   return {
     tick: 0, initialized: false, phase: 0, timeLeftS: 0,
-    robots: new Map(), projectiles: new Map(), cores: new Map(), healthPacks: new Map(), uplinks: new Map(),
+    robots: new Map(), projectiles: new Map(), cores: new Map(), healthPacks: new Map(), uplinks: new Map(), pointDrops: new Map(),
     ackSeq: 0,
     tuning: FALLBACK_TUNING,
   }
@@ -65,6 +68,7 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     world.cores.clear()
     world.healthPacks.clear()
     world.uplinks.clear()
+    world.pointDrops.clear()
   }
 
   world.initialized = true
@@ -136,6 +140,15 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     ent.seenAt = now
     world.healthPacks.set(id, ent)
   }
+
+  for (const drop of snap.pointDrops) {
+    const id = drop.base?.id ?? 0
+    const ent = world.pointDrops.get(id) ?? ({} as PointDropEnt)
+    Object.assign(ent, drop)
+    ent.seenAt = now
+    world.pointDrops.set(id, ent)
+  }
+  for (const id of snap.pointDropGone) world.pointDrops.delete(id)
 
   return 'applied'
 }

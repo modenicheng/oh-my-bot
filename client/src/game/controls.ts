@@ -2,7 +2,7 @@
 // main.ts 在收到 mapBootstrap 事件时调用 enterGame()，收到房间回到大厅信号时调用 exitGame()。
 import { create } from '@bufbuild/protobuf'
 import {
-  AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema,
+  AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema, UpgradeRequestSchema,
   type ServerMsg, type EvMatchEnd, type SimTuning,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
@@ -15,6 +15,7 @@ import { Renderer, type RenderExtras, type SayBubble } from './render'
 import { InputSampler, AXIS_AIM } from './input'
 import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
+import { UpgradePanel } from './upgrades'
 import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
@@ -32,6 +33,9 @@ export interface GameDeps {
   onExitToRoom?: () => void
 }
 
+/** 升级轨展示名（下标与协议 levels 一致；反馈文案专用）。 */
+const UPGRADE_TRACK_NAMES = ['机体', '移速', '盾量', '攻击', '能量'] as const
+
 export class GameController {
   private world = emptyWorld()
   private map: MapDefParsed | null = null
@@ -39,6 +43,8 @@ export class GameController {
   private renderer: Renderer
   private input = new InputSampler()
   private hud: Hud
+  private upgrades: UpgradePanel
+  private lastUpgradeLevels: number[] = []
   private feedback: GameFeedback
   private bubbles: SayBubble[] = []
   /** 渲染循环每帧复用的 extras 容器，避免每帧对象字面量分配。 */
@@ -108,6 +114,10 @@ export class GameController {
     // true 期间逐帧重绘，全静默时仅脏标记重绘（快照到达/resize/DPR 即时出画）。
     this.stage = new CanvasStage(deps.canvas, { draw: () => this.drawFrame(), onResize: () => this.resizeCanvas() })
     this.hud = new Hud(deps.hudRoot)
+    this.upgrades = new UpgradePanel(deps.hudRoot, {
+      buy: track => this.buyUpgrade(track),
+      returnFocus: () => deps.canvas.focus({ preventScroll: true }),
+    })
     this.feedback = new GameFeedback(
       (text, kind, source) => this.hud.flashMsg(text, kind, source),
       () => this.hud.showInnerRing(),
@@ -168,6 +178,7 @@ export class GameController {
     this.input.detach()
     this.feedback.reset()
     this.hud.dispose()
+    this.upgrades.dispose()
     this.closeChat(false)
     this.chat.removeEventListener('submit', this.submitChat)
     this.chat.removeEventListener('keydown', this.chatKey)
@@ -268,6 +279,30 @@ export class GameController {
       default:
         break
     }
+  }
+
+  /** 购买升级（ADR-0016）：低频事件直投；点数不足/满级由服务器静默拒绝。 */
+  buyUpgrade(track: number): void {
+    if (!this.active || this.ended) return
+    this.send(encodeClient(create(ClientMsgSchema, {
+      payload: { case: 'upgradeRequest', value: create(UpgradeRequestSchema, { track }) },
+    })))
+  }
+
+  /** 升级成功反馈：等级较上一帧增长时提示轨名与到达级（服务器权威，非乐观）。 */
+  private flashUpgradeGains(): void {
+    const levels = this.world.self?.upgrade?.levels ?? []
+    if (levels.length === 0) { this.lastUpgradeLevels = []; return }
+    if (this.lastUpgradeLevels.length === levels.length) {
+      for (let i = 0; i < levels.length; i++) {
+        const prev = this.lastUpgradeLevels[i] ?? 0
+        const now = levels[i] ?? 0
+        if (now > prev) {
+          this.hud.flashMsg(`${UPGRADE_TRACK_NAMES[i] ?? '升级'} Lv${now}`, 'status')
+        }
+      }
+    }
+    this.lastUpgradeLevels = [...levels]
   }
 
   /** 离开游戏或断线时释放控制，不影响服务端模拟。 */
@@ -468,6 +503,8 @@ export class GameController {
     this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     this.extras.feedback = this.feedback
     this.renderer.render(this.world, this.map, this.cam, this.extras)
+    this.upgrades.update(this.world)
+    this.flashUpgradeGains()
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable,
       self ? this.feedback.delayedHealth(selfId, self.hpX10) : undefined)
     this.feedback.ambience(this.world, this.map, this.active && !this.ended)

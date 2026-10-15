@@ -133,9 +133,12 @@ export class Hud {
     const tuning = world.tuning
     this.leftPanel.classList.toggle('dead', !!self?.dead)
     if (self) {
-      const hp = clamp01(self.hpX10 / tuning.maxHpX10)
-      const delayed = clamp01((delayedHp ?? self.hpX10 / 10) / (tuning.maxHpX10 / 10))
-      const en = clamp01(self.energyX10 / tuning.maxEnergyX10)
+      // 分母优先 per-robot 上限（ADR-0016 头条），缺失（旧服务器）回退 tuning。
+      const maxHpX10 = self.maxHpX10 ?? tuning.maxHpX10
+      const maxEnX10 = self.maxEnergyX10 ?? tuning.maxEnergyX10
+      const hp = clamp01(self.hpX10 / maxHpX10)
+      const delayed = clamp01((delayedHp ?? self.hpX10 / 10) / (maxHpX10 / 10))
+      const en = clamp01(self.energyX10 / maxEnX10)
       // scaleX 走合成器路径（app.css transition 同步为 transform），width 每帧触发 layout。
       if (hp !== this.lastHp) { this.lastHp = hp; this.hpFill.style.transform = `scaleX(${hp})` }
       if (delayed !== this.lastHpDelay) { this.lastHpDelay = delayed; this.hpDelay.style.transform = `scaleX(${delayed})` }

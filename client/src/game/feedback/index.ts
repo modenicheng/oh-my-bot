@@ -9,7 +9,7 @@ import { type MapDefParsed, type MapUplink, type MapVec2 } from '../mapdef'
 import { hackMaxX10 } from '../tuning'
 import type { WorldState } from '../world'
 import type { KillFeedSource } from '../kill-feed'
-import { cyan, green, red, white } from './constants'
+import { amber, cyan, green, red, white } from './constants'
 import { CameraFeel } from './camera-feel'
 import { Effects, EFFECT_MS } from './effects'
 import { Trails } from './trails'
@@ -194,6 +194,23 @@ export class GameFeedback {
         }
         if (k.value.target === selfId && !k.value.invulnerable) this.message(k.value.shield ? '护盾吸收命中' : '机体受击')
         break
+      case 'pointDropSpawn': {
+        // 赏金阵亡散落：本人得到明确的损失反馈；他人在散落点看到 amber 提示。
+        if (k.value.fromRobot === selfId) {
+          this.message(k.value.levelLost ? '赏金阵亡 · 掉落 1 级与全部自由点数' : '赏金阵亡 · 散落全部自由点数')
+        } else if (k.value.at) {
+          this.fx.add('pickup', k.value.at, amber, 4_000_000 + k.value.fromRobot, EFFECT_MS.corePickup)
+        }
+        break
+      }
+      case 'pointDropPickup': {
+        const own = k.value.by === selfId
+        const p = world.pointDrops.get(k.value.dropId)?.base?.pos ?? world.robots.get(k.value.by)?.base?.pos
+        if (p) this.fx.add('pickup', p, amber, k.value.dropId, EFFECT_MS.corePickup)
+        if (own) { audio.play('corePickup'); this.message(`拾取技能点晶片 · +${k.value.points}`) }
+        else if (p) this.sound('corePickup', p, world)
+        break
+      }
       case 'wallHit':
         if (!world.robots.has(k.value.robot)) break
         if (k.value.at && k.value.impact >= WALL_HIT_MIN_IMPACT) {
@@ -207,7 +224,7 @@ export class GameFeedback {
           ?? world.robots.get(k.value.by)?.base?.pos
         if (p) this.fx.add('pickup', p, green, k.value.coreId, EFFECT_MS.corePickup)
         // A delta can remove the core before its pickup event, including all position data for self.
-        if (own) { audio.play('corePickup'); this.message(`拾取 Core · +${k.value.value} 分`) }
+        if (own) { audio.play('corePickup'); this.message(`拾取 Core · +${k.value.value} 分 · +${k.value.value >= 25 ? 10 : 5} 技能点`) }
         else if (p) this.sound('corePickup', p, world)
         break
       }

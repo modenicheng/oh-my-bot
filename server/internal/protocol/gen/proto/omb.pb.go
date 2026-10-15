@@ -4539,7 +4539,7 @@ func (x *EvMapBootstrap) GetTuning() *SimTuning {
 // 数组均 50 项 track-major：下标 = track*10 + levelIdx，track 顺序 hp/speed/shield/
 // attack/energy，levelIdx 0–9 对应买 L1..L10。steps 的单位按轨文档化：
 // hp/attack/energy ×10（200=+20 HP / 10=+1.0 伤 / 250=+25 能量）、speed ×10 m/s
-// （4=+0.4）、shield ×1000 承伤系数（−50=−0.05，负值=减伤增强）。
+// （4=+0.4）、shield ×1000 承伤减量（50=承伤系数 −0.05，即减伤 +5%）。
 type UpgradeTuning struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Costs         []int32                `protobuf:"varint,1,rep,packed,name=costs,proto3" json:"costs,omitempty"`                       // 每级购入成本（正整数点数）

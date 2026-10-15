@@ -5,6 +5,8 @@ import type { MapDefParsed } from './mapdef'
 export const ink = {
   bg: '#070d14', floor: '#101b25', panel: '#182735', line: '#29414f',
   text: '#d8e5eb', dim: '#8b9fab', cyan: '#22d3ee', lime: '#b9d985', danger: '#ff756d', white: '#f4fbff',
+  // 技能点/成长语义色（ADR-0016），与 CSS --amber 同值。
+  amber: '#fbbf24',
 } as const
 export const mono = '"Fusion Pixel", ui-monospace, monospace'
 const FONT_10 = `10px ${mono}`
@@ -249,6 +251,32 @@ export function drawCore(ctx: CanvasRenderingContext2D, cam: Camera, wx: number,
   ctx.restore()
 }
 
+// drawPointDrop：技能点晶片（ADR-0016）——amber 菱形本体 + 数值角标。
+// 菱形与 HUD 计数器同一语义形状（icons.skillPoint 的画布近亲），带轻微
+// 浮动（reduced-motion 关）与落地阴影。
+export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, points: number, tick = 0): void {
+  const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(9, 0.85 * cam.scale)
+  if (!visible(cam, x, y)) return
+  const bob = motion.matches ? 0 : Math.sin(tick / 20 + wx) * Math.min(2, cam.scale * 0.05)
+  ctx.save()
+  ctx.fillStyle = '#02091090'
+  ctx.beginPath(); ctx.ellipse(x, y + size * 0.5, size * 0.34, size * 0.12, 0, 0, tau); ctx.fill()
+  const cy = y + bob
+  ctx.globalAlpha = 0.25; ctx.fillStyle = ink.amber
+  ctx.fillRect(x - size * 0.5, cy - size * 0.5, size, size)
+  ctx.globalAlpha = 1; ctx.fillStyle = ink.amber
+  ctx.beginPath()
+  ctx.moveTo(x, cy - size * 0.5); ctx.lineTo(x + size * 0.5, cy); ctx.lineTo(x, cy + size * 0.5); ctx.lineTo(x - size * 0.5, cy)
+  ctx.closePath(); ctx.fill()
+  ctx.fillStyle = '#070d14'
+  ctx.beginPath()
+  ctx.moveTo(x, cy - size * 0.24); ctx.lineTo(x + size * 0.24, cy); ctx.lineTo(x, cy + size * 0.24); ctx.lineTo(x - size * 0.24, cy)
+  ctx.closePath(); ctx.fill()
+  ctx.fillStyle = ink.amber; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+  ctx.fillText(`${points}`, x, cy + size * 0.55)
+  ctx.restore()
+}
+
 export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, available: boolean, respawnInS: number, tick = 0): void {
   // 0.95 m sprite: clearly bigger than a core (0.8 m) but smaller than a
   // robot (1.2 m), matching the 1.15 m pickup reach of HealthPackRadius.
@@ -364,19 +392,19 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   ctx.fillStyle = ink.text; ctx.fillRect(-3, -1, 4, 2); ctx.restore()
 }
 
-export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false, delayedHp = hp): void {
+export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, hp: number, energy: number, nick: string, selected: boolean, shield = false, delayedHp = hp, maxHp = 100, maxEnergy = 100): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), r = Math.max(6, 0.6 * cam.scale)
   if (!visible(cam, x, y)) return
   const clearance = shield ? r * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : r
   const w = Math.max(24, r * 2.5), by = y - clearance - 12
   ctx.save(); ctx.fillStyle = '#060c12'; ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 8)
-  const actualRatio = Math.min(1, Math.max(0, hp / 100))
-  const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / 100))
+  const actualRatio = Math.min(1, Math.max(0, hp / maxHp))
+  const delayedRatio = Math.min(1, Math.max(actualRatio, delayedHp / maxHp))
   if (delayedRatio > actualRatio) {
     ctx.fillStyle = '#ffb066'; ctx.fillRect(x - w / 2 + w * actualRatio, by, w * (delayedRatio - actualRatio), 3)
   }
   ctx.fillStyle = hp > 25 ? '#8cff66' : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
-  ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / 100)), 2)
+  ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / maxEnergy)), 2)
   ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()
 }

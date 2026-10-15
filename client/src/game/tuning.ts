@@ -6,7 +6,22 @@
 // 兜底值与 DEFAULT_TUNING.goldenHex 由 server/internal/glue 的 SimTuning golden
 // 测试互钉（两侧断言同一 hex），服务器调数值而不改协议时漂移即刻暴露。
 import { create, toBinary } from '@bufbuild/protobuf'
-import { SimTuningSchema, type SimTuning } from '@omb/protocol'
+import { SimTuningSchema, UpgradeTuningSchema, type SimTuning } from '@omb/protocol'
+
+/** 升级曲线兜底（ADR-0016）：与 sim.UpgradeCosts/UpgradeStepsX10 同值。
+ *  track-major：hp/speed/shield/attack/energy 各 10 级；L6–10 效益减半；
+ *  单位按轨——hp/attack/energy ×10、speed ×10 m/s、shield ×1000 承伤减量。 */
+export const FALLBACK_UPGRADE_COSTS: readonly number[] = Object.freeze(
+  new Array(5).fill([2, 3, 5, 8, 12, 18, 27, 40, 60, 90]).flat())
+const trackSteps = (full: number, half: number): number[] =>
+  [...new Array(5).fill(full), ...new Array(5).fill(half)]
+export const FALLBACK_UPGRADE_STEPS: readonly number[] = Object.freeze([
+  ...trackSteps(200, 100),   // hp ×10
+  ...trackSteps(4, 2),       // speed ×10 m/s
+  ...trackSteps(50, 10),     // shield ×1000 承伤减量
+  ...trackSteps(10, 5),      // attack ×10
+  ...trackSteps(250, 150),   // energy ×10
+])
 
 /** 兜底值 = 当前服务器常量的快照（仅旧服务器/旧录像路径使用）。 */
 export const FALLBACK_TUNING: Readonly<SimTuning> = Object.freeze(create(SimTuningSchema, {
@@ -17,6 +32,7 @@ export const FALLBACK_TUNING: Readonly<SimTuning> = Object.freeze(create(SimTuni
   hackDurationTicks: 240,
   invulnDurationTicks: 240,
   visionRadius: 20,
+  upgrade: create(UpgradeTuningSchema, { costs: [...FALLBACK_UPGRADE_COSTS], stepsX10: [...FALLBACK_UPGRADE_STEPS] }),
 }))
 
 /** 字节 → 小写 hex（测试用；不依赖 Node Buffer，客户端包是浏览器环境）。 */
@@ -40,6 +56,8 @@ export function resolveTuning(wire: SimTuning | undefined): Readonly<SimTuning> 
     hackDurationTicks: wire.hackDurationTicks || FALLBACK_TUNING.hackDurationTicks,
     invulnDurationTicks: wire.invulnDurationTicks || FALLBACK_TUNING.invulnDurationTicks,
     visionRadius: wire.visionRadius || FALLBACK_TUNING.visionRadius,
+    // 缺失（旧服务器）回退兜底曲线；升级 UI 以此判定显隐。
+    upgrade: wire.upgrade ?? FALLBACK_TUNING.upgrade,
   }))
 }
 
