@@ -269,7 +269,7 @@ export class Renderer {
         else { ctx.moveTo(cx, cy); pen = true }
       }
       ctx.fillStyle = map.partial ? 'rgb(5, 9, 14)' : SHADOW_FILL
-      ctx.fill()
+      ctx.fill('evenodd')
       ctx.restore()
     }
 
