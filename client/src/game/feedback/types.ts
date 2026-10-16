@@ -1,7 +1,7 @@
 import type { MapVec2 } from '../mapdef'
 
-/** HUD/kill-feed 消息类别（hud.ts BANNER_ICON 消费）。 */
-export type FeedbackKind = 'status' | 'kill' | 'uplink'
+/** HUD 消息类别（hud.ts BANNER_ICON 消费）。 */
+export type FeedbackKind = 'status' | 'uplink'
 
 /** 瞬态特效类别；draw 侧按 Record<EffectKind, DrawFn> 注册表分发。 */
 export type EffectKind = 'shot' | 'impact' | 'spawn' | 'pickup' | 'heal' | 'uplink' | 'splash' | 'dash' | 'death'

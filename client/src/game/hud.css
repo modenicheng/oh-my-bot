@@ -17,6 +17,9 @@
 @media (prefers-reduced-motion: reduce) { .hud-death, .hud-death * { animation: none !important; transition: none !important; } }
 
 /* Event panels share the HP/EN anchor; the opening gate belongs to the game stage. */
+.hud-comms { position: absolute; inset: auto auto calc(100% + 12px) -2px; width: calc(100% + 2px); display: grid; gap: 6px; pointer-events: none; }
+/* Keep transient status messages clear of the chat form while typing. */
+#hud:has(#game-chat:not([hidden])) .hud-comms { visibility: hidden; }
 #hud-left > .hud-comms > #hud-msg {
   --event-color: #8b98a9;
   position: relative;

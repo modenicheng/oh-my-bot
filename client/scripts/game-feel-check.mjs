@@ -1,5 +1,4 @@
 import { startClient } from './startup-helpers.mjs'
-import { killFeedFloodPass } from './kill-feed-check.mjs'
 import { sleep, until, startStaticServer, gen2MapJson, FixtureServer, frame } from './harness.mjs'
 // game-feel-check.mjs — focused browser regression for ongoing game-feel UI.
 //
@@ -956,15 +955,14 @@ async function bannerPass(browser, fix, reduced = false) {
     await until(async () => await page.evaluate(() => performance.now() - window.__sayPaint.at > 200), 'speech expires without duplicate refresh', 2200)
 
     const kill = fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } })
+    sound = await audioStarted(page)
     fix.bcast(kill)
-    await until(async () => /击毁/.test(await page.locator('.kill-feed').textContent()), 'kill communications rail')
+    await until(async () => await audioStarted(page) > sound, 'kill feedback still plays')
+    assert.equal(await page.locator('.kill-feed').count(), 0, 'kill notifications are removed')
     assert.notEqual(await page.locator('#hud-msg').getAttribute('data-kind'), 'kill')
-    assert.equal(await page.locator('.kill-feed').getAttribute('aria-live'), 'off')
+    assert.doesNotMatch(await hudMsgText(page), /击毁/)
     assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'remote defeat never shakes the local camera')
-    await sleep(120) // one micro-batch animation, not one animation per kill
-    const banner = await page.locator('.kill-feed').boundingBox(), hp = await page.locator('#hud-left').boundingBox()
-    assert.ok(banner.y + banner.height <= hp.y - 8 && Math.abs(banner.x - hp.x) < 2, 'communications rail anchored above HP/EN')
-    await shot(page, reduced ? '13-kill-reduced.png' : '11-kill-banner.png')
+    await shot(page, reduced ? '13-no-kill-reduced.png' : '11-game-without-kill-feed.png')
     sound = await audioStarted(page)
     fix.bcast(kill); await sleep(70)
     assert.equal(await audioStarted(page), sound, 'duplicate kill is silent')
@@ -1000,7 +998,11 @@ async function bannerPass(browser, fix, reduced = false) {
     await sleep(100)
     assert.equal(await page.evaluate(() => window.__cameraShakes.length), 0, 'successful hacking never moves the camera')
     await shot(page, reduced ? '14-uplink-reduced.png' : '12-uplink-banner.png')
-    await killFeedFloodPass(page, fix, { reduced, shots: SHOTS })
+    const status = await hudMsgText(page)
+    for (let i = 0; i < 1000; i++) fix.bcast(fix.event('kill', EvKillSchema, { killer: 1000 + i % 64, victim: 1000 + Math.floor(i / 64) }))
+    await sleep(200)
+    assert.equal(await page.locator('.kill-feed').count(), 0, 'kill flood creates no notification DOM')
+    assert.equal(await hudMsgText(page), status, 'kill flood leaves the uplink message intact')
 
     await page.locator('#game-canvas').focus()
     await page.keyboard.press('c')
@@ -1057,10 +1059,12 @@ async function bannerPass(browser, fix, reduced = false) {
     await page.setViewportSize({ width: 480, height: 820 })
     await page.locator('#workbench-close').click()
     await fix.step(st => { st.timeLeftS = 1 })
+    sound = await audioStarted(page)
     fix.bcast(fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: { x: 20, y: 0 } }))
-    await until(async () => /击毁/.test(await page.locator('.kill-feed').textContent()), 'narrow kill rail')
+    await until(async () => await audioStarted(page) > sound, 'narrow kill feedback still plays')
+    assert.equal(await page.locator('.kill-feed').count(), 0, 'narrow viewport has no kill notifications')
     await assertNoHudOverlap(page, 'narrow-event-banner')
-    if (!reduced) await shot(page, '19-kill-narrow.png')
+    if (!reduced) await shot(page, '19-no-kill-narrow.png')
     assert.deepEqual(errors, [], 'event and countdown pass has no page errors')
   } finally { await ctx.close() }
 }

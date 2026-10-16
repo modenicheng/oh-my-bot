@@ -119,7 +119,7 @@ export class GameController {
       returnFocus: () => deps.canvas.focus({ preventScroll: true }),
     })
     this.feedback = new GameFeedback(
-      (text, kind, source) => this.hud.flashMsg(text, kind, source),
+      (text, kind) => this.hud.flashMsg(text, kind),
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )
