@@ -328,7 +328,12 @@ message EvMatchStart { uint64 map_seed = 1; uint32 players = 2; } // 开局：�
 message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/robot 节流（铁头娃埋点）
 message EvScriptError { uint32 robot = 1; string error = 2; uint32 script_rev = 3; } // 人工智障埋点
 message EvMatchEnd { repeated ScoreRow scores = 1; }
-message ScoreRow { uint32 robot = 1; sint32 score = 2; repeated Title titles = 3; }
+message ScoreRow {
+  uint32 robot = 1;
+  sint32 score = 2;
+  repeated Title titles = 3;
+  string nick = 4; // Global identity; opponents need not have entered the recipient's AOI.
+}
 message EvScoreboard { // 局内实时积分榜（服务器权威，约 1s 一拍；不落 Match Event Log，仅下发）
   repeated ScoreRow rows = 1;
   uint32 tick = 2;

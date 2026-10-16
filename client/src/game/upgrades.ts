@@ -5,6 +5,7 @@ import './upgrades.css'
 import { icon, type IconName } from '../icons'
 import type { WorldState } from './world'
 import type { UpgradeTuning } from '@omb/protocol'
+import { setText } from '../ui/dom'
 
 /** 轨定义：下标与协议 UpgradeSelf.levels / UpgradeTuning 数组一致。 */
 const TRACKS: readonly { icon: IconName; name: string; fmt: (step: number) => string }[] = [
@@ -39,6 +40,10 @@ export class UpgradePanel {
   private readonly deltas: readonly HTMLElement[]
   private readonly costs: readonly HTMLElement[]
   private lastPoints = -1
+  private readonly lastLevels = Array<number>(TRACKS.length).fill(-1)
+  private curve: UpgradeTuning | undefined
+  private labels: { delta: string; cost: string }[] = []
+  private popTimer: number | undefined
   private readonly reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
   constructor(hudRoot: ParentNode, deps: UpgradePanelDeps) {
@@ -116,47 +121,67 @@ export class UpgradePanel {
     else hudRoot.appendChild(this.root)
   }
 
-  /** 每帧由 GameController 驱动；SelfState.upgrade 缺失（旧服务器）时整块隐藏。 */
+  /** 快照更新时消费；曲线文案仅在 tuning 变化时预处理。 */
   update(world: WorldState): void {
     const up = world.self?.upgrade
     const curve: UpgradeTuning | undefined = world.tuning.upgrade
     if (!up || !curve || curve.costs.length < TRACKS.length * MAX_LEVEL) {
       if (!this.root.hidden) this.root.hidden = true
+      this.lastPoints = -1
+      this.lastLevels.fill(-1)
       return
     }
-    this.root.hidden = false
+    if (this.root.hidden) this.root.hidden = false
     const points = up.points ?? 0
-    const levels = up.levels.length === TRACKS.length ? up.levels : [0, 0, 0, 0, 0]
-    this.count.textContent = String(points)
+    const levels = up.levels
+    const curveChanged = curve !== this.curve
+    if (curveChanged) {
+      this.curve = curve
+      this.labels = curve.costs.map((cost, index) => ({
+        delta: TRACKS[Math.floor(index / MAX_LEVEL)]?.fmt(curve.stepsX10[index] ?? 0) ?? '',
+        cost: String(cost),
+      }))
+    }
+    if (!curveChanged && points === this.lastPoints && this.lastLevels.every((level, i) => level === (levels.length === TRACKS.length ? levels[i] : 0))) return
+    setText(this.count, String(points))
     if (points > this.lastPoints && this.lastPoints >= 0 && !this.reduced.matches) {
       this.root.dataset.pop = '1'
-      window.setTimeout(() => delete this.root.dataset.pop, 180)
+      window.clearTimeout(this.popTimer)
+      this.popTimer = window.setTimeout(() => { delete this.root.dataset.pop; this.popTimer = undefined }, 180)
     }
     this.lastPoints = points
-    this.bounty.hidden = !levels.some(l => l >= BOUNTY_LEVEL)
+    const bounty = levels.length === TRACKS.length && levels.some(l => l >= BOUNTY_LEVEL)
+    if (this.bounty.hidden === bounty) this.bounty.hidden = !bounty
     for (let t = 0; t < TRACKS.length; t++) {
-      const level = levels[t] ?? 0
+      const level = levels.length === TRACKS.length ? levels[t] ?? 0 : 0
       const idx = t * MAX_LEVEL + level
       const cells = this.pips[t]!
-      for (let l = 0; l < MAX_LEVEL; l++) cells[l]!.classList.toggle('on', l < level)
+      if (level !== this.lastLevels[t]) {
+        for (let l = 0; l < MAX_LEVEL; l++) {
+          if (cells[l]!.classList.contains('on') !== (l < level)) cells[l]!.classList.toggle('on', l < level)
+        }
+        this.lastLevels[t] = level
+      }
       const row = this.rows[t]!
       const deltaEl = this.deltas[t]!
       const costEl = this.costs[t]!
       if (level >= MAX_LEVEL) {
-        row.dataset.state = 'max'
-        deltaEl.textContent = 'MAX'
-        costEl.textContent = ''
+        if (row.dataset.state !== 'max') row.dataset.state = 'max'
+        setText(deltaEl, 'MAX')
+        setText(costEl, '')
         continue
       }
       const cost = curve.costs[idx] ?? 0
-      const step = curve.stepsX10[idx] ?? 0
-      deltaEl.textContent = TRACKS[t]!.fmt(step)
-      costEl.textContent = String(cost)
-      row.dataset.state = points >= cost ? 'buy' : 'wait'
+      const label = this.labels[idx]!
+      setText(deltaEl, label.delta)
+      setText(costEl, label.cost)
+      const state = points >= cost ? 'buy' : 'wait'
+      if (row.dataset.state !== state) row.dataset.state = state
     }
   }
 
   dispose(): void {
+    window.clearTimeout(this.popTimer)
     this.root.remove()
   }
 }

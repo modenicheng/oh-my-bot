@@ -1,19 +1,35 @@
 import { Title } from '@omb/protocol'
 import type { RobotEnt } from './world'
 import { icon } from '../icons'
+import { setText } from '../ui/dom'
 import './scoreboard.css'
 
-export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
+export interface ScoreEntry { robot: number; score: number; titles?: readonly number[]; nick?: string }
 export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number; assist?: number }
 export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; replayEvidence?: ReplayTitleEvidence }
 
 export type ScoreRowOptions = { titles?: boolean; ended?: boolean }
 
+function sameScore(a: ScoreEntry, b: ScoreEntry): boolean {
+  const titles = a.titles ?? [], previous = b.titles ?? []
+  return a.robot === b.robot && a.score === b.score && (a.nick ?? '') === (b.nick ?? '') && titles.length === previous.length
+    && titles.every((title, index) => title === previous[index])
+}
+
+function sameDisplay(a: ScoreDisplay, b: ScoreDisplay): boolean {
+  const evidence = a.replayEvidence, previous = b.replayEvidence
+  return sameScore(a, b) && a.rank === b.rank && a.nick === b.nick && a.self === b.self
+    && a.dead === b.dead && a.status === b.status
+    && (evidence === undefined || previous === undefined ? evidence === previous
+      : evidence.kill === previous.kill && evidence.hit === previous.hit && evidence.core === previous.core
+        && evidence.uplink === previous.uplink && evidence.assist === previous.assist)
+}
+
 export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
 }
 
-/** 实时榜以服务器为准；昵称可跨 AOI 缓存，但绝不从可见机器人推算分数。 */
+/** Global rows carry identity independently of AOI; old servers can use observed names. */
 export class Scoreboard {
   readonly names = new Map<number, string>()
   private rows: ScoreEntry[] = []
@@ -33,8 +49,13 @@ export class Scoreboard {
   }
   accept(rows: readonly ScoreEntry[], tick: number, final = false): void {
     if (this.final || !final && tick < this.tick) return
-    this.rows = rows.map(row => ({ robot: row.robot, score: row.score, titles: [...(row.titles ?? [])] }))
+    const changed = !this.received || final !== this.final || rows.length !== this.rows.length
+      || rows.some((row, index) => !sameScore(row, this.rows[index]!))
+    // Identical snapshots still advance freshness; they must not invalidate the HUD.
     this.tick = tick; this.final = final; this.received = true
+    if (!changed) return
+    this.rows = rows.map(row => ({ robot: row.robot, score: row.score, titles: [...(row.titles ?? [])], nick: row.nick }))
+    for (const row of rows) if (row.nick) this.names.set(row.robot, row.nick)
     this.version++; this.displayCache = null
   }
   score(robot: number): number | undefined { return this.rows.find(row => row.robot === robot)?.score }
@@ -53,7 +74,7 @@ export class Scoreboard {
     const rows = rankedScores(this.rows).map((row, i) => {
       const robot = robots.get(row.robot)
       return { ...row, rank: i + 1,
-        nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
+        nick: row.nick || this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
         dead: !!robot?.dead,
         status: (robot ? (robot.dead ? 'dead' : 'alive') : 'unknown') as 'alive' | 'dead' | 'unknown',
       }
@@ -141,12 +162,12 @@ function updateTitleBadge(award: HTMLElement, title: number, score: number, repl
   const button = award.querySelector<HTMLButtonElement>('.score-title')!
   const detail = titleDetailsByAward.get(award)
   if (!detail) return false
-  button.textContent = info.name
-  button.setAttribute('aria-label', `${info.name}称号`)
-  detail.setAttribute('aria-label', `${info.name}称号详情`)
-  detail.querySelector<HTMLElement>('.title-rule')!.textContent = info.rule
-  detail.querySelector<HTMLElement>('.title-evidence')!.textContent = info.evidence
-  detail.querySelector<HTMLElement>('.title-source')!.textContent = info.source
+  setText(button, info.name)
+  if (button.getAttribute('aria-label') !== `${info.name}称号`) button.setAttribute('aria-label', `${info.name}称号`)
+  if (detail.getAttribute('aria-label') !== `${info.name}称号详情`) detail.setAttribute('aria-label', `${info.name}称号详情`)
+  setText(detail.querySelector<HTMLElement>('.title-rule')!, info.rule)
+  setText(detail.querySelector<HTMLElement>('.title-evidence')!, info.evidence)
+  setText(detail.querySelector<HTMLElement>('.title-source')!, info.source)
   return true
 }
 
@@ -216,16 +237,20 @@ function text(className: string, value: string): HTMLSpanElement {
   const span = document.createElement('span'); span.className = className; span.textContent = value; return span
 }
 
+function toggleClass(element: HTMLElement, name: string, enabled: boolean): void {
+  if (element.classList.contains(name) !== enabled) element.classList.toggle(name, enabled)
+}
+
 function setClassState(element: HTMLElement, row: ScoreDisplay, ended: boolean): void {
-  element.classList.toggle('score-self', row.self)
-  element.classList.toggle('score-first', row.rank === 1)
-  element.classList.toggle('score-second', row.rank === 2)
-  element.classList.toggle('score-third', row.rank === 3)
+  toggleClass(element, 'score-self', row.self)
+  toggleClass(element, 'score-first', row.rank === 1)
+  toggleClass(element, 'score-second', row.rank === 2)
+  toggleClass(element, 'score-third', row.rank === 3)
   const dead = row.dead || row.status === 'dead'
-  element.classList.toggle('score-dead', dead)
-  element.dataset.rank = String(row.rank)
-  element.dataset.status = row.status ?? (dead ? 'dead' : 'unknown')
-  if (ended) element.dataset.status = 'final'
+  toggleClass(element, 'score-dead', dead)
+  const rank = String(row.rank), status = ended ? 'final' : row.status ?? (dead ? 'dead' : 'unknown')
+  if (element.dataset.rank !== rank) element.dataset.rank = rank
+  if (element.dataset.status !== status) element.dataset.status = status
 }
 
 function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRowOptions): void {
@@ -236,19 +261,21 @@ function fillScoreRow(element: HTMLElement, row: ScoreDisplay, options: ScoreRow
   const crown = rank.querySelector<SVGSVGElement>('[data-icon="crown"]')
   if (row.rank === 1 && !crown) rank.insertBefore(icon('crown'), rankNumber)
   else if (row.rank !== 1 && crown) crown.remove()
-  rankNumber.textContent = String(row.rank)
-  element.querySelector<HTMLElement>('.score-name')!.textContent = row.nick
-  element.querySelector<HTMLElement>('.score-value')!.textContent = String(row.score)
+  setText(rankNumber, String(row.rank))
+  setText(element.querySelector<HTMLElement>('.score-name')!, row.nick)
+  setText(element.querySelector<HTMLElement>('.score-value')!, String(row.score))
   const evidence = element.querySelector<HTMLElement>('.score-replay-evidence')!
   const recorded = row.replayEvidence
-  evidence.hidden = !recorded
-  evidence.textContent = recorded ? `K${recorded.kill} H${recorded.hit} C${recorded.core} U${recorded.uplink} A${recorded.assist ?? 0}` : ''
+  if (evidence.hidden !== !recorded) evidence.hidden = !recorded
+  setText(evidence, recorded ? `K${recorded.kill} H${recorded.hit} C${recorded.core} U${recorded.uplink} A${recorded.assist ?? 0}` : '')
 
   const badges = element.querySelector<HTMLElement>('.score-titles')!
-  badges.hidden = !options.titles
+  if (badges.hidden !== !options.titles) badges.hidden = !options.titles
   if (!options.titles) {
-    disposeRowTitles(element)
-    badges.replaceChildren()
+    if (badges.childNodes.length) {
+      disposeRowTitles(element)
+      badges.replaceChildren()
+    }
   } else {
     const existing = titleBadges.get(element) ?? new Map<number, HTMLElement>()
     const wanted = new Set((row.titles ?? []).filter(title => titleDetails(title, row.score, row.replayEvidence)))
@@ -289,9 +316,29 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titlesOrO
   return element
 }
 
-/** Keyed DOM renderer: updates rows in place and moves existing nodes only when order changes. */
+/** Find the rows that can stay attached while the changed order is applied. */
+function stationaryRows(positions: number[]): Set<number> {
+  const tails: number[] = [], previous = new Array<number>(positions.length).fill(-1)
+  for (let i = 0; i < positions.length; i++) {
+    if (positions[i]! < 0) continue
+    let low = 0, high = tails.length
+    while (low < high) {
+      const mid = (low + high) >>> 1
+      if (positions[tails[mid]!]! < positions[i]!) low = mid + 1
+      else high = mid
+    }
+    if (low > 0) previous[i] = tails[low - 1]!
+    tails[low] = i
+  }
+  const stable = new Set<number>()
+  for (let i = tails.at(-1) ?? -1; i >= 0; i = previous[i]!) stable.add(i)
+  return stable
+}
+
+/** Keyed DOM renderer: update leaves in place and move the fewest row nodes. */
 export class ScoreRowRenderer {
   private readonly rows = new Map<number, HTMLElement>()
+  private readonly renderedRows = new Map<number, ScoreDisplay>()
   private renderedOptions = ''
   private created = 0
   private moved = 0
@@ -303,28 +350,49 @@ export class ScoreRowRenderer {
     for (const [id, element] of this.rows) {
       if (!wanted.has(id) || element.tagName.toLowerCase() !== tag) {
         disposeRowTitles(element); element.remove(); this.rows.delete(id); this.removed++
+        this.renderedRows.delete(id)
       }
     }
     const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
+    const optionsChanged = this.renderedOptions !== key
     this.renderedOptions = key
-    values.forEach((value, index) => {
+    const elements = values.map(value => {
       let element = this.rows.get(value.robot)
+      const previous = this.renderedRows.get(value.robot)
+      const changed = optionsChanged || !previous || !sameDisplay(value, previous)
       if (!element) {
         element = scoreRow(value, tag, options)
         this.rows.set(value.robot, element)
         this.created++
-      } else fillScoreRow(element, value, options)
-      if (parent.children[index] !== element) {
-        parent.insertBefore(element, parent.children[index] ?? null)
-        this.moved++
+      } else if (changed) fillScoreRow(element, value, options)
+      if (changed) {
+        // Replay callers can mutate and reuse row objects; keep a value snapshot.
+        this.renderedRows.set(value.robot, { ...value, titles: value.titles && [...value.titles],
+          replayEvidence: value.replayEvidence && { ...value.replayEvidence } })
       }
+      return element
     })
+    const current = [...parent.children]
+    if (current.length === elements.length && current.every((element, index) => element === elements[index])) return
+    const positions = new Map(current.map((element, index) => [element, index]))
+    const stable = stationaryRows(elements.map(element => positions.get(element) ?? -1))
+    // Forward insertion moves 63 siblings when the leader falls to last place.
+    // The longest increasing subsequence stays attached to reduce accessible subtree churn.
+    for (let i = elements.length - 1; i >= 0; i--) if (!stable.has(i)) {
+      const element = elements[i]!, next = elements[i + 1] ?? null
+      // An attached row may own focus or an open title. Preserve that state on
+      // browsers supporting atomic moves; new rows still use ordinary insertion.
+      if (parent.isConnected && element.parentElement === parent && typeof parent.moveBefore === 'function') {
+        parent.moveBefore(element, next)
+      } else parent.insertBefore(element, next)
+      this.moved++
+    }
   }
   get nodeCount(): number { return this.rows.size }
   get createdCount(): number { return this.created }
   get movedCount(): number { return this.moved }
   get removedCount(): number { return this.removed }
-  clear(): void { for (const element of this.rows.values()) disposeRowTitles(element); this.rows.clear(); this.renderedOptions = '' }
+  clear(): void { for (const element of this.rows.values()) disposeRowTitles(element); this.rows.clear(); this.renderedRows.clear(); this.renderedOptions = '' }
 }
 
 export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], names: ReadonlyMap<number, string>, onBack?: () => void, self = -1): void {
@@ -340,14 +408,14 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
   const summary = document.createElement('div'); summary.className = 'end-summary'
   if (ownRank >= 0) {
     const own = ranked[ownRank]!
-    summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${names.get(self) || `robot-${self}`} · ${own.score} 分`))
+    summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${own.nick || names.get(self) || `robot-${self}`} · ${own.score} 分`))
   } else summary.append(text('end-placement', '最终战果'))
   summary.append(text('end-field', `${rows.length} 位参赛者`))
   const help = text('end-help', '悬停或聚焦称号即可浮动查看依据；点击可固定，Esc 关闭。')
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
   for (const [i, row] of ranked.entries()) {
-    list.append(scoreRow({ ...row, rank: i + 1, nick: names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
+    list.append(scoreRow({ ...row, rank: i + 1, nick: row.nick || names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
   const footer = document.createElement('footer'); footer.className = 'end-footer'
   footer.append(text('end-source', '积分与称号以服务器结算为准；未提供的统计不作估算。'))

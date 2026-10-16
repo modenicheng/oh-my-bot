@@ -20,6 +20,7 @@ import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
 import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
 import { bgm } from '../music/bgm'
+import { artReady, prepareArt } from './art'
 
 const SEND_HZ = 60
 const FRAME_MS = 1000 / SEND_HZ
@@ -112,14 +113,14 @@ export class GameController {
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage。游戏画面含时间驱动动效
     // （飘字/震动/拖尾）与指针瞄准预览，恒绘改为 awake 谓词：frameAwake 为
     // true 期间逐帧重绘，全静默时仅脏标记重绘（快照到达/resize/DPR 即时出画）。
-    this.stage = new CanvasStage(deps.canvas, { draw: () => this.drawFrame(), onResize: () => this.resizeCanvas() })
+    this.stage = new CanvasStage(deps.canvas, { draw: () => this.drawFrame(), onResize: (w, h, dpr) => this.resizeCanvas(w, h, dpr) })
     this.hud = new Hud(deps.hudRoot)
     this.upgrades = new UpgradePanel(deps.hudRoot, {
       buy: track => this.buyUpgrade(track),
       returnFocus: () => deps.canvas.focus({ preventScroll: true }),
     })
     this.feedback = new GameFeedback(
-      (text, kind, source) => this.hud.flashMsg(text, kind, source),
+      (text, kind) => this.hud.flashMsg(text, kind),
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )
@@ -134,6 +135,13 @@ export class GameController {
     this.chatInput.addEventListener('compositionend', this.countChat)
     window.addEventListener('blur', this.releaseOnBlur)
     document.addEventListener('visibilitychange', this.releaseWhenHidden)
+    void artReady.then(() => {
+      if (!this.map) return
+      prepareArt(this.cam.scale * 1.05, this.stage.dpr || 1)
+      this.renderer.prepareBubbles(this.bubbles, this.cam, true)
+      this.preparePresentation()
+      this.stage.requestDraw()
+    })
   }
 
   /** 收到 mapBootstrap：解析地图，进入游戏态 */
@@ -153,6 +161,7 @@ export class GameController {
     this.endShown = false
     this.setPaused(false, false)
     this.scores.reset()
+    this.lastUpgradeLevels = []
     hideMatchEnd(this.hudRoot)
     this.bubbles = []
     this.sayTicks.clear()
@@ -179,6 +188,7 @@ export class GameController {
     this.feedback.reset()
     this.hud.dispose()
     this.upgrades.dispose()
+    this.renderer.dispose()
     this.closeChat(false)
     this.chat.removeEventListener('submit', this.submitChat)
     this.chat.removeEventListener('keydown', this.chatKey)
@@ -237,6 +247,7 @@ export class GameController {
         // 普通 full 只是状态重同步，不代表服务端释放了 HumanAxes；保留本地
         // held/mask，避免服务端继续旧值而客户端静默停止发送对应轴。
         this.feedback.snapshot(this.world, this.map, snap, this.active && !this.ended)
+        this.preparePresentation()
         // 世界已推进：静默跳帧期间快照到达也必须出画（awake 门不感知世界变化）。
         this.stage.requestDraw()
         if (snap.full) this.resyncAt = -Infinity
@@ -259,11 +270,15 @@ export class GameController {
         if (this.active && !document.hidden && !this.ended) {
           this.bubbles = this.bubbles.filter(bubble => bubble.robotId !== robot)
           this.bubbles.push({ robotId: robot, text, at: performance.now() })
+          this.renderer.prepareBubbles(this.bubbles, this.cam)
+          this.extras.bubbles = this.bubbles
+          this.stage.requestDraw()
         }
         break
       }
       case 'scoreboard':
         this.scores.accept(ev.kind.value.rows, ev.kind.value.tick)
+        this.updateHud()
         this.stage.requestDraw()
         break
       case 'matchEnd': {
@@ -273,10 +288,12 @@ export class GameController {
         this.closeChat(false)
         this.endShown = true
         this.showEnd(ev.kind.value)
+        this.updateHud()
         this.stage.requestDraw()
         break
       }
       default:
+        if (ev.kind.case === 'pointDropSpawn') this.renderer.prepare(this.world, this.map, this.cam, this.extras)
         break
     }
   }
@@ -322,6 +339,9 @@ export class GameController {
         audio.play('matchStart')
       }
       // 恢复激活：观战期间世界可能已推进，静默跳帧也要立即出画一帧。
+      prepareArt(this.cam.scale * 1.05, this.stage.dpr || 1)
+      this.preparePresentation()
+      this.feedback.ambience(this.world, this.map, !this.ended)
       this.stage.requestDraw()
     }
   }
@@ -375,6 +395,7 @@ export class GameController {
     if (this.assistAimCapable === capable) return
     this.assistAimCapable = capable
     this.syncAimGuard()
+    this.updateHud()
   }
 
   /** 每帧按本地信号更新瞄准 guard：辅助开启 + 瞄准能力脚本在场 + 人未
@@ -438,19 +459,26 @@ export class GameController {
     this.stage.syncSize()
   }
 
-  private resizeCanvas(): void {
+  private resizeCanvas(w?: number, h?: number, dpr?: number): void {
     if (!this.map) return
-    const rect = this.canvas.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return
-    this.renderer.resize(rect.width, rect.height, this.stage.dpr || window.devicePixelRatio || 1)
-    this.cam.resize(rect.width, rect.height, this.map.extent)
+    if (w === undefined || h === undefined) {
+      const rect = this.canvas.getBoundingClientRect()
+      w = rect.width; h = rect.height
+    }
+    if (w <= 0 || h <= 0) return
+    dpr ??= this.stage.dpr || window.devicePixelRatio || 1
+    this.input.refreshBounds()
+    this.renderer.resize(w, h, dpr)
+    this.cam.resize(w, h, this.map.extent)
+    prepareArt(this.cam.scale * 1.05, dpr)
+    this.preparePresentation()
   }
 
   private startLoops(): void {
     // 渲染循环：rAF（awake 谓词：动效/指针预览在场才逐帧，静默期跳帧省功耗）；
     // 输入采样：60Hz
     this.stage.start({ awake: () => this.frameAwake() })
-    this.sendTimer = setInterval(() => this.sampleAndSend(), FRAME_MS)
+    this.sendTimer = setInterval(() => { this.updateAnimations(); this.sampleAndSend() }, FRAME_MS)
   }
 
   /** C-26 收尾（空闲跳帧门）：指针瞄准预览（人持有炮塔轴且自机在场）或 say
@@ -478,6 +506,12 @@ export class GameController {
 
   private drawFrame(): void {
     if (!this.map || !this.active) return
+    this.renderer.render(this.world, this.map, this.cam, this.extras)
+  }
+
+  /** Consume changes before rAF; drawing never updates DOM, input, or audio. */
+  private preparePresentation(): void {
+    if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
     this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
@@ -491,24 +525,36 @@ export class GameController {
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
     if (pos) this.cam.follow(pos.x, pos.y)
     else this.cam.follow(0, 0)
-    // 原地压缩过期气泡：rAF 每帧执行，避免 filter 的每帧数组分配。
+    this.extras.bubbles = this.bubbles
+    this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
+    this.extras.feedback = this.feedback
+    this.renderer.prepare(this.world, this.map, this.cam, this.extras)
+    this.upgrades.update(this.world)
+    this.flashUpgradeGains()
+    this.updateHud()
+    if (!this.ended) this.hud.setAssist(this.input.assistOn)
+  }
+
+  private updateAnimations(): void {
+    if (!this.map || !this.active || document.hidden) return
     const now = performance.now()
     let kept = 0
     for (let i = 0; i < this.bubbles.length; i++) {
       const bubble = this.bubbles[i]!
       if (now - bubble.at < 4000) this.bubbles[kept++] = bubble
     }
+    if (kept !== this.bubbles.length) this.stage.requestDraw()
     this.bubbles.length = kept
     this.extras.bubbles = this.bubbles
-    this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
-    this.extras.feedback = this.feedback
-    this.renderer.render(this.world, this.map, this.cam, this.extras)
-    this.upgrades.update(this.world)
-    this.flashUpgradeGains()
+    const selfId = this.world.self?.robotId ?? 0, self = this.world.robots.get(selfId)
+    if (self) this.hud.updateDelayedHealth(this.feedback.delayedHealth(selfId, self.hpX10), (self.maxHpX10 ?? this.world.tuning.maxHpX10) / 10)
+  }
+
+  private updateHud(): void {
+    if (!this.map || !this.active) return
+    const selfId = this.world.self?.robotId ?? 0, self = this.world.robots.get(selfId)
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable,
       self ? this.feedback.delayedHealth(selfId, self.hpX10) : undefined)
-    this.feedback.ambience(this.world, this.map, this.active && !this.ended)
-    if (!this.ended) this.hud.setAssist(this.input.assistOn)
   }
 
   private sampleAndSend(): void {
@@ -516,12 +562,11 @@ export class GameController {
     this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
+    if (self?.dead) { this.input.resetTakeover(); return }
     const pos = self?.base?.pos
     const sx = pos?.x ?? 0
     const sy = pos?.y ?? 0
-    const hacking = this.selfHacking(selfId)
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
-    if (pos) this.cam.follow(pos.x, pos.y)
+    this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     const { msg, active } = this.input.sample(sx, sy)
     this.feedback.input(msg, this.world, this.map)
     if (!active) return // 全零输入（无人类操作）不发，避免抢占脚本

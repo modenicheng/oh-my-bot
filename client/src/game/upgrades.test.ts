@@ -35,6 +35,25 @@ function worldWithUpgrade(points: number, levels: number[]) {
 const curve = create(UpgradeTuningSchema, { costs: [...FALLBACK_UPGRADE_COSTS], stepsX10: [...FALLBACK_UPGRADE_STEPS] })
 
 describe('UpgradePanel', () => {
+  it('does not mutate unchanged upgrade DOM across repeated snapshots', () => {
+    const { panel, host } = panelWith()
+    const world = worldWithUpgrade(6, [3, 10, 0, 1, 4])
+    panel.update(world)
+    const observer = new MutationObserver(() => {})
+    observer.observe(host, { subtree: true, childList: true, characterData: true, attributes: true })
+    try {
+      for (let i = 0; i < 20; i++) {
+        world.self!.upgrade = { ...world.self!.upgrade!, levels: [...world.self!.upgrade!.levels] }
+        panel.update(world)
+      }
+      expect(observer.takeRecords()).toHaveLength(0)
+      world.tuning = { ...world.tuning, upgrade: { ...curve, costs: [...curve.costs], stepsX10: [...curve.stepsX10] } }
+      world.tuning.upgrade!.costs[3] = 7
+      panel.update(world)
+      expect(host.querySelector('.hud-up-cost b')?.textContent).toBe('7')
+    } finally { observer.disconnect(); panel.dispose() }
+  })
+
   it('旧服务器（SelfState.upgrade 缺失）整块隐藏', () => {
     const { panel, host } = panelWith()
     const world = emptyWorld()

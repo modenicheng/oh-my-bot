@@ -207,7 +207,10 @@ func (l layout) coverCells() []coverCell {
 // 9：外/中环 pad 配额保底 ≥ TargetAlive——升级玩法（ADR-0016）的点数经济
 //
 //	在大房不被 pad 面积配额封顶；n≤49 配额已达 TA，几何与 v8 完全一致。
-const GeneratorVer = 10
+//
+// 11: Exhausted cover strata widen their candidate lattice without relaxing clearance.
+// Successful v10 geometry is unchanged; the version increment changes MapHash.
+const GeneratorVer = 11
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (

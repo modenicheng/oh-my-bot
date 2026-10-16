@@ -4,9 +4,11 @@ import type { WorldState } from './world'
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
 import type { GameFeedback } from './feedback'
-import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawPointDrop, drawUplink, drawProjectile, drawVitals, visibleWorld, reducedMotion, type PointDropIntro } from './art'
+import { ink, mono, ROBOT_R, ROBOT_SHIELD_OUTER_RADIUS, ROBOT_SHIELD_RADIUS, createCanvas2d, resizeCanvas2d, prepareArena, prepareUplinkText, prepareProjectileTrail, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawPointDrop, drawUplink, drawProjectile, drawVitals, visibleWorld, reducedMotion, type PointDropIntro } from './art'
+import { beginTextPreparation, drawText, prepareText } from './text-raster'
 import { appendSurfaceShadow, appendWallShadow } from './shadow'
 import { hackMaxX10 } from './tuning'
+import { VisionRaster } from './vision-raster'
 const VISION_FEATHER = 3.5
 /** 晶片散开入场时长：从阵亡点飞至落点 + 淡入放大（reduced-motion 直接落定）。 */
 const POINT_DROP_INTRO_MS = 460
@@ -44,6 +46,76 @@ export class Renderer {
   }
   resize(w: number, h: number, dpr: number): void {
     resizeCanvas2d(this.canvas, w, h, dpr)
+  }
+  dispose(): void { this.visionRaster.dispose() }
+  private readonly projectileTrails = new Map<number, CanvasGradient>()
+  private readonly respawnLabels = new Map<number, string>()
+  private readonly healthPackLabels = new Map<number, string>()
+  private readonly pointDropLabels = new Map<number, string>()
+  private readonly dropIntros = new Map<number, PointDropIntro>()
+  private dpr = 1
+
+  /** Snapshot/event/resize work. Drawing only reads these prepared resources. */
+  prepare(world: WorldState, map: MapDefParsed, cam: Camera, extras: RenderExtras): void {
+    map = map.partial ? world.localMap ?? map : map
+    this.dpr = this.canvas.width / Math.max(1, cam.cw) || 1
+    beginTextPreparation(this.ctx)
+    prepareArena(map, this.ctx, this.dpr, cam)
+    this.prepareVision(world, map, cam)
+    this.prepareBubbles(extras.bubbles, cam)
+    for (const id of this.respawnLabels.keys()) if (!world.robots.has(id)) this.respawnLabels.delete(id)
+    for (const [id, robot] of world.robots) if (robot.dead) this.respawnLabels.set(id, `${robot.respawnInS}s`)
+    this.healthPackLabels.clear()
+    for (const [id, pack] of world.healthPacks) if (pack.respawnInS > 0) this.healthPackLabels.set(id, `${pack.respawnInS}s`)
+    this.pointDropLabels.clear()
+    for (const [id, drop] of world.pointDrops) if (drop.points > 1) this.pointDropLabels.set(id, String(drop.points))
+    for (const [id, robot] of world.robots) {
+      if (robot.dead) prepareText(this.respawnLabels.get(id) ?? '', FONT_11, ink.dim, this.dpr, this.ctx)
+      else prepareText(robot.nick ?? '', FONT_11, id === world.self?.robotId ? ink.cyan : ink.text, this.dpr, this.ctx)
+    }
+    for (const label of this.healthPackLabels.values()) prepareText(label, `10px ${mono}`, ink.dim, this.dpr, this.ctx)
+    for (const label of this.pointDropLabels.values()) prepareText(label, `10px ${mono}`, ink.amber, this.dpr, this.ctx)
+    for (const uplink of world.uplinks.values()) prepareUplinkText(uplink.progressX10 / hackMaxX10(world.tuning), this.dpr, this.ctx)
+    for (const id of this.projectileTrails.keys()) if (!world.projectiles.has(id)) this.projectileTrails.delete(id)
+    for (const [id, projectile] of world.projectiles) {
+      const color = projectile.color || world.robots.get(projectile.ownerId)?.color || ink.cyan
+      this.projectileTrails.set(id, prepareProjectileTrail(this.ctx, cam.scale, color))
+    }
+    const now = performance.now()
+    for (const id of this.dropIntros.keys()) if (!world.pointDrops.has(id)) this.dropIntros.delete(id)
+    for (const [id, drop] of world.pointDrops) {
+      const pos = drop.base?.pos
+      if (!pos || drop.bornAt === undefined || now - drop.bornAt >= POINT_DROP_INTRO_MS) continue
+      // Keep unresolved origins pending: a reliable spawn event can follow its snapshot.
+      if (!drop.introFrom) drop.introFrom = extras.feedback?.nearestDropOrigin(pos.x, pos.y, now)
+      const from = drop.introFrom ?? pos
+      let intro = this.dropIntros.get(id)
+      if (!intro) { intro = { p: 0, fromX: from.x, fromY: from.y }; this.dropIntros.set(id, intro) }
+      else { intro.fromX = from.x; intro.fromY = from.y }
+    }
+  }
+
+  prepareBubbles(bubbles: SayBubble[], cam: Camera, force = false): void {
+    if (!bubbles.length) return
+    const ctx = this.ctx, maxWidth = Math.max(80, Math.min(240, cam.cw - 40))
+    ctx.save(); ctx.font = FONT_14
+    for (const bubble of bubbles) {
+      if (!force && bubble.layout?.maxWidth === maxWidth) {
+        for (const line of bubble.layout.lines) prepareText(line, FONT_14, ink.text, this.dpr, ctx)
+        continue
+      }
+      const lines: string[] = []
+      let line = '', width = 0
+      for (const char of [...bubble.text].slice(0, 160)) {
+        const measured = ctx.measureText(line + char).width
+        if (line && measured > maxWidth) { lines.push(line); width = Math.max(width, ctx.measureText(line).width); line = '' }
+        line += char
+      }
+      if (line) { lines.push(line); width = Math.max(width, ctx.measureText(line).width) }
+      bubble.layout = { maxWidth, lines, width: Math.ceil(width) + 20 }
+      for (const text of lines) prepareText(text, FONT_14, ink.text, this.dpr, ctx)
+    }
+    ctx.restore()
   }
   render(world: WorldState, map: MapDefParsed, cam: Camera, extras: RenderExtras): void {
     const observation = world.localMap ?? map
@@ -85,28 +157,25 @@ export class Renderer {
       let intro: PointDropIntro | undefined
       if (drop.bornAt !== undefined) {
         const t = (now - drop.bornAt) / POINT_DROP_INTRO_MS
-        if (introOff || t >= 1) {
-          drop.bornAt = undefined; drop.introFrom = undefined
-        } else if (t >= 0) {
-          // 原点懒解析一次（事件与快照到达顺序不定，检索窗口覆盖两种顺序）。
-          if (drop.introFrom === undefined) drop.introFrom = extras.feedback?.nearestDropOrigin(p.x, p.y, now) ?? null
-          const from = drop.introFrom ?? p
+        if (!introOff && t >= 0 && t < 1) {
+          intro = this.dropIntros.get(drop.base!.id)
+          const fromX = intro?.fromX ?? p.x, fromY = intro?.fromY ?? p.y
           const e = 1 - (1 - t) ** 3 // easeOutCubic：先快后缓地滑向落点
-          x = from.x + (p.x - from.x) * e
-          y = from.y + (p.y - from.y) * e
-          intro = { p: e, fromX: from.x, fromY: from.y }
+          x = fromX + (p.x - fromX) * e
+          y = fromY + (p.y - fromY) * e
+          if (intro) intro.p = e
         }
       }
-      drawPointDrop(ctx, cam, x, y, drop.points, world.tick, intro)
+      drawPointDrop(ctx, cam, x, y, drop.points, world.tick, intro, this.pointDropLabels.get(drop.base!.id))
     }
     for (const def of observation.healthPacks) {
       const state = world.healthPacks.get(def.id)
-      drawHealthPack(ctx, cam, def.pos.x, def.pos.y, state?.available ?? true, state?.respawnInS ?? 0, world.tick)
+      drawHealthPack(ctx, cam, def.pos.x, def.pos.y, state?.available ?? true, this.healthPackLabels.get(def.id) ?? '', world.tick)
     }
     if (!map.partial) drawCover(ctx, map, cam)
     for (const p of world.projectiles.values()) {
       const b = p.base
-      if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan)
+      if (b?.pos) drawProjectile(ctx, cam, b.pos.x, b.pos.y, b.heading, p.color || world.robots.get(p.ownerId)?.color || ink.cyan, this.projectileTrails.get(b.id))
     }
     extras.feedback?.drawTrails(ctx, cam, world.tick)
     for (const r of world.robots.values()) {
@@ -115,8 +184,7 @@ export class Renderer {
       if (!b?.pos || !visibleWorld(cam, b.pos.x, b.pos.y, 96)) { stats.culledRobots++; continue }
       stats.drawnRobots++
       if (r.dead) {
-        ctx.fillStyle = ink.dim; ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText(`${r.respawnInS}s`, cam.toPxX(b.pos.x), cam.toPxY(b.pos.y))
+        drawText(ctx, this.respawnLabels.get(b.id) ?? '', FONT_11, ink.dim, cam.toPxX(b.pos.x), cam.toPxY(b.pos.y), 'center', 'middle')
         continue
       }
       const self = b.id === world.self?.robotId
@@ -159,9 +227,6 @@ export class Renderer {
     const x = cam.toPxX(self.x)
     const y = cam.toPxY(self.y)
     const radius = (world.visionRadius ?? world.tuning.visionRadius) * cam.scale
-    const feather = Math.min(VISION_FEATHER * cam.scale, radius * 0.28)
-    const clearRadius = Math.max(0, radius - feather)
-
     ctx.save()
     // Fill only outside the 20m circle. Do not use destination-out here:
     // erasing the canvas would reveal the page background, not the world below.
@@ -189,14 +254,6 @@ export class Renderer {
     // 投影在世界坐标系完成后按 cam 变换到像素。每墙独立子路径（首顶点
     // moveTo）：子路径间的连线会在可见区拉出伪影边。
     const pts = this.shadowPts
-    const range = world.visionRadius ?? world.tuning.visionRadius
-    pts.length = 0
-    for (let i = 0; i < map.walls.length; i++) {
-      if (appendWallShadow(pts, self.x, self.y, map.walls[i]!, range) > 0) pts.push(Number.NaN, Number.NaN)
-    }
-    for (const boundary of map.boundaries ?? []) {
-      if (appendSurfaceShadow(pts, self.x, self.y, boundary.start, boundary.end, range) > 0) pts.push(Number.NaN, Number.NaN)
-    }
     if (pts.length > 0) {
       ctx.save()
       ctx.beginPath()
@@ -212,32 +269,67 @@ export class Renderer {
         else { ctx.moveTo(cx, cy); pen = true }
       }
       ctx.fillStyle = map.partial ? 'rgb(5, 9, 14)' : SHADOW_FILL
-      ctx.fill()
+      ctx.fill('evenodd')
       ctx.restore()
     }
 
     // Keep the circular feather visible where there is no wall shadow.
     // 渐变参数仅随自机屏幕位置变化，稳态下恒定：单槽缓存消除每帧重建。
-    const edgeKey = `${x},${y},${clearRadius},${radius}`
-    if (this.edgeKey !== edgeKey || !this.edgeGradient) {
-      const gradient = ctx.createRadialGradient(x, y, clearRadius, x, y, radius)
-      gradient.addColorStop(0, 'rgba(5, 9, 14, 0)')
-      gradient.addColorStop(0.72, 'rgba(5, 9, 14, 0.08)')
-      gradient.addColorStop(1, 'rgba(5, 9, 14, 0.78)')
-      this.edgeKey = edgeKey
-      this.edgeGradient = gradient
+    if (!this.visionRaster.draw(ctx)) {
+      ctx.fillStyle = this.edgeGradient ?? SHADOW_FILL
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, Math.PI * 2)
+      // The gradient is exactly transparent inside clearRadius. Excluding that
+      // disk avoids shading most of the viewport during animated zoom.
+      const clearRadius = this.edgeClearRadius
+      if (clearRadius > 0) {
+        ctx.moveTo(x + clearRadius, y)
+        ctx.arc(x, y, clearRadius, 0, Math.PI * 2, true)
+      }
+      ctx.fill()
     }
-    ctx.fillStyle = this.edgeGradient
-    ctx.beginPath()
-    ctx.arc(x, y, radius, 0, Math.PI * 2)
-    ctx.fill()
     ctx.restore()
   }
 
-  /** 影多边形顶点缓冲：drawVisionMask 每帧复用（length=0 重置），零稳态分配。 */
+  /** World-space shadow geometry changes only with observer/map/range, not camera frames. */
   private readonly shadowPts: number[] = []
   private edgeKey = ''
   private edgeGradient: CanvasGradient | null = null
+  private edgeClearRadius = 0
+  private readonly visionRaster = new VisionRaster()
+  private shadowMap: MapDefParsed | undefined
+  private shadowX = Number.NaN
+  private shadowY = Number.NaN
+  private shadowRange = Number.NaN
+
+  private prepareVision(world: WorldState, map: MapDefParsed, cam: Camera): void {
+    const self = world.robots.get(world.self?.robotId ?? 0)?.base?.pos
+    if (!self || cam.scale <= 0) { this.shadowPts.length = 0; this.shadowMap = undefined; return }
+    const range = world.visionRadius ?? world.tuning.visionRadius
+    if (map !== this.shadowMap || self.x !== this.shadowX || self.y !== this.shadowY || range !== this.shadowRange) {
+      const pts = this.shadowPts
+      pts.length = 0
+      for (const wall of map.walls) {
+        if (appendWallShadow(pts, self.x, self.y, wall, range) > 0) pts.push(Number.NaN, Number.NaN)
+      }
+      for (const boundary of map.boundaries ?? []) {
+        if (appendSurfaceShadow(pts, self.x, self.y, boundary.start, boundary.end, range) > 0) pts.push(Number.NaN, Number.NaN)
+      }
+      this.shadowMap = map; this.shadowX = self.x; this.shadowY = self.y; this.shadowRange = range
+    }
+    const x = cam.toPxX(self.x), y = cam.toPxY(self.y), radius = range * cam.scale
+    const clearRadius = Math.max(0, radius - Math.min(VISION_FEATHER * cam.scale, radius * 0.28))
+    this.edgeClearRadius = clearRadius
+    if (this.visionRaster.prepare(cam.cw, cam.ch, this.dpr, x, y, radius, clearRadius, world.tick)) return
+    const key = `${x},${y},${clearRadius},${radius}`
+    if (key === this.edgeKey && this.edgeGradient) return
+    this.edgeKey = key
+    const gradient = this.ctx.createRadialGradient(x, y, clearRadius, x, y, radius)
+    gradient.addColorStop(0, 'rgba(5, 9, 14, 0)')
+    gradient.addColorStop(0.72, 'rgba(5, 9, 14, 0.08)')
+    gradient.addColorStop(1, 'rgba(5, 9, 14, 0.78)')
+    this.edgeGradient = gradient
+  }
 
   /** say 气泡：随机器人移动的像素框，长消息换行，4s 后消失。 */
   private drawBubbles(world: WorldState, cam: Camera, extras: RenderExtras): void {
@@ -255,20 +347,7 @@ export class Renderer {
       const anchorY = cam.toPxY(pos.y) - (guarded ? radius * ROBOT_SHIELD_RADIUS * ROBOT_SHIELD_OUTER_RADIUS : radius) - 38
       if (x < -radius || x > cam.cw + radius || anchorY > cam.ch) continue
       ctx.save()
-      ctx.font = FONT_14
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      const maxWidth = Math.max(80, Math.min(240, cam.cw - 40))
-      if (!bub.layout || bub.layout.maxWidth !== maxWidth) {
-        const lines: string[] = []
-        let line = ''
-        for (const char of [...bub.text].slice(0, 160)) {
-          if (line && ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = '' }
-          line += char
-        }
-        if (line) lines.push(line)
-        bub.layout = { maxWidth, lines, width: Math.ceil(Math.max(0, ...lines.map(text => ctx.measureText(text).width))) + 20 }
-      }
+      if (!bub.layout) { ctx.restore(); continue }
       const { lines, width } = bub.layout
       if (!lines.length) { ctx.restore(); continue }
       const height = lines.length * 18 + 16
@@ -290,7 +369,7 @@ export class Renderer {
       ctx.fillStyle = '#10141af5'; ctx.fill()
       ctx.strokeStyle = r.color || ink.cyan; ctx.lineWidth = 1; ctx.stroke()
       ctx.fillStyle = ink.text
-      lines.forEach((text, i) => ctx.fillText(text, left + width / 2, top + 17 + i * 18))
+      lines.forEach((text, i) => drawText(ctx, text, FONT_14, ink.text, left + width / 2, top + 17 + i * 18, 'center', 'middle'))
       ctx.restore()
     }
   }

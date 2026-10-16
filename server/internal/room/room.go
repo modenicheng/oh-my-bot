@@ -514,6 +514,21 @@ func (r *Room) launchWarmupLocked(seed uint64, playerIDs []uint64, soloLauncher 
 	}
 }
 
+// FailLaunch releases a failed asynchronous launch so the host can retry.
+// The handle check prevents an obsolete failure from ending a newer match.
+func (r *Room) FailLaunch(handle MatchHandle) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if handle == nil || r.match != handle || (r.state != Warmup && r.state != Running) {
+		return false
+	}
+	r.match.Abort()
+	r.match = nil
+	r.aborted = true
+	r.state = Ended
+	return true
+}
+
 // EndMatch moves a Running room to Ended after a match finished on its own
 // (time up, or the sim reported completion). It is idempotent. It does not
 // add scores; the caller reports those via AddMatchResult first.

@@ -11,6 +11,7 @@
 
 import type { Transport, TransportStats } from './transport'
 import { TransportTiming } from './gen/proto/omb_pb'
+import { webSocketMetrics, type ConnectionMetrics } from './ws-metrics'
 
 // 时序常量全部取自生成枚举 TransportTiming（单一权威源，见文件头注释）；
 // 本文件不再手写任何心跳/帧字节字面量（漂移由 golden.test.ts 拦截）。
@@ -27,12 +28,13 @@ export class WsTransport implements Transport {
   private cb?: (msg: Uint8Array) => void
   private pongCb?: () => void
   private closeCb?: (reason: string) => void
-  private lastPingAt = 0
+  private lastPingAt: number | undefined
   private lastInboundAt = 0
   private connectTimer?: ReturnType<typeof setTimeout>
   private pingTimer?: ReturnType<typeof setInterval>
   private livenessTimer?: ReturnType<typeof setInterval>
   private rejectConnect?: (err: Error) => void
+  private readonly metrics: ConnectionMetrics = { rttMs: null }
   readonly stats: TransportStats = { rttMs: 0, lossRate: 0 }
 
   connect(url: string): Promise<void> {
@@ -64,6 +66,7 @@ export class WsTransport implements Transport {
       ws.onopen = () => {
         if (!this.isCurrent(ws)) return
         opened = true
+        webSocketMetrics.open(this.metrics)
         this.lastInboundAt = Date.now()
         this.startHeartbeat(ws)
         settle()
@@ -86,10 +89,15 @@ export class WsTransport implements Transport {
       ws.onmessage = (ev) => {
         if (!this.isCurrent(ws)) return
         const buf = new Uint8Array(ev.data as ArrayBuffer)
+        webSocketMetrics.receive(buf.byteLength)
         if (buf.length === 0) return
         this.lastInboundAt = Date.now()
         if (buf[0] === FRAME_PONG) {
-          this.stats.rttMs = Math.max(0, Date.now() - this.lastPingAt)
+          if (this.lastPingAt !== undefined) {
+            this.stats.rttMs = Math.max(0, Date.now() - this.lastPingAt)
+            this.metrics.rttMs = this.stats.rttMs
+            this.lastPingAt = undefined
+          }
           this.pongCb?.()
           return
         }
@@ -115,6 +123,7 @@ export class WsTransport implements Transport {
     const ws = this.ws
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('ws not open')
     ws.send(slice(msg))
+    webSocketMetrics.send(msg.byteLength)
   }
 
   onMessage(cb: (msg: Uint8Array) => void): () => void {
@@ -160,6 +169,7 @@ export class WsTransport implements Transport {
   private teardown(): void {
     const ws = this.ws
     this.ws = undefined
+    webSocketMetrics.close(this.metrics)
     clearTimeout(this.connectTimer)
     this.connectTimer = undefined
     clearInterval(this.pingTimer)
@@ -178,6 +188,7 @@ export class WsTransport implements Transport {
   private internalSend(ws: WebSocket, msg: Uint8Array): void {
     try {
       ws.send(slice(msg))
+      webSocketMetrics.send(msg.byteLength)
     } catch {
       this.teardown()
       this.closeCb?.('连接发送失败，已断开')

@@ -74,8 +74,18 @@ describe('human input continuity', () => {
     expect(input.sample(10, 10).msg.aim).toBeCloseTo(expected())
     canvas.rect = { left: 15, top: 10, width: 1200, height: 750 }
     cam.resize(1200, 750, 80)
+    input.refreshBounds()
     expect(input.aimAt(10, 10)).toBeCloseTo(expected())
     expect(input.sample(10, 10).msg.aim).toBeCloseTo(input.aimAt(10, 10)!)
+  })
+
+  it('reads canvas layout on geometry changes, never while sampling or projecting aim', () => {
+    const bounds = vi.spyOn(canvas, 'getBoundingClientRect')
+    send(canvas, 'mousemove', { clientX: 640, clientY: 320 })
+    for (let i = 0; i < 100; i++) { input.aimAt(10, 10); input.sample(10, 10) }
+    expect(bounds).not.toHaveBeenCalled()
+    send(win, 'resize')
+    expect(bounds).toHaveBeenCalledOnce()
   })
 
   it('takes aim from the first click, and blur sends one explicit stop', () => {

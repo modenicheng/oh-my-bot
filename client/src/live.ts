@@ -2,11 +2,11 @@ import type { ServerMsg } from '@omb/protocol'
 import { RoomSession, type SessionState } from './net'
 import { SpectatorCamera } from './replay/spectator'
 import { bindSpectateControls } from './replay/spectate-controls'
-import { artReady } from './game/art'
+import { artReady, prepareArt } from './game/art'
 import { CanvasStage } from './game/canvas-stage'
 import { parseMapDef, type MapDefParsed } from './game/mapdef'
 import { resolveTuning } from './game/tuning'
-import { Renderer, phaseName, type SayBubble } from './game/render'
+import { Renderer, phaseName, type SayBubble, type RenderExtras } from './game/render'
 import { Scoreboard, type ScoreDisplay, ScoreRowRenderer } from './game/scoreboard'
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
@@ -35,14 +35,15 @@ export class LiveSpectator {
   private ended = false
   private roomState = 0
   private bubbles: SayBubble[] = []
+  private bubbleTimer: ReturnType<typeof setTimeout> | undefined
+  private assetSize = ''
+  private readonly extras: RenderExtras = { bubbles: [] }
   private roster = ''
   private rosterSize = -1
   private scores = new Scoreboard()
   private lastRows: ScoreDisplay[] | null = null
   private lastEnded = false
   private readonly scoreRenderer = new ScoreRowRenderer()
-  /** 脏标记：快照/事件/相机变化才整帧重绘，空闲观战不再永动重绘。 */
-  private dirty = true
   private disposeControls: (() => void) | null = null
   private follow: HTMLSelectElement
   private status: HTMLElement
@@ -57,11 +58,7 @@ export class LiveSpectator {
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage；本类保留脏标记语义
     // （快照/事件/相机变化才整帧重绘，空闲观战不重绘）。
     this.stage = new CanvasStage(deps.canvas, {
-      draw: () => {
-        // 气泡 4s 寿命：存在期间保持脏标记，让它自然淡出过期（原循环语义）。
-        if (this.bubbles.length) this.stage.requestDraw()
-        this.draw()
-      },
+      draw: () => this.draw(),
       onResize: () => this.resize(),
     })
     this.follow = this.el<HTMLSelectElement>('live-follow')
@@ -75,8 +72,13 @@ export class LiveSpectator {
     this.el('live-online').textContent = '真人 0'
     this.bindEvents()
     this.resize()
-    void artReady.then(() => { if (!this.disposed) this.requestDraw() })
-    this.stage.start()
+    void artReady.then(() => {
+      if (this.disposed) return
+      prepareArt(this.camera.camera.scale, this.stage.dpr || 1)
+      this.renderer.prepareBubbles(this.bubbles, this.camera.camera, true)
+      this.requestDraw()
+    })
+    this.stage.start({ awake: () => this.bubbles.length > 0 })
   }
 
   async connect(roomCode: string): Promise<void> {
@@ -102,6 +104,7 @@ export class LiveSpectator {
 
   /** 标记下一帧重绘（rAF 合帧；相机交互/快照路径都可安全高频调用）。 */
   private requestDraw(): void {
+    this.preparePresentation()
     this.stage.requestDraw()
   }
 
@@ -187,6 +190,7 @@ export class LiveSpectator {
       if (previous?.text === say.text && performance.now() - previous.at < 4000) return
       this.bubbles = this.bubbles.filter(b => b.robotId !== say.robot)
       this.bubbles.push({ robotId: say.robot, text: say.text, at: performance.now() })
+      this.scheduleBubbleExpiry()
       this.requestDraw()
     }
   }
@@ -213,7 +217,10 @@ export class LiveSpectator {
     this.needsFull = true
     this.resyncSent = false
     this.ended = false
+    if (this.bubbleTimer !== undefined) clearTimeout(this.bubbleTimer)
+    this.bubbleTimer = undefined
     this.bubbles = []
+    this.extras.bubbles = this.bubbles
     this.roster = ''
     this.follow.replaceChildren(new Option('自由视角', ''))
     this.follow.disabled = true
@@ -250,15 +257,42 @@ export class LiveSpectator {
     this.follow.disabled = robots.length === 0
   }
 
-  private draw(): void {
+  private preparePresentation(): void {
     if (!this.map || this.disposed) return
     bgm.phase('live', this.world.phase)
     this.camera.updateFollow(this.world.robots.get(this.camera.followId ?? 0)?.base?.pos)
     const followValue = this.camera.followId === null ? '' : String(this.camera.followId)
     if (this.follow.value !== followValue) this.follow.value = followValue
     setText(this.zoomEl, `${this.camera.zoom.toFixed(1)}\u00d7`)
-    if (this.bubbles.length) this.bubbles = this.bubbles.filter(b => performance.now() - b.at < 4000)
-    this.renderer.render(this.world, this.map, this.camera.camera, { bubbles: this.bubbles })
+    const assetSize = `${this.camera.camera.scale}|${this.stage.dpr || 1}`
+    if (assetSize !== this.assetSize) {
+      prepareArt(this.camera.camera.scale, this.stage.dpr || 1)
+      this.assetSize = assetSize
+    }
+    this.extras.bubbles = this.bubbles
+    this.renderer.prepare(this.world, this.map, this.camera.camera, this.extras)
+  }
+
+  /** Expiration must run even if no new snapshot arrives and the camera is idle. */
+  private scheduleBubbleExpiry(): void {
+    if (this.bubbleTimer !== undefined) clearTimeout(this.bubbleTimer)
+    this.bubbleTimer = undefined
+    if (!this.bubbles.length || this.disposed) return
+    const expires = Math.min(...this.bubbles.map(b => b.at + 4000))
+    this.bubbleTimer = setTimeout(() => {
+      this.bubbleTimer = undefined
+      const now = performance.now()
+      let kept = 0
+      for (const bubble of this.bubbles) if (now - bubble.at < 4000) this.bubbles[kept++] = bubble
+      this.bubbles.length = kept
+      this.stage.requestDraw()
+      this.scheduleBubbleExpiry()
+    }, Math.max(1, expires - performance.now()))
+  }
+
+  private draw(): void {
+    if (!this.map || this.disposed) return
+    this.renderer.render(this.world, this.map, this.camera.camera, this.extras)
   }
 
   private resize(): void {
@@ -268,7 +302,8 @@ export class LiveSpectator {
     const dpr = this.stage.dpr || window.devicePixelRatio || 1
     this.renderer.resize(rect.width, rect.height, dpr)
     this.camera.resize(rect.width, rect.height, this.map?.extent ?? 80)
-    this.stage.requestDraw()
+    prepareArt(this.camera.camera.scale, dpr)
+    this.requestDraw()
   }
 
   private bindEvents(): void {
@@ -300,6 +335,8 @@ export class LiveSpectator {
 
   dispose(): void {
     this.disposed = true
+    if (this.bubbleTimer !== undefined) clearTimeout(this.bubbleTimer)
+    this.bubbleTimer = undefined
     this.session.close()
     this.disposeControls?.()
     this.events.abort()

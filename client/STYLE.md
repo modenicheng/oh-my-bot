@@ -11,8 +11,11 @@
 - `src/startup.ts` / `src/startup.css` 负责首屏加载、动效与可信手势音频解锁，避免混入大厅逻辑。
 - `src/game/scoreboard.ts` / `scoreboard.css` 统一管理积分状态、榜单行和结算称号；实战、观战、回放复用展示，不在 HUD 中复制计分规则。
 - `src/music/bgm.ts` 管理三段背景音乐与当前视图的对应关系；`audio.ts` 持有共享 AudioContext 并统一控制静音、音量和后台暂停。
+- `src/debug/` 负责 F3 左上角调试浮层：单张 Canvas 以 4Hz 绘制读数与曲线，固定 TypedArray 环形缓冲保留最近 30 秒；隐藏时只采样，后台暂停，恢复时丢弃过期数据。WS 有效载荷、消息数、活跃连接与 RTT 由 `packages/protocol/src/ws-metrics.ts` 汇总，关闭连接即移除。
 
 调整这些边界后，在仓库根目录运行 `pnpm typecheck`、`pnpm exec vitest run`、`pnpm build`，再运行 `pnpm --filter client test:startup` 验证启动、进房、房主操作、页面往返、观战/回放积分、结算以及三段音乐切换。此浏览器检查使用确定性协议测试桩，不替代真实服务器的对局测试。
+
+调试浮层另运行 `pnpm --filter client test:debug`：填满 30 秒历史后检查绘制频率、持续 DOM 写入与布局读取，并覆盖 WS 心跳、F3、输入焦点、内存读数缺失和小屏尺寸；截图写入 `.artifacts/debug-panel/`。内存曲线仅为浏览器可选的 JS 堆估计，网络带宽仅为应用 WS 载荷（含心跳），RTT 为活跃 WS 最近心跳测量的最大值。
 
 ## 色板
 

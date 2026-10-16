@@ -55,6 +55,9 @@ try {
   await until(() => fetch(`${base}/healthz`).then(r => r.ok).catch(() => false), 'server')
   browser = await chromium.launch()
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  // This authored legacy fixture tests navigation against its recorded checkpoints.
+  // Request the raw log: visual regeneration needs the original simulator version.
+  await page.route(`**/api/replay/${matchId}?visual=1`, route => route.continue({ url: `${base}/api/replay/${matchId}` }))
   const errors = pageErrors(page)
   page.on('websocket', () => sockets++)
   await page.goto(`${base}/?view=spectator&replay=${matchId}`)
@@ -102,7 +105,13 @@ try {
   const end = Number(await page.locator('#rp-timeline').getAttribute('max'))
   await seek(page, end)
   assert.equal(await page.locator('#rp-timeline').inputValue(), String(end))
-  assert.ok((await pixels(page)).colors > 20, 'terminal frame remains visible')
+  const terminal = await pixels(page)
+  assert.ok(terminal.colors > 20, 'terminal frame remains visible')
+  await seek(page, end - 6)
+  await page.click('#rp-play')
+  await until(() => page.locator('#rp-play').getAttribute('aria-label').then(label => label === '播放'), 'automatic playback end')
+  assert.equal(await page.locator('#rp-timeline').inputValue(), String(end))
+  assert.equal((await pixels(page)).hash, terminal.hash, 'automatic playback paints the same terminal frame as seeking')
 
   await page.reload()
   await startClient(page)
@@ -141,6 +150,10 @@ try {
   assert.deepEqual(errors, [])
   console.log(`SPECTATOR_OK screenshots=${shots}`)
 } catch (error) {
+  if (page && !page.isClosed()) console.error('SPECTATOR_DIAGNOSTICS', await page.evaluate(() => ({
+    url: location.href, error: document.querySelector('#replay-error')?.textContent,
+    status: document.querySelector('#rp-status')?.textContent,
+  })))
   await page?.screenshot({ path: join(shots, 'failure.png') }).catch(() => {})
   throw error
 } finally {
