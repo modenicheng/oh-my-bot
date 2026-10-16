@@ -4,6 +4,7 @@ import type { MapDefParsed } from '../game/mapdef'
 import type { ReplayFrame } from './index'
 import { phaseNum } from './index'
 import { drawIcon } from '../icons'
+import { beginTextPreparation, drawText, prepareText } from '../game/text-raster'
 import { ink, mono, ROBOT_R, createCanvas2d, resizeCanvas2d, prepareArt, prepareArena, prepareProjectileTrail, drawArena, drawCover, drawRobot, drawCore, drawPointDrop, drawHealthPack, drawUplink, drawProjectile, drawVitals } from '../game/art'
 
 const BUBBLE_FONT = `12px ${mono}`
@@ -26,7 +27,8 @@ export class ReplayRenderer {
     this.dpr = dpr; this.assetScale = 0
   }
   prepare(frame: ReplayFrame, cam: Camera, map?: MapDefParsed): void {
-    if (map) prepareArena(map)
+    beginTextPreparation(this.ctx)
+    if (map) prepareArena(map, this.ctx, this.dpr, cam)
     if (cam.scale !== this.assetScale) { prepareArt(cam.scale, this.dpr); this.assetScale = cam.scale }
     this.byId.clear()
     this.respawnLabels.clear()
@@ -42,16 +44,27 @@ export class ReplayRenderer {
     }
     this.pointDropLabels.clear()
     for (const drop of frame.pointDrops) if (drop.points > 1) this.pointDropLabels.set(drop.id, String(drop.points))
+    for (const robot of frame.robots) {
+      prepareText(robot.nick ?? '', `11px ${mono}`, ink.text, this.dpr, this.ctx)
+      prepareText(robot.nick ?? '', `11px ${mono}`, ink.cyan, this.dpr, this.ctx)
+    }
+    for (const label of this.respawnLabels.values()) prepareText(label, `11px ${mono}`, ink.dim, this.dpr, this.ctx)
+    for (const label of this.healthPackLabels.values()) prepareText(label, `10px ${mono}`, ink.dim, this.dpr, this.ctx)
+    for (const label of this.pointDropLabels.values()) prepareText(label, `10px ${mono}`, ink.amber, this.dpr, this.ctx)
     this.projectileTrails.clear()
     for (const projectile of frame.projectiles) {
       this.projectileTrails.set(projectile.id, prepareProjectileTrail(this.ctx, cam.scale, this.byId.get(projectile.owner)?.color || ink.cyan))
     }
     this.ctx.save(); this.ctx.font = BUBBLE_FONT
     for (const bubble of frame.bubbles) {
-      if (this.bubbleLayouts.has(bubble.text)) continue
+      if (this.bubbleLayouts.has(bubble.text)) {
+        prepareText(this.bubbleLayouts.get(bubble.text)!.text, BUBBLE_FONT, ink.text, this.dpr, this.ctx)
+        continue
+      }
       if (this.bubbleLayouts.size >= 128) this.bubbleLayouts.clear()
       const text = bubble.text.slice(0, 40)
-      this.bubbleLayouts.set(bubble.text, { text, width: this.ctx.measureText(text).width })
+      const label = prepareText(text, BUBBLE_FONT, ink.text, this.dpr, this.ctx)
+      this.bubbleLayouts.set(bubble.text, { text, width: label.width })
     }
     this.ctx.restore()
   }
@@ -78,9 +91,8 @@ export class ReplayRenderer {
     for (const p of frame.projectiles) drawProjectile(ctx, cam, p.pos.x, p.pos.y, p.heading, byId.get(p.owner)?.color || ink.cyan, this.projectileTrails.get(p.id))
     for (const r of frame.robots) {
       if (!r.alive) {
-        ctx.fillStyle = ink.dim; ctx.font = `11px ${mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         const label = this.respawnLabels.get(r.id)
-        if (label) ctx.fillText(label, cam.toPxX(r.pos.x), cam.toPxY(r.pos.y))
+        if (label) drawText(ctx, label, `11px ${mono}`, ink.dim, cam.toPxX(r.pos.x), cam.toPxY(r.pos.y), 'center', 'middle')
         else drawIcon(ctx, 'skull', cam.toPxX(r.pos.x), cam.toPxY(r.pos.y), 16)
         continue
       }
@@ -104,9 +116,6 @@ export class ReplayRenderer {
       const alpha = age < 3 ? 1 : 1 - (age - 3)
       ctx.save()
       ctx.globalAlpha = alpha
-      ctx.font = BUBBLE_FONT
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
       const layout = this.bubbleLayouts.get(bub.text)
       if (!layout) { ctx.restore(); continue }
       const { text, width: tw } = layout
@@ -116,7 +125,7 @@ export class ReplayRenderer {
       ctx.lineWidth = 1
       ctx.strokeRect(x - tw / 2 - 6, y - 9, tw + 12, 18)
       ctx.fillStyle = ink.text
-      ctx.fillText(text, x, y)
+      drawText(ctx, text, BUBBLE_FONT, ink.text, x, y, 'center', 'middle')
       ctx.restore()
     }
   }

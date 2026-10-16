@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { create } from '@bufbuild/protobuf'
 import { RobotStateSchema, Title } from '@omb/protocol'
-import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, titleName, titleDetails } from './scoreboard'
+import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, showMatchEnd, titleName, titleDetails } from './scoreboard'
 import { deathStatus } from './death'
 import type { RobotEnt } from './world'
 
@@ -41,6 +41,37 @@ describe('authoritative scoreboard', () => {
     const second = board.display(robots)
     expect(second).not.toBe(first)
     expect(second[0]?.dead).toBe(false)
+  })
+
+  it('shows names from the global scoreboard before opponents ever enter AOI', () => {
+    const board = new Scoreboard()
+    const robots = new Map([[1, robot(1, 'pilot')]])
+    board.observe(robots)
+    const rows = [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }, { robot: 1, score: 0, nick: 'pilot' }]
+    board.accept(rows, 60)
+    expect(board.display(robots, 1)[0]).toMatchObject({ nick: 'TEST-BOT-134', status: 'unknown' })
+    board.reset()
+    // Reconnect/map bootstrap clears AOI history; the catch-up must suffice.
+    board.accept(rows, 120)
+    expect(board.display(new Map())[0]?.nick).toBe('TEST-BOT-134')
+  })
+
+  it('refreshes a cached fallback when only the authoritative name changes', () => {
+    const board = new Scoreboard()
+    board.accept([{ robot: 2, score: 100 }], 60)
+    const fallback = board.display(new Map())
+    expect(fallback[0]?.nick).toBe('robot-2')
+    const rows = [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }]
+    board.accept(rows, 120)
+    expect(board.display(new Map())).not.toBe(fallback)
+    expect(board.display(new Map())[0]?.nick).toBe('TEST-BOT-134')
+  })
+
+  it('shows authoritative settlement names without any AOI identity history', () => {
+    const root = document.createElement('div')
+    showMatchEnd(root, [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }], new Map(), undefined, 2)
+    expect(root.querySelector('.end-personal')?.textContent).toBe('TEST-BOT-134 · 100 分')
+    expect(root.querySelector('.score-name')?.textContent).toBe('TEST-BOT-134')
   })
 
   it('keeps unchanged score snapshots cached while advancing the stale-score boundary', () => {
@@ -202,6 +233,64 @@ describe('authoritative scoreboard', () => {
       expect(changes.length).toBeGreaterThan(0)
       expect(changes.every(change => change.target === target || target.contains(change.target))).toBe(true)
     } finally { observer.disconnect() }
+  })
+
+  it('moves only the displaced row when the leader drops to the bottom', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = Array.from({ length: 64 }, (_, i) => ({
+      robot: i + 1, score: 100 - i, rank: i + 1, nick: `robot-${i + 1}`, self: false, dead: false,
+    }))
+    renderer.update(parent, values)
+    const original = [...parent.children]
+    const moves = renderer.movedCount
+    const reordered = [...values.slice(1), values[0]!].map((row, i) => ({ ...row, rank: i + 1 }))
+    renderer.update(parent, reordered)
+    expect([...parent.children]).toEqual([...original.slice(1), original[0]])
+    expect(renderer.movedCount - moves).toBe(1)
+  })
+
+  it('keeps score text nodes alive when their values change', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const row = { robot: 1, score: 10, rank: 1, nick: 'robot-1', self: false, dead: false }
+    renderer.update(parent, [row])
+    const value = parent.querySelector('.score-value')!
+    const node = value.firstChild
+    renderer.update(parent, [{ ...row, score: 11 }])
+    expect(value.textContent).toBe('11')
+    expect(value.firstChild).toBe(node)
+  })
+
+  it('keeps random rank changes ordered with the minimum existing-node moves', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    let seed = 71
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0)
+    let ids = Array.from({ length: 12 }, (_, i) => i + 1)
+    const rows = () => ids.map((robot, index) => ({ robot, rank: index + 1, score: 100 - index,
+      nick: `robot-${robot}`, self: false, dead: false }))
+    renderer.update(parent, rows())
+    for (let run = 0; run < 50; run++) {
+      const old = new Map(ids.map((id, index) => [id, index]))
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = next() % (i + 1)
+        ;[ids[i], ids[j]] = [ids[j]!, ids[i]!]
+      }
+      const sequence = ids.map(id => old.get(id)!)
+      const lengths = sequence.map(() => 1)
+      for (let i = 0; i < sequence.length; i++) for (let j = 0; j < i; j++) {
+        if (sequence[j]! < sequence[i]!) lengths[i] = Math.max(lengths[i]!, lengths[j]! + 1)
+      }
+      const moves = renderer.movedCount
+      renderer.update(parent, rows())
+      expect([...parent.children].map(node => Number((node as HTMLElement).dataset.robot))).toEqual(ids)
+      expect(renderer.movedCount - moves).toBe(ids.length - Math.max(...lengths))
+    }
+    ids = [20, ...ids.slice(3), 21]
+    renderer.update(parent, rows())
+    expect([...parent.children].map(node => Number((node as HTMLElement).dataset.robot))).toEqual(ids)
+    expect(renderer.nodeCount).toBe(ids.length)
   })
 
   it('reuses title and replay evidence nodes and never appends duplicate evidence', () => {

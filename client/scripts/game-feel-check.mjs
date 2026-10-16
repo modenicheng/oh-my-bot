@@ -23,7 +23,7 @@ import { sleep, until, startStaticServer, gen2MapJson, FixtureServer, frame } fr
 //   ServerEvent.shot{projectile,owner,at,heading}
 //   ServerEvent.projectile_impact{projectile,owner,target,at,shield,invulnerable}
 
-import { chromium } from 'playwright'
+import { chromium, firefox } from 'playwright'
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf'
 import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
@@ -36,7 +36,7 @@ import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 
 // ---------------------------------------------------------------- constants
-const PORT = 18421
+const PORT = Number(process.env.OMB_FEEL_PORT || 18421)
 const BASE = `http://127.0.0.1:${PORT}`
 const CLIENT_DIR = resolve(import.meta.dirname, '..')
 const DIST = join(CLIENT_DIR, 'dist')
@@ -213,11 +213,22 @@ const AUDIO_INIT = `(() => {
 
 // Observe actual Canvas calls, not application internals or screenshot heuristics.
 const CAMERA_INIT = `(() => {
-  const radii = window.__ombArenaRadii = []
-  const arc = CanvasRenderingContext2D.prototype.arc
-  CanvasRenderingContext2D.prototype.arc = function (x, y, radius, ...rest) {
-    if (this.canvas?.id === 'game-canvas' && radius > 1000) { radii.push(radius); if (radii.length > 500) radii.shift() }
+  const scales = window.__ombCameraScales = []
+  const proto = CanvasRenderingContext2D.prototype
+  const arc = proto.arc, stroke = proto.stroke, begin = proto.beginPath
+  const circles = new WeakMap()
+  proto.beginPath = function (...args) { circles.delete(this); return begin.apply(this, args) }
+  proto.arc = function (x, y, radius, ...rest) {
+    circles.set(this, radius)
     return arc.call(this, x, y, radius, ...rest)
+  }
+  proto.stroke = function (...args) {
+    // The visible uplink base has a fixed 1.7m * 0.7 radius, even when
+    // off-screen arena circles are culled by the renderer.
+    if (this.canvas?.id === 'game-canvas' && this.strokeStyle === '#486768' && circles.has(this)) {
+      scales.push(circles.get(this) / (1.7 * 0.7)); if (scales.length > 500) scales.shift()
+    }
+    return stroke.apply(this, args)
   }
 })()`
 
@@ -371,7 +382,8 @@ async function assertHelpAnchor(page, label) {
   assert.ok(trigger.x >= stage.x && trigger.x - stage.x <= 24 && trigger.y - stage.y <= 24, `${label}: ? stays in the upper left`)
   assert.ok(Math.abs(popup.x - trigger.x) < 1, `${label}: popup aligns with its own trigger`)
   assert.ok(popup.y >= trigger.y + trigger.height && popup.y - trigger.y - trigger.height <= 12, `${label}: popup opens directly beneath ?`)
-  assert.ok(popup.x + popup.width <= stage.x + stage.width, `${label}: popup fits the battlefield`)
+  assert.ok(popup.x + popup.width <= stage.x + stage.width,
+    `${label}: popup fits the battlefield (${JSON.stringify({ trigger, popup, stage })})`)
   await assertNoHudOverlap(page, `${label}-help-open`)
   await shot(page, `help-${label}.png`)
   await button.click()
@@ -623,29 +635,31 @@ async function fullPass(browser, fix) {
     assert.equal(await hudMsgText(page), quietMessage, 'full resync must not replay messages')
 
     // --- uplink: the authoritative object stays fixed; self hacking pulls the camera back.
-    const arenaRadius = async () => page.evaluate(() => {
-      const values = window.__ombArenaRadii || []
+    const cameraScale = async () => page.evaluate(() => {
+      const values = window.__ombCameraScales || []
       const value = values.length ? values.at(-1) : 0
       values.length = 0
       return value
     })
-    await page.evaluate(() => { window.__ombArenaRadii.length = 0 })
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    const radiusIdle = await arenaRadius()
-    assert.ok(radiusIdle > 1000, `baseline arena radius captured (${radiusIdle})`)
+    await page.evaluate(() => { window.__ombCameraScales.length = 0 })
+    // Quiet steady scenes intentionally skip drawing; advance authority to
+    // observe a real frame instead of waiting for an unnecessary repaint.
+    await fix.step(() => {})
+    const scaleIdle = await cameraScale()
+    assert.ok(scaleIdle > 20, `baseline camera scale captured (${scaleIdle})`)
     await page.keyboard.down('e')
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: true, hackingId: SELF_ID, progressX10: 5, myCooldownS: 0 } })
-    await fix.step(st => { st.uplinks[0].progressX10 = 20 }) // 2.0s / 8.0s = 25%
+    await fix.step(st => { st.uplinks[0].progressX10 = 10 }) // 1.0s / 4.0s = 25%
     assert.match(await hudMsgText(page), /黑入/, `uplink 25%: hacking banner expected (got "${await hudMsgText(page)}")`)
     assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '25')
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '25%')
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    const radiusHacking = await arenaRadius()
-    assert.ok(radiusHacking < radiusIdle - 5, `hacking zooms the camera out (${radiusIdle} -> ${radiusHacking})`)
+    const scaleHacking = await cameraScale()
+    assert.ok(scaleHacking < scaleIdle - .1, `hacking zooms the camera out (${scaleIdle} -> ${scaleHacking})`)
     await shot(page, '04-uplink25.png')
     const vis25 = await canvasCenter(page)
-    await fix.step(st => { st.uplinks[0].progressX10 = 40 })
-    await fix.step(st => { st.uplinks[0].progressX10 = 60 }) // 75%
+    await fix.step(st => { st.uplinks[0].progressX10 = 20 })
+    await fix.step(st => { st.uplinks[0].progressX10 = 30 }) // 75%
     assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '75')
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '75%')
     await shot(page, '05-uplink75.png')
@@ -653,15 +667,15 @@ async function fullPass(browser, fix) {
     assert.ok(!vis25.equals(vis75), 'uplink progress circle must visually advance 25% -> 75%')
     // completion: authoritative EvUplinkHack + ready drop + personal 30s CD
     const aDone = await audioStarted(page)
-    await fix.step(st => { st.uplinks[0].progressX10 = 80 })
+    await fix.step(st => { st.uplinks[0].progressX10 = 40 })
     fix.bcast(fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 10 }))
     await fix.step(st => { st.uplinks[0] = { ...st.uplinks[0], ready: false, hackingId: 0, progressX10: 0, myCooldownS: 30 } })
     await page.keyboard.up('e')
     await sleep(120)
     await fix.step(() => {}); await fix.step(() => {}); await fix.step(() => {})
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    const radiusRecovered = await arenaRadius()
-    assert.ok(radiusRecovered > radiusHacking + 5, `camera restores after hacking (${radiusHacking} -> ${radiusRecovered})`)
+    const scaleRecovered = await cameraScale()
+    assert.ok(scaleRecovered > scaleHacking + .1, `camera restores after hacking (${scaleHacking} -> ${scaleRecovered})`)
     assert.ok((await audioStarted(page)) > aDone, 'uplink completion must fire success audio')
     assert.match(await hudMsgText(page), /黑入完成/)
     assert.equal(await page.locator('#skill-uplink-cd').innerText(), '30s')
@@ -699,24 +713,24 @@ async function fullPass(browser, fix) {
     for (let i = 0; i < 8; i++) { await fix.step(() => {}); times.push(await page.locator('#hud-time').textContent()) }
     assert.ok(new Set(times).size > 1, `hud-time must reflect countdown (${times.join('|')})`)
 
-    // --- audio settings persisted controls (#audio-settings > #audio-mute/#audio-volume)
+    // --- audio settings persisted controls (#audio-settings > #audio-sfx-mute/#audio-sfx-volume)
     const panel = page.locator('#audio-settings')
     assert.equal(await panel.count(), 1, '#audio-settings panel must exist')
-    const mute = panel.locator('#audio-mute')
-    const vol = panel.locator('#audio-volume')
-    assert.equal(await mute.count(), 1, '#audio-mute must exist inside #audio-settings')
-    assert.equal(await vol.count(), 1, '#audio-volume must exist inside #audio-settings')
+    const mute = panel.locator('#audio-sfx-mute')
+    const vol = panel.locator('#audio-sfx-volume')
+    assert.equal(await mute.count(), 1, '#audio-sfx-mute must exist inside #audio-settings')
+    assert.equal(await vol.count(), 1, '#audio-sfx-volume must exist inside #audio-settings')
 
     await panel.locator('summary').click()
     await mute.click()
     await sleep(180)
     assert.ok(Math.abs(await masterGainValue(page)) < 1e-6, 'mute must fade master gain below audibility')
     const controlReflectsMute = await page.evaluate(() => {
-      const el = document.querySelector('#audio-mute')
+      const el = document.querySelector('#audio-sfx-mute')
       if (!el) return false
       return el.getAttribute('aria-pressed') === 'true' || el.checked === true || el.dataset.muted === 'true' || el.classList.contains('on') || el.classList.contains('muted')
     })
-    assert.ok(controlReflectsMute, '#audio-mute control must reflect muted state')
+    assert.ok(controlReflectsMute, '#audio-sfx-mute control must reflect muted state')
 
     await vol.evaluate(el => { el.value = '40'; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) })
     await sleep(150)
@@ -732,7 +746,7 @@ async function fullPass(browser, fix) {
     await page.mouse.move(1200, 600)
     await until(() => fix.inputs.length >= 5, 'sampler resumed after reload')
     const after = await page.evaluate(() => {
-      const el = document.querySelector('#audio-mute'); const v = document.querySelector('#audio-volume')
+      const el = document.querySelector('#audio-sfx-mute'); const v = document.querySelector('#audio-sfx-volume')
       const m = el ? (el.getAttribute('aria-pressed') === 'true' || el.checked === true || el.dataset.muted === 'true' || el.classList.contains('on') || el.classList.contains('muted')) : null
       return { m, v: v ? v.value : null }
     })
@@ -746,7 +760,7 @@ async function fullPass(browser, fix) {
 
     // --- unmute restores audible master: live RMS via analyser tap on master gain
     await page.locator('#audio-settings summary').click()
-    await page.locator('#audio-mute').click()
+    await page.locator('#audio-sfx-mute').click()
     await sleep(150)
     const masterRestored = await masterGainValue(page)
     assert.ok(masterRestored > 0, `unmute must restore master gain >0 (got ${masterRestored})`)
@@ -803,7 +817,7 @@ async function quickPass(browser, fix, viewport, label, shotName) {
 }
 
 async function hudPerformancePass(browser, fix, viewport, label) {
-  const ctx = await browser.newContext({ viewport })
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: label === 'retina' ? 2 : 1 })
   await ctx.addInitScript(AUDIO_INIT)
   await ctx.addInitScript(() => {
     const request = window.requestAnimationFrame
@@ -813,6 +827,8 @@ async function hudPerformancePass(browser, fix, viewport, label) {
     })
     window.__renderPreparation = []
     for (const [prototype, name] of [
+      [CanvasRenderingContext2D.prototype, 'fillText'],
+      [CanvasRenderingContext2D.prototype, 'strokeText'],
       [CanvasRenderingContext2D.prototype, 'measureText'],
       [CanvasRenderingContext2D.prototype, 'createLinearGradient'],
       [CanvasRenderingContext2D.prototype, 'createRadialGradient'],
@@ -824,15 +840,26 @@ async function hudPerformancePass(browser, fix, viewport, label) {
         return original.apply(this, args)
       }
     }
+    const font = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'font')
+    Object.defineProperty(CanvasRenderingContext2D.prototype, 'font', {
+      ...font,
+      set(value) {
+        if (window.__inAnimationFrame && window.__probeRendering && this.canvas.id === 'game-canvas') window.__renderPreparation.push('font')
+        return font.set.call(this, value)
+      },
+    })
   })
   const page = await ctx.newPage(), errors = []
   try {
     await joinGame(page, fix, errors)
     await fix.step(st => { st.self.upgrade = { points: 6, levels: [3, 10, 0, 1, 4] } })
-    const rows = Array.from({ length: 64 }, (_, i) => ({ robot: i === 0 ? SELF_ID : 1000 + i, score: 1000 - i * 10 }))
+    const rows = Array.from({ length: 64 }, (_, i) => ({ robot: i === 0 ? SELF_ID : 1000 + i,
+      nick: i === 0 ? 'pilot' : `TEST-BOT-${i}`, score: 1000 - i * 10 }))
     const sendScores = values => fix.bcast(fix.event('scoreboard', EvScoreboardSchema, { tick: fix.st.tick, rows: values }))
     sendScores(rows)
     await until(async () => await page.locator('#hud-score-rows .score-row').count() === 64, `${label}: scoreboard populated`)
+    assert.deepEqual(await page.locator('#hud-score-rows .score-name').allTextContents(), rows.map(row => row.nick),
+      `${label}: global scoreboard names do not depend on opponents entering AOI`)
     await page.evaluate(() => {
       const root = document.querySelector('#hud-score-rows')
       window.__scoreNodes = [...root.children]
@@ -856,7 +883,7 @@ async function hudPerformancePass(browser, fix, viewport, label) {
     await fix.step(st => { st.uplinks[0].hackingId = SELF_ID; st.uplinks[0].progressX10 = 20 })
     assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '50')
     await fix.step(st => { st.uplinks[0].hackingId = 0; st.uplinks[0].progressX10 = 0 })
-    assert.deepEqual(await page.evaluate(() => window.__renderPreparation), [], `${label}: draw frames never measure text/layout or create gradients`)
+    assert.deepEqual(await page.evaluate(() => window.__renderPreparation), [], `${label}: draw frames never shape text, resolve fonts, measure layout, or create gradients`)
 
     const changed = rows.map(row => ({ ...row }))
     changed[0].score++
@@ -869,11 +896,36 @@ async function hudPerformancePass(browser, fix, viewport, label) {
       return changes.length > 0 && changes.every(record => record.target === score || score.contains(record.target))
     }), true, `${label}: only the changed score text is written`)
 
+    await page.evaluate(() => {
+      const row = document.querySelector('#hud-score-rows .score-row:last-child')
+      row.tabIndex = -1
+      row.focus({ preventScroll: true })
+      window.__focusedScoreRow = row
+    })
     changed[63].score = 2000
     sendScores(changed)
     await fix.step(() => {})
     assert.equal(await page.locator('#hud-score-rows .score-row').first().getAttribute('data-robot'), String(changed[63].robot))
     assert.equal(await page.evaluate(() => window.__scoreNodes.every(node => document.querySelector('#hud-score-rows').contains(node))), true, `${label}: rank changes reuse all row nodes`)
+    if (await page.evaluate(() => typeof Element.prototype.moveBefore === 'function')) {
+      assert.equal(await page.evaluate(() => document.activeElement === window.__focusedScoreRow), true, `${label}: rank changes preserve focused row state`)
+    }
+    // Demoting the leader needs one move, rather than reattaching all 63 followers.
+    await page.evaluate(() => {
+      window.__scoreMutations = []
+      window.__scoreValue = document.querySelector('#hud-score-rows .score-value').firstChild
+    })
+    changed[63].score = 1
+    sendScores(changed)
+    await fix.step(() => {})
+    assert.equal(await page.locator('#hud-score-rows .score-row').last().getAttribute('data-robot'), String(changed[63].robot))
+    assert.equal(await page.evaluate(() => {
+      const root = document.querySelector('#hud-score-rows')
+      return window.__scoreMutations.filter(record => record.type === 'childList' && record.target === root)
+        .reduce((count, record) => count + record.addedNodes.length, 0)
+    }), 1, `${label}: leader demotion moves one row`)
+    assert.equal(await page.evaluate(() => window.__scoreValue === document.querySelector('#hud-score-rows .score-row:last-child .score-value').firstChild),
+      true, `${label}: changing score preserves its text node`)
     await page.evaluate(() => window.__scoreObserver.disconnect())
 
     fix.bcast(fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 }))
@@ -897,11 +949,12 @@ async function bannerPass(browser, fix, reduced = false) {
   await ctx.addInitScript(AUDIO_INIT)
   await ctx.addInitScript(COLOR_INIT)
   await ctx.addInitScript(() => {
-    const drawText = CanvasRenderingContext2D.prototype.fillText
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage
     const setTransform = CanvasRenderingContext2D.prototype.setTransform
     const translate = CanvasRenderingContext2D.prototype.translate
     const save = CanvasRenderingContext2D.prototype.save
     const frameTransforms = new WeakMap()
+    const speechRasters = new WeakMap()
     window.__sayPaint = null
     window.__cameraShakes = []
     CanvasRenderingContext2D.prototype.setTransform = function(...args) {
@@ -917,9 +970,31 @@ async function bannerPass(browser, fix, reduced = false) {
       if (this.canvas?.id === 'game-canvas' && frameTransforms.get(this) === 2) frameTransforms.set(this, 0)
       return save.call(this)
     }
-    CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) {
-      if (text === 'PIXEL SAY 气泡') window.__sayPaint = { x, y, at: performance.now(), font: this.font }
-      return drawText.call(this, text, x, y, ...args)
+    const observeText = prototype => {
+      const fillText = prototype.fillText
+      prototype.fillText = function(text, x, y, ...args) {
+        if (text === 'PIXEL SAY 气泡') {
+          if (this.canvas?.id === 'game-canvas') {
+            window.__sayPaint = { x, y, at: performance.now(), font: this.font }
+          } else {
+            const point = this.getTransform().transformPoint({ x, y })
+            speechRasters.set(this.canvas, { x: point.x, y: point.y, font: this.font })
+          }
+        }
+        return fillText.call(this, text, x, y, ...args)
+      }
+    }
+    observeText(CanvasRenderingContext2D.prototype)
+    if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') observeText(OffscreenCanvasRenderingContext2D.prototype)
+    CanvasRenderingContext2D.prototype.drawImage = function(image, ...args) {
+      const speech = speechRasters.get(image)
+      if (speech && this.canvas?.id === 'game-canvas') {
+        const [sx, sy, sw, sh, dx, dy, dw, dh] = args.length === 8 ? args
+          : [0, 0, image.width, image.height, args[0], args[1], args[2] ?? image.width, args[3] ?? image.height]
+        window.__sayPaint = { x: dx + (speech.x - sx) * dw / sw,
+          y: dy + (speech.y - sy) * dh / sh, at: performance.now(), font: speech.font }
+      }
+      return drawImage.call(this, image, ...args)
     }
   })
   const page = await ctx.newPage(), errors = []
@@ -1254,20 +1329,29 @@ const fix = new Fixture()
 fix.attach(server)
 let browser
 try {
-  browser = await chromium.launch()
-  await hudPerformancePass(browser, fix, { width: 1280, height: 800 }, 'desktop')
-  await hudPerformancePass(browser, fix, { width: 480, height: 820 }, 'mobile')
-  if (!process.argv.includes('--hud-performance')) {
-    await projectileColorPass(browser, fix)
-    await fullPass(browser, fix)
-    await quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')
-    await quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')
-    await reducedMotionPass(browser, fix)
-    await bannerPass(browser, fix)
-    await bannerPass(browser, fix, true)
+  browser = await (process.argv.includes('--firefox') ? firefox : chromium).launch()
+  const scenarios = [
+    ['hud-desktop', () => hudPerformancePass(browser, fix, { width: 1280, height: 800 }, 'desktop')],
+    ['hud-mobile', () => hudPerformancePass(browser, fix, { width: 480, height: 820 }, 'mobile')],
+    ['hud-retina', () => hudPerformancePass(browser, fix, { width: 1280, height: 800 }, 'retina')],
+    ['projectile-color', () => projectileColorPass(browser, fix)],
+    ['full', () => fullPass(browser, fix)],
+    ['mid', () => quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')],
+    ['mobile', () => quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')],
+    ['reduced-motion', () => reducedMotionPass(browser, fix)],
+    ['banner', () => bannerPass(browser, fix)],
+    ['banner-reduced', () => bannerPass(browser, fix, true)],
+  ]
+  const selected = process.argv.find(arg => arg.startsWith('--scenario='))?.slice('--scenario='.length)
+  assert.ok(!selected || scenarios.some(([name]) => name === selected), `unknown scenario: ${selected}`)
+  for (const [name, run] of scenarios) {
+    if (selected && name !== selected || process.argv.includes('--hud-performance') && !name.startsWith('hud-')) continue
+    console.log(`game-feel-check: ${name} starting`)
+    await run()
+    console.log(`game-feel-check: ${name} PASS`)
   }
 
-  console.log(`\n=== game-feel-check${process.argv.includes('--hud-performance') ? ' --hud-performance' : ''} PASS ===`)
+  console.log(`\n=== game-feel-check${selected ? ` --scenario=${selected}` : process.argv.includes('--hud-performance') ? ' --hud-performance' : ''} PASS ===`)
   console.log(`joins accepted: ${fix.joins}, input frames captured: ${fix.inputs.length}`)
   console.log(`screenshots in: ${SHOTS}`)
 } finally {

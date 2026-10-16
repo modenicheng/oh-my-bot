@@ -4,5 +4,6 @@
 export * from './gen/proto/omb_pb'
 export * from './transport'
 export * from './ws'
+export { readWebSocketMetrics, type WebSocketMetrics } from './ws-metrics'
 export * from './messages'
 export * from './replay'

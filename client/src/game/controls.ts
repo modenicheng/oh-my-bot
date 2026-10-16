@@ -188,6 +188,7 @@ export class GameController {
     this.feedback.reset()
     this.hud.dispose()
     this.upgrades.dispose()
+    this.renderer.dispose()
     this.closeChat(false)
     this.chat.removeEventListener('submit', this.submitChat)
     this.chat.removeEventListener('keydown', this.chatKey)

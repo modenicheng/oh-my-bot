@@ -204,6 +204,20 @@ describe('drawVisionMask locked core-zone cover (X-9)', () => {
   })
 })
 
+describe('vision feather fallback work', () => {
+  it('excludes the fully transparent center from the gradient fill', async () => {
+    const { ops, cam } = await visionOps(2, 2)
+    const start = ops.map(op => op.op).lastIndexOf('beginPath')
+    const feather = ops.slice(start)
+    const arcs = feather.filter(op => op.op === 'arc').map(op => op.args)
+    const x = cam.toPxX(40), y = cam.toPxY(0)
+    expect(arcs).toEqual([
+      [x, y, 20 * cam.scale, 0, Math.PI * 2],
+      [x, y, 16.5 * cam.scale, 0, Math.PI * 2, true],
+    ])
+  })
+})
+
 // 精确墙影投影：每墙一个子路径合入单次 nonzero 填充；视野圆 clip 保证影不外溢。
 describe('drawVisionMask exact projected wall shadows', () => {
   it('draws one subpath per wall with a single nonzero fill clipped to the vision disc', async () => {
@@ -329,9 +343,11 @@ describe('drawVisionMask exact projected wall shadows', () => {
 
   it('edge feather gradient stays after the shadow block (unchanged contract)', async () => {
     const { ops, cam } = await visionOps(1, 2, [wall(46, -2, 50, 2)])
-    // 最后一块纯圆填充 = 边缘渐变（自机圆心 + 视野半径）。
-    const discs = discFills(ops)
-    expect(discs[discs.length - 1]).toEqual({ x: cam.toPxX(40), y: cam.toPxY(0), r: 20 * cam.scale })
+    // The final fill remains the feather, now an annulus with a transparent hole.
+    const start = ops.map(op => op.op).lastIndexOf('beginPath')
+    const feather = ops.slice(start)
+    expect(feather.filter(op => op.op === 'arc')[0]?.args.slice(0, 3)).toEqual([cam.toPxX(40), cam.toPxY(0), 20 * cam.scale])
+    expect(feather.at(-1)?.op).toBe('restore')
   })
 })
 // Uplink 锚定 def.pos：进度变化不改变实体坐标（进度环与交互圈同坐标），

@@ -3907,6 +3907,7 @@ type ScoreRow struct {
 	Robot         uint32                 `protobuf:"varint,1,opt,name=robot,proto3" json:"robot,omitempty"`
 	Score         int32                  `protobuf:"zigzag32,2,opt,name=score,proto3" json:"score,omitempty"`
 	Titles        []Title                `protobuf:"varint,3,rep,packed,name=titles,proto3,enum=omb.v1.Title" json:"titles,omitempty"`
+	Nick          string                 `protobuf:"bytes,4,opt,name=nick,proto3" json:"nick,omitempty"` // Global identity; opponents need not have entered the recipient's AOI.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3960,6 +3961,13 @@ func (x *ScoreRow) GetTitles() []Title {
 		return x.Titles
 	}
 	return nil
+}
+
+func (x *ScoreRow) GetNick() string {
+	if x != nil {
+		return x.Nick
+	}
+	return ""
 }
 
 type EvScoreboard struct {
@@ -6412,11 +6420,12 @@ const file_proto_omb_proto_rawDesc = "" +
 	"script_rev\x18\x03 \x01(\rR\tscriptRev\"6\n" +
 	"\n" +
 	"EvMatchEnd\x12(\n" +
-	"\x06scores\x18\x01 \x03(\v2\x10.omb.v1.ScoreRowR\x06scores\"]\n" +
+	"\x06scores\x18\x01 \x03(\v2\x10.omb.v1.ScoreRowR\x06scores\"q\n" +
 	"\bScoreRow\x12\x14\n" +
 	"\x05robot\x18\x01 \x01(\rR\x05robot\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x11R\x05score\x12%\n" +
-	"\x06titles\x18\x03 \x03(\x0e2\r.omb.v1.TitleR\x06titles\"H\n" +
+	"\x06titles\x18\x03 \x03(\x0e2\r.omb.v1.TitleR\x06titles\x12\x12\n" +
+	"\x04nick\x18\x04 \x01(\tR\x04nick\"H\n" +
 	"\fEvScoreboard\x12$\n" +
 	"\x04rows\x18\x01 \x03(\v2\x10.omb.v1.ScoreRowR\x04rows\x12\x12\n" +
 	"\x04tick\x18\x02 \x01(\rR\x04tick\"\xf0\x01\n" +

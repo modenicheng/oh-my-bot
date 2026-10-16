@@ -1,6 +1,8 @@
 // Shared vector art for live play and replay. SVGs decode once; drawing uses simulation time.
 import type { Camera } from './camera'
 import type { MapDefParsed } from './mapdef'
+import { drawText, invalidateTextRasters, prepareText } from './text-raster'
+import { arenaSectors, prepareArenaSectors } from './arena-sectors'
 
 export const ink = {
   bg: '#070d14', floor: '#101b25', panel: '#182735', line: '#29414f',
@@ -25,10 +27,18 @@ const FENCE_DIRECTIONS = Array.from({ length: 128 }, (_, i) => {
 })
 const sectorLabels = new WeakMap<MapDefParsed, Map<number, string>>()
 
-export function prepareArena(map: MapDefParsed): void {
+export function prepareArena(map: MapDefParsed, ctx?: CanvasRenderingContext2D, dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, cam?: Camera): void {
   if (!sectorLabels.has(map)) {
     sectorLabels.set(map, new Map(map.sectors.map(sector => [sector.id, `出生区 ${String(sector.id + 1).padStart(2, '0')}`])))
   }
+  for (const label of sectorLabels.get(map)!.values()) prepareText(label, FONT_11, '#9cb0bb', dpr, ctx)
+  prepareText('核心区 · 已开放', FONT_11, ink.cyan, dpr, ctx)
+  prepareText('核心区 · 待开放', FONT_11, ink.dim, dpr, ctx)
+  if (cam) prepareArenaSectors(map, cam)
+}
+
+export function prepareUplinkText(progress: number, dpr: number, ctx?: CanvasRenderingContext2D): void {
+  if (progress > 0) prepareText(PERCENT_LABELS[Math.min(100, Math.floor(progress * 100))] ?? '', FONT_16, ink.text, dpr, ctx)
 }
 export const ROBOT_SHIELD_RADIUS = 2.05
 export const ROBOT_SHIELD_OUTER_RADIUS = 1.16
@@ -45,7 +55,10 @@ const sources = {
   healthPack: new URL('../assets/health-pack.svg', import.meta.url).href,
 }
 const sprites = {} as Record<keyof typeof sources, HTMLImageElement>
-export const fontReady = document.fonts.load(`12px ${mono}`).then(fonts => fonts.length > 0, () => false)
+export const fontReady = document.fonts.load(`12px ${mono}`).then(fonts => {
+  invalidateTextRasters()
+  return fonts.length > 0
+}, () => false)
 export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]) => new Promise<boolean>(resolve => {
   const image = new Image()
   sprites[name as keyof typeof sources] = image
@@ -142,11 +155,23 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   const laneOuter = R * (78.5 / 80)
   const ringMid = R * (55 / 80)
   const laneInner = R * (30 / 80)
+  const nearest = Math.hypot(Math.max(0, -x, x - cam.cw), Math.max(0, -y, y - cam.ch))
+  const farthest = Math.hypot(Math.max(Math.abs(x), Math.abs(x - cam.cw)), Math.max(Math.abs(y), Math.abs(y - cam.ch)))
+  // Include the maximum camera shake and stroke fringe in visibility tests.
+  const fringe = 16
   ctx.save()
-  circle(ctx, x, y, R * s)
-  ctx.fillStyle = ink.floor; ctx.fill(); ctx.clip()
+  ctx.fillStyle = ink.floor
+  if (farthest < R * s - fringe) ctx.fillRect(-fringe, -fringe, cam.cw + fringe * 2, cam.ch + fringe * 2)
+  else { circle(ctx, x, y, R * s); ctx.fill(); ctx.clip() }
   // Eight equal sectors and concentric service lanes give orientation at both zoom levels.
-  for (let i = 0; i < 8; i++) {
+  const sectors = arenaSectors(map, cam)
+  if (sectors) {
+    for (const { points, alternate } of sectors) {
+      ctx.beginPath(); ctx.moveTo(points[0]!, points[1]!)
+      for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i]!, points[i + 1]!)
+      ctx.closePath(); ctx.fillStyle = alternate ? '#13212b' : ink.floor; ctx.fill()
+    }
+  } else for (let i = 0; i < 8; i++) {
     const a = (i - 0.5) * tau / 8
     ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, R * s, a, a + tau / 8); ctx.closePath()
     ctx.fillStyle = i % 2 ? '#13212b' : ink.floor; ctx.fill()
@@ -156,18 +181,23 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   const top = Math.max(-R, Math.floor(cam.toWorldY(0) / 4) * 4)
   const right = Math.min(R, cam.toWorldX(cam.cw)), bottom = Math.min(R, cam.toWorldY(cam.ch))
   ctx.beginPath()
-  for (let gx = left; gx <= right; gx += 4) { ctx.moveTo(cam.toPxX(gx), cam.toPxY(-R)); ctx.lineTo(cam.toPxX(gx), cam.toPxY(R)) }
-  for (let gy = top; gy <= bottom; gy += 4) { ctx.moveTo(cam.toPxX(-R), cam.toPxY(gy)); ctx.lineTo(cam.toPxX(R), cam.toPxY(gy)) }
+  const gridTop = Math.max(cam.toPxY(-R), -fringe), gridBottom = Math.min(cam.toPxY(R), cam.ch + fringe)
+  const gridLeft = Math.max(cam.toPxX(-R), -fringe), gridRight = Math.min(cam.toPxX(R), cam.cw + fringe)
+  for (let gx = left; gx <= right; gx += 4) { ctx.moveTo(cam.toPxX(gx), gridTop); ctx.lineTo(cam.toPxX(gx), gridBottom) }
+  for (let gy = top; gy <= bottom; gy += 4) { ctx.moveTo(gridLeft, cam.toPxY(gy)); ctx.lineTo(gridRight, cam.toPxY(gy)) }
   ctx.stroke()
   for (const r of [ringMid, laneOuter]) {
+    const margin = Math.max(fringe, s * .65)
+    if (nearest > r * s + margin || farthest < r * s - margin) continue
     circle(ctx, x, y, r * s); ctx.strokeStyle = '#0a131d'; ctx.lineWidth = Math.max(2, s * 0.65); ctx.stroke()
     ctx.strokeStyle = '#3c5564'; ctx.lineWidth = 1; ctx.stroke()
   }
+  ctx.strokeStyle = '#3c55647a'; ctx.lineWidth = 1; ctx.beginPath()
   for (const direction of ARENA_LANES) {
-    ctx.strokeStyle = '#3c55647a'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(x + direction.x * laneInner * s, y + direction.y * laneInner * s)
-    ctx.lineTo(x + direction.x * laneOuter * s, y + direction.y * laneOuter * s); ctx.stroke()
+    ctx.moveTo(x + direction.x * laneInner * s, y + direction.y * laneInner * s)
+    ctx.lineTo(x + direction.x * laneOuter * s, y + direction.y * laneOuter * s)
   }
+  ctx.stroke()
   // Spawn plates use the exact authored spawn rectangle; brackets do not imply collision.
   for (const sector of map.sectors) {
     const a = sector.spawnArea, px = cam.toPxX(a.min.x), py = cam.toPxY(a.min.y)
@@ -180,22 +210,24 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
     ctx.beginPath(); ctx.moveTo(px, py + b); ctx.lineTo(px, py); ctx.lineTo(px + b, py)
     ctx.moveTo(px + w - b, py + h); ctx.lineTo(px + w, py + h); ctx.lineTo(px + w, py + h - b); ctx.stroke()
     if (s >= 8) {
-      ctx.font = FONT_11; ctx.textAlign = 'left'; ctx.fillStyle = '#9cb0bb'; ctx.textBaseline = 'top'
-      ctx.fillText(sectorLabels.get(map)?.get(sector.id) ?? '', px + 8, py + 8)
+      drawText(ctx, sectorLabels.get(map)?.get(sector.id) ?? '', FONT_11, '#9cb0bb', px + 8, py + 8, 'left', 'top')
       ctx.strokeStyle = '#486775'; ctx.lineWidth = 1
       const cx = px + w / 2, cy = py + h / 2
       ctx.beginPath(); ctx.moveTo(cx - 7, cy); ctx.lineTo(cx + 7, cy); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx, cy + 7); ctx.stroke()
     }
   }
   const unlocked = phase >= map.coreZone.unlockPhase && phase > 0
-  circle(ctx, x, y, map.coreZone.radius * s); ctx.fillStyle = unlocked ? '#12303a' : '#0c1620'; ctx.fill()
-  ctx.lineWidth = 1.5; ctx.strokeStyle = unlocked ? ink.cyan : '#71909f'; ctx.setLineDash([8, 6]); ctx.stroke(); ctx.setLineDash([])
+  if (nearest <= map.coreZone.radius * s + fringe) {
+    circle(ctx, x, y, map.coreZone.radius * s); ctx.fillStyle = unlocked ? '#12303a' : '#0c1620'; ctx.fill()
+    ctx.lineWidth = 1.5; ctx.strokeStyle = unlocked ? ink.cyan : '#71909f'; ctx.setLineDash([8, 6]); ctx.stroke(); ctx.setLineDash([])
+  }
   if (visible(cam, x, y)) {
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = FONT_11; ctx.fillStyle = unlocked ? ink.cyan : ink.dim
-    ctx.fillText(unlocked ? '核心区 · 已开放' : '核心区 · 待开放', x, y + Math.max(28, 5 * s))
+    drawText(ctx, unlocked ? '核心区 · 已开放' : '核心区 · 待开放', FONT_11,
+      unlocked ? ink.cyan : ink.dim, x, y + Math.max(28, 5 * s), 'center', 'middle')
   }
   ctx.restore()
   // Solid outer fence corresponds to the authoritative arena boundary.
+  if (nearest > R * s + fringe || farthest < (R - .7) * s - fringe) return
   ctx.save()
   circle(ctx, x, y, R * s); ctx.strokeStyle = '#3b6878'; ctx.lineWidth = 3; ctx.stroke()
   circle(ctx, x, y, R * s); ctx.strokeStyle = '#6dd1db'; ctx.lineWidth = 1; ctx.stroke()
@@ -400,8 +432,7 @@ export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: nu
   const g = Math.max(1, s * 0.1)
   ctx.fillRect(x - s * 0.2, cy - s * 0.36, g, g)
   if (points > 1) {
-    ctx.fillStyle = ink.amber; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-    ctx.fillText(label, x, cy + s * 0.55)
+    drawText(ctx, label, FONT_10, ink.amber, x, cy + s * 0.55, 'center', 'top')
   }
   ctx.restore()
 }
@@ -418,8 +449,8 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   if (available) {
     ctx.strokeStyle = `${ink.lime}88`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
   } else if (respawnLabel) {
-    ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-    ctx.fillText(respawnLabel, x, y + size * 0.55)
+    ctx.globalAlpha = 0.85
+    drawText(ctx, respawnLabel, FONT_10, ink.dim, x, y + size * 0.55, 'center', 'top')
   }
   ctx.restore()
 }
@@ -490,8 +521,8 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
       ctx.arc(x, y, size * 0.9, -tau / 4, a); ctx.stroke()
       ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
     }
-    ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
-    ctx.fillText(PERCENT_LABELS[Math.min(100, Math.floor(progress * 100))] ?? '', x, y + size + 5)
+    drawText(ctx, PERCENT_LABELS[Math.min(100, Math.floor(progress * 100))] ?? '',
+      FONT_16, ink.text, x, y + size + 5, 'center', 'top')
   }
   ctx.restore()
 }
@@ -538,6 +569,6 @@ export function drawVitals(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
   }
   ctx.fillStyle = hp > 25 ? '#8cff66' : ink.danger; ctx.fillRect(x - w / 2, by, w * actualRatio, 3)
   ctx.fillStyle = ink.cyan; ctx.fillRect(x - w / 2, by + 5, w * Math.min(1, Math.max(0, energy / maxEnergy)), 2)
-  ctx.font = FONT_11; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
-  ctx.fillStyle = selected ? ink.cyan : ink.text; ctx.fillText(nick, x, by - 5); ctx.restore()
+  drawText(ctx, nick, FONT_11, selected ? ink.cyan : ink.text, x, by - 5)
+  ctx.restore()
 }

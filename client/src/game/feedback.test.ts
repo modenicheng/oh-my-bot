@@ -645,8 +645,10 @@ describe('canvas quiescence gate (C-26 idle skip)', () => {
       if (f.feedback.quiet(tick)) converged = tick
     }
     expect(converged).toBeGreaterThan(0)
-    f.feedback.cameraZoom(converged + 1, false) // 目标切回 1：重新推进
-    expect(f.feedback.quiet(converged + 1)).toBe(false)
+    expect(f.feedback.cameraZoom(converged, true)).toBe(.92)
+    expect(f.feedback.cameraZoom(converged + 1, true)).toBe(.92)
+    f.feedback.cameraZoom(converged + 2, false) // 目标切回 1：重新推进
+    expect(f.feedback.quiet(converged + 2)).toBe(false)
   })
 
   it('recovers from a quiet canvas immediately when a new effect appears', () => {

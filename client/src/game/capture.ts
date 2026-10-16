@@ -1,6 +1,7 @@
 // 手册资产截取页（仅本地 vite dev / capture 脚本使用，不进入生产构建路由）。
 // 用与游戏完全相同的 draw* 函数与 SVG sprite 渲染 sprite sheet，供截图嵌入玩家文档。
-import { artReady, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, ink } from './art'
+import { artReady, drawArena, drawCover, drawRobot, drawCore, drawHealthPack, drawUplink, drawProjectile, drawVitals, ink, mono, prepareArena, prepareUplinkText } from './art'
+import { prepareText } from './text-raster'
 import { Camera } from './camera'
 import { drawIcon } from '../icons'
 import type { MapDefParsed } from './mapdef'
@@ -348,6 +349,10 @@ function exportIconDataURLs(names: readonly IconName[]): Record<string, string> 
 async function main() {
   await artReady
   const map = fixtureMap()
+  prepareArena(map)
+  prepareText('示例', `11px ${mono}`, ink.text)
+  prepareText('8.5s', `10px ${mono}`, ink.dim)
+  prepareUplinkText(48 / 80, 1)
   const $ = (id: string) => document.getElementById(id)!
 
   // ---- 场地：外环全貌（墙 + 环 + 核心区）----

@@ -3,6 +3,7 @@ package glue
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -863,9 +864,16 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 		err = m.ApplyDurations(dur)
 	}
 	if err != nil {
+		if m != nil {
+			m.Stop()
+		}
 		rc.mu.Lock()
-		if rc.launch.Load() == a && !a.cancelled.Load() {
+		if rc.launch.Load() == a && !a.cancelled.Load() && rc.Room.FailLaunch(a) {
+			rc.launch.CompareAndSwap(a, nil)
+			rc.match = nil
+			log.Printf("room %s: match launch failed (seed=%d players=%d warmup=%t): %v", rc.Code, seed, len(players), warmup, err)
 			rc.broadcastLocked(say("match launch failed: " + err.Error()))
+			rc.broadcastRoomStateLocked()
 		}
 		rc.mu.Unlock()
 		return

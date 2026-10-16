@@ -22,8 +22,12 @@ import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
 import { $ } from './ui/dom'
 import { startupReady } from './startup-resources'
+import { DebugPanel } from './debug/panel'
 
 export const ready = startupReady
+
+const debugPanel = new DebugPanel()
+if (import.meta.hot) import.meta.hot.dispose(() => debugPanel.dispose())
 
 mountIcons(document)
 // 登录回跳的 ?token= 必须在任何 writeRoute 快照 URL 之前落入存储并清洗。
@@ -373,6 +377,14 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0) {
       if (dedupeControlNoticeSay(msg, lastControlNotice)) { lastControlNotice = undefined; return }
       if (workbench.consumeAiDirectedSay(ev.kind.value.text)) return
+      const launchFailedPrefix = 'match launch failed: '
+      if (ev.kind.value.text.startsWith(launchFailedPrefix)) {
+        awaitingFull = false
+        connectionNotice.hidden = true
+        lobby.showRoomError(`对局启动失败：${ev.kind.value.text.slice(launchFailedPrefix.length)}。请重试开始对局或热身场。`)
+        if (game) exitGame()
+        return
+      }
     }
     const joinFailed = joinRejection(msg)
     if (joinFailed !== undefined) {
@@ -388,6 +400,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       awaitingFull = true
       game?.setActive(false)
       const ok = game?.onMapBootstrap(ev.kind.value.mapJson, ev.kind.value.tuning) ?? false
+      if (ok) lobby.showRoomError('')
       syncWorkbench()
       if (ok && !utilityView) showView('game')
       if (ok && utilityView) showView(utilityView, utilityRoute)

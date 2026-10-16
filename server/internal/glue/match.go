@@ -297,7 +297,10 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
-	scriptCfg := script.Config{TickTimeout: scriptTickQuota(len(players))}
+	// Built-ins are initialized during asynchronous assembly, outside the
+	// simulation clock. A busy machine must not spend their 4ms tick quota on
+	// startup scheduling; gameplay still uses the unchanged per-tick limit.
+	scriptCfg := script.Config{TickTimeout: scriptTickQuota(len(players)), InitTimeout: time.Second}
 	m.scriptPool = script.NewRunPool(scriptCfg)
 	for rid := range m.botRobots {
 		rt := script.NewGojaRuntime(scriptCfg)
@@ -1028,7 +1031,7 @@ func (m *Match) maybeBroadcastScoreboard(wv sim.WorldView) {
 	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}}) // 玩家 + 观战者，可靠通道（低频事件，不值得丢）
 }
 
-// scoreboardFingerprint 用 榜位+分数 序列做指纹：顺序或分数变化即视为变更。
+// scoreboardFingerprint includes public identity so name-only updates are published.
 func scoreboardFingerprint(rows []stats.ScoreRow) string {
 	var b strings.Builder
 	for i, r := range rows {
@@ -1038,6 +1041,10 @@ func scoreboardFingerprint(rows []stats.ScoreRow) string {
 		b.WriteString(strconv.FormatUint(uint64(r.RobotID), 10))
 		b.WriteByte(':')
 		b.WriteString(strconv.FormatInt(int64(r.Score), 10))
+		b.WriteByte(':')
+		b.WriteString(strconv.Itoa(len(r.Nick)))
+		b.WriteByte(':')
+		b.WriteString(r.Nick)
 	}
 	return b.String()
 }
@@ -1046,7 +1053,7 @@ func scoreboardFingerprint(rows []stats.ScoreRow) string {
 func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 	out := make([]*ombv1.ScoreRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &ombv1.ScoreRow{Robot: r.RobotID, Score: int32(r.Score)})
+		out = append(out, &ombv1.ScoreRow{Robot: r.RobotID, Score: int32(r.Score), Nick: r.Nick})
 	}
 	return &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Scoreboard{Scoreboard: &ombv1.EvScoreboard{Rows: out, Tick: tick}}}
 }
@@ -1137,7 +1144,7 @@ func settledMatchEnd(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
 	out := &ombv1.EvMatchEnd{}
 	for _, r := range rows {
-		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: r.RobotID, Score: r.Score, Titles: r.Titles})
+		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: r.RobotID, Score: r.Score, Titles: r.Titles, Nick: r.Nick})
 	}
 	return out
 }

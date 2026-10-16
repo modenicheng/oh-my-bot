@@ -4,7 +4,7 @@ import { icon } from '../icons'
 import { setText } from '../ui/dom'
 import './scoreboard.css'
 
-export interface ScoreEntry { robot: number; score: number; titles?: readonly number[] }
+export interface ScoreEntry { robot: number; score: number; titles?: readonly number[]; nick?: string }
 export interface ReplayTitleEvidence { kill: number; hit: number; core: number; uplink: number; assist?: number }
 export interface ScoreDisplay extends ScoreEntry { rank: number; nick: string; self: boolean; dead: boolean; status?: 'alive' | 'dead' | 'unknown'; replayEvidence?: ReplayTitleEvidence }
 
@@ -12,7 +12,7 @@ export type ScoreRowOptions = { titles?: boolean; ended?: boolean }
 
 function sameScore(a: ScoreEntry, b: ScoreEntry): boolean {
   const titles = a.titles ?? [], previous = b.titles ?? []
-  return a.robot === b.robot && a.score === b.score && titles.length === previous.length
+  return a.robot === b.robot && a.score === b.score && (a.nick ?? '') === (b.nick ?? '') && titles.length === previous.length
     && titles.every((title, index) => title === previous[index])
 }
 
@@ -29,7 +29,7 @@ export function rankedScores<T extends ScoreEntry>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.score - a.score || a.robot - b.robot)
 }
 
-/** 实时榜以服务器为准；昵称可跨 AOI 缓存，但绝不从可见机器人推算分数。 */
+/** Global rows carry identity independently of AOI; old servers can use observed names. */
 export class Scoreboard {
   readonly names = new Map<number, string>()
   private rows: ScoreEntry[] = []
@@ -54,7 +54,8 @@ export class Scoreboard {
     // Identical snapshots still advance freshness; they must not invalidate the HUD.
     this.tick = tick; this.final = final; this.received = true
     if (!changed) return
-    this.rows = rows.map(row => ({ robot: row.robot, score: row.score, titles: [...(row.titles ?? [])] }))
+    this.rows = rows.map(row => ({ robot: row.robot, score: row.score, titles: [...(row.titles ?? [])], nick: row.nick }))
+    for (const row of rows) if (row.nick) this.names.set(row.robot, row.nick)
     this.version++; this.displayCache = null
   }
   score(robot: number): number | undefined { return this.rows.find(row => row.robot === robot)?.score }
@@ -73,7 +74,7 @@ export class Scoreboard {
     const rows = rankedScores(this.rows).map((row, i) => {
       const robot = robots.get(row.robot)
       return { ...row, rank: i + 1,
-        nick: this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
+        nick: row.nick || this.names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self,
         dead: !!robot?.dead,
         status: (robot ? (robot.dead ? 'dead' : 'alive') : 'unknown') as 'alive' | 'dead' | 'unknown',
       }
@@ -315,7 +316,26 @@ export function scoreRow(row: ScoreDisplay, tag: 'div' | 'li' = 'div', titlesOrO
   return element
 }
 
-/** Keyed DOM renderer: updates rows in place and moves existing nodes only when order changes. */
+/** Find the rows that can stay attached while the changed order is applied. */
+function stationaryRows(positions: number[]): Set<number> {
+  const tails: number[] = [], previous = new Array<number>(positions.length).fill(-1)
+  for (let i = 0; i < positions.length; i++) {
+    if (positions[i]! < 0) continue
+    let low = 0, high = tails.length
+    while (low < high) {
+      const mid = (low + high) >>> 1
+      if (positions[tails[mid]!]! < positions[i]!) low = mid + 1
+      else high = mid
+    }
+    if (low > 0) previous[i] = tails[low - 1]!
+    tails[low] = i
+  }
+  const stable = new Set<number>()
+  for (let i = tails.at(-1) ?? -1; i >= 0; i = previous[i]!) stable.add(i)
+  return stable
+}
+
+/** Keyed DOM renderer: update leaves in place and move the fewest row nodes. */
 export class ScoreRowRenderer {
   private readonly rows = new Map<number, HTMLElement>()
   private readonly renderedRows = new Map<number, ScoreDisplay>()
@@ -336,7 +356,7 @@ export class ScoreRowRenderer {
     const key = `${options.titles ? 1 : 0}:${options.ended ? 1 : 0}`
     const optionsChanged = this.renderedOptions !== key
     this.renderedOptions = key
-    values.forEach((value, index) => {
+    const elements = values.map(value => {
       let element = this.rows.get(value.robot)
       const previous = this.renderedRows.get(value.robot)
       const changed = optionsChanged || !previous || !sameDisplay(value, previous)
@@ -350,11 +370,23 @@ export class ScoreRowRenderer {
         this.renderedRows.set(value.robot, { ...value, titles: value.titles && [...value.titles],
           replayEvidence: value.replayEvidence && { ...value.replayEvidence } })
       }
-      if (parent.children[index] !== element) {
-        parent.insertBefore(element, parent.children[index] ?? null)
-        this.moved++
-      }
+      return element
     })
+    const current = [...parent.children]
+    if (current.length === elements.length && current.every((element, index) => element === elements[index])) return
+    const positions = new Map(current.map((element, index) => [element, index]))
+    const stable = stationaryRows(elements.map(element => positions.get(element) ?? -1))
+    // Forward insertion moves 63 siblings when the leader falls to last place.
+    // The longest increasing subsequence stays attached to reduce accessible subtree churn.
+    for (let i = elements.length - 1; i >= 0; i--) if (!stable.has(i)) {
+      const element = elements[i]!, next = elements[i + 1] ?? null
+      // An attached row may own focus or an open title. Preserve that state on
+      // browsers supporting atomic moves; new rows still use ordinary insertion.
+      if (parent.isConnected && element.parentElement === parent && typeof parent.moveBefore === 'function') {
+        parent.moveBefore(element, next)
+      } else parent.insertBefore(element, next)
+      this.moved++
+    }
   }
   get nodeCount(): number { return this.rows.size }
   get createdCount(): number { return this.created }
@@ -376,14 +408,14 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
   const summary = document.createElement('div'); summary.className = 'end-summary'
   if (ownRank >= 0) {
     const own = ranked[ownRank]!
-    summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${names.get(self) || `robot-${self}`} · ${own.score} 分`))
+    summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${own.nick || names.get(self) || `robot-${self}`} · ${own.score} 分`))
   } else summary.append(text('end-placement', '最终战果'))
   summary.append(text('end-field', `${rows.length} 位参赛者`))
   const help = text('end-help', '悬停或聚焦称号即可浮动查看依据；点击可固定，Esc 关闭。')
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
   for (const [i, row] of ranked.entries()) {
-    list.append(scoreRow({ ...row, rank: i + 1, nick: names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
+    list.append(scoreRow({ ...row, rank: i + 1, nick: row.nick || names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
   const footer = document.createElement('footer'); footer.className = 'end-footer'
   footer.append(text('end-source', '积分与称号以服务器结算为准；未提供的统计不作估算。'))

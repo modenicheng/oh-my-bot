@@ -117,6 +117,10 @@ export class Lobby {
 
   setRoomCode(value: string): void { this.roomInput.value = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }
   showError(message: string): void { $('form-error').textContent = message }
+  showRoomError(message: string): void {
+    $('room-error').textContent = message
+    $('room-error').hidden = !message
+  }
   setJoining(joining: boolean): void { this.joinButton.disabled = joining }
 
   /** 同步认证徽章与昵称输入：已登录锁昵称（服务端会强制覆盖），未登录给出登录入口。 */
@@ -171,6 +175,7 @@ export class Lobby {
 
   beginJoin(roomCode: string): void {
     this.setJoining(true)
+    this.showRoomError('')
     $('room-code').textContent = roomCode
     $<HTMLAnchorElement>('room-live').href = `?view=live&room=${encodeURIComponent(roomCode)}`
     this.hostNick = ''; this.robotsOnline = 0; this.state = -1; this.soloBots = 0; this.pausedState = false
