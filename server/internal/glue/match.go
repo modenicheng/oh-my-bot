@@ -152,6 +152,9 @@ func (m *Match) encoderFor(rid uint32) *snapshot.DeltaEncoder {
 		enc.ForceFull()
 		m.encoders[rid] = enc
 	}
+	if session := m.rc.sessions[m.playerOf[rid]]; session != nil {
+		enc.SetCompactMetadata(session.CompactSnapshots())
+	}
 	return enc
 }
 
@@ -173,6 +176,9 @@ func (m *Match) specEncoderFor(pid uint64) *snapshot.DeltaEncoder {
 		enc = snapshot.NewEncoder()
 		enc.ForceFull()
 		m.specEncoders[pid] = enc
+	}
+	if session := m.rc.spectators[pid]; session != nil {
+		enc.SetCompactMetadata(session.CompactSnapshots())
 	}
 	return enc
 }

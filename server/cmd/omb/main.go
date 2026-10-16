@@ -533,6 +533,7 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 		var mu sync.Mutex
 		var sess *glue.Session
 		closed := false
+		compact := netws.OffersCompactProtocol(r)
 		defer func() {
 			mu.Lock()
 			defer mu.Unlock()
@@ -547,6 +548,9 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 				defer mu.Unlock()
 				if !closed {
 					handleUpstream(hub, up, reliable, lossy, frame, closeConn, &sess, authName)
+					if sess != nil {
+						sess.SetCompactSnapshots(compact)
+					}
 				}
 			}
 		}).ServeHTTP(w, r)

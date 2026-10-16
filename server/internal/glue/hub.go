@@ -274,6 +274,9 @@ type Session struct {
 	spectator    bool // read-only observer; never joins Room/identities/match players
 	SendReliable func(*ombv1.ServerMsg)
 	SendLossy    func(*ombv1.ServerMsg)
+
+	compactSnapshots atomic.Bool
+
 	// SendReliableFrame 是广播预编码通道（netws 注入；测试/旧路径可 nil）：
 	// 入参为「0x03 + ServerMsg protobuf」完整帧字节。nil 或消息不适用预编码
 	// （ScriptLog/MapBootstrap）时广播方回退 SendReliable 逐连接编码。

@@ -31,7 +31,7 @@ class FakeWebSocket {
   onclose: (() => void) | null = null
   onmessage: ((ev: { data: ArrayBuffer }) => void) | null = null
 
-  constructor(public url: string) {
+  constructor(public url: string, public protocols?: string | string[]) {
     FakeWebSocket.instances.push(this)
   }
 
@@ -102,6 +102,21 @@ function roomStateFrame(): number[] {
   }))
 }
 
+function batchFrame(children: number[][]): number[] {
+  const data = new Uint8Array(4 + children.reduce((n, child) => n + 4 + child.length, 0))
+  const view = new DataView(data.buffer)
+  data.set([5, 1])
+  view.setUint16(2, children.length, true)
+  let offset = 4
+  for (const child of children) {
+    view.setUint32(offset, child.length, true)
+    offset += 4
+    data.set(child, offset)
+    offset += child.length
+  }
+  return Array.from(data)
+}
+
 /** Node 下 globalThis 无事件 API：把 window 事件桥接到真实 EventTarget。 */
 let evtBus = new EventTarget()
 
@@ -164,6 +179,30 @@ describe('RoomSession', () => {
     return ws
   }
 
+  it('dispatches batched messages in order and stops after a terminal rejection', async () => {
+    const session = await start()
+    const ws = await ack(session)
+    messages.length = 0
+    ws.message(batchFrame([sayFrame('first'), sayFrame('second')]))
+    expect(messages.map(msg => msg.payload.case === 'event' && msg.payload.value.kind.case === 'say'
+      ? msg.payload.value.kind.value.text : '')).toEqual(['first', 'second'])
+    messages.length = 0
+    ws.message(batchFrame([controlNoticeFrame(EvControlNotice_Code.CN_JOIN_FAILED, 'denied'), sayFrame('must-not-run')]))
+    expect(session.state).toBe('disconnected')
+    expect(messages).toHaveLength(1)
+    session.close()
+  })
+
+  it('rejects a malformed batch atomically', async () => {
+    const session = await start()
+    const ws = await ack(session)
+    messages.length = 0
+    const bytes = batchFrame([sayFrame('must-not-run'), sayFrame('broken')])
+    ws.message(bytes.slice(0, -1))
+    expect(messages).toHaveLength(0)
+    session.close()
+  })
+
   /** 最近一次带倒计时的 reconnecting 上报。 */
   function lastRetryIn(): number {
     const entry = [...states].reverse().find(([st, r]) => st === 'reconnecting' && r !== undefined)
@@ -176,6 +215,42 @@ describe('RoomSession', () => {
     expect(s.state).toBe('connecting')
     expect(FakeWebSocket.instances).toHaveLength(1)
     s.close()
+  })
+
+  it.each([false, true])('successful legacy fallback preserves the RoomSession handshake (spectator=%s)', async (spectator) => {
+    const s = new RoomSession()
+    await s.connect({ ...opts, spectator })
+    const first = FakeWebSocket.instances[0]!
+    expect(first.protocols).toEqual(['omb.binary.v1'])
+    first.error()
+    await flush()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    const fallback = FakeWebSocket.instances[1]!
+    expect(fallback.protocols).toBeUndefined()
+    expect(fallback.url).toBe(first.url)
+    expect(s.state).toBe('connecting')
+    expect(states).toEqual([['connecting', undefined]])
+    expect(first.upFrames()).toEqual([])
+    fallback.open()
+    await flush()
+    expect(fallback.upFrames()).toHaveLength(1)
+    const handshake = fromBinary(ClientMsgSchema, new Uint8Array(fallback.upFrames()[0]!).subarray(1))
+    expect(handshake.payload).toMatchObject(spectator
+      ? { case: 'spectate', value: { roomCode: opts.roomCode } }
+      : { case: 'join', value: { roomCode: opts.roomCode, nick: opts.nick, color: opts.color } })
+    expect(s.state).toBe('connecting') // A legacy socket opening still needs a room ack.
+    first.message(roomStateFrame())
+    first.closeEvent()
+    expect(messages).toEqual([])
+    fallback.message(roomStateFrame())
+    expect(s.state).toBe('online')
+    fallback.message(sayFrame('legacy ready'))
+    expect(messages.map(msg => msg.payload.case === 'event' ? msg.payload.value.kind.case : '')).toEqual(['roomState', 'say'])
+    expect(states).toEqual([['connecting', undefined], ['online', undefined]])
+    expect(disconnects).toEqual([])
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    s.close()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('roomState/snapshot 均为 ack；say 事件不算 ack', async () => {
@@ -275,14 +350,21 @@ describe('RoomSession', () => {
     let prev = 500
     for (let i = 0; i < 7; i++) {
       FakeWebSocket.instances.at(-1)!.closeEvent()
+      if (i > 0) {
+        await flush()
+        expect(s.state).toBe('connecting')
+        expect(FakeWebSocket.instances).toHaveLength(2 * i + 1)
+        FakeWebSocket.instances.at(-1)!.closeEvent() // Both pre-open handshakes must fail this attempt.
+      }
       await flush()
+      expect(s.state).toBe('reconnecting')
       const delay = lastRetryIn()
       expect(delay).toBeGreaterThanOrEqual(Math.round(prev * 0.8) - 1)
       expect(delay).toBeLessThanOrEqual(Math.round(prev * 1.2) + 1)
       expect(delay).toBeLessThanOrEqual(15_000)
       prev = Math.min(15_000, prev * 2)
       await vi.advanceTimersByTimeAsync(delay) // 恰好到期：新 socket 建立（CONNECTING）
-      expect(FakeWebSocket.instances).toHaveLength(i + 2)
+      expect(FakeWebSocket.instances).toHaveLength(2 * i + 2)
     }
     // 末两档均已封顶：12000..15000
     const delay = lastRetryIn()
@@ -320,7 +402,15 @@ describe('RoomSession', () => {
     const s = await start()
     FakeWebSocket.instances[0]!.closeEvent()
     await flush()
+    expect(s.state).toBe('connecting')
+    expect(states).toEqual([['connecting', undefined]])
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    FakeWebSocket.instances[1]!.closeEvent()
+    await flush()
     expect(s.state).toBe('reconnecting')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(lastRetryIn()).toBeGreaterThanOrEqual(400)
+    expect(lastRetryIn()).toBeLessThanOrEqual(600)
     expect(disconnects).toEqual([])
     s.close()
   })

@@ -2,6 +2,7 @@
 // full=true 重建；delta 按 id 合并；*_gone 为墓碑删除；base_tick 断链 → 请求方发 ResyncRequest。
 import {
   ResyncRequestSchema, ClientMsgSchema,
+  isBinarySnapshot,
   type ServerMsg, type SnapshotDelta, type SelfState,
   type RobotState, type ProjectileState, type CoreState, type UplinkState, type HealthPackState, type SimTuning, type PointDropState,
 } from '@omb/protocol'
@@ -9,6 +10,7 @@ import { create } from '@bufbuild/protobuf'
 import { encodeClient } from '@omb/protocol'
 import { FALLBACK_TUNING, invulnWindowMs } from './tuning'
 import { parseMapDef, type MapDefParsed } from './mapdef'
+import { projectBinaryLocalMap } from './binary-local-map'
 
 export interface RobotEnt extends RobotState {
   /** 本地渲染帧时间戳（无敌闪烁等动画用） */
@@ -31,6 +33,8 @@ export interface PointDropEnt extends PointDropState {
 }
 
 export interface WorldState {
+  /** Full map received during bootstrap; never replaced by a local projection. */
+  staticMap?: MapDefParsed
   localMap?: MapDefParsed
   visionRadius?: number
   tick: number
@@ -49,6 +53,10 @@ export interface WorldState {
   ackSeq: number
   /** 服务器下发的对局数值（X-3）；未收到 bootstrap 时为兜底值（旧服务器） */
   tuning: Readonly<SimTuning>
+}
+
+export function setWorldStaticMap(world: WorldState, map: MapDefParsed): void {
+  world.staticMap = map
 }
 
 export function emptyWorld(): WorldState {
@@ -71,7 +79,13 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
 
   if (world.initialized && snap.tick < world.tick) return 'stale'
   if (!snap.full && (!world.initialized || snap.baseTick !== world.tick)) return 'resync-needed'
-  if (snap.mapJson !== undefined) world.localMap = parseMapDef(snap.mapJson)
+  const binary = isBinarySnapshot(snap)
+  // Compact omission retains a delta baseline, but a full frame replaces it.
+  if (binary && snap.full) {
+    world.self = undefined
+    world.visionRadius = undefined
+  }
+  if (!binary && snap.mapJson !== undefined) world.localMap = parseMapDef(snap.mapJson)
   if (snap.visionRadius !== undefined) world.visionRadius = snap.visionRadius
   for (const id of snap.uplinkGone) world.uplinks.delete(id)
   for (const id of snap.healthPackGone) world.healthPacks.delete(id)
@@ -165,6 +179,14 @@ export function applySnapshot(world: WorldState, snap: SnapshotDelta): SnapshotR
     world.pointDrops.set(id, ent)
   }
   for (const id of snap.pointDropGone) world.pointDrops.delete(id)
+
+  if (binary) {
+    // Spectators have no local self/vision. Clear any prior player projection
+    // rather than treating the full static terrain as a partial observation.
+    world.localMap = world.staticMap && world.self !== undefined && world.visionRadius !== undefined
+      ? projectBinaryLocalMap(world.staticMap, world.uplinks, world.healthPacks)
+      : undefined
+  }
 
   return 'applied'
 }

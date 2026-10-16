@@ -1,8 +1,8 @@
 // 进房连接会话：WsTransport 拨号 + JoinRoom 握手 + 断线自动重连（指数退避）。
-// 帧协议见 packages/protocol/src/messages.ts（0x02 上行 / 0x03 下行）。
+// Frames: protobuf controls plus negotiated compact snapshots/ordered batches.
 // 心跳与存活检测完全下沉到 WsTransport；本层负责握手超时、重试节奏与状态上报。
 // 断线后以相同 room/nick/color 自动重进；close() 后会话不可复用（重新 joinRoom）。
-import { WsTransport, decodeServer, encodeClient,
+import { WsTransport, ServerFrameDecoder, encodeClient,
          JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinRejection,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
@@ -70,6 +70,7 @@ export class RoomSession {
   private closed = false
   private netBound = false
   private docTarget?: EventTarget
+  private readonly decoder = new ServerFrameDecoder()
   state: SessionState = 'idle'
 
   /** 启动首个连接尝试；立即返回，后续节奏经 onStateChange/onDisconnect 上报。 */
@@ -137,6 +138,7 @@ export class RoomSession {
     }
     const opts = this.opts
     const gen = ++this.gen
+    this.decoder.reset()
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
     this.retryPaused = false
@@ -169,18 +171,25 @@ export class RoomSession {
 
   private onFrame(gen: number, data: Uint8Array): void {
     if (this.closed || gen !== this.gen || !this.opts) return
-    let msg: ServerMsg | null
+    let messages: ServerMsg[]
     try {
-      msg = decodeServer(data)
+      messages = this.decoder.decode(data)
     } catch {
       return // 畸形帧丢弃
     }
-    if (!msg) return
+    for (const msg of messages) {
+      if (this.closed || gen !== this.gen || !this.opts) break
+      this.onDecodedMessage(msg)
+    }
+  }
+
+  private onDecodedMessage(msg: ServerMsg): void {
+    if (!this.opts) return
     // X-4：结构化 join 拒绝通知优先；旧服务器回退解析 "join failed:" 前缀 say
     const rejection = joinRejection(msg)
     if (rejection !== undefined) {
       // 进房被拒（房间满/码无效等）：终结会话，原因交上层展示
-      this.terminalFail(gen, rejection.reason, msg)
+      this.terminalFail(this.gen, rejection.reason, msg)
       return
     }
     if (this.state !== 'online' && isJoinAck(msg)) this.confirmOnline()

@@ -1,8 +1,8 @@
 // WebSocket Transport 实现（默认）。
-// 二进制帧（ArrayBuffer），与 protobuf 编解码配合；RTT 用 ping/pong 心跳估计。
+// ArrayBuffer frames negotiate compact snapshots; protobuf controls stay compatible.
 //
 // 所有权约定（客户端连接健壮性）：
-// - 一个 WsTransport 只 owns 一个 socket；重连由上层（RoomSession）新建 transport 驱动。
+// - Own at most one socket at a time; retry a failed compact handshake once as legacy.
 // - 心跳/存活时序取自生成协议 TransportTiming（审计 X-5 单一权威源：
 //   protocol/proto/omb.proto 定义，与 server/internal/netws/timing_test.go 互钉）。
 // - 断开统一收敛为 onClose(reason) 单次回调；open 后的 error 交给 onclose 收口，不重复上报。
@@ -12,6 +12,7 @@
 import type { Transport, TransportStats } from './transport'
 import { TransportTiming } from './gen/proto/omb_pb'
 import { webSocketMetrics, type ConnectionMetrics } from './ws-metrics'
+import { BINARY_SUBPROTOCOL } from './binary'
 
 // 时序常量全部取自生成枚举 TransportTiming（单一权威源，见文件头注释）；
 // 本文件不再手写任何心跳/帧字节字面量（漂移由 golden.test.ts 拦截）。
@@ -42,12 +43,6 @@ export class WsTransport implements Transport {
     if (this.ws) return Promise.reject(new Error('ws transport already connecting/connected'))
     return new Promise((resolve, reject) => {
       let settled = false
-      let opened = false
-      const ws = new WebSocket(url)
-      ws.binaryType = 'arraybuffer'
-      this.ws = ws
-      this.rejectConnect = reject
-
       const settle = (err?: Error) => {
         if (settled) return
         settled = true
@@ -57,59 +52,84 @@ export class WsTransport implements Transport {
         if (err) reject(err)
         else resolve()
       }
+      this.rejectConnect = settle
 
+      // Both handshakes share one deadline; fallback must not extend connect().
       this.connectTimer = setTimeout(() => {
-        if (this.isCurrent(ws)) this.teardown()
+        this.teardown()
         settle(new Error(`ws connect timeout: ${url}`))
       }, CONNECT_TIMEOUT_MS)
 
-      ws.onopen = () => {
-        if (!this.isCurrent(ws)) return
-        opened = true
-        webSocketMetrics.open(this.metrics)
-        this.lastInboundAt = Date.now()
-        this.startHeartbeat(ws)
-        settle()
-      }
-      ws.onerror = () => {
-        if (!this.isCurrent(ws) || opened) return // open 后的 error 由 onclose 统一收口
-        this.teardown()
-        settle(new Error(`ws connect failed: ${url}`))
-      }
-      ws.onclose = () => {
-        if (!this.isCurrent(ws)) return
-        this.teardown()
-        if (opened) {
-          settle()
-          this.closeCb?.('与服务器的连接已断开')
-        } else {
-          settle(new Error(`ws closed before open: ${url}`))
+      const connectSocket = (offerCompact: boolean) => {
+        let ws: WebSocket
+        try {
+          ws = offerCompact ? new WebSocket(url, [BINARY_SUBPROTOCOL]) : new WebSocket(url)
+        } catch (err) {
+          this.teardown()
+          settle(err instanceof Error ? err : new Error(String(err)))
+          return
         }
-      }
-      ws.onmessage = (ev) => {
-        if (!this.isCurrent(ws)) return
-        const buf = new Uint8Array(ev.data as ArrayBuffer)
-        webSocketMetrics.receive(buf.byteLength)
-        if (buf.length === 0) return
-        this.lastInboundAt = Date.now()
-        if (buf[0] === FRAME_PONG) {
-          if (this.lastPingAt !== undefined) {
-            this.stats.rttMs = Math.max(0, Date.now() - this.lastPingAt)
-            this.metrics.rttMs = this.stats.rttMs
-            this.lastPingAt = undefined
+        ws.binaryType = 'arraybuffer'
+        this.ws = ws
+        let opened = false
+        const failBeforeOpen = (err: Error) => {
+          // Browsers hide handshake status: try legacy once, fencing the failed
+          // socket before dialing. Intentional close and timeout never enter here.
+          if (offerCompact) {
+            this.detachSocket()
+            connectSocket(false)
+          } else {
+            this.teardown()
+            settle(err)
           }
-          this.pongCb?.()
-          return
         }
-        if (buf[0] === FRAME_PING) {
-          const reply = new Uint8Array(buf.length)
-          reply[0] = FRAME_PONG
-          reply.set(buf.subarray(1), 1)
-          this.internalSend(ws, reply) // 服务器心跳 ping → 回 pong（回显载荷）
-          return
+        ws.onopen = () => {
+          if (!this.isCurrent(ws) || opened) return
+          opened = true
+          webSocketMetrics.open(this.metrics)
+          this.lastInboundAt = Date.now()
+          this.startHeartbeat(ws)
+          settle()
         }
-        this.cb?.(buf)
+        ws.onerror = () => {
+          if (!this.isCurrent(ws) || opened) return // open 后的 error 由 onclose 统一收口
+          failBeforeOpen(new Error(`ws connect failed: ${url}`))
+        }
+        ws.onclose = () => {
+          if (!this.isCurrent(ws)) return
+          if (opened) {
+            this.teardown()
+            this.closeCb?.('与服务器的连接已断开')
+          } else {
+            failBeforeOpen(new Error(`ws closed before open: ${url}`))
+          }
+        }
+        ws.onmessage = (ev) => {
+          if (!this.isCurrent(ws)) return
+          const buf = new Uint8Array(ev.data as ArrayBuffer)
+          webSocketMetrics.receive(buf.byteLength)
+          if (buf.length === 0) return
+          this.lastInboundAt = Date.now()
+          if (buf[0] === FRAME_PONG) {
+            if (this.lastPingAt !== undefined) {
+              this.stats.rttMs = Math.max(0, Date.now() - this.lastPingAt)
+              this.metrics.rttMs = this.stats.rttMs
+              this.lastPingAt = undefined
+            }
+            this.pongCb?.()
+            return
+          }
+          if (buf[0] === FRAME_PING) {
+            const reply = new Uint8Array(buf.length)
+            reply[0] = FRAME_PONG
+            reply.set(buf.subarray(1), 1)
+            this.internalSend(ws, reply) // 服务器心跳 ping → 回 pong（回显载荷）
+            return
+          }
+          this.cb?.(buf)
+        }
       }
+      connectSocket(true)
     })
   }
 
@@ -167,8 +187,7 @@ export class WsTransport implements Transport {
 
   /** 摘除当前 socket：清回调、清定时器、关闭 CONNECTING/OPEN。 */
   private teardown(): void {
-    const ws = this.ws
-    this.ws = undefined
+    this.detachSocket()
     webSocketMetrics.close(this.metrics)
     clearTimeout(this.connectTimer)
     this.connectTimer = undefined
@@ -176,6 +195,12 @@ export class WsTransport implements Transport {
     this.pingTimer = undefined
     clearInterval(this.livenessTimer)
     this.livenessTimer = undefined
+  }
+
+  /** Detach before closing so late events cannot affect a replacement socket. */
+  private detachSocket(): void {
+    const ws = this.ws
+    this.ws = undefined
     if (!ws) return
     ws.onopen = null
     ws.onerror = null

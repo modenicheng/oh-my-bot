@@ -263,6 +263,7 @@ message SelfState {
   optional UpgradeSelf upgrade = 12; // 局内升级状态；缺失表示旧服务器（=0 点全零级）
   optional uint32 shield_ready_tick = 13;
   optional uint32 shield_started_tick = 14;
+  optional uint32 input_generation = 15; // Owner generation, including death/respawn updates without map reload.
 }
 
 message SnapshotDelta {

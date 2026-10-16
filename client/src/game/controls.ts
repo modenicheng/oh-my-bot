@@ -168,6 +168,7 @@ export class GameController {
     this.feedback.reset()
     this.input.assistOn = this.assistPreference
     this.world = emptyWorld()
+    this.world.staticMap = this.map
     // X-3：服务器权威对局数值；缺失（旧服务器）resolveTuning 回退兜底
     this.world.tuning = resolveTuning(tuning)
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable)

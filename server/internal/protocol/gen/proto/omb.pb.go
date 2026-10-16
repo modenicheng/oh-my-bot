@@ -2531,6 +2531,7 @@ type SelfState struct {
 	Upgrade           *UpgradeSelf           `protobuf:"bytes,12,opt,name=upgrade,proto3,oneof" json:"upgrade,omitempty"`                                                    // 局内升级状态；缺失表示旧服务器（=0 点全零级）
 	ShieldReadyTick   *uint32                `protobuf:"varint,13,opt,name=shield_ready_tick,json=shieldReadyTick,proto3,oneof" json:"shield_ready_tick,omitempty"`
 	ShieldStartedTick *uint32                `protobuf:"varint,14,opt,name=shield_started_tick,json=shieldStartedTick,proto3,oneof" json:"shield_started_tick,omitempty"`
+	InputGeneration   *uint32                `protobuf:"varint,15,opt,name=input_generation,json=inputGeneration,proto3,oneof" json:"input_generation,omitempty"` // Owner generation, including death/respawn updates without map reload.
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2659,6 +2660,13 @@ func (x *SelfState) GetShieldReadyTick() uint32 {
 func (x *SelfState) GetShieldStartedTick() uint32 {
 	if x != nil && x.ShieldStartedTick != nil {
 		return *x.ShieldStartedTick
+	}
+	return 0
+}
+
+func (x *SelfState) GetInputGeneration() uint32 {
+	if x != nil && x.InputGeneration != nil {
+		return *x.InputGeneration
 	}
 	return 0
 }
@@ -6280,7 +6288,7 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x06points\x18\x02 \x01(\x11R\x06points\"=\n" +
 	"\vUpgradeSelf\x12\x16\n" +
 	"\x06points\x18\x01 \x01(\rR\x06points\x12\x16\n" +
-	"\x06levels\x18\x02 \x03(\rR\x06levels\"\xb8\x06\n" +
+	"\x06levels\x18\x02 \x03(\rR\x06levels\"\xfd\x06\n" +
 	"\tSelfState\x12\x19\n" +
 	"\brobot_id\x18\x01 \x01(\rR\arobotId\x120\n" +
 	"\bmove_src\x18\x02 \x01(\x0e2\x15.omb.v1.ControlSourceR\amoveSrc\x124\n" +
@@ -6298,7 +6306,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x10manual_axes_mask\x18\v \x01(\rH\x05R\x0emanualAxesMask\x88\x01\x01\x122\n" +
 	"\aupgrade\x18\f \x01(\v2\x13.omb.v1.UpgradeSelfH\x06R\aupgrade\x88\x01\x01\x12/\n" +
 	"\x11shield_ready_tick\x18\r \x01(\rH\aR\x0fshieldReadyTick\x88\x01\x01\x123\n" +
-	"\x13shield_started_tick\x18\x0e \x01(\rH\bR\x11shieldStartedTick\x88\x01\x01B\f\n" +
+	"\x13shield_started_tick\x18\x0e \x01(\rH\bR\x11shieldStartedTick\x88\x01\x01\x12.\n" +
+	"\x10input_generation\x18\x0f \x01(\rH\tR\x0finputGeneration\x88\x01\x01B\f\n" +
 	"\n" +
 	"_assist_onB\x12\n" +
 	"\x10_dash_ready_tickB\x12\n" +
@@ -6309,7 +6318,8 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\n" +
 	"\b_upgradeB\x14\n" +
 	"\x12_shield_ready_tickB\x16\n" +
-	"\x14_shield_started_tick\"\xce\x06\n" +
+	"\x14_shield_started_tickB\x13\n" +
+	"\x11_input_generation\"\xce\x06\n" +
 	"\rSnapshotDelta\x12\x12\n" +
 	"\x04tick\x18\x01 \x01(\rR\x04tick\x12\x17\n" +
 	"\aack_seq\x18\x02 \x01(\rR\x06ackSeq\x12#\n" +

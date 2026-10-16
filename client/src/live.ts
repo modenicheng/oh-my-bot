@@ -214,6 +214,7 @@ export class LiveSpectator {
     this.lastEnded = false
     this.rosterSize = -1
     this.world = emptyWorld()
+    this.world.staticMap = this.map ?? undefined
     this.needsFull = true
     this.resyncSent = false
     this.ended = false
