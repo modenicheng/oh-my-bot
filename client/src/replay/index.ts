@@ -202,8 +202,9 @@ export class ReplayIndex {
       applyEvent(ev, robots, scores, healthPacks, bubbles, this.marks, this.robots)
       if (ev.kind === 'phase_change') phase = phaseNum(ev.payload?.to)
       if (ev.kind === 'match_end' && Array.isArray(ev.payload?.scores)) {
-        finalScores = ev.payload.scores.map((row: { robot?: number; score?: number; titles?: Array<string | number> }) => ({
+        finalScores = ev.payload.scores.map((row: { robot?: number; score?: number; nick?: string; titles?: Array<string | number> }) => ({
           robot: numOr(row.robot, 0), score: numOr(row.score, 0),
+          nick: typeof row.nick === 'string' && row.nick ? row.nick : undefined,
           titles: (row.titles ?? []).map(title => typeof title === 'number' ? title : Title[title as keyof typeof Title])
             .filter((title): title is number => typeof title === 'number'),
         }))

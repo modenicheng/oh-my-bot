@@ -319,7 +319,7 @@ describe('ReplayIndex', () => {
       { type: 'match_start', tick: 0, state: { tick: 0, phase: 1, robots: [] } },
       { type: 'event', tick: 120, event: { kill: { killer: 1, victim: 2, assist: 0 } } },
       { type: 'event', tick: 125, event: { match_end: { scores: [
-        { robot: 1, score: 77, titles: ['KILL_STEAL', 'HEALER'] },
+        { robot: 1, score: 77, nick: 'TEST-BOT-134', titles: ['KILL_STEAL', 'HEALER'] },
         { robot: 2, score: 0, titles: [Title.SURVIVOR] },
       ] } } },
     ].map(record => JSON.stringify(record)).join(String.fromCharCode(10)))
@@ -329,6 +329,7 @@ describe('ReplayIndex', () => {
     expect(replay.frameAt(124).finalScores).toBeNull()
     const final = replay.frameAt(125)
     expect(final.scores.get(1)?.total).toBe(77)
+    expect(final.finalScores?.[0]?.nick).toBe('TEST-BOT-134')
     expect(final.finalScores?.[0]?.titles).toEqual([Title.KILL_STEAL, Title.HEALER])
     expect(final.finalScores?.[1]?.titles).toEqual([Title.SURVIVOR])
     final.scores.get(1)!.total = 999

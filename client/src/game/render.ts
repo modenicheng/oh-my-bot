@@ -269,7 +269,7 @@ export class Renderer {
         else { ctx.moveTo(cx, cy); pen = true }
       }
       ctx.fillStyle = map.partial ? 'rgb(5, 9, 14)' : SHADOW_FILL
-      ctx.fill('evenodd')
+      ctx.fill()
       ctx.restore()
     }
 
@@ -279,13 +279,6 @@ export class Renderer {
       ctx.fillStyle = this.edgeGradient ?? SHADOW_FILL
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, Math.PI * 2)
-      // The gradient is exactly transparent inside clearRadius. Excluding that
-      // disk avoids shading most of the viewport during animated zoom.
-      const clearRadius = this.edgeClearRadius
-      if (clearRadius > 0) {
-        ctx.moveTo(x + clearRadius, y)
-        ctx.arc(x, y, clearRadius, 0, Math.PI * 2, true)
-      }
       ctx.fill()
     }
     ctx.restore()
@@ -295,7 +288,6 @@ export class Renderer {
   private readonly shadowPts: number[] = []
   private edgeKey = ''
   private edgeGradient: CanvasGradient | null = null
-  private edgeClearRadius = 0
   private readonly visionRaster = new VisionRaster()
   private shadowMap: MapDefParsed | undefined
   private shadowX = Number.NaN
@@ -319,7 +311,6 @@ export class Renderer {
     }
     const x = cam.toPxX(self.x), y = cam.toPxY(self.y), radius = range * cam.scale
     const clearRadius = Math.max(0, radius - Math.min(VISION_FEATHER * cam.scale, radius * 0.28))
-    this.edgeClearRadius = clearRadius
     if (this.visionRaster.prepare(cam.cw, cam.ch, this.dpr, x, y, radius, clearRadius, world.tick)) return
     const key = `${x},${y},${clearRadius},${radius}`
     if (key === this.edgeKey && this.edgeGradient) return

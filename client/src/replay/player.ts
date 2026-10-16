@@ -3,7 +3,7 @@
 // 时间轴：拖动条（0→endTick）+ 播放/暂停/倍速（0.5/1/2/4×）+ 步进（±1s）。
 // 事件叠加层：kill/core/uplink/phase 标记点，hover 显示详情。
 import { Camera } from '../game/camera'
-import { rankedScores, ScoreRowRenderer } from '../game/scoreboard'
+import { rankedScores, ScoreRowRenderer, type ScoreEntry } from '../game/scoreboard'
 import { bgm } from '../music/bgm'
 import { SpectatorCamera } from './spectator'
 import { artReady } from '../game/art'
@@ -420,16 +420,16 @@ export class ReplayPlayer {
     setText(this.el['rp-phase'], phaseName(frame.phase as any))
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
-      const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
-      // 签名只含 会发生变化的行内容（robot/score/titles）；不得混入 frame.tick——
+      const rows = rankedScores<ScoreEntry>(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
+      // 签名只含会发生变化的行内容（robot/score/nick/titles）；不得混入 frame.tick——
       // tick 每帧必变会让缓存失效，积分面板被 60Hz 全量重写（审计 C-31）。
       // evidence 与 score 同源单调，行相同即 evidence 相同，不进签名。
       const signature = `${frame.finalScores !== null}:${rows.map(row => {
         const titles = 'titles' in row ? (row as { titles?: readonly number[] }).titles : undefined
-        return `${row.robot},${row.score},${titles?.join('.') ?? ''}`
+        return `${row.robot},${row.score},${row.nick ?? ''},${titles?.join('.') ?? ''}`
       }).join(';')}`
       if (signature !== this.scoreMarkup) {
-        const displays = rows.map((row, i) => ({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
+        const displays = rows.map((row, i) => ({ ...row, rank: i + 1, nick: row.nick ?? this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
           self: false, dead: false, status: 'unknown' as const, replayEvidence: frame.scores.get(row.robot) }))
         // Replay evidence is part of the keyed row structure, so seeking never
         // appends another evidence node to an existing row.
