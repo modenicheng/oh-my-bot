@@ -29,7 +29,7 @@ import {
   ServerMsgSchema, ClientMsgSchema, ServerEventSchema, SnapshotDeltaSchema,
   EvRoomStateSchema, EvMapBootstrapSchema, EvShotSchema, EvProjectileImpactSchema,
   EvUplinkHackSchema, EvCorePickupSchema, EvHealSchema, EvKillSchema, EvPhaseChangeSchema, EvSaySchema, Vec2Schema,
-  EvScriptResultSchema,
+  EvScriptResultSchema, EvScoreboardSchema,
 } from '../../packages/protocol/src/index.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -802,6 +802,96 @@ async function quickPass(browser, fix, viewport, label, shotName) {
   }
 }
 
+async function hudPerformancePass(browser, fix, viewport, label) {
+  const ctx = await browser.newContext({ viewport })
+  await ctx.addInitScript(AUDIO_INIT)
+  await ctx.addInitScript(() => {
+    const request = window.requestAnimationFrame
+    window.requestAnimationFrame = callback => request.call(window, time => {
+      window.__inAnimationFrame = true
+      try { callback(time) } finally { window.__inAnimationFrame = false }
+    })
+    window.__renderPreparation = []
+    for (const [prototype, name] of [
+      [CanvasRenderingContext2D.prototype, 'measureText'],
+      [CanvasRenderingContext2D.prototype, 'createLinearGradient'],
+      [CanvasRenderingContext2D.prototype, 'createRadialGradient'],
+      [Element.prototype, 'getBoundingClientRect'],
+    ]) {
+      const original = prototype[name]
+      prototype[name] = function (...args) {
+        if (window.__inAnimationFrame && window.__probeRendering) window.__renderPreparation.push(name)
+        return original.apply(this, args)
+      }
+    }
+  })
+  const page = await ctx.newPage(), errors = []
+  try {
+    await joinGame(page, fix, errors)
+    await fix.step(st => { st.self.upgrade = { points: 6, levels: [3, 10, 0, 1, 4] } })
+    const rows = Array.from({ length: 64 }, (_, i) => ({ robot: i === 0 ? SELF_ID : 1000 + i, score: 1000 - i * 10 }))
+    const sendScores = values => fix.bcast(fix.event('scoreboard', EvScoreboardSchema, { tick: fix.st.tick, rows: values }))
+    sendScores(rows)
+    await until(async () => await page.locator('#hud-score-rows .score-row').count() === 64, `${label}: scoreboard populated`)
+    await page.evaluate(() => {
+      const root = document.querySelector('#hud-score-rows')
+      window.__scoreNodes = [...root.children]
+      window.__scoreMutations = []
+      window.__scoreObserver = new MutationObserver(records => window.__scoreMutations.push(...records))
+      window.__scoreObserver.observe(root, { childList: true, characterData: true, attributes: true, subtree: true })
+      window.__hudMutations = []
+      window.__hudObserver = new MutationObserver(records => window.__hudMutations.push(...records))
+      window.__hudObserver.observe(document.querySelector('#hud'), { childList: true, characterData: true, attributes: true, subtree: true })
+      window.__probeRendering = true
+    })
+    for (let i = 0; i < 20; i++) {
+      await fix.step(st => { st.timeLeftS = 480 })
+      sendScores(rows)
+      await fix.step(st => { st.timeLeftS = 480 })
+    }
+    assert.equal(await page.evaluate(() => window.__scoreMutations.length), 0, `${label}: unchanged scores create no DOM mutations`)
+    assert.equal(await page.evaluate(() => window.__hudMutations.length), 0, `${label}: unchanged HUD and upgrades create no DOM mutations`)
+    await page.evaluate(() => window.__hudObserver.disconnect())
+    fix.bcast(fix.event('say', EvSaySchema, { robot: SELF_ID, text: 'Prepared speech layout before the next animation frame' }))
+    await fix.step(st => { st.uplinks[0].hackingId = SELF_ID; st.uplinks[0].progressX10 = 20 })
+    assert.equal(await page.locator('#hud-uplink-track').getAttribute('aria-valuenow'), '50')
+    await fix.step(st => { st.uplinks[0].hackingId = 0; st.uplinks[0].progressX10 = 0 })
+    assert.deepEqual(await page.evaluate(() => window.__renderPreparation), [], `${label}: draw frames never measure text/layout or create gradients`)
+
+    const changed = rows.map(row => ({ ...row }))
+    changed[0].score++
+    sendScores(changed)
+    await fix.step(() => {})
+    assert.equal(await page.locator(`#hud-score-rows [data-robot="${SELF_ID}"] .score-value`).textContent(), '1001')
+    assert.equal(await page.evaluate(() => {
+      const score = document.querySelector('#hud-score-rows .score-value')
+      const changes = window.__scoreMutations
+      return changes.length > 0 && changes.every(record => record.target === score || score.contains(record.target))
+    }), true, `${label}: only the changed score text is written`)
+
+    changed[63].score = 2000
+    sendScores(changed)
+    await fix.step(() => {})
+    assert.equal(await page.locator('#hud-score-rows .score-row').first().getAttribute('data-robot'), String(changed[63].robot))
+    assert.equal(await page.evaluate(() => window.__scoreNodes.every(node => document.querySelector('#hud-score-rows').contains(node))), true, `${label}: rank changes reuse all row nodes`)
+    await page.evaluate(() => window.__scoreObserver.disconnect())
+
+    fix.bcast(fix.event('uplinkHack', EvUplinkHackSchema, { by: SELF_ID, uplinkId: UPLINK_ID, value: 15 }))
+    await until(async () => /黑入完成/.test(await hudMsgText(page)), `${label}: uplink banner`)
+    const status = await hudMsgText(page)
+    const sound = await audioStarted(page)
+    for (let i = 0; i < 1000; i++) fix.bcast(fix.event('kill', EvKillSchema, { killer: 2000 + i % 64, victim: 3000 + Math.floor(i / 64) }))
+    // The final audible event proves the preceding WebSocket flood was consumed.
+    fix.bcast(fix.event('kill', EvKillSchema, { killer: SELF_ID, victim: ENEMY_ID, at: ENEMY_POS }))
+    await until(async () => await audioStarted(page) > sound, `${label}: death audio survives kill removal`)
+    assert.equal(await page.locator('.kill-feed').count(), 0, `${label}: kills create no notification DOM`)
+    assert.equal(await hudMsgText(page), status, `${label}: kills preserve the uplink banner`)
+    assert.deepEqual(errors, [], `${label}: no page errors`)
+    await shot(page, `hud-performance-${label}.png`)
+    console.log(`${label}: 64 rows x 20 unchanged updates = 0 DOM mutations; score/rank updates and kill flood passed`)
+  } finally { await ctx.close() }
+}
+
 async function bannerPass(browser, fix, reduced = false) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: reduced ? 'reduce' : 'no-preference' })
   await ctx.addInitScript(AUDIO_INIT)
@@ -1165,15 +1255,19 @@ fix.attach(server)
 let browser
 try {
   browser = await chromium.launch()
-  await projectileColorPass(browser, fix)
-  await fullPass(browser, fix)
-  await quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')
-  await quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')
-  await reducedMotionPass(browser, fix)
-  await bannerPass(browser, fix)
-  await bannerPass(browser, fix, true)
+  await hudPerformancePass(browser, fix, { width: 1280, height: 800 }, 'desktop')
+  await hudPerformancePass(browser, fix, { width: 480, height: 820 }, 'mobile')
+  if (!process.argv.includes('--hud-performance')) {
+    await projectileColorPass(browser, fix)
+    await fullPass(browser, fix)
+    await quickPass(browser, fix, { width: 900, height: 600 }, 'mid-900x600', '09-action-900x600.png')
+    await quickPass(browser, fix, { width: 480, height: 820 }, 'mobile-480x820', '10-action-480x820.png')
+    await reducedMotionPass(browser, fix)
+    await bannerPass(browser, fix)
+    await bannerPass(browser, fix, true)
+  }
 
-  console.log('\n=== game-feel-check PASS ===')
+  console.log(`\n=== game-feel-check${process.argv.includes('--hud-performance') ? ' --hud-performance' : ''} PASS ===`)
   console.log(`joins accepted: ${fix.joins}, input frames captured: ${fix.inputs.length}`)
   console.log(`screenshots in: ${SHOTS}`)
 } finally {

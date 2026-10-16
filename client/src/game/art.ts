@@ -13,6 +13,23 @@ const FONT_10 = `10px ${mono}`
 const FONT_11 = `11px ${mono}`
 const FONT_16 = `16px ${mono}`
 const tau = Math.PI * 2
+const PERCENT_LABELS = Array.from({ length: 101 }, (_, percent) => `${percent}%`)
+const POINT_LABELS = Array.from({ length: 5 }, (_, points) => String(points))
+const ARENA_LANES = Array.from({ length: 8 }, (_, i) => {
+  const angle = (i + 0.5) * tau / 8
+  return { x: Math.cos(angle), y: Math.sin(angle) }
+})
+const FENCE_DIRECTIONS = Array.from({ length: 128 }, (_, i) => {
+  const angle = i * tau / 128
+  return { x: Math.cos(angle), y: Math.sin(angle) }
+})
+const sectorLabels = new WeakMap<MapDefParsed, Map<number, string>>()
+
+export function prepareArena(map: MapDefParsed): void {
+  if (!sectorLabels.has(map)) {
+    sectorLabels.set(map, new Map(map.sectors.map(sector => [sector.id, `出生区 ${String(sector.id + 1).padStart(2, '0')}`])))
+  }
+}
 export const ROBOT_SHIELD_RADIUS = 2.05
 export const ROBOT_SHIELD_OUTER_RADIUS = 1.16
 /** 机器人碰撞半径（世界单位）：各渲染器/反馈共用，勿再各自声明本地副本。 */
@@ -38,6 +55,25 @@ export const spritesReady = Promise.all(Object.entries(sources).map(([name, url]
 }))).then(results => results.every(Boolean))
 export const artReady = Promise.all([fontReady, spritesReady])
 
+const rasterSprites = new Map<keyof typeof sources, { pixels: number; image: CanvasImageSource }>()
+
+/** One raster per asset at the viewport's maximum zoom, never an unbounded zoom atlas. */
+export function prepareArt(scale: number, dpr: number): void {
+  if (typeof OffscreenCanvas === 'undefined') return
+  const sizes = { robot: 1.2, turret: 1.2, core: 1.05, uplink: 1.7, healthPack: 0.95 }
+  for (const name of Object.keys(sources) as (keyof typeof sources)[]) {
+    const image = sprites[name]
+    if (!image.complete || !image.naturalWidth) continue
+    const pixels = Math.max(16, Math.ceil(sizes[name] * scale * dpr))
+    if (rasterSprites.get(name)?.pixels === pixels) continue
+    const canvas = new OffscreenCanvas(pixels, pixels)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) continue
+    ctx.drawImage(image, 0, 0, pixels, pixels)
+    rasterSprites.set(name, { pixels, image: canvas })
+  }
+}
+
 /** 取 2d 上下文；两个渲染器共用同一失败语义。三块全屏画布每帧首操作都是
  * 不透明 fillRect 全量覆盖（审计 C-40），关闭 alpha 让合成器走不透明加速路径。 */
 export function createCanvas2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
@@ -59,7 +95,9 @@ export function resizeCanvas2d(canvas: HTMLCanvasElement, w: number, h: number, 
 
 function sprite(ctx: CanvasRenderingContext2D, name: keyof typeof sprites, x: number, y: number, size: number): void {
   const image = sprites[name]
-  if (image.complete && image.naturalWidth) ctx.drawImage(image, x - size / 2, y - size / 2, size, size)
+  const raster = rasterSprites.get(name)
+  if (raster) ctx.drawImage(raster.image, x - size / 2, y - size / 2, size, size)
+  else if (image.complete && image.naturalWidth) ctx.drawImage(image, x - size / 2, y - size / 2, size, size)
   else { ctx.fillStyle = ink.dim; ctx.fillRect(x - size / 4, y - size / 4, size / 2, size / 2) }
 }
 function circle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
@@ -125,11 +163,10 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
     circle(ctx, x, y, r * s); ctx.strokeStyle = '#0a131d'; ctx.lineWidth = Math.max(2, s * 0.65); ctx.stroke()
     ctx.strokeStyle = '#3c5564'; ctx.lineWidth = 1; ctx.stroke()
   }
-  for (let i = 0; i < 8; i++) {
-    const a = (i + 0.5) * tau / 8
+  for (const direction of ARENA_LANES) {
     ctx.strokeStyle = '#3c55647a'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * laneInner * s, y + Math.sin(a) * laneInner * s)
-    ctx.lineTo(x + Math.cos(a) * laneOuter * s, y + Math.sin(a) * laneOuter * s); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(x + direction.x * laneInner * s, y + direction.y * laneInner * s)
+    ctx.lineTo(x + direction.x * laneOuter * s, y + direction.y * laneOuter * s); ctx.stroke()
   }
   // Spawn plates use the exact authored spawn rectangle; brackets do not imply collision.
   for (const sector of map.sectors) {
@@ -144,7 +181,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
     ctx.moveTo(px + w - b, py + h); ctx.lineTo(px + w, py + h); ctx.lineTo(px + w, py + h - b); ctx.stroke()
     if (s >= 8) {
       ctx.font = FONT_11; ctx.textAlign = 'left'; ctx.fillStyle = '#9cb0bb'; ctx.textBaseline = 'top'
-      ctx.fillText(`出生区 ${String(sector.id + 1).padStart(2, '0')}`, px + 8, py + 8)
+      ctx.fillText(sectorLabels.get(map)?.get(sector.id) ?? '', px + 8, py + 8)
       ctx.strokeStyle = '#486775'; ctx.lineWidth = 1
       const cx = px + w / 2, cy = py + h / 2
       ctx.beginPath(); ctx.moveTo(cx - 7, cy); ctx.lineTo(cx + 7, cy); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx, cy + 7); ctx.stroke()
@@ -163,8 +200,7 @@ export function drawArena(ctx: CanvasRenderingContext2D, map: MapDefParsed, cam:
   circle(ctx, x, y, R * s); ctx.strokeStyle = '#3b6878'; ctx.lineWidth = 3; ctx.stroke()
   circle(ctx, x, y, R * s); ctx.strokeStyle = '#6dd1db'; ctx.lineWidth = 1; ctx.stroke()
   ctx.strokeStyle = '#87c9d3'; ctx.lineWidth = Math.max(1, s * 0.08); ctx.beginPath()
-  for (let i = 0; i < 128; i++) {
-    const a = i * tau / 128, c = Math.cos(a), sn = Math.sin(a)
+  for (const { x: c, y: sn } of FENCE_DIRECTIONS) {
     ctx.moveTo(x + c * (R - 0.7) * s, y + sn * (R - 0.7) * s); ctx.lineTo(x + c * R * s, y + sn * R * s)
   }
   ctx.stroke(); ctx.restore()
@@ -330,7 +366,7 @@ function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number)
 // 微光外菱 + amber 本体 + 深色内菱 + 闪点，>1 点才带数值角标。轻微浮动
 // （reduced-motion 关）与落地阴影；入场期（intro）自阵亡点飞来：淡入、
 // 放大弹出并拖出渐隐运动条。
-export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, points: number, tick = 0, intro?: PointDropIntro): void {
+export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, points: number, tick = 0, intro?: PointDropIntro, label = POINT_LABELS[points] ?? ''): void {
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(4.5, 0.315 * cam.scale)
   if (!visible(cam, x, y)) return
   // reduced-motion 下入场动画整体退化（渲染层也会跳过，这里兜底独立调用方）。
@@ -365,12 +401,12 @@ export function drawPointDrop(ctx: CanvasRenderingContext2D, cam: Camera, wx: nu
   ctx.fillRect(x - s * 0.2, cy - s * 0.36, g, g)
   if (points > 1) {
     ctx.fillStyle = ink.amber; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-    ctx.fillText(`${points}`, x, cy + s * 0.55)
+    ctx.fillText(label, x, cy + s * 0.55)
   }
   ctx.restore()
 }
 
-export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, available: boolean, respawnInS: number, tick = 0): void {
+export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, available: boolean, respawnLabel: string, tick = 0): void {
   // 0.95 m sprite: clearly bigger than a core (0.8 m) but smaller than a
   // robot (1.2 m), matching the 1.15 m pickup reach of HealthPackRadius.
   const x = cam.toPxX(wx), y = cam.toPxY(wy), size = Math.max(10, 0.95 * cam.scale)
@@ -381,9 +417,9 @@ export function drawHealthPack(ctx: CanvasRenderingContext2D, cam: Camera, wx: n
   sprite(ctx, 'healthPack', x, y + bob, size)
   if (available) {
     ctx.strokeStyle = `${ink.lime}88`; ctx.lineWidth = 1; ctx.setLineDash([2, 5]); circle(ctx, x, y, size * 0.62); ctx.stroke()
-  } else if (respawnInS > 0) {
+  } else if (respawnLabel) {
     ctx.globalAlpha = 0.85; ctx.fillStyle = ink.dim; ctx.font = FONT_10; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-    ctx.fillText(`${respawnInS}s`, x, y + size * 0.55)
+    ctx.fillText(respawnLabel, x, y + size * 0.55)
   }
   ctx.restore()
 }
@@ -455,7 +491,7 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
       ctx.fillStyle = ink.white; ctx.fillRect(x + Math.cos(a) * size * 0.9 - 3, y + Math.sin(a) * size * 0.9 - 3, 6, 6)
     }
     ctx.font = FONT_16; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = ink.text
-    ctx.fillText(`${Math.min(100, Math.floor(progress * 100))}%`, x, y + size + 5)
+    ctx.fillText(PERCENT_LABELS[Math.min(100, Math.floor(progress * 100))] ?? '', x, y + size + 5)
   }
   ctx.restore()
 }
@@ -465,23 +501,27 @@ export function drawUplink(ctx: CanvasRenderingContext2D, cam: Camera, wx: numbe
 // 无规范保证），长度按 1/4 像素分桶限容，消除每弹每帧 createLinearGradient。
 const beamGradients = new WeakMap<CanvasRenderingContext2D, Map<string, CanvasGradient>>()
 
-export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, heading: number, color: string): void {
-  const x = cam.toPxX(wx), y = cam.toPxY(wy)
-  if (!visible(cam, x, y)) return
-  ctx.save(); ctx.translate(x, y); ctx.rotate(heading)
-  const length = 1.4 * cam.scale
+export function prepareProjectileTrail(ctx: CanvasRenderingContext2D, scale: number, color: string): CanvasGradient {
   let cached = beamGradients.get(ctx)
   if (!cached) { cached = new Map(); beamGradients.set(ctx, cached) }
-  const bucket = Math.round(length * 4) / 4
+  const bucket = Math.round(1.4 * scale * 4) / 4
   const key = color + '|' + bucket
   let trail = cached.get(key)
   if (!trail) {
-    // One bounded beam, no frame-history allocations and no trail beyond the authoritative projectile.
+    if (cached.size >= 128) cached.clear()
     trail = ctx.createLinearGradient(-bucket, 0, 0, 0)
     trail.addColorStop(0, `${ink.cyan}00`); trail.addColorStop(1, color)
     cached.set(key, trail)
   }
-  ctx.fillStyle = trail; ctx.fillRect(-length, -2, length, 4)
+  return trail
+}
+
+export function drawProjectile(ctx: CanvasRenderingContext2D, cam: Camera, wx: number, wy: number, heading: number, color: string, trail?: CanvasGradient): void {
+  const x = cam.toPxX(wx), y = cam.toPxY(wy)
+  if (!visible(cam, x, y)) return
+  ctx.save(); ctx.translate(x, y); ctx.rotate(heading)
+  const length = 1.4 * cam.scale
+  ctx.fillStyle = trail ?? color; ctx.fillRect(-length, -2, length, 4)
   ctx.fillStyle = ink.text; ctx.fillRect(-3, -1, 4, 2); ctx.restore()
 }
 

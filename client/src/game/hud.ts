@@ -128,7 +128,7 @@ export class Hud {
 
     // 常态机体用低饱和绿，能量用青色；数值与颜色共同标识状态。
     const tuning = world.tuning
-    this.leftPanel.classList.toggle('dead', !!self?.dead)
+    if (this.leftPanel.classList.contains('dead') !== !!self?.dead) this.leftPanel.classList.toggle('dead', !!self?.dead)
     if (self) {
       // 分母优先 per-robot 上限（ADR-0016 头条），缺失（旧服务器）回退 tuning。
       const maxHpX10 = self.maxHpX10 ?? tuning.maxHpX10
@@ -156,7 +156,8 @@ export class Hud {
     setText(this.phaseEl, phaseName(world.phase))
     const clock = world.initialized ? fmtClock(world.timeLeftS) : '—:—'
     setText(this.timeEl, clock)
-    this.timeEl.classList.toggle('urgent', world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30)
+    const urgent = world.initialized && world.timeLeftS >= 0 && world.timeLeftS <= 30
+    if (this.timeEl.classList.contains('urgent') !== urgent) this.timeEl.classList.toggle('urgent', urgent)
 
     setText(this.selfScore, String(scores?.score(selfId) ?? '—'))
     this.death.update(self, world.initialized, scores?.ended ?? false, scores?.score(selfId))
@@ -182,6 +183,14 @@ export class Hud {
   setAssist(on: boolean): void {
     this.assistLocal = on
     this.renderAssist()
+  }
+
+  /** Only the white health bar needs the animation clock between snapshots. */
+  updateDelayedHealth(health: number, maxHealth: number): void {
+    const delayed = clamp01(health / maxHealth)
+    if (delayed === this.lastHpDelay) return
+    this.lastHpDelay = delayed
+    this.hpDelay.style.transform = `scaleX(${delayed})`
   }
 
   /** 有界消息：定时自动清除，dispose 清理定时器（退出对局后可安全重入）。 */
@@ -314,7 +323,7 @@ export class Hud {
     const nearest = map && pos && !self?.dead ? nearestUplink(map, world.phase, pos.x, pos.y) : undefined
     const card = this.skills.uplink
     if (!nearest) {
-      this.uplinkPanel.hidden = true
+      if (!this.uplinkPanel.hidden) this.uplinkPanel.hidden = true
       this.setCard(card, 'off', self?.dead ? '阵亡' : self ? '靠近' : '—')
       return
     }

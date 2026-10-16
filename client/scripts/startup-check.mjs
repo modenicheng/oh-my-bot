@@ -643,9 +643,9 @@ try {
   }
   assert.equal(await weights(), titleWeights, 'returning to lobby restores title stage')
   await scoring.locator('#audio-settings summary').click()
-  await scoring.locator('#audio-mute').click()
+  await scoring.locator('#audio-bgm-mute').click()
   await scoring.waitForFunction(() => window.__musicSources.every(entry => !entry.source.loop || entry.stopped))
-  await scoring.locator('#audio-mute').click()
+  await scoring.locator('#audio-bgm-mute').click()
   await scoring.waitForFunction(() => window.__musicSources.some(entry => entry.source.loop && !entry.stopped))
   assert.equal(await scoring.evaluate(() => window.__startupContexts.length), 1, 'music and effects keep one context')
   event('SCOR', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })

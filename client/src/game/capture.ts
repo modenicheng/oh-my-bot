@@ -400,7 +400,7 @@ async function main() {
       const cam = makeCamera(canvas, 0, 0, 30)
       ctx.fillStyle = ink.floor
       ctx.fillRect(0, 0, canvas.width, canvas.height)
-      drawHealthPack(ctx, cam, 0, 0, true, 0, 0)
+      drawHealthPack(ctx, cam, 0, 0, true, '', 0)
     }
     {
       const { canvas } = cell(sheet, '血包 · 冷却（虚影）', 200, 200)
@@ -408,7 +408,7 @@ async function main() {
       const cam = makeCamera(canvas, 0, 0, 30)
       ctx.fillStyle = ink.floor
       ctx.fillRect(0, 0, canvas.width, canvas.height)
-      drawHealthPack(ctx, cam, 0, 0, false, 8.5, 0)
+      drawHealthPack(ctx, cam, 0, 0, false, '8.5s', 0)
     }
     {
       const { canvas } = cell(sheet, '普通核心 +10', 200, 200)

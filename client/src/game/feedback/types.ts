@@ -12,6 +12,6 @@ export interface Effect { kind: EffectKind; pos: MapVec2; at: number; duration: 
 export interface HealthVisual { actualX10: number; delayedX10: number; holdUntil: number; updatedAt: number }
 
 /** 飘字：color/prefix 区分伤害（red/-）与技能点拾取（amber/+）。 */
-export interface DamagePopup { robot: number; pos: MapVec2; amountX10: number; at: number; seed: number; color: string; prefix: string }
+export interface DamagePopup { robot: number; pos: MapVec2; amountX10: number; at: number; seed: number; color: string; prefix: string; text: string }
 
 export interface TrailPoint { pos: MapVec2; tick: number; color: string }

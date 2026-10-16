@@ -41,6 +41,8 @@ export class InputSampler {
   private lastAim = 0
   private cam: Camera | null = null
   private canvas: HTMLCanvasElement | null = null
+  private bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null = null
+  private readonly geometryChanged = () => this.refreshBounds()
   private disposers: (() => void)[] = []
   /** assist 开关状态（本地镜像，快照权威回写） */
   assistOn = false
@@ -54,6 +56,11 @@ export class InputSampler {
     this.detach()
     this.canvas = canvas
     this.cam = cam
+    this.refreshBounds()
+    window.addEventListener('resize', this.geometryChanged)
+    window.addEventListener('scroll', this.geometryChanged, true)
+    let observer: ResizeObserver | undefined
+    if (typeof ResizeObserver !== 'undefined') { observer = new ResizeObserver(this.geometryChanged); observer.observe(canvas) }
 
     const onKeyDown = (e: KeyboardEvent) => {
       // 输入框聚焦时不动游戏输入（大厅/聊天场景）
@@ -127,6 +134,9 @@ export class InputSampler {
     window.addEventListener('blur', onBlur)
 
     this.disposers.push(
+      () => window.removeEventListener('resize', this.geometryChanged),
+      () => window.removeEventListener('scroll', this.geometryChanged, true),
+      () => observer?.disconnect(),
       () => document.removeEventListener('visibilitychange', onVisibility),
       () => window.removeEventListener('keydown', onKeyDown),
       () => window.removeEventListener('keyup', onKeyUp),
@@ -166,6 +176,7 @@ export class InputSampler {
     this.stickyAxes = 0
     this.releaseAxes = 0
     this.canvas = null
+    this.bounds = null
     this.cam = null
     this.aimUnderScript = false
   }
@@ -173,11 +184,18 @@ export class InputSampler {
   /** Every draw and input sample uses the same current camera and CSS pointer position. */
   aimAt(selfX: number, selfY: number): number | undefined {
     if (!(this.stickyAxes & AXIS_AIM) || !this.cam || !this.canvas) return undefined
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.bounds
+    if (!rect) return undefined
     if (rect.width <= 0 || rect.height <= 0) return undefined
     const px = (this.pointer.x - rect.left) * this.cam.cw / rect.width
     const py = (this.pointer.y - rect.top) * this.cam.ch / rect.height
     return Math.atan2(this.cam.toWorldY(py) - selfY, this.cam.toWorldX(px) - selfX)
+  }
+
+  /** Geometry events prepare the CSS mapping; aim projection never flushes layout. */
+  refreshBounds(): void {
+    const rect = this.canvas?.getBoundingClientRect()
+    this.bounds = rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
   }
 
   /** Mirror the server's three branches, including axes retained after focus loss. */

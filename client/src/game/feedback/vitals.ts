@@ -69,7 +69,8 @@ export class Vitals {
 
   popup(robot: number, pos: MapVec2, amountX10: number, at: number, seed: number, color = red, prefix = '-'): void {
     if (this.popups.length >= MAX_POPUPS) this.popups.shift()
-    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed, color, prefix })
+    const text = `${prefix}${(amountX10 / 10).toFixed(amountX10 % 10 ? 1 : 0)}`
+    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed, color, prefix, text })
   }
 
   /** 低血状态下再次被确认命中：短暂增亮并外扩同一边框。 */
@@ -108,7 +109,7 @@ export class Vitals {
       const drift = this.reduced.matches ? 0 : (POPUP_DRIFT_BASE + (popup.seed % POPUP_DRIFT_SEED)) * t
       const x = cam.toPxX(popup.pos.x) + ((popup.seed % POPUP_X_SEED) - POPUP_X_OFFSET)
       const y = cam.toPxY(popup.pos.y) - POPUP_RISE - drift
-      const text = `${popup.prefix}${(popup.amountX10 / 10).toFixed(popup.amountX10 % 10 ? 1 : 0)}`
+      const text = popup.text
       ctx.globalAlpha = t < POPUP_FULL_UNTIL ? 1 : (1 - t) / (1 - POPUP_FULL_UNTIL)
       ctx.fillStyle = POPUP_SHADOW_COLOR; ctx.fillText(text, x + POPUP_SHADOW_OFFSET, y + POPUP_SHADOW_OFFSET)
       ctx.fillStyle = popup.color; ctx.fillText(text, x, y)

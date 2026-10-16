@@ -42,6 +42,8 @@ export class ReplayPlayer {
 
   // 播放状态
   private playing = false
+  private clock: ReturnType<typeof setInterval> | undefined
+  private preparedFrame: ReplayFrame | null = null
   private resumeAfterScrub = false
   private speed = 1
   private tick = 0
@@ -67,7 +69,7 @@ export class ReplayPlayer {
       this.cam = this.spectator.camera
     }
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage；播放时钟推进在 pump()。
-    this.stage = new CanvasStage(deps.canvas, { draw: () => this.pump(), onResize: () => this.resize() })
+    this.stage = new CanvasStage(deps.canvas, { draw: () => this.renderPreparedFrame(), onResize: () => this.resize() })
     this.bindDom()
     this.bindEvents()
   }
@@ -232,6 +234,8 @@ export class ReplayPlayer {
 
   private pause(): void {
     this.playing = false
+    if (this.clock !== undefined) clearInterval(this.clock)
+    this.clock = undefined
     this.stage.stop()
     const btn = this.el['rp-play']
     if (btn) iconButton(btn, 'play', '播放')
@@ -331,10 +335,11 @@ export class ReplayPlayer {
   // ---- 渲染循环 -----------------------------------------------------------
 
   private startRaf(): void {
-    this.stage.start({ always: true })
+    this.stage.start()
+    if (this.clock === undefined) this.clock = setInterval(() => this.pump(), 1000 / TICK_HZ)
   }
 
-  /** 播放时钟推进 + 出画（仅恒绘路径；scrub/resize 走 drawFrame 直绘，不推进时间）。 */
+  /** Prepare playback on its clock; rAF only consumes the latest prepared frame. */
   private pump(): void {
     if (this.disposed || !this.playing) return
     const now = performance.now()
@@ -342,15 +347,23 @@ export class ReplayPlayer {
     this.lastFrameTime = now
     if (!this.index) return
     this.tickF += dt * TICK_HZ * this.speed
-    if (this.tickF >= this.index.endTick) {
-      this.tickF = this.index.endTick
-      this.pause() // stage.stop()：本轮 draw 返回后循环即退役（代际号失效）
-    }
+    const ended = this.tickF >= this.index.endTick
+    if (ended) this.tickF = this.index.endTick
     this.tick = Math.round(this.tickF)
-    this.drawFrame()
+    this.prepareFrame()
+    if (ended) {
+      // Stopping rAF cancels pending paint, so publish the terminal frame first.
+      this.renderPreparedFrame()
+      this.pause()
+    } else this.stage.requestDraw()
   }
 
   private drawFrame(): void {
+    this.prepareFrame()
+    this.renderPreparedFrame()
+  }
+
+  private prepareFrame(): void {
     if (!this.index || !this.map) return
     this.bindRenderer()
     const frame = this.index.frameAt(this.tick)
@@ -377,8 +390,14 @@ export class ReplayPlayer {
       this.cam.cx = 0
       this.cam.cy = (this.cam.ch / 2 - (top + height / 2)) / this.cam.scale
     }
-    this.renderer!.render(frame, this.map, this.cam, this.followRobotId ?? -1)
+    this.renderer!.prepare(frame, this.cam, this.map)
+    this.preparedFrame = frame
     this.updateHud(frame)
+  }
+
+  private renderPreparedFrame(): void {
+    if (this.disposed || !this.preparedFrame || !this.map) return
+    this.renderer?.render(this.preparedFrame, this.map, this.cam, this.followRobotId ?? -1)
   }
 
   private resize(): void {
