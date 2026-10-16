@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0-rc.3](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.2...v1.1.0-rc.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **client:** preserve locked vision mask fill rule ([7ddad88](https://github.com/modenicheng/oh-my-bot/commit/7ddad88dd1cc0bf73a655c409712823b0520dc28))
+* make OIDC match startup recoverable ([c3d6b74](https://github.com/modenicheng/oh-my-bot/commit/c3d6b741cd321eefc60d0151cd0608ba512de779))
+* recover OIDC match startup and publish diagnostics ([c76bf6c](https://github.com/modenicheng/oh-my-bot/commit/c76bf6c17334b306a7631db2941ddb694001742f))
+
+
+### Performance Improvements
+
+* **client:** 将游戏展示预处理移出绘制回调 ([7d95597](https://github.com/modenicheng/oh-my-bot/commit/7d955977a5d250b788828692c69d49a9dd0b57fd))
+* **client:** 移除局内击杀通知 ([9fd92b6](https://github.com/modenicheng/oh-my-bot/commit/9fd92b66c45e5528da200019ebee167566a3c18b))
+* **client:** 跳过未变化的排行榜更新 ([d3f46ac](https://github.com/modenicheng/oh-my-bot/commit/d3f46ac0957d4eb3fcdae94c19999e369ac5233d))
+
 ## [1.1.0-rc.2](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.1...v1.1.0-rc.2) (2026-10-15)
 
 
