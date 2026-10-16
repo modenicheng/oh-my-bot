@@ -43,6 +43,24 @@ describe('authoritative scoreboard', () => {
     expect(second[0]?.dead).toBe(false)
   })
 
+  it('keeps unchanged score snapshots cached while advancing the stale-score boundary', () => {
+    const board = new Scoreboard()
+    const robots = new Map([[1, robot(1, '甲')]])
+    board.accept([{ robot: 1, score: 10 }], 1)
+    const first = board.display(robots, 1)
+    board.accept([{ robot: 1, score: 10, titles: [] }], 3)
+    expect(board.display(robots, 1)).toBe(first)
+    board.accept([{ robot: 1, score: 99 }], 2)
+    expect(board.score(1)).toBe(10)
+    board.accept([{ robot: 1, score: 10, titles: [Title.RUNNER] }], 4)
+    expect(board.display(robots, 1)).not.toBe(first)
+    expect(board.display(robots, 1)[0]?.titles).toEqual([Title.RUNNER])
+    board.accept([{ robot: 1, score: 10, titles: [Title.RUNNER] }], 5, true)
+    expect(board.ended).toBe(true)
+    board.accept([{ robot: 1, score: 99 }], 6)
+    expect(board.score(1)).toBe(10)
+  })
+
   it('ignores stale live scores and makes final results authoritative', () => {
     const board = new Scoreboard()
     const final = [{ robot: 1, score: 99, titles: [Title.WAR_MACHINE] }]
@@ -148,6 +166,42 @@ describe('authoritative scoreboard', () => {
     expect(renderer.nodeCount).toBe(64)
     expect(renderer.createdCount).toBe(64)
     expect(parent.children).toHaveLength(64)
+  })
+
+  it('makes no DOM mutations when refreshing 64 unchanged rows', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = Array.from({ length: 64 }, (_, i) => ({
+      robot: i + 1, score: 100 - i, rank: i + 1, nick: `robot-${i + 1}`, self: i === 0, dead: false,
+    }))
+    renderer.update(parent, values)
+    const observer = new MutationObserver(() => {})
+    observer.observe(parent, { subtree: true, childList: true, characterData: true, attributes: true })
+    try {
+      for (let i = 0; i < 20; i++) renderer.update(parent, values.map(row => ({ ...row })))
+      expect(observer.takeRecords().length).toBe(0)
+    } finally { observer.disconnect() }
+  })
+
+  it('changes only the affected score text and detects reused input objects', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = [
+      { robot: 1, score: 20, rank: 1, nick: '甲', self: true, dead: false },
+      { robot: 2, score: 10, rank: 2, nick: '乙', self: false, dead: false },
+    ]
+    renderer.update(parent, values)
+    const observer = new MutationObserver(() => {})
+    observer.observe(parent, { subtree: true, childList: true, characterData: true, attributes: true })
+    try {
+      values[0]!.score++
+      renderer.update(parent, values)
+      const target = parent.querySelector('[data-robot="1"] .score-value')!
+      expect(target.textContent).toBe('21')
+      const changes = observer.takeRecords()
+      expect(changes.length).toBeGreaterThan(0)
+      expect(changes.every(change => change.target === target || target.contains(change.target))).toBe(true)
+    } finally { observer.disconnect() }
   })
 
   it('reuses title and replay evidence nodes and never appends duplicate evidence', () => {
