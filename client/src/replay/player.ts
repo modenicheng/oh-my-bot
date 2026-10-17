@@ -3,7 +3,7 @@
 // 时间轴：拖动条（0→endTick）+ 播放/暂停/倍速（0.5/1/2/4×）+ 步进（±1s）。
 // 事件叠加层：kill/core/uplink/phase 标记点，hover 显示详情。
 import { Camera } from '../game/camera'
-import { rankedScores, ScoreRowRenderer } from '../game/scoreboard'
+import { rankedScores, ScoreRowRenderer, type ScoreEntry } from '../game/scoreboard'
 import { bgm } from '../music/bgm'
 import { SpectatorCamera } from './spectator'
 import { artReady } from '../game/art'
@@ -16,6 +16,7 @@ import { fmtClock, setText } from '../ui/dom'
 import { parseReplayNDJSONAsync, type ReplayData } from './model'
 import { ReplayRenderer } from './render'
 import { fetchReplayText, ReplayApiError } from './api'
+import { viewportPoint, viewportRect } from '../app/landscape'
 
 const TICK_HZ = 60
 const SPEEDS = [0.5, 1, 2, 4] as const
@@ -42,6 +43,8 @@ export class ReplayPlayer {
 
   // 播放状态
   private playing = false
+  private clock: ReturnType<typeof setInterval> | undefined
+  private preparedFrame: ReplayFrame | null = null
   private resumeAfterScrub = false
   private speed = 1
   private tick = 0
@@ -67,7 +70,7 @@ export class ReplayPlayer {
       this.cam = this.spectator.camera
     }
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage；播放时钟推进在 pump()。
-    this.stage = new CanvasStage(deps.canvas, { draw: () => this.pump(), onResize: () => this.resize() })
+    this.stage = new CanvasStage(deps.canvas, { draw: () => this.renderPreparedFrame(), onResize: () => this.resize() })
     this.bindDom()
     this.bindEvents()
   }
@@ -232,6 +235,8 @@ export class ReplayPlayer {
 
   private pause(): void {
     this.playing = false
+    if (this.clock !== undefined) clearInterval(this.clock)
+    this.clock = undefined
     this.stage.stop()
     const btn = this.el['rp-play']
     if (btn) iconButton(btn, 'play', '播放')
@@ -331,10 +336,11 @@ export class ReplayPlayer {
   // ---- 渲染循环 -----------------------------------------------------------
 
   private startRaf(): void {
-    this.stage.start({ always: true })
+    this.stage.start()
+    if (this.clock === undefined) this.clock = setInterval(() => this.pump(), 1000 / TICK_HZ)
   }
 
-  /** 播放时钟推进 + 出画（仅恒绘路径；scrub/resize 走 drawFrame 直绘，不推进时间）。 */
+  /** Prepare playback on its clock; rAF only consumes the latest prepared frame. */
   private pump(): void {
     if (this.disposed || !this.playing) return
     const now = performance.now()
@@ -342,15 +348,23 @@ export class ReplayPlayer {
     this.lastFrameTime = now
     if (!this.index) return
     this.tickF += dt * TICK_HZ * this.speed
-    if (this.tickF >= this.index.endTick) {
-      this.tickF = this.index.endTick
-      this.pause() // stage.stop()：本轮 draw 返回后循环即退役（代际号失效）
-    }
+    const ended = this.tickF >= this.index.endTick
+    if (ended) this.tickF = this.index.endTick
     this.tick = Math.round(this.tickF)
-    this.drawFrame()
+    this.prepareFrame()
+    if (ended) {
+      // Stopping rAF cancels pending paint, so publish the terminal frame first.
+      this.renderPreparedFrame()
+      this.pause()
+    } else this.stage.requestDraw()
   }
 
   private drawFrame(): void {
+    this.prepareFrame()
+    this.renderPreparedFrame()
+  }
+
+  private prepareFrame(): void {
     if (!this.index || !this.map) return
     this.bindRenderer()
     const frame = this.index.frameAt(this.tick)
@@ -377,13 +391,19 @@ export class ReplayPlayer {
       this.cam.cx = 0
       this.cam.cy = (this.cam.ch / 2 - (top + height / 2)) / this.cam.scale
     }
-    this.renderer!.render(frame, this.map, this.cam, this.followRobotId ?? -1)
+    this.renderer!.prepare(frame, this.cam, this.map)
+    this.preparedFrame = frame
     this.updateHud(frame)
+  }
+
+  private renderPreparedFrame(): void {
+    if (this.disposed || !this.preparedFrame || !this.map) return
+    this.renderer?.render(this.preparedFrame, this.map, this.cam, this.followRobotId ?? -1)
   }
 
   private resize(): void {
     const canvas = this.deps.canvas
-    const rect = canvas.getBoundingClientRect()
+    const rect = viewportRect(canvas)
     if (rect.width <= 0 || rect.height <= 0) return
     const dpr = this.stage.dpr || window.devicePixelRatio || 1
     this.bindRenderer()
@@ -401,16 +421,16 @@ export class ReplayPlayer {
     setText(this.el['rp-phase'], phaseName(frame.phase as any))
     const scoreEl = this.el['rp-score']
     if (scoreEl && this.index) {
-      const rows = rankedScores(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
-      // 签名只含 会发生变化的行内容（robot/score/titles）；不得混入 frame.tick——
+      const rows = rankedScores<ScoreEntry>(frame.finalScores ?? [...frame.scores.values()].map(s => ({ robot: s.id, score: s.total })))
+      // 签名只含会发生变化的行内容（robot/score/nick/titles）；不得混入 frame.tick——
       // tick 每帧必变会让缓存失效，积分面板被 60Hz 全量重写（审计 C-31）。
       // evidence 与 score 同源单调，行相同即 evidence 相同，不进签名。
       const signature = `${frame.finalScores !== null}:${rows.map(row => {
         const titles = 'titles' in row ? (row as { titles?: readonly number[] }).titles : undefined
-        return `${row.robot},${row.score},${titles?.join('.') ?? ''}`
+        return `${row.robot},${row.score},${row.nick ?? ''},${titles?.join('.') ?? ''}`
       }).join(';')}`
       if (signature !== this.scoreMarkup) {
-        const displays = rows.map((row, i) => ({ ...row, rank: i + 1, nick: this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
+        const displays = rows.map((row, i) => ({ ...row, rank: i + 1, nick: row.nick ?? this.index!.robots.get(row.robot)?.nick ?? `#${row.robot}`,
           self: false, dead: false, status: 'unknown' as const, replayEvidence: frame.scores.get(row.robot) }))
         // Replay evidence is part of the keyed row structure, so seeking never
         // appends another evidence node to an existing row.
@@ -436,9 +456,10 @@ export class ReplayPlayer {
 
   private onCanvasClick(e: PointerEvent): void {
     if (!this.index) return
-    const rect = this.deps.canvas.getBoundingClientRect()
-    const wx = this.cam.toWorldX(e.clientX - rect.left)
-    const wy = this.cam.toWorldY(e.clientY - rect.top)
+    const rect = viewportRect(this.deps.canvas)
+    const point = viewportPoint(e.clientX, e.clientY)
+    const wx = this.cam.toWorldX(point.x - rect.left)
+    const wy = this.cam.toWorldY(point.y - rect.top)
     // Full-map targets retain a 12px hit area at small viewport scales.
     const hitR = Math.max(1.1, 12 / this.cam.scale)
     let bestId: number | null = null

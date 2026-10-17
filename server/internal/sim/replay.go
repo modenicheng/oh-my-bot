@@ -56,6 +56,9 @@ func RestoreCheckpoint(state Checkpoint, sink EventSink) (*Sim, error) {
 	ids := make([]uint32, len(cp.Robots))
 	known := make(map[uint32]bool, len(cp.Robots))
 	for i, robot := range cp.Robots {
+		if err := validateRobotSingleShots(robot, cp.SimulationVersion, cp.Tick); err != nil {
+			return nil, err
+		}
 		if robot.ID == 0 || known[robot.ID] || (i > 0 && robot.ID <= cp.Robots[i-1].ID) ||
 			robot.Sector >= 8 || (robot.State != Alive && robot.State != Dead) {
 			return nil, fmt.Errorf("sim: invalid checkpoint robot %d", robot.ID)
@@ -244,13 +247,16 @@ func validateReplayContinuity(records []LogRecord) error {
 		return err
 	}
 	type sequence struct {
-		latest  uint32
-		has     bool
-		pending *Input
+		latest      uint32
+		has         bool
+		pending     *Input
+		inputTick   uint32
+		consumed    uint32
+		hasConsumed bool
 	}
 	sequences := make(map[uint32]sequence, len(initial.Robots))
 	for _, robot := range initial.Robots {
-		seq := sequence{latest: robot.LatestSeq, has: robot.HasSeq}
+		seq := sequence{latest: robot.LatestSeq, has: robot.HasSeq, consumed: robot.ConsumedSeq, hasConsumed: robot.HasConsumedSeq || robot.ConsumedSeq != 0}
 		if robot.InputPending {
 			pending := robot.PendingInput
 			seq.pending = &pending
@@ -282,6 +288,9 @@ func validateReplayContinuity(records []LogRecord) error {
 				return err
 			}
 		case RecordInput, RecordControl:
+			if record.Control != nil && record.Control.SingleShots != nil && initial.SimulationVersion < 8 {
+				return fmt.Errorf("sim: discrete shots require simulation version 8")
+			}
 			seq, ok := sequences[record.RobotID]
 			if !ok {
 				return fmt.Errorf("sim: replay control for unknown robot %d", record.RobotID)
@@ -292,8 +301,26 @@ func validateReplayContinuity(records []LogRecord) error {
 				if seq.has && (input.Seq < seq.latest || (input.Seq == seq.latest && !pendingCopy)) {
 					return fmt.Errorf("sim: replay input sequence did not advance")
 				}
+				if seq.inputTick != 0 && seq.inputTick < record.Tick {
+					seq.consumed, seq.hasConsumed = seq.latest, true
+				}
+				seq.inputTick = record.Tick
 				seq.latest, seq.has, seq.pending = input.Seq, true, nil
 				sequences[record.RobotID] = seq
+			} else if shots := record.Control.SingleShots; shots != nil {
+				if err := validateSingleShots(*shots, record.Tick-1, true); err != nil {
+					return err
+				}
+				for _, accepted := range shots.Accepted {
+					if !seq.has || accepted > seq.latest {
+						return fmt.Errorf("sim: accepted shot beyond replay input")
+					}
+				}
+				for _, shot := range shots.Pending {
+					if !seq.has || seq.inputTick != record.Tick || shot.Seq > seq.latest || (seq.hasConsumed && shot.Seq <= seq.consumed) {
+						return fmt.Errorf("sim: discrete shot sequence outside replay input")
+					}
+				}
 			}
 		}
 	}
@@ -317,6 +344,15 @@ func (s *Sim) applyReplayRecord(record LogRecord) error {
 		r.PendingInput, r.LatestSeq, r.HasSeq, r.InputPending = *record.Input, record.Input.Seq, true, true
 	case RecordControl:
 		c := record.Control
+		if c.SingleShots != nil {
+			if s.simulationVersion < 8 {
+				return fmt.Errorf("sim: discrete shots require simulation version 8")
+			}
+			r.SingleShots = cloneSingleShots(*c.SingleShots)
+			if err := validateRobotSingleShots(*r, s.simulationVersion, s.tick); err != nil {
+				return err
+			}
+		}
 		r.Control.PendingScript = cloneCommands(c.Script)
 		r.Control.ScriptPending = c.Script != nil || c.ScriptFailed
 		r.Control.ScriptFailed = c.ScriptFailed

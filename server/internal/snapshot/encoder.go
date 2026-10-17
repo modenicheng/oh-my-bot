@@ -16,6 +16,7 @@ import (
 // SelfInput 是 Encode 的自机参数：自机 RobotView + 分轴仲裁结果（ADR-0009，
 // 下发 SelfState.move_src/turret_src 供 UI 显示）。
 type SelfInput struct {
+	InputGeneration   uint32
 	Robot             sim.RobotView
 	MoveSrc           byte // 'H' human / 'S' script / '-' none
 	TurretSrc         byte
@@ -38,16 +39,17 @@ type SelfInput struct {
 // 离开 AOI 的 tombstone；新入 AOI 实体携带完整元数据（nick/color）。
 // base_tick 恒为上一帧 tick。
 type DeltaEncoder struct {
-	lastRobots  map[uint32]robotStamp
-	lastProjs   map[uint32]projStamp
-	lastCores   map[uint32]coreStamp
-	lastUplinks map[uint32]uplinkStamp
-	lastDrops   map[uint32]dropStamp
-	lastPacks   map[uint32]bool
-	lastMap     string
-	lastTick    uint32
-	hasBaseline bool // 是否已发过 full（首帧或 ForceFull）
-	forceFull   bool
+	lastRobots      map[uint32]robotStamp
+	lastProjs       map[uint32]projStamp
+	lastCores       map[uint32]coreStamp
+	lastUplinks     map[uint32]uplinkStamp
+	lastDrops       map[uint32]dropStamp
+	lastPacks       map[uint32]packStamp
+	lastMap         string
+	lastTick        uint32
+	hasBaseline     bool // 是否已发过 full（首帧或 ForceFull）
+	forceFull       bool
+	compactMetadata bool
 }
 
 // Every wire-visible gameplay state participates in delta detection. In particular,
@@ -93,6 +95,12 @@ type dropStamp struct {
 	points int32
 }
 
+type packStamp struct {
+	pos       sim.Vec2
+	available bool
+	respawn   uint32
+}
+
 // NewEncoder 创建编码器；首次 Encode 必为 full。
 func NewEncoder() *DeltaEncoder {
 	return &DeltaEncoder{
@@ -106,6 +114,16 @@ func NewEncoder() *DeltaEncoder {
 
 // ForceFull：下一帧强制全量（ResyncRequest 后调用）。
 func (e *DeltaEncoder) ForceFull() { e.forceFull = true }
+
+// SetCompactMetadata skips legacy local-map JSON work for negotiated binary clients.
+// Only a capability transition invalidates the JSON baseline, so callers may set it
+// each tick without making legacy deltas resend the map.
+func (e *DeltaEncoder) SetCompactMetadata(compact bool) {
+	if e.compactMetadata != compact {
+		e.compactMetadata = compact
+		e.lastMap = ""
+	}
+}
 
 // Encode 编码一帧。self 为 nil 时 Self 字段留空（观战/异常路径）。
 // tick 应与 obs.Frame.Tick 一致（由调用方保证单调）。
@@ -125,12 +143,14 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	delta.Phase = phaseToProto(phase)
 	delta.TimeLeftS = timeLeftS
 	if obs.Frame.Map != nil && obs.Frame.Map.Partial {
-		data, _ := json.Marshal(obs.Frame.Map)
-		mapJSON := string(data)
-		if full || mapJSON != e.lastMap {
-			delta.MapJson = &mapJSON
+		if !e.compactMetadata {
+			data, _ := json.Marshal(obs.Frame.Map)
+			mapJSON := string(data)
+			if full || mapJSON != e.lastMap {
+				delta.MapJson = &mapJSON
+			}
+			e.lastMap = mapJSON
 		}
-		e.lastMap = mapJSON
 		radius := obs.VisionRadius
 		delta.VisionRadius = &radius
 	}
@@ -208,12 +228,15 @@ func (e *DeltaEncoder) Encode(tick, ackSeq uint32, phase sim.Phase, timeLeftS ui
 	}
 	// Uplink 恒全量（地图对象）——proto 无 uplink_gone 字段。
 
-	// Health packs are four public map objects. Send the complete state every frame
-	// so reconnect and resync never depend on a missing tombstone.
-	nextPacks := make(map[uint32]bool, len(obs.HealthPacks))
+	// Keep exact simulation state here; compact wire quantization has its own baseline.
+	nextPacks := make(map[uint32]packStamp, len(obs.HealthPacks))
 	for i := range obs.HealthPacks {
-		nextPacks[obs.HealthPacks[i].ID] = true
-		delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(&obs.HealthPacks[i]))
+		pack := &obs.HealthPacks[i]
+		st := packStamp{pos: pack.Pos, available: pack.Available, respawn: pack.RespawnInS}
+		nextPacks[pack.ID] = st
+		if prev, seen := e.lastPacks[pack.ID]; full || !seen || prev != st {
+			delta.HealthPacks = append(delta.HealthPacks, encodeHealthPack(pack))
+		}
 	}
 
 	// ---- PointDrops（ADR-0016）：公共对象、有界集合（单只 ≤4 点、每次死亡
@@ -382,6 +405,7 @@ func encodeSelf(s *SelfInput) *ombv1.SelfState {
 		points = uint32(s.Upg.Points)
 	}
 	return &ombv1.SelfState{
+		InputGeneration:   &s.InputGeneration,
 		RobotId:           s.Robot.ID,
 		MoveSrc:           ctrlSrc(s.MoveSrc),
 		TurretSrc:         ctrlSrc(s.TurretSrc),

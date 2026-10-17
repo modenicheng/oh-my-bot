@@ -20,10 +20,10 @@
 .score-title { display: block; min-height: 32px; border: 1px solid #46515f; border-radius: 0; padding: 5px 9px;
   background: var(--panel); color: var(--amber); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; touch-action: manipulation; }
 .score-title:hover, .score-title[aria-expanded='true'] { border-color: var(--amber); background: #242014; }
-.score-title:focus-visible, .end-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.score-title:focus-visible, .end-back:focus-visible, .end-next:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* Fixed portal tooltip: viewport-positioned by scoreboard.ts and independent
    from every score list's overflow/stacking context. */
-.score-title-detail { position: fixed; z-index: 10020; width: min(340px, calc(100vw - 24px)); overflow: auto; overscroll-behavior: contain;
+.score-title-detail { position: fixed; z-index: 10020; width: min(340px, calc(var(--app-width, 100vw) - 24px)); overflow: auto; overscroll-behavior: contain;
   padding: 10px 12px; border: 1px solid var(--amber); border-left-width: 3px; background: var(--bg); box-shadow: 0 10px 26px #0009;
   color: var(--fg); font: 12px/1.7 Inter, system-ui, sans-serif; overflow-wrap: anywhere; user-select: text; pointer-events: auto; }
 .score-title-detail span { display: block; }
@@ -48,7 +48,8 @@
 .end-placement { font: 32px/1.2 var(--pixel); color: var(--accent); }
 .end-personal { font: 16px/1.5 var(--pixel); overflow-wrap: anywhere; min-width: 0; }
 .end-field { margin-left: auto; }
-.end-help { display: block; padding: 12px 24px; }
+.end-help { display: block; margin: 0; padding: 12px 24px; }
+.end-help-touch { display: none; }
 .end-list { list-style: none; margin: 0; min-height: 80px; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
   scrollbar-gutter: stable; padding: 0 24px 12px; }
 .end-list .score-row { padding: 14px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
@@ -57,11 +58,16 @@
 .end-list .score-first .score-name::before { content: '冠军 · '; color: var(--amber); }
 .end-list .score-self { box-shadow: inset 2px 0 var(--accent); padding-left: 10px; }
 .end-list .score-titles { font-size: 12px; }
-.end-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid var(--line); }
+.end-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--line); }
+.end-source { flex: 1; min-width: 120px; }
+.end-error { margin: 0; padding: 8px 24px; color: var(--danger); font-size: 12px; }
 .end-empty { display: block; padding: 24px; color: var(--fg-dim); font-size: 13px; }
-.end-back { flex: none; min-height: 44px; border: 1px solid var(--accent); border-radius: 0; background: #12232c;
+.end-back, .end-next { flex: none; min-height: 44px; border: 1px solid var(--accent); border-radius: 0; background: #12232c;
   color: var(--accent); padding: 10px 20px; font: 14px var(--pixel); cursor: pointer; }
-.end-back:hover { background: #173340; }
+.end-back:hover, .end-next:hover:not(:disabled) { background: #173340; }
+.end-next { background: var(--accent); color: var(--bg); }
+.end-next:hover:not(:disabled) { background: #83e7f3; }
+.end-next:disabled { opacity: .5; cursor: default; }
 @media (max-width: 560px), (max-height: 520px) {
   .end-overlay { padding: 10px; }
   .end-header { padding: 14px 14px 10px; }
@@ -71,7 +77,8 @@
   .end-help { padding: 10px 14px; }
   .end-list { padding-inline: 14px; }
   .end-footer { padding: 12px 14px; flex-wrap: wrap; }
-  .end-back { width: 100%; }
+  .end-back, .end-next { flex: 1; white-space: nowrap; }
+  .end-source { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .end-overlay *, .score-award * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
@@ -85,3 +92,36 @@
   .score-row { grid-template-columns: 3ch minmax(0, 1fr) auto; gap-inline: 5px; padding-inline: 5px; }
   .score-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 }
+/* The app can rotate its logical viewport while the device remains portrait.
+   Keep compact settlement rules tied to the layout, not physical media size. */
+:is(html.mobile-landscape, .touch-battle) .end-overlay {
+  z-index: 40;
+  padding: max(6px, var(--mobile-safe-top, var(--app-safe-top, env(safe-area-inset-top, 0px))))
+    max(12px, var(--mobile-safe-right, var(--app-safe-right, env(safe-area-inset-right, 0px))))
+    max(6px, var(--mobile-safe-bottom, var(--app-safe-bottom, env(safe-area-inset-bottom, 0px))))
+    max(12px, var(--mobile-safe-left, var(--app-safe-left, env(safe-area-inset-left, 0px))));
+}
+:is(html.mobile-landscape, .touch-battle) .end-panel { width: min(760px, 100%); height: 100%; min-height: 0; }
+:is(html.mobile-landscape, .touch-battle) :is(.end-header, .end-summary, .end-help, .end-footer) { flex: none; }
+:is(html.mobile-landscape, .touch-battle) .end-header { padding: 6px 12px 4px; flex-wrap: nowrap; gap: 4px 12px; }
+:is(html.mobile-landscape, .touch-battle) .end-title { flex: none; font-size: 22px; line-height: 1.2; }
+:is(html.mobile-landscape, .touch-battle) .end-caption { font-size: 11px; }
+:is(html.mobile-landscape, .touch-battle) .end-summary { margin-inline: 12px; padding-block: 4px; gap: 6px 12px; flex-wrap: nowrap; }
+:is(html.mobile-landscape, .touch-battle) .end-placement { flex: none; font-size: 22px; }
+:is(html.mobile-landscape, .touch-battle) .end-personal { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(html.mobile-landscape, .touch-battle) .end-field { flex: none; font-size: 11px; }
+:is(html.mobile-landscape, .touch-battle) .end-help { padding: 4px 12px; font-size: 11px; line-height: 1.4; }
+:is(html.mobile-landscape, .touch-battle) :is(.end-help-desktop, .end-source-detail) { display: none; }
+:is(html.mobile-landscape, .touch-battle) .end-help-touch { display: inline; }
+:is(html.mobile-landscape, .touch-battle) .end-list { min-height: 0; padding: 0 12px; }
+:is(html.mobile-landscape, .touch-battle) .end-list .score-row {
+  grid-template-columns: 3ch minmax(80px, 1fr) auto minmax(0, 1.4fr);
+  align-items: center; min-height: 53px; padding-block: 4px; gap: 4px 8px; font-size: 14px; line-height: 1.35;
+}
+:is(html.mobile-landscape, .touch-battle) .end-list .score-titles { grid-column: 4; grid-row: 1; align-items: center; gap: 4px; padding-bottom: 0; font-size: 11px; }
+:is(html.mobile-landscape, .touch-battle) .end-list .score-title { min-height: 44px; padding: 6px 8px; }
+:is(html.mobile-landscape, .touch-battle) .end-footer { flex-wrap: nowrap; gap: 12px; padding: 6px 12px; }
+:is(html.mobile-landscape, .touch-battle) .end-source { flex: 1; min-width: 0; font-size: 11px; line-height: 1.4; }
+:is(html.mobile-landscape, .touch-battle) :is(.end-back, .end-next) { flex: none; width: auto; min-width: 88px; min-height: 44px; padding: 8px 12px; white-space: nowrap; }
+:is(html.mobile-landscape, .touch-battle) #game-stage:has(.end-overlay) .game-header,
+#game-stage.touch-battle:has(.end-overlay) .game-header { visibility: hidden; }

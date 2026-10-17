@@ -38,7 +38,11 @@ describe('editor module loader', () => {
     const preload = preloadEditorModule()
     // preload 内部把拒绝转成告警并兑现 Promise；加入开屏 ready 时不会阻断进入。
     await expect(preload).resolves.toBeUndefined()
-    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('预加载失败'), expect.any(Error)))
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+      '[omb:editor] editor.preload_failed',
+      expect.objectContaining({ event: 'editor.preload_failed', retry_on_open: true, error: expect.objectContaining({ name: 'Error' }) }),
+    ))
+    expect(JSON.stringify(warn.mock.calls)).toContain('chunk fetch failed')
     // 失败不缓存：恢复后打开重新发起 import 并成功。
     vi.doMock('./editor', () => ({ createBotEditor: 'recovered-editor-module' }))
     await expect(ensureEditorModule()).resolves.toMatchObject({ createBotEditor: 'recovered-editor-module' })

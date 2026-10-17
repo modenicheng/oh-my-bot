@@ -24,7 +24,11 @@ export function requireEl<T extends HTMLElement>(root: HTMLElement, id: string):
  * el 为 undefined 时静默跳过（回放视图部分 DOM 节点可被裁剪）。
  */
 export function setText(target: HTMLElement | undefined, text: string): void {
-  if (target && target.textContent !== text) target.textContent = text
+  if (!target || target.textContent === text) return
+  const node = target.firstChild
+  // Keep accessible text leaves alive; textContent replaces them even for a score increment.
+  if (node?.nodeType === 3 && node === target.lastChild) node.nodeValue = text
+  else target.textContent = text
 }
 
 /** 秒 → m:ss（负数钳为 0，HUD 时钟与回放时间轴共用）。 */

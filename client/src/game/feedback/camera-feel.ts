@@ -60,6 +60,9 @@ export class CameraFeel {
     this.dashZoom.tick = tick
     this.zoomAtTick = tick
     this.zoomSettled = Math.abs(this.dashZoom.value - target) < ZOOM_SETTLED_EPS
+    // Once visually settled, stop microscopic scale changes from invalidating
+    // prepared arena/vision resources on every subsequent snapshot.
+    if (this.zoomSettled) this.dashZoom.value = target
     return this.dashZoom.value
   }
 

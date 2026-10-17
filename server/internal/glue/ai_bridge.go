@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
@@ -234,7 +235,11 @@ func (m *Match) runAiPrompt(_ *Session, pid uint64, text string, svc *AIService,
 	agg := newAIStreamAggregator(func(delta ai.StreamDelta) {
 		m.sendAIStream(pid, svc, matchSeq, delta)
 	})
+	started := time.Now()
+	slog.Debug("ai.request_started", "room_code", m.rc.Code, "player_id", pid, "match_seq", matchSeq)
 	outcome, err := agent.HandlePromptStream(context.Background(), pid, text, agg.push)
+	slog.Info("ai.request_completed", "room_code", m.rc.Code, "player_id", pid, "match_seq", matchSeq,
+		"duration_ms", time.Since(started).Milliseconds(), "ok", err == nil)
 	agg.close()
 
 	m.rc.mu.Lock()
@@ -381,8 +386,7 @@ func (m *Match) emitNonSimEvent(ev *ombv1.ServerEvent) {
 func logAIRequestError(pid uint64, err error) {
 	var perr *ai.ProviderError
 	if errors.As(err, &perr) {
-		log.Printf("AI provider request failed: player=%d category=%s status=%d retryable=%t",
-			pid, perr.Category, perr.Status, perr.Retryable)
+		slog.Warn("ai.provider_failed", "player_id", pid, "category", perr.Category, "status", perr.Status, "retryable", perr.Retryable)
 		return
 	}
 	switch {
@@ -390,7 +394,7 @@ func logAIRequestError(pid uint64, err error) {
 		errors.Is(err, ai.ErrGlobalGuardrail), errors.Is(err, ai.ErrBusy), errors.Is(err, ai.ErrConcurrency):
 		return
 	default:
-		log.Printf("AI request failed: player=%d err=%v", pid, err)
+		slog.Error("ai.request_failed", "player_id", pid, "error_type", fmt.Sprintf("%T", err))
 	}
 }
 

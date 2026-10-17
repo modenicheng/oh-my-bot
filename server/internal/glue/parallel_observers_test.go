@@ -87,6 +87,15 @@ func TestParallelObserversByteIdenticalToSerial(t *testing.T) {
 			if serial[i][j].reliable != parallel[i][j].reliable {
 				t.Fatalf("session %d msg %d channel mismatch", i, j)
 			}
+			// Tick wall-clock telemetry is intentionally runtime-dependent, so it
+			// cannot participate in the byte-identical world projection check.
+			// The event cadence and projection shape are covered separately.
+			if ev := serial[i][j].msg.GetEvent(); ev != nil && ev.GetTickTelemetry() != nil {
+				if other := parallel[i][j].msg.GetEvent(); other == nil || other.GetTickTelemetry() == nil || ev.GetTick() != other.GetTick() {
+					t.Fatalf("session %d msg %d telemetry event mismatch", i, j)
+				}
+				continue
+			}
 			a, b := serial[i][j].msg.String(), parallel[i][j].msg.String()
 			if a != b {
 				t.Fatalf("session %d msg %d differs:\nserial:   %s\nparallel: %s", i, j, a, b)

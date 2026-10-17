@@ -1,0 +1,135 @@
+/* Square technical HUD; circles are reserved for the semantic analog sticks. */
+.touch-battle {
+  --mobile-safe-top: var(--app-safe-top, env(safe-area-inset-top, 0px));
+  --mobile-safe-right: var(--app-safe-right, env(safe-area-inset-right, 0px));
+  --mobile-safe-bottom: var(--app-safe-bottom, env(safe-area-inset-bottom, 0px));
+  --mobile-safe-left: var(--app-safe-left, env(safe-area-inset-left, 0px));
+}
+.mobile-controls {
+  --mobile-top: calc(var(--mobile-safe-top) + 8px);
+  --mobile-right: calc(var(--mobile-safe-right) + 12px);
+  --mobile-bottom: calc(var(--mobile-safe-bottom) + 16px);
+  --mobile-left: calc(var(--mobile-safe-left) + 12px);
+  --stick-size: 120px;
+  --ability-size: 56px;
+  --right-cluster-width: calc(var(--stick-size) + 128px);
+  position: absolute; inset: 0; z-index: 30; pointer-events: none;
+  color: var(--fg, #d8dee9); font: 12px var(--mono, monospace);
+}
+.mobile-controls[hidden], .mobile-controls [hidden] { display: none !important; }
+.mobile-controls:focus { outline: none; }
+.mobile-controls button, .mobile-layout-choice select {
+  min-height: 44px; min-width: 44px; padding: 8px; border: 1px solid #416779;
+  border-radius: 0; background: #10141af5; color: var(--fg, #d8dee9);
+  font: inherit; cursor: pointer; pointer-events: auto;
+}
+.mobile-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.mobile-controls button:focus-visible, .mobile-layout-choice select:focus-visible, .mobile-help > summary:focus-visible {
+  outline: 2px solid var(--accent, #22d3ee); outline-offset: 2px;
+}
+.mobile-controls button[aria-pressed='true'], .mobile-controls button[aria-expanded='true'],
+.mobile-controls button[data-held='true'] { border-color: var(--accent, #22d3ee); color: var(--accent, #22d3ee); }
+.mobile-toolbar { position: absolute; top: var(--mobile-top); left: var(--mobile-left); display: flex; gap: 8px; }
+.mobile-tools { position: absolute; top: calc(var(--mobile-top) + 52px); right: var(--mobile-right); display: flex; gap: 8px; }
+.mobile-toolbar button, .mobile-tools button { white-space: nowrap; }
+.mobile-move-zone, .mobile-stick, .mobile-ability {
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.mobile-move-zone {
+  position: absolute; left: var(--mobile-left); bottom: var(--mobile-bottom);
+  width: min(300px, calc(100% - var(--mobile-left) - var(--mobile-right) - var(--right-cluster-width) - 8px));
+  height: min(46%, 210px); pointer-events: auto;
+  border-left: 1px solid #41677980; border-bottom: 1px solid #41677980;
+  background: repeating-linear-gradient(0deg, transparent 0 23px, #1f27331f 23px 24px);
+}
+.mobile-move-label { position: absolute; bottom: 6px; left: 8px; color: #8b98a9; pointer-events: none; }
+.mobile-stick {
+  width: var(--stick-size); height: var(--stick-size); border: 1px solid #416779;
+  box-sizing: border-box; border-radius: 50%; background: #10141ac9;
+}
+.mobile-stick::after { content: ''; position: absolute; inset: 39%; border: 1px dashed #416779; border-radius: 50%; pointer-events: none; }
+.mobile-move-stick { position: absolute; margin: calc(var(--stick-size) / -2); pointer-events: none; }
+.mobile-stick-knob { position: absolute; width: 32px; height: 32px; left: calc(50% - 16px); top: calc(50% - 16px);
+  border-radius: 50%; border: 1px solid #22d3ee; background: #22d3ee24; pointer-events: none; }
+/* Reserve through the mode button's left edge, including notch insets and an 8px gap. */
+.mobile-right-cluster { position: absolute; right: var(--mobile-right); bottom: var(--mobile-bottom); width: var(--right-cluster-width); height: calc(var(--stick-size) + 64px); pointer-events: none; }
+.mobile-aim-stick { position: absolute; right: 0; bottom: 0; pointer-events: auto; }
+.mobile-aim-stick[data-gesture='aiming'] { border-color: #22d3ee; }
+.mobile-aim-stick[data-gesture='tracking'] { border-style: dashed; }
+.mobile-stick-label, .mobile-fire-status { position: absolute; left: 0; right: 0; text-align: center; pointer-events: none; }
+.mobile-stick-label { top: 22px; color: #8b98a9; }
+.mobile-fire-status { bottom: 20px; font: 12px var(--pixel, 'Fusion Pixel', monospace); color: #8b98a9; }
+.mobile-controls .mobile-ability { position: absolute; width: var(--ability-size); height: var(--ability-size); flex-direction: column; gap: 1px; padding: 3px; }
+.mobile-ability .pixel-icon { width: 24px; height: 24px; }
+.mobile-ability-status { font: 11px var(--pixel, 'Fusion Pixel', monospace); line-height: 1.1; white-space: nowrap; }
+.mobile-ability[data-state='off'] { color: #8b98a9; border-style: dashed; }
+.mobile-ability[data-state='off']::after { content: ''; position: absolute; right: 5px; top: 6px; width: 7px; height: 2px; background: currentColor; }
+.mobile-ability[data-state='cooling'] .mobile-ability-status { color: var(--amber, #fbbf24); }
+.mobile-ability[data-state='active'] { border: 3px double #22d3ee; color: #22d3ee; }
+.mobile-ability[data-state='active']::after { content: ''; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: currentColor; }
+.mobile-ability[data-mobile-ability='dash'] { right: calc(var(--stick-size) + 8px); bottom: 0; }
+.mobile-ability[data-mobile-ability='shield'] { right: calc(var(--stick-size) + 8px); bottom: 64px; }
+.mobile-ability[data-mobile-ability='interact'] { right: calc((var(--stick-size) - var(--ability-size)) / 2); top: 0; }
+.mobile-controls [data-mobile-action='mode'] { position: absolute; right: calc(var(--stick-size) + 72px); top: 0; width: 56px; height: 56px; color: #22d3ee; }
+.mobile-controls [data-mobile-action='mode'] .pixel-icon { width: 24px; height: 24px; }
+.mobile-gate { position: absolute; inset: 0; display: grid; place-items: center; background: #0a0e14e8; pointer-events: auto; }
+.mobile-gate-card { margin: 68px 16px 16px; width: min(380px, calc(100% - 32px)); padding: 16px; border: 1px solid #416779; background: #10141a; }
+.mobile-gate h2 { margin: 0 0 12px; font: 24px var(--pixel, 'Fusion Pixel', monospace); color: #22d3ee; }
+.mobile-gate p { line-height: 1.7; color: #8b98a9; }
+.mobile-gate button { margin: 4px 8px 0 0; }
+.mobile-layout-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; color: #8b98a9; font-size: 12px; }
+.mobile-layout-choice select { font: 14px var(--mono, monospace); min-width: 120px; }
+.mobile-layout-fallback { position: absolute; right: 12px; top: 112px; z-index: 40; background: #10141a; padding: 4px 8px; }
+.mobile-help { border-top: 1px solid #416779; margin-top: 12px; font: 12px var(--mono, monospace); }
+.mobile-help[hidden] { display: none; }
+.mobile-help > summary { min-height: 44px; padding: 12px 0; box-sizing: border-box; cursor: pointer; color: var(--accent, #22d3ee); }
+.mobile-help p { margin: 0 0 12px; color: #8b98a9; line-height: 1.8; overflow-wrap: anywhere; max-height: calc(var(--app-height, 100dvh) - 160px); overflow-y: auto; }
+#game-stage.touch-battle ~ .game-options button,
+#game-stage.touch-battle ~ .game-options input[type='range'] { min-width: 44px; min-height: 44px; }
+#game-stage.touch-battle ~ .game-options .game-options-key { display: none; }
+
+/* Scope every legacy HUD override to the actual battle stage, never the document. */
+#game-stage.touch-battle .hud-axes, #game-stage.touch-battle .hud-skills { display: none; }
+#game-stage.touch-battle .game-header { top: calc(var(--mobile-safe-top) + 8px); left: calc(var(--mobile-safe-left) + 12px); right: calc(var(--mobile-safe-right) + 12px); z-index: 36; display: block; }
+#game-stage.touch-battle .game-help,
+#game-stage.touch-battle #btn-game-replay,
+#game-stage.touch-battle #audio-settings { display: none; }
+#game-stage.touch-battle .game-tools { position: absolute; inset: 0 0 auto auto; display: flex; gap: 8px; flex-wrap: nowrap; }
+#game-stage.touch-battle .game-tools button { min-width: 44px; min-height: 44px; padding: 6px; font-size: 11px; white-space: nowrap; }
+#game-stage.touch-battle .game-tools kbd { display: none; }
+#game-stage.touch-battle .hud-left { inset: calc(var(--mobile-safe-top) + 60px) auto auto calc(var(--mobile-safe-left) + 12px); width: 164px; padding: 6px 8px; }
+#game-stage.touch-battle .hud-bar-label { font-size: 10px; letter-spacing: 0; margin-bottom: 2px; }
+#game-stage.touch-battle .hud-bar-num { font-size: 16px; }
+#game-stage.touch-battle .hud-bar { height: 4px; margin-bottom: 4px; }
+#game-stage.touch-battle .hud-top { top: calc(var(--mobile-safe-top) + 8px); left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 2px; }
+#game-stage.touch-battle .hud-phase { font-size: 10px; padding: 2px 6px; }
+#game-stage.touch-battle .hud-clock { font-size: 22px; padding: 2px 6px; }
+#game-stage.touch-battle .hud-right { inset: calc(var(--mobile-safe-top) + 112px) calc(var(--mobile-safe-right) + 12px) auto auto; max-width: min(400px, calc(100% - 24px)); }
+#game-stage.touch-battle #hud-uplink { display: none; }
+#game-stage.touch-battle .hud-roster { display: none; }
+#game-stage.touch-battle.touch-scores-open .hud-roster { display: flex; max-height: min(55cqh, 320px); overflow: auto; min-width: 260px; border: 1px solid #416779; }
+#game-stage.touch-battle .hud-upgrades { margin: 0; padding: 0; border: 0; background: none; }
+#game-stage.touch-battle .hud-up-head { display: none; }
+#game-stage.touch-battle .hud-up-row { display: none; }
+#game-stage.touch-battle.touch-upgrades-open .hud-upgrades { position: absolute; left: 0; top: 68px; width: min(360px, calc(100cqw - 40px)); max-height: 58cqh; overflow-y: auto; padding: 8px; background: #10141af5; border: 1px solid #416779; pointer-events: auto; z-index: 35; }
+#game-stage.touch-battle.touch-upgrades-open .hud-up-head { display: flex; }
+#game-stage.touch-battle.touch-upgrades-open .hud-up-row { display: grid; min-height: 44px; }
+#game-stage.touch-battle.touch-upgrades-open .hud-up-row kbd { display: none; }
+#game-stage.touch-battle.touch-upgrades-open .hud-up-row { grid-template-columns: 18px 34px 1fr auto auto; }
+#game-stage.touch-battle .hud-left:has(.hud-upgrades:not([hidden])) { padding-top: 6px; }
+#game-stage.touch-battle .hud-comms { inset: 68px auto auto 0; width: min(320px, calc(100cqw - 24px)); }
+#game-stage.touch-battle #hud-left > .hud-comms > #hud-msg { padding: 6px 8px; font-size: 12px; }
+#game-stage.touch-battle #hud-inner-ring { top: calc(var(--mobile-safe-top) + 60px); width: 216px; gap: 8px; padding: 8px 10px; border-width: 1px 0; clip-path: none; }
+#game-stage.touch-battle #hud-inner-ring > .pixel-icon { width: 16px; height: 16px; flex-basis: 16px; }
+#game-stage.touch-battle #hud-inner-ring .hud-inner-copy { gap: 4px; }
+#game-stage.touch-battle #hud-inner-ring strong { font-size: 16px; }
+#game-stage.touch-battle #hud-inner-ring .hud-inner-copy > span { font-size: 9px; }
+#game-stage.touch-battle.touch-scores-open .hud-right, #game-stage.touch-battle.touch-upgrades-open .hud-left { z-index: 35; }
+#game-stage.touch-battle .hud-up-points { font-size: 16px; }
+
+@container (max-width: 760px) {
+  .mobile-controls { --stick-size: 112px; }
+  .mobile-move-zone { height: min(46%, 180px); }
+  #game-stage.touch-battle .game-tools .pixel-icon { display: none; }
+  #game-stage.touch-battle .hud-clock { font-size: 20px; }
+}

@@ -27,7 +27,8 @@ import (
 // five tracks derive per-robot HP/energy caps, move speed, shield scale and shot
 // damage from levels, and bounty deaths scatter PointDrop pickups. Zero levels
 // equal the v4 constants exactly; pre-v5 replays carry no upgrade records.
-const SimulationVersion = 7
+// Version 8 adds bounded, one-tick discrete human shots and input generations.
+const SimulationVersion = 8
 
 const (
 	TickRate                   = 60
@@ -109,29 +110,31 @@ type Input struct {
 // Sim only exposes copies; all mutation goes through its queued APIs.
 // HP and Energy use game units, not the wire protocol's x10 representation.
 type Robot struct {
-	ConsumedSeq     uint32       `json:"consumed_seq"`
-	Control         ControlState `json:"control"`
-	Combat          CombatState  `json:"combat"`
-	Nick            string       `json:"nick,omitempty"`
-	Color           string       `json:"color,omitempty"`
-	ID              uint32       `json:"id"`
-	Position        Vec2         `json:"position"`
-	PathStart       Vec2         `json:"path_start"`
-	Velocity        Vec2         `json:"velocity"`
-	HP              float64      `json:"hp"`
-	Energy          float64      `json:"energy"`
-	State           RobotStatus  `json:"state"`
-	Heading         float64      `json:"heading"`
-	SpawnPosition   Vec2         `json:"spawn_position"`
-	Sector          uint32       `json:"sector"`
-	Input           Input        `json:"input"`
-	PendingInput    Input        `json:"pending_input"`
-	InputPending    bool         `json:"input_pending"`
-	LatestSeq       uint32       `json:"latest_seq"`
-	HasSeq          bool         `json:"has_seq"`
-	RespawnPending  bool         `json:"respawn_pending"`
-	LastWallHitTick uint32       `json:"last_wall_hit_tick"`
-	HasWallHit      bool         `json:"has_wall_hit"`
+	ConsumedSeq     uint32          `json:"consumed_seq"`
+	HasConsumedSeq  bool            `json:"has_consumed_seq,omitempty"`
+	Control         ControlState    `json:"control"`
+	Combat          CombatState     `json:"combat"`
+	Nick            string          `json:"nick,omitempty"`
+	Color           string          `json:"color,omitempty"`
+	ID              uint32          `json:"id"`
+	Position        Vec2            `json:"position"`
+	PathStart       Vec2            `json:"path_start"`
+	Velocity        Vec2            `json:"velocity"`
+	HP              float64         `json:"hp"`
+	Energy          float64         `json:"energy"`
+	State           RobotStatus     `json:"state"`
+	Heading         float64         `json:"heading"`
+	SpawnPosition   Vec2            `json:"spawn_position"`
+	Sector          uint32          `json:"sector"`
+	Input           Input           `json:"input"`
+	PendingInput    Input           `json:"pending_input"`
+	InputPending    bool            `json:"input_pending"`
+	LatestSeq       uint32          `json:"latest_seq"`
+	HasSeq          bool            `json:"has_seq"`
+	SingleShots     SingleShotState `json:"single_shots,omitempty"`
+	RespawnPending  bool            `json:"respawn_pending"`
+	LastWallHitTick uint32          `json:"last_wall_hit_tick"`
+	HasWallHit      bool            `json:"has_wall_hit"`
 	// Snippet 埋点节流：与 WallHit 同粒度思路，避免 60Hz 刷屏事件。
 	LastSnippetUseTick uint32 `json:"last_snippet_use_tick"`
 	HasSnippetUse      bool   `json:"has_snippet_use"`
@@ -236,6 +239,7 @@ func NewSim(seed uint64, playerIDs []uint32, eventSink EventSink) *Sim {
 		s.index[id] = i
 		// Assist defaults off: script arbitration is opt-in per player/room.
 		s.robots[i] = Robot{ID: id, HP: MaxHP, Energy: MaxEnergy, State: Alive, Sector: uint32(i % 8), Control: ControlState{}}
+		s.robots[i].SingleShots.Generation = 1
 		if id >= s.nextProjectile {
 			s.nextProjectile = id + 1
 		}
@@ -349,24 +353,52 @@ func (s *Sim) SetSpawn(robotID uint32, pos Vec2, sector uint32) error {
 // is valid initially; duplicates, older values and uint32 wrap are rejected.
 // The last consumed control remains held until replaced (including a stop).
 func (s *Sim) ApplyInput(robotID uint32, in *ombv1.ClientInput) bool {
+	return s.ApplyInputOutcome(robotID, in) == ""
+}
+
+// ApplyInputOutcome returns a terminal admission rejection, or empty on success.
+// A new valid sequence is consumed even when its discrete action is rejected:
+// retrying that same request after a cooldown/lifecycle change must not fire.
+func (s *Sim) ApplyInputOutcome(robotID uint32, in *ombv1.ClientInput) string {
 	i, ok := s.index[robotID]
-	if !ok || in == nil || s.ended || AxisMask(in.AxisMask)&^allAxes != 0 || math.IsNaN(in.Aim) || math.IsInf(in.Aim, 0) {
-		return false
+	if !ok || in == nil || s.ended {
+		return "invalid_input"
 	}
 	r := &s.robots[i]
 	if r.HasSeq && in.Seq <= r.LatestSeq {
-		return false
+		return "sequence"
+	}
+	invalid := AxisMask(in.AxisMask)&^allAxes != 0 || !finite(in.Aim)
+	if invalid && in.SingleShot == nil {
+		return "invalid_input"
 	}
 	next := Input{Seq: in.Seq, AxisMask: AxisMask(in.AxisMask), MoveX: max(-1000, min(1000, in.MoveX)),
 		MoveY: max(-1000, min(1000, in.MoveY)), Fire: in.Fire, Aim: in.Aim,
 		Dash: in.Dash, Shield: in.Shield, Interact: in.Interact}
+	outcome := ""
+	if invalid {
+		// A terminal rejection still consumes its fresh identity and releases
+		// fire. No malformed axis/angle is allowed into held/checkpoint state.
+		outcome = "invalid_input"
+		next = Input{Seq: in.Seq, AxisMask: AxisFire, Aim: r.Heading}
+	} else if in.SingleShot != nil {
+		outcome = s.admitSingleShot(r, in.Seq, in.SingleShot)
+		// The atomic request owns aim/fire even if the sender omitted axis_mask;
+		// never reinterpret a discrete release as a held-fire pulse.
+		next.Fire = false
+		next.AxisMask |= AxisFire
+		if outcome == "" {
+			next.AxisMask |= AxisAim | AxisFire
+			next.Aim = in.SingleShot.Aim
+		}
+	}
 	// Coalesce disjoint axes received before this tick; never lose an earlier release.
 	if r.InputPending {
 		next = mergeInput(r.PendingInput, next)
 	}
 	r.PendingInput = next
 	r.LatestSeq, r.HasSeq, r.InputPending = in.Seq, true, true
-	return true
+	return outcome
 }
 
 // Respawn is an explicit queued reset hook retained for callers and replay.

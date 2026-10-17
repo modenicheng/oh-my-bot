@@ -1,6 +1,11 @@
 // 回放 API 客户端：GET /api/matches（对局列表）与 GET /api/replay/<id>（NDJSON 流）。
 // 同源 fetch（embed 前端与 API 同端口），错误统一抛 ReplayApiError。
 
+import { observedFetch } from '../observability/http'
+import { createLogger } from '../observability/logger'
+
+const log = createLogger('replay')
+
 export class ReplayApiError extends Error {}
 
 /** 对局条目（列表页展示用）。 */
@@ -16,7 +21,7 @@ export interface MatchEntry {
 export async function fetchMatches(): Promise<MatchEntry[]> {
   let resp: Response
   try {
-    resp = await fetch('/api/matches')
+    resp = await observedFetch('/api/matches')
   } catch (e) {
     throw new ReplayApiError(`网络错误: ${(e as Error).message}`)
   }
@@ -27,6 +32,7 @@ export async function fetchMatches(): Promise<MatchEntry[]> {
   try {
     data = await resp.json()
   } catch (e) {
+    log.error('matches.decode_failed', { error: e })
     throw new ReplayApiError(`对局列表解析失败: ${(e as Error).message}`)
   }
   if (!Array.isArray(data)) throw new ReplayApiError('对局列表格式异常')
@@ -45,7 +51,7 @@ export async function fetchMatches(): Promise<MatchEntry[]> {
 export async function fetchReplayText(id: string): Promise<string> {
   let resp: Response
   try {
-    resp = await fetch(`/api/replay/${encodeURIComponent(id)}?visual=1`)
+    resp = await observedFetch(`/api/replay/${encodeURIComponent(id)}?visual=1`)
   } catch (e) {
     throw new ReplayApiError(`网络错误: ${(e as Error).message}`)
   }
@@ -55,6 +61,7 @@ export async function fetchReplayText(id: string): Promise<string> {
   try {
     return await resp.text()
   } catch (e) {
+    log.error('replay.read_failed', { match_id: id, error: e })
     throw new ReplayApiError(`回放读取失败: ${(e as Error).message}`)
   }
 }
