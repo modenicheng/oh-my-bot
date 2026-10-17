@@ -16,7 +16,7 @@ import { battleKeyAction, upgradeTrackKey } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
 import { readRoute, saveProfile, loadProfile, clearProfile, writeRoute, type View, type RouteExtra, type JoinProfile } from './route'
 import { consumeTokenFromURL, fetchAuthEnabled, validClaims, clearToken, isAuthRejection } from './auth'
-import { mountIcons } from './icons'
+import { icon, mountIcons } from './icons'
 import { audio } from './audio'
 import { bgm } from './music/bgm'
 import { Lobby } from './app/lobby'
@@ -53,6 +53,29 @@ const viewReplayPlayer = $<HTMLElement>('view-replay-player')
 const viewLive = $<HTMLElement>('view-live')
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
 viewJoin.querySelector('.join-utilities')!.appendChild(audioSettings)
+
+const fullscreenButton = $<HTMLButtonElement>('btn-fullscreen')
+function syncFullscreenButton(): void {
+  const fullscreen = document.fullscreenElement !== null
+  fullscreenButton.replaceChildren(icon(fullscreen ? 'fullscreenExit' : 'fullscreen'))
+  const label = fullscreen ? '退出全屏' : '全屏'
+  const text = document.createElement('span')
+  text.textContent = label
+  fullscreenButton.append(text)
+  fullscreenButton.setAttribute('aria-label', label)
+  fullscreenButton.setAttribute('aria-pressed', String(fullscreen))
+  fullscreenButton.title = label
+}
+fullscreenButton.addEventListener('click', () => {
+  try {
+    const action = document.fullscreenElement
+      ? document.exitFullscreen?.()
+      : document.documentElement.requestFullscreen?.()
+    void Promise.resolve(action).catch(() => { /* Fullscreen is an optional browser permission. */ })
+  } catch { /* Some embedded browsers reject the API synchronously. */ }
+})
+document.addEventListener('fullscreenchange', syncFullscreenButton)
+syncFullscreenButton()
 
 // ---- 对局帮助面板：默认折叠，? 展开/收起，Esc 关闭 ------------------------------
 

@@ -31,7 +31,7 @@ Files: `protocol/proto/omb.proto`, generated protocol outputs, `server/internal/
 
 Files: `client/src/game/input/touch-state.ts`, `touch-state.test.ts`, `client/src/game/input.ts`, `input.test.ts`.
 
-- [x] Write failing tests for independent pointer owners, radial analog mapping, single release, center cancellation, continuous mode, ability transfer, final-up coordinates, and system cancellation.
+- [x] Write failing tests for independent pointer owners, radial analog mapping, single release, center cancellation, continuous mode, direct ability holds, pass-through skill targets, final-up coordinates, and system cancellation.
 - [x] Implement pure state transitions with cached geometry and no DOM/network dependencies.
 - [x] Add sampler touch snapshot/discrete-intent integration, preserving monotonic sequence and desktop aim guard. Suppress synthetic desktop mouse events in touch layout.
 - [x] Verify sticky aim/fire takeover and held false while single-shot aiming; fresh contact after release/reset.
@@ -43,7 +43,7 @@ Files: `client/src/game/mobile-controls.ts`, `.css`, `orientation.ts`, focused t
 
 - [x] Test touch layout selection/override, landscape fallback, pointer cancellation, listener disposal, mode persistence, and safe multi-thumb focus.
 - [x] Render two semantic circular sticks and square ability buttons within the right-thumb arc; show authoritative states and explicit firing mode.
-- [x] Capture pointers on a stable root, hit-test ability transfer by coordinates, cache geometry outside the sampling loop.
+- [x] Capture pointers on a stable root, keep direct ability hit-testing stable, and cache geometry outside the sampling loop.
 - [x] Gate input on portrait, modal, readiness, connection, death and visibility; best-effort fullscreen/orientation lock never prevents already-landscape play.
 - [x] Expose Assist, chat, menu, upgrades and auxiliary actions on touch. Compact HUD and side panels without hiding room-host controls.
 - [x] Integrate capability/generation handshake and correlated shot feedback.
@@ -52,7 +52,7 @@ Files: `client/src/game/mobile-controls.ts`, `.css`, `orientation.ts`, focused t
 
 Files: `client/scripts/mobile-controls-check.mjs`, existing browser fixtures, verification notes in this plan.
 
-- [x] Add browser fixtures for multitouch move/aim/release, ability transfer, mode switch, portrait transition, focus and background cancellation, missing capability and teardown. Background/pagehide and teardown also have DOM tests; native OS backgrounding is not certified by the browser fixture.
+- [x] Add browser fixtures for multitouch move/aim/release, pass-through skill crossing, direct ability holds, mode switch, portrait transition, focus and background cancellation, missing capability and teardown. Background/pagehide and teardown also have DOM tests; native OS backgrounding is not certified by the browser fixture.
 - [x] Inspect screenshots at 667x375, 844x390, 932x430, 1024x768, and portrait; fix overlap and unreachable actions.
 - [x] Run `pnpm typecheck`, full Vitest, `pnpm build`, `pnpm --filter client test:startup`, focused mobile browser checks, and production Go suites. See exact commands, source times and limitations below.
 - [x] Test real-server shot counts rather than relying solely on mocked browser input.
@@ -69,6 +69,7 @@ The user has requested implementation, authorizing execution of this plan. Work 
 - `pnpm exec vitest run --maxWorkers=4 --reporter=dot` passes 136 files / 1476 tests at 01:31. An unrestricted concurrent run hit the 15-second art-cache import hook timeout; the bounded-worker run passes without changing that test or extending its timeout. Earlier network handshake/backoff test failures were resolved by the parallel session, whose files were not edited here.
 - `go test -p 1 ./cmd/... ./internal/...` passes on the combined backend source at 01:19. `go build -o ../.artifacts/mobile-compact/omb.exe ./cmd/omb` passes at 01:22. Earlier production sim/glue/snapshot SingleShot race tests and `go vet` also passed. A broader `go test -p 1 ./...` at 01:16 failed two tests in the parallel session's ignored scratch package `server/tmp/network-binary-replay-20261017`; that scratch package was not changed by this task. The green Go claim covers production packages only.
 - `test:startup` passes at 01:26 with capability-absence/layout fallback and battle teardown assertions. A pre-existing fixture race was fixed by waiting for the mock server's PREL room subscription before sending bootstrap, rather than relying on room-view visibility.
+- Follow-up mobile feel fix: a right-stick gesture now remains aim/fire-owned when it passes over dash/shield/Uplink hit rectangles; only a direct pointer-down on a skill acquires the held skill. The mobile upgrade drawer is 300px max width, outside taps dismiss it without starting a new gesture, and the home screen exposes a shared PC/mobile fullscreen toggle.
 - `test:assist-focus` previously passed against the real server: applying a movement Snippet returns canvas focus and a fresh WASD edge regains the movement axis.
 - `OMB_MOBILE_EXPECT_COMPACT=1 pnpm --filter client test:mobile` passes 21 checks against the real server on the 01:30 build: 10 authoritative shots (7 single / 3 continuous), 7 correlated fired outcomes, no page/WS errors. The per-connection production decoder observes 3991 compact snapshots, 30 protobuf frames and 9 batch frames. This verifies actual compact delivery, not only negotiation.
 - The real UI transitions from Warmup to Running while two contacts are held. It confirms a fresh bootstrap/generation, neutral old contacts, and one shot from a fresh release. Touch host pause/resume stays reachable with old contacts down, including closing and reopening the menu while paused; recovery cannot reuse the old contacts.

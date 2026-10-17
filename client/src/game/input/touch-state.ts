@@ -112,9 +112,10 @@ export class TouchState {
     if (this.right.pointerId !== pointerId) return false
     this.right.point = { x, y }
     if (this.right.phase === 'ability-held') return true
-    const ability = this.abilityAt(x, y)
-    if (ability) this.holdAbility(ability)
-    else this.trackAim(x, y)
+    // Aiming owns the whole gesture after a free-stick down. The ability
+    // buttons are close enough to the stick that crossing one must not steal
+    // the thumb, stop continuous fire, or activate a skill by accident.
+    this.trackAim(x, y)
     return true
   }
 
@@ -122,7 +123,7 @@ export class TouchState {
     if (!this.owners.includes(pointerId)) return { handled: false }
     let shot: number | undefined
     if (this.right.pointerId === pointerId && this.right.phase !== 'ability-held'
-      && Number.isFinite(x) && Number.isFinite(y) && !this.abilityAt(x, y)) {
+      && Number.isFinite(x) && Number.isFinite(y)) {
       // Up may contain the last motion even if the browser omitted pointermove.
       this.trackAim(x, y)
       if (this.right.phase === 'aiming' && this.fireMode === 'single') shot = this.value.aim

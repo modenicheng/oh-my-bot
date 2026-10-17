@@ -112,26 +112,26 @@ describe('mobile control DOM adapter', () => {
     expect(f.onInput.mock.lastCall?.[0].moveX).toBe(1000)
   })
 
-  it('hit tests captured coordinates and locks an ability until release despite unavailable HUD', () => {
+  it('keeps an aim owner through ability buttons despite unavailable HUD', () => {
     const f = fixture()
     pointer(element('[data-mobile-role="aim"]'), 'pointerdown', 2, 550, 290)
     pointer(stage, 'pointermove', 2, 610, 290)
     pointer(stage, 'pointermove', 2, 438, 312)
-    expect(f.onInput.mock.lastCall?.[0]).toMatchObject({ dash: true, fire: false })
+    expect(f.onInput.mock.lastCall?.[0]).toMatchObject({ dash: false, fire: false, axisMask: 6 })
     element('#skill-dash').dataset.state = 'off'
     f.controls.update()
     pointer(stage, 'pointermove', 2, 438, 250)
     pointer(stage, 'pointerup', 2, 610, 290)
-    expect(f.onInput.mock.lastCall?.[0]).toMatchObject({ dash: false, shield: false, fire: false })
-    expect(f.onShot).not.toHaveBeenCalled()
+    expect(f.onInput.mock.lastCall?.[0]).toMatchObject({ dash: false, shield: false, fire: false, axisMask: 6 })
+    expect(f.onShot).toHaveBeenCalledExactlyOnceWith(0)
   })
 
-  it('checks final-up ability position rather than stale move target', () => {
+  it('keeps a final-up aim direction even when it is inside an ability button', () => {
     const f = fixture()
     pointer(element('[data-mobile-role="aim"]'), 'pointerdown', 2, 550, 290)
     pointer(stage, 'pointermove', 2, 610, 290)
     pointer(stage, 'pointerup', 2, 438, 312)
-    expect(f.onShot).not.toHaveBeenCalled()
+    expect(f.onShot).toHaveBeenCalledExactlyOnceWith(Math.atan2(22, -112))
     expect(f.onInput.mock.lastCall?.[0].dash).toBe(false)
   })
 
@@ -418,6 +418,20 @@ describe('mobile control DOM adapter', () => {
     expect(element('[data-mobile-action="scores"]').getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('closes a touch drawer from the outside without starting a new battle gesture', () => {
+    const f = fixture()
+    element('[data-mobile-action="upgrades"]').click()
+    expect(f.controls.blocked).toBe(true)
+    const event = pointer(stage, 'pointerdown', 9, 700, 80)
+    expect(event.defaultPrevented).toBe(false)
+    expect(stage.classList.contains('touch-upgrades-open')).toBe(false)
+    expect(element('[data-mobile-action="upgrades"]').getAttribute('aria-expanded')).toBe('false')
+    expect(f.onInput.mock.lastCall?.[0]).toMatchObject({ moveX: 0, fire: false, dash: false, shield: false })
+    expect(f.controls.blocked).toBe(false)
+    pointer(stage, 'pointermove', 9, 610, 290)
+    expect(f.onShot).not.toHaveBeenCalled()
+  })
+
   it('mirrors authoritative HUD states, reason and takeover without fake cooldown or disabled release', () => {
     const f = fixture()
     f.controls.update()
@@ -455,7 +469,7 @@ describe('mobile control DOM adapter', () => {
     expect(help.textContent).toContain('左摇杆移动')
     expect(help.textContent).toContain('松手单发')
     expect(help.textContent).toContain('按住连发')
-    expect(help.textContent).toContain('拖入')
+    expect(help.textContent).toContain('经过技能按钮')
     expect(help.textContent).not.toMatch(/WASD|SHIFT|鼠标/)
     expect(Array.from(panel.childNodes)).toEqual(original)
     expect(panel.hidden).toBe(true)
@@ -517,6 +531,12 @@ describe('mobile control DOM adapter', () => {
     element('#skill-uplink .skill-cd').textContent = '48%'
     f.controls.update()
     expect(element('[data-mobile-ability="interact"]').textContent).toBe('48%')
+  })
+
+  it('keeps the home fullscreen control separate from battle touch controls', () => {
+    const f = fixture()
+    expect(stage.querySelector('[data-mobile-action="fullscreen"]')).toBeNull()
+    expect(f.controls.blocked).toBe(false)
   })
 
   it('omits mobile fullscreen controls while retaining the unsupported-version options action', () => {
@@ -608,6 +628,19 @@ describe('mobile CSS boundary', () => {
     expect(hidden.display).toBe('none')
     expect(css).not.toMatch(/#btn-game-start[^}]*display:\s*none/)
     expect(css).not.toMatch(/\.game-options-audio[^}]*display:\s*none/)
+  })
+
+  it('keeps the mobile upgrade drawer compact', () => {
+    expect(rule('#game-stage.touch-battle.touch-upgrades-open .hud-upgrades').width)
+      .toBe('min(300px, calc(100cqw - 24px))')
+  })
+
+  it('keeps the low-use firing mode switch small and close to the right stick', () => {
+    expect(rule('.mobile-controls')['--right-cluster-width']).toBe('calc(var(--stick-size) + 96px)')
+    const mode = rule(".mobile-controls [data-mobile-action='mode']")
+    expect(mode.right).toBe('calc(var(--stick-size) + 48px)')
+    expect(mode.width).toBe('44px')
+    expect(mode.height).toBe('44px')
   })
 
   it('anchors phase and countdown to the safe top edge and makes the core-open banner compact', () => {

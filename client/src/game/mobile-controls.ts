@@ -305,7 +305,7 @@ export class MobileControls {
     summary.textContent = '触控操作帮助'
     summary.tabIndex = 0 // Include the native disclosure in GameOptions' modal focus loop.
     const helpCopy = document.createElement('p')
-    helpCopy.textContent = '左摇杆移动，右摇杆定向瞄准。默认松手单发（准星图标），回到中心取消；切换为按住连发（三发图标）后，按住外圈开火。按住冲刺、护盾或黑入；右摇杆拖入技能后锁定该技能，松手结束，不会补发射击。技能角标亮点表示激活，短横表示不可用；数字显示冷却或黑入进度。'
+    helpCopy.textContent = '左摇杆移动，右摇杆定向瞄准。默认松手单发（准星图标），回到中心取消；切换为按住连发（三发图标）后，按住外圈开火。按住冲刺、护盾或黑入；瞄准手指经过技能按钮不会触发技能或中断开火，技能需直接按下，松手结束。技能角标亮点表示激活，短横表示不可用；数字显示冷却或黑入进度。'
     this.touchHelp.append(summary, helpCopy)
     options?.append(this.touchHelp)
     this.listen(this.layoutSelect, 'change', () => {
@@ -387,8 +387,15 @@ export class MobileControls {
   }
 
   private pointerDown(event: PointerEvent): void {
-    if (!this.touch || !this.battleVisible || this.blocked || event.pointerType === 'mouse' || event.button !== 0) return
     const target = event.target as Element | null
+    // An open mobile drawer is a modal touch surface. Tapping anywhere else
+    // dismisses it, but the dismissing contact must not become battle input.
+    if (this.drawer !== undefined && !target?.closest(
+      '.hud-upgrades, .hud-roster, [data-mobile-action="upgrades"], [data-mobile-action="scores"]')) {
+      this.closeDrawer()
+      return
+    }
+    if (!this.touch || !this.battleVisible || this.blocked || event.pointerType === 'mouse' || event.button !== 0) return
     if (!target?.closest('[data-mobile-role], [data-mobile-ability]')) return
     // Focusing first synchronously enables main's battle-domain gate on first contact.
     this.surface.focus({ preventScroll: true })
@@ -455,11 +462,24 @@ export class MobileControls {
   }
 
   private toggleDrawer(drawer: 'scores' | 'upgrades'): void {
+    if (this.drawer === drawer) {
+      this.closeDrawer()
+      return
+    }
     this.cancel()
-    this.drawer = this.drawer === drawer ? undefined : drawer
+    this.drawer = drawer
     this.root.classList.toggle('touch-scores-open', this.drawer === 'scores')
     this.root.classList.toggle('touch-upgrades-open', this.drawer === 'upgrades')
     for (const key of ['scores', 'upgrades']) this.buttons.get(key)!.setAttribute('aria-expanded', String(this.drawer === key))
+    this.deps.onGateChange()
+  }
+
+  private closeDrawer(): void {
+    if (this.drawer === undefined) return
+    this.cancel()
+    this.drawer = undefined
+    this.root.classList.remove('touch-scores-open', 'touch-upgrades-open')
+    for (const key of ['scores', 'upgrades']) this.buttons.get(key)!.setAttribute('aria-expanded', 'false')
     this.deps.onGateChange()
   }
 

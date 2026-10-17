@@ -99,11 +99,11 @@ describe('touch pointer ownership and shot transitions', () => {
     expect(state.pointerUp(3, 550, 290).shot).toBeUndefined()
   })
 
-  it('cancels a shot when only the final up enters an ability without inventing a hold', () => {
+  it('keeps the aiming gesture when the final up enters an ability region', () => {
     const state = new TouchState(geometry)
     state.pointerDown(1, 550, 290)
     state.pointerMove(1, 610, 290)
-    expect(state.pointerUp(1, 438, 312).shot).toBeUndefined()
+    expect(state.pointerUp(1, 438, 312).shot).toBeCloseTo(Math.atan2(22, -112))
     expect(state.snapshot).toMatchObject({ dash: false, shield: false, interact: false, fire: false })
     expect(state.right.phase).toBe('idle')
   })
@@ -154,16 +154,17 @@ describe('exclusive touch abilities and lifecycle', () => {
     })
   }
 
-  it('transfers aim to one ability, clears fire, and locks that ability through other targets', () => {
+  it('keeps aim and continuous fire while crossing ability targets', () => {
     const state = new TouchState(geometry, 'hold')
     state.pointerDown(1, 550, 290)
     state.pointerMove(1, 610, 290)
+    expect(state.snapshot.fire).toBe(true)
     state.pointerMove(1, 438, 312)
-    expect(state.snapshot).toMatchObject({ dash: true, fire: false, axisMask: 14 })
-    expect(state.right.phase).toBe('ability-held')
+    expect(state.snapshot).toMatchObject({ dash: false, shield: false, fire: true, axisMask: 6 })
+    expect(state.right.phase).toBe('aiming')
     state.pointerMove(1, 438, 250)
     state.pointerMove(1, 610, 290)
-    expect(state.snapshot).toMatchObject({ dash: true, shield: false, fire: false })
+    expect(state.snapshot).toMatchObject({ dash: false, shield: false, fire: true })
     expect(state.pointerUp(1, 610, 290).shot).toBeUndefined()
   })
 
@@ -174,7 +175,7 @@ describe('exclusive touch abilities and lifecycle', () => {
     state.pointerDown(2, 550, 290)
     state.pointerMove(2, 438, 312)
     state.cancel()
-    expect(state.snapshot).toMatchObject({ moveX: 0, moveY: 0, fire: false, dash: false, axisMask: 9 })
+    expect(state.snapshot).toMatchObject({ moveX: 0, moveY: 0, fire: false, dash: false, axisMask: 7 })
     expect(state.owners).toEqual([])
     expect(state.mode).toBe('hold')
     expect(state.pointerMove(2, 610, 290)).toBe(false)
@@ -205,7 +206,7 @@ describe('exclusive touch abilities and lifecycle', () => {
     state.pointerMove(1, 610, 290)
     state.pointerMove(1, 438, 312)
     state.cancel()
-    expect(state.snapshot.axisMask).toBe(14)
+    expect(state.snapshot.axisMask).toBe(6)
     state.resetTakeover()
     expect(state.snapshot.axisMask).toBe(0)
     expect(state.snapshot.aim).toBeUndefined()

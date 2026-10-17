@@ -830,32 +830,33 @@ try {
     await setMode('single')
   })
 
-  await check('skill transfer locks right role and preserves left movement/focus', async () => {
-    const start = mark(), g = await geometry()
+  await check('aiming crossing skill buttons keeps firing ownership', async () => {
+    const g = await geometry()
+    await readyWeapon()
     await movingLeft(g)
     await aiming(g, false, true)
     const dash = await findControl('dash'), shield = await findControl('shield')
     let index = inputs.length
     await touch.move(22, center(await boxOf(dash)))
-    await inputSince(index, value => value.dash && !value.fire && !value.singleShot && value.moveX < -100 && (value.axisMask & 8) !== 0, 'coordinate hit test transfers captured pointer to dash')
-    await until(() => self.abilitySrc === 1 && robots.get(self.robotId)?.dashing, 'authoritative dash active')
+    await inputSince(index, value => !value.dash && !value.fire && !value.singleShot && value.moveX < -100 &&
+      (value.axisMask & 6) === 6, 'crossing dash keeps captured aim/fire axes')
     await skillFeedback()
     await dash.focus()
     index = inputs.length
     await touch.move(22, g.aimOutside)
-    await inputSince(index, value => value.dash && value.moveX < -100 && !value.fire, 'battle-button focus and crossing back retain dash + move')
+    await inputSince(index, value => !value.dash && !value.fire && value.moveX < -100 && (value.axisMask & 6) === 6,
+      'battle-button focus and crossing back retain aim ownership')
     index = inputs.length
     await touch.move(22, center(await boxOf(shield)))
-    await inputSince(index, value => value.dash && !value.shield && !value.fire && value.moveX < -100, 'transfer cannot switch to another ability')
-    await screenshot('skill-transfer')
-    index = inputs.length
-    await touch.up(22)
-    const released = await inputSince(index, value => !value.dash && !value.shield && !value.fire && value.moveX < -100, 'ability release keeps left movement')
-    await consumed(released, 'ability release')
-    await quiet(start, 'skill transfer/release')
+    await inputSince(index, value => !value.dash && !value.shield && !value.fire && value.moveX < -100 && (value.axisMask & 6) === 6,
+      'crossing shield does not switch ability')
+    await screenshot('aim-crosses-skills')
+    const shieldCenter = center(await boxOf(shield))
+    await releaseShot(Math.atan2(shieldCenter.y - g.aimOrigin.y, shieldCenter.x - g.aimOrigin.x))
+    await quiet(mark(), 'aim crossing/release')
     index = inputs.length
     await touch.up(11)
-    await expectNeutral(index, 15, 'ability and movement neutral')
+    await expectNeutral(index, 7, 'aim crossing movement neutral')
   })
 
   await check('direct dash acquires the right role and releases without firing', async () => {

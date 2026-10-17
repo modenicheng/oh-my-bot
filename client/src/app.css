@@ -102,6 +102,8 @@ input, textarea { user-select: text; }
 .robot-mark { width: 72px; height: 72px; align-self: center; margin: 0 0 8px; }
 #btn-join, #btn-start { background: var(--accent); color: #09151e; font-weight: 600; }
 #btn-join:hover:not(:disabled), #btn-start:hover:not(:disabled) { background: #83e7f3; }
+#btn-fullscreen { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+#btn-fullscreen .pixel-icon { width: 15px; height: 15px; }
 button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* 游戏视图：全屏 canvas + HUD 覆盖层（#app 面板化布局在此视图下解除） */
 #view-game { position: fixed; inset: 0; display: grid; }

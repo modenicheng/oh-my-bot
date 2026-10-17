@@ -76,7 +76,7 @@ The left stick origin appears at first contact within its bounded lower-left act
 
 Use Pointer Events with a separate owner `pointerId` for the left role and the right role. Do not filter by `isPrimary`, because the second thumb must work. A touch cannot switch from left to right merely by crossing the screen midpoint. Additional contacts cannot steal an occupied role.
 
-Capture each acquired pointer on a stable interaction root. Since capture suppresses normal cross-element hover targeting, skill transfer uses the pointer's coordinates against cached hit regions, not `pointerenter`/`pointerleave` on the ability button. Refresh those regions on layout changes, not on every sample.
+Capture each acquired pointer on a stable interaction root. Since capture suppresses normal cross-element hover targeting, direct skill ownership uses the pointer's coordinates against cached hit regions, not `pointerenter`/`pointerleave` on the ability button. Refresh those regions on layout changes, not on every sample.
 
 Apply `touch-action: none` and text-selection suppression to active battle control surfaces, not to the entire application or document reader. Do not globally disable browser zoom in the viewport meta tag.
 
@@ -102,10 +102,10 @@ The aim vector is displacement from the fixed right-stick origin. Once outside t
 | Move within dead zone | Enter tracking; retain last facing; do not fire | Enter tracking; retain last facing; stop fire |
 | Normal up while outside dead zone | Submit one request with the final valid direction | Stop fire; submit no one-shot request |
 | Normal up within dead zone | Cancel shot | Stop fire |
-| Transfer to an ability target | Cancel shot; enter ability-held | Stop fire; enter ability-held |
+| Move across an ability target | Keep aiming; keep the selected fire-mode behavior | Keep aiming; keep held fire |
 | System cancellation | Cancel without firing | Stop without a final extra shot |
 
-A quick tap that never leaves the dead zone does not fire. Returning to the dead zone cancels unless the player moves out again before normal release. At pointer-up, recompute displacement and ability-target hit testing from the event coordinates so that a last motion omitted from `pointermove` cannot use a stale direction or cancellation state. If that final position enters an ability region, cancel the shot; do not synthesize an ability hold that has already ended.
+A quick tap that never leaves the dead zone does not fire. Returning to the dead zone cancels unless the player moves out again before normal release. At pointer-up, recompute displacement from the event coordinates so that a last motion omitted from `pointermove` cannot use a stale direction. Ability regions do not cancel or steal an already-owned aiming gesture.
 
 For a valid drag, update the local aim line without waiting for a server snapshot. Preview is direction feedback only; projectile creation, energy deduction, and successful-shot feedback remain authoritative. Retain the last valid facing in the dead zone, with a distinct cancellation indication; do not draw a new arbitrary direction.
 
@@ -119,9 +119,9 @@ Preserve current hold semantics:
 - Shield: hold to request shielding; release to request stopping. Honor the existing minimum duration, cooldown, energy, and fire restrictions.
 - Uplink interaction: highlight the button when an eligible nearby Uplink exists; hold to channel, release to stop. Display the server-derived availability, progress, and rejection reason.
 
-Direct pointer-down on an ability acquires the right-hand role. Alternatively, sliding the aiming thumb into an ability's non-overlapping inner/upper hot region transfers that same role: clear continuous fire/unsent single-shot, then start the selected held ability. The left role is unaffected.
+Direct pointer-down on an ability acquires the right-hand role. Sliding an already-owned aiming thumb across an ability does not transfer the role: the nearby skill buttons are intentionally pass-through targets for that gesture. The left role is unaffected.
 
-After transfer, lock the role to that ability until pointer-up or cancellation. Sliding back over the aiming stick does not resume aiming/fire, and sliding over another ability does not change the selected ability. This avoids jitter and prevents a skill release from accidentally firing.
+An ability gesture remains locked to the ability selected on pointer-down until pointer-up or cancellation. This keeps direct skill holds stable while allowing an aiming thumb to pass nearby buttons without jitter or accidental skill activation.
 
 All buttons show server-confirmed active, cooling, insufficient-energy, and unavailable states. A displayed unavailable state must never suppress handling of a release for an already owned pointer. Server combat rules, rather than client styling, resolve shield/fire and other action conflicts.
 
@@ -135,7 +135,7 @@ Maintain the existing four control axes and explicit hand-back policy:
 | --- | --- |
 | Left stick outside its dead zone | Movement axis |
 | Right stick outside its dead zone | Aim and fire axes |
-| Ability activation | Ability axis; terminate fire when transferred from the right stick |
+| Ability activation | Ability axis; direct skill holds do not affect an already-owned aim gesture |
 | Firing-mode switch alone | No new battle axis takeover |
 
 An intentional touch-aim drag is the mobile equivalent of explicit manual aim takeover; it is not subject to the desktop mouse-micro-motion guard. Keep the desktop R/guard behavior unchanged.
@@ -202,7 +202,7 @@ DOM listeners, geometry observers, pointer captures, orientation listeners, and 
 1. Establish discrete-shot protocol, shared authoritative processing, lifecycle clearing, and replay/checkpoint tests. This independently secures the highest-risk input contract.
 2. Extract input-source boundaries without changing desktop behavior; implement/test the pure touch state machine and source-neutral release/takeover contracts.
 3. Connect Pointer Events, battle focus, orientation gating, and the minimal two-stick presentation.
-4. Add ability transfer, mobile HUD, touch auxiliary actions, mode persistence, and authoritative feedback.
+4. Add direct ability holds, pass-through skill targets, mobile HUD, touch auxiliary actions, mode persistence, and authoritative feedback.
 5. Validate browser fixtures and a real server, then perform Android Chrome and iPhone Safari hardware checks. Browser emulation alone does not establish mobile input feel or orientation support.
 
 Each stage needs focused failing-then-passing tests before proceeding. The execution plan and verification record are in `docs/superpowers/plans/2026-10-16-mobile-battle-controls.md`.
@@ -216,7 +216,7 @@ Each stage needs focused failing-then-passing tests before proceeding. The execu
 - Moving out, back in, and out again rearms correctly. Camera follow, resizing, CSS scaling, and DPR do not corrupt directional aim.
 - Continuous-fire drag holds fire only outside the dead zone. Release/return/cancellation stops it, with no extra one-shot.
 - Mode switch stops the right gesture without stopping left movement or starting a new shot.
-- Direct ability use and stick-to-ability transfer retain left movement. Returning across the stick or releasing the ability never fires.
+- Direct ability use retains left movement. Passing across a skill or releasing a direct ability never creates an unintended fire action.
 - Death, hidden document, blur, disconnect, resync, portrait entry, modal entry, and view teardown clear state. Recovery always requires fresh contact.
 - Normal pointer-up is handled once; the subsequent expected capture-release event cannot produce a second action. Unexpected capture loss takes the cancellation path.
 
