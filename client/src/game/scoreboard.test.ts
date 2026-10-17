@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
 import { RobotStateSchema, Title } from '@omb/protocol'
-import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, titleName, titleDetails } from './scoreboard'
+import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, showMatchEnd, showMatchEndError, hideMatchEnd, titleName, titleDetails } from './scoreboard'
 import { deathStatus } from './death'
 import type { RobotEnt } from './world'
 
@@ -41,6 +41,105 @@ describe('authoritative scoreboard', () => {
     const second = board.display(robots)
     expect(second).not.toBe(first)
     expect(second[0]?.dead).toBe(false)
+  })
+
+  it('shows names from the global scoreboard before opponents ever enter AOI', () => {
+    const board = new Scoreboard()
+    const robots = new Map([[1, robot(1, 'pilot')]])
+    board.observe(robots)
+    const rows = [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }, { robot: 1, score: 0, nick: 'pilot' }]
+    board.accept(rows, 60)
+    expect(board.display(robots, 1)[0]).toMatchObject({ nick: 'TEST-BOT-134', status: 'unknown' })
+    board.reset()
+    // Reconnect/map bootstrap clears AOI history; the catch-up must suffice.
+    board.accept(rows, 120)
+    expect(board.display(new Map())[0]?.nick).toBe('TEST-BOT-134')
+  })
+
+  it('refreshes a cached fallback when only the authoritative name changes', () => {
+    const board = new Scoreboard()
+    board.accept([{ robot: 2, score: 100 }], 60)
+    const fallback = board.display(new Map())
+    expect(fallback[0]?.nick).toBe('robot-2')
+    const rows = [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }]
+    board.accept(rows, 120)
+    expect(board.display(new Map())).not.toBe(fallback)
+    expect(board.display(new Map())[0]?.nick).toBe('TEST-BOT-134')
+  })
+
+  it('shows authoritative settlement names without any AOI identity history', () => {
+    const root = document.createElement('div')
+    showMatchEnd(root, [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }], new Map(), undefined, 2)
+    expect(root.querySelector('.end-personal')?.textContent).toBe('TEST-BOT-134 · 100 分')
+    expect(root.querySelector('.score-name')?.textContent).toBe('TEST-BOT-134')
+  })
+
+  it('keeps the normal settlement back action without offering host actions', () => {
+    const root = document.createElement('div'), onBack = vi.fn()
+    showMatchEnd(root, [], new Map(), onBack)
+    expect(root.querySelector('.end-next')).toBeNull()
+    root.querySelector<HTMLButtonElement>('.end-back')!.click()
+    expect(onBack).toHaveBeenCalledOnce()
+    hideMatchEnd(root)
+  })
+
+  it('starts the next round only once across touch and click while keeping results visible', () => {
+    const root = document.createElement('div'), onNextRound = vi.fn(), onBack = vi.fn()
+    showMatchEnd(root, [{ robot: 1, score: 20 }], new Map(), onBack, -1, { onNextRound })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', cancelable: true }))
+    next.click()
+    next.dispatchEvent(new Event('click'))
+    expect(next.disabled).toBe(true)
+    expect(onNextRound).toHaveBeenCalledOnce()
+    expect(onBack).not.toHaveBeenCalled()
+    expect(root.querySelector('.end-overlay')).not.toBeNull()
+    expect(root.querySelector('.score-value')?.textContent).toBe('20')
+    hideMatchEnd(root)
+  })
+
+  it('keeps a rejected next round visible and permits one new deliberate attempt', () => {
+    const root = document.createElement('div'), onNextRound = vi.fn()
+    showMatchEnd(root, [], new Map(), undefined, -1, { onNextRound })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.click()
+    showMatchEndError(root, '至少需要一名真人参赛者或自动 Bot')
+    expect(root.querySelector<HTMLElement>('.end-error')?.hidden).toBe(false)
+    expect(root.textContent).toContain('至少需要一名真人参赛者或自动 Bot')
+    expect(next.disabled).toBe(false)
+    next.click()
+    next.click()
+    expect(onNextRound).toHaveBeenCalledTimes(2)
+    expect(next.disabled).toBe(true)
+    hideMatchEnd(root)
+  })
+
+  it('does not lock the next-round action if transport is offline', () => {
+    const root = document.createElement('div')
+    showMatchEnd(root, [], new Map(), undefined, -1, { onNextRound: () => false })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.click()
+    expect(next.disabled).toBe(false)
+    expect(root.textContent).toContain('连接恢复后可开始下一局')
+    hideMatchEnd(root)
+  })
+
+  it('keeps unchanged score snapshots cached while advancing the stale-score boundary', () => {
+    const board = new Scoreboard()
+    const robots = new Map([[1, robot(1, '甲')]])
+    board.accept([{ robot: 1, score: 10 }], 1)
+    const first = board.display(robots, 1)
+    board.accept([{ robot: 1, score: 10, titles: [] }], 3)
+    expect(board.display(robots, 1)).toBe(first)
+    board.accept([{ robot: 1, score: 99 }], 2)
+    expect(board.score(1)).toBe(10)
+    board.accept([{ robot: 1, score: 10, titles: [Title.RUNNER] }], 4)
+    expect(board.display(robots, 1)).not.toBe(first)
+    expect(board.display(robots, 1)[0]?.titles).toEqual([Title.RUNNER])
+    board.accept([{ robot: 1, score: 10, titles: [Title.RUNNER] }], 5, true)
+    expect(board.ended).toBe(true)
+    board.accept([{ robot: 1, score: 99 }], 6)
+    expect(board.score(1)).toBe(10)
   })
 
   it('ignores stale live scores and makes final results authoritative', () => {
@@ -148,6 +247,100 @@ describe('authoritative scoreboard', () => {
     expect(renderer.nodeCount).toBe(64)
     expect(renderer.createdCount).toBe(64)
     expect(parent.children).toHaveLength(64)
+  })
+
+  it('makes no DOM mutations when refreshing 64 unchanged rows', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = Array.from({ length: 64 }, (_, i) => ({
+      robot: i + 1, score: 100 - i, rank: i + 1, nick: `robot-${i + 1}`, self: i === 0, dead: false,
+    }))
+    renderer.update(parent, values)
+    const observer = new MutationObserver(() => {})
+    observer.observe(parent, { subtree: true, childList: true, characterData: true, attributes: true })
+    try {
+      for (let i = 0; i < 20; i++) renderer.update(parent, values.map(row => ({ ...row })))
+      expect(observer.takeRecords().length).toBe(0)
+    } finally { observer.disconnect() }
+  })
+
+  it('changes only the affected score text and detects reused input objects', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = [
+      { robot: 1, score: 20, rank: 1, nick: '甲', self: true, dead: false },
+      { robot: 2, score: 10, rank: 2, nick: '乙', self: false, dead: false },
+    ]
+    renderer.update(parent, values)
+    const observer = new MutationObserver(() => {})
+    observer.observe(parent, { subtree: true, childList: true, characterData: true, attributes: true })
+    try {
+      values[0]!.score++
+      renderer.update(parent, values)
+      const target = parent.querySelector('[data-robot="1"] .score-value')!
+      expect(target.textContent).toBe('21')
+      const changes = observer.takeRecords()
+      expect(changes.length).toBeGreaterThan(0)
+      expect(changes.every(change => change.target === target || target.contains(change.target))).toBe(true)
+    } finally { observer.disconnect() }
+  })
+
+  it('moves only the displaced row when the leader drops to the bottom', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const values = Array.from({ length: 64 }, (_, i) => ({
+      robot: i + 1, score: 100 - i, rank: i + 1, nick: `robot-${i + 1}`, self: false, dead: false,
+    }))
+    renderer.update(parent, values)
+    const original = [...parent.children]
+    const moves = renderer.movedCount
+    const reordered = [...values.slice(1), values[0]!].map((row, i) => ({ ...row, rank: i + 1 }))
+    renderer.update(parent, reordered)
+    expect([...parent.children]).toEqual([...original.slice(1), original[0]])
+    expect(renderer.movedCount - moves).toBe(1)
+  })
+
+  it('keeps score text nodes alive when their values change', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    const row = { robot: 1, score: 10, rank: 1, nick: 'robot-1', self: false, dead: false }
+    renderer.update(parent, [row])
+    const value = parent.querySelector('.score-value')!
+    const node = value.firstChild
+    renderer.update(parent, [{ ...row, score: 11 }])
+    expect(value.textContent).toBe('11')
+    expect(value.firstChild).toBe(node)
+  })
+
+  it('keeps random rank changes ordered with the minimum existing-node moves', () => {
+    const parent = document.createElement('div')
+    const renderer = new ScoreRowRenderer()
+    let seed = 71
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0)
+    let ids = Array.from({ length: 12 }, (_, i) => i + 1)
+    const rows = () => ids.map((robot, index) => ({ robot, rank: index + 1, score: 100 - index,
+      nick: `robot-${robot}`, self: false, dead: false }))
+    renderer.update(parent, rows())
+    for (let run = 0; run < 50; run++) {
+      const old = new Map(ids.map((id, index) => [id, index]))
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = next() % (i + 1)
+        ;[ids[i], ids[j]] = [ids[j]!, ids[i]!]
+      }
+      const sequence = ids.map(id => old.get(id)!)
+      const lengths = sequence.map(() => 1)
+      for (let i = 0; i < sequence.length; i++) for (let j = 0; j < i; j++) {
+        if (sequence[j]! < sequence[i]!) lengths[i] = Math.max(lengths[i]!, lengths[j]! + 1)
+      }
+      const moves = renderer.movedCount
+      renderer.update(parent, rows())
+      expect([...parent.children].map(node => Number((node as HTMLElement).dataset.robot))).toEqual(ids)
+      expect(renderer.movedCount - moves).toBe(ids.length - Math.max(...lengths))
+    }
+    ids = [20, ...ids.slice(3), 21]
+    renderer.update(parent, rows())
+    expect([...parent.children].map(node => Number((node as HTMLElement).dataset.robot))).toEqual(ids)
+    expect(renderer.nodeCount).toBe(ids.length)
   })
 
   it('reuses title and replay evidence nodes and never appends duplicate evidence', () => {

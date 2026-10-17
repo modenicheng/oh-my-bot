@@ -250,6 +250,34 @@ func TestQuotaConfigurable(t *testing.T) {
 	}
 }
 
+func TestInitializationBudgetDoesNotChangeTickQuota(t *testing.T) {
+	rt := NewGojaRuntime(Config{TickTimeout: time.Millisecond, InitTimeout: 200 * time.Millisecond})
+	defer rt.Close()
+	// Initialization deliberately exceeds a tick, as it can during a busy launch.
+	if err := rt.Load(`var start = Date.now(); while (Date.now() - start < 20) {} function tick(ctx) { while (true) {} }`); err != nil {
+		t.Fatalf("initialization used the tick quota: %v", err)
+	}
+	if _, err := rt.Tick(testFrame()); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("tick quota was relaxed along with initialization: %v", err)
+	}
+}
+
+func TestInitializationBudgetStillInterruptsEntryGetter(t *testing.T) {
+	rt := NewGojaRuntime(Config{TickTimeout: time.Millisecond, InitTimeout: 20 * time.Millisecond})
+	defer rt.Close()
+	if err := rt.Load(`function tick(ctx) { ctx.api.fire(); }`); err != nil {
+		t.Fatal(err)
+	}
+	revision := rt.Rev()
+	start := time.Now()
+	if err := rt.Load(`const bot = { get tick() { while (true) {} } };`); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("entry getter escaped initialization budget: %v", err)
+	}
+	if time.Since(start) > 500*time.Millisecond || rt.Rev() != revision {
+		t.Fatal("failed initialization was unbounded or replaced the active script")
+	}
+}
+
 // ---- Hot Swap / Rev ----
 
 func TestHotSwapEntryGetterTimeoutKeepsOld(t *testing.T) {

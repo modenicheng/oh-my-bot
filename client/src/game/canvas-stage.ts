@@ -6,6 +6,7 @@
 // 谓词为 true 期间逐帧重绘（时间驱动动效/指针预览在场），false 时退化为
 // 脏标记（controls：静默判定由 feedback.quiet 提供，快照/resize 仍即时出画）。
 import { createCanvas2d, resizeCanvas2d } from './art'
+import { viewportRect } from '../app/landscape'
 
 export interface CanvasStageOpts {
   /** 帧绘制（stage 已保证后备缓冲与 ctx 就绪；可在回调内 stop()，不会泄漏续帧）。 */
@@ -79,7 +80,7 @@ export class CanvasStage {
     if (this.disposed) return false
     const dpr = window.devicePixelRatio || 1
     if (!this.sizeDirty && dpr === this.dpr_) return false
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = viewportRect(this.canvas)
     if (rect.width <= 0 || rect.height <= 0) return false
     this.sizeDirty = false
     const changed = rect.width !== this.w || rect.height !== this.h || dpr !== this.dpr_

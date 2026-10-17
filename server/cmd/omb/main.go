@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -32,6 +32,7 @@ import (
 	"github.com/modenicheng/oh-my-bot/server/internal/glue"
 	"github.com/modenicheng/oh-my-bot/server/internal/listen"
 	"github.com/modenicheng/oh-my-bot/server/internal/netws"
+	"github.com/modenicheng/oh-my-bot/server/internal/observability"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/room"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -107,16 +108,16 @@ func applyGCSettings(cfg ai.ServerConfig) {
 			p = ai.GCPercentMax
 		}
 		debug.SetGCPercent(p)
-		log.Printf("gc: GOGC=%d (from config or in-code default)", p)
+		slog.Info("runtime.gc_configured", "gc_percent", p)
 	}
 	if cfg.GC.MemoryLimit != "" {
 		if limit, err := parseByteSize(cfg.GC.MemoryLimit); err == nil {
 			old := debug.SetMemoryLimit(limit)
 			if limit > 0 {
-				log.Printf("gc: GOMEMLIMIT=%s (previous soft limit %s)", cfg.GC.MemoryLimit, byteSizeHuman(old))
+				slog.Info("runtime.memory_limit_configured", "limit", cfg.GC.MemoryLimit, "previous_limit", byteSizeHuman(old))
 			}
 		} else {
-			log.Printf("gc: invalid gc.memory_limit %q: %v (kept default)", cfg.GC.MemoryLimit, err)
+			slog.Warn("runtime.invalid_memory_limit", "value", cfg.GC.MemoryLimit, "error", err)
 		}
 	}
 }
@@ -176,11 +177,11 @@ func envDefaultSoloBots() uint32 {
 	}
 	n, err := strconv.ParseUint(raw, 10, 32)
 	if err != nil {
-		log.Printf("invalid OMB_DEFAULT_SOLO_BOTS=%q: %v (using 0)", raw, err)
+		slog.Warn("config.invalid_solo_bots", "value", raw, "error", err)
 		return 0
 	}
 	if n > uint64(room.MaxSoloBots) {
-		log.Printf("OMB_DEFAULT_SOLO_BOTS=%d exceeds %d; clamped", n, room.MaxSoloBots)
+		slog.Warn("config.solo_bots_clamped", "requested", n, "maximum", room.MaxSoloBots)
 		return uint32(room.MaxSoloBots)
 	}
 	return uint32(n)
@@ -197,16 +198,16 @@ func envMaxPlayers() {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 {
-		log.Printf("invalid OMB_MAX_PLAYERS=%q (using default %d)", raw, room.MaxPlayers)
+		slog.Warn("config.invalid_max_players", "value", raw, "default", room.MaxPlayers)
 		return
 	}
 	before := room.MaxPlayers
 	room.SetMaxPlayers(n)
 	if room.MaxPlayers != n {
-		log.Printf("OMB_MAX_PLAYERS=%d clamped to %d", n, room.MaxPlayers)
+		slog.Warn("config.max_players_clamped", "requested", n, "maximum", room.MaxPlayers)
 	}
 	if room.MaxPlayers != before {
-		log.Printf("room seat cap set to %d (OMB_MAX_PLAYERS)", room.MaxPlayers)
+		slog.Info("config.max_players_configured", "max_players", room.MaxPlayers)
 	}
 }
 
@@ -220,7 +221,7 @@ func envDuration(name string) (time.Duration, bool) {
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil {
-		log.Printf("invalid %s=%q: %v (using default)", name, raw, err)
+		slog.Warn("config.invalid_duration", "setting", name, "value", raw, "error", err)
 		return 0, false
 	}
 	return d, true
@@ -242,11 +243,11 @@ func applyJanitorEnv(hub *glue.Hub) {
 			continue
 		}
 		if d <= 0 {
-			log.Printf("%s=%s is not positive; keeping default", cfg.name, d)
+			slog.Warn("config.nonpositive_duration", "setting", cfg.name, "value", d)
 			continue
 		}
 		cfg.apply(d)
-		log.Printf("empty-room janitor %s set to %s", cfg.name, d)
+		slog.Info("config.janitor_configured", "setting", cfg.name, "value", d)
 	}
 }
 
@@ -261,6 +262,20 @@ func main() {
 		return
 	}
 
+	serverCfg, cfgErr := ai.LoadServerConfig("")
+	if cfgErr != nil {
+		slog.Error("config.load_failed", "error", cfgErr)
+		os.Exit(1)
+	}
+	logger, err := observability.NewLogger(os.Stderr, serverCfg.Log)
+	if err != nil {
+		slog.Error("config.logging_invalid", "error", err)
+		os.Exit(1)
+	}
+	logger = logger.With("service", "omb", "version", version)
+	slog.SetDefault(logger)
+	slog.Info("logging.configured", "log_level", serverCfg.Log.Level, "log_format", serverCfg.Log.Format, "source", serverCfg.Log.Source)
+
 	hub := glue.NewHub()
 	// 席位上限先于一切房间装配（env OMB_MAX_PLAYERS，代码默认 200）。
 	envMaxPlayers()
@@ -270,11 +285,7 @@ func main() {
 	applyJanitorEnv(hub)
 	if defaultBots := envDefaultSoloBots(); defaultBots > 0 {
 		hub.SetDefaultSoloBots(defaultBots)
-		log.Printf("new rooms default to %d solo bots (OMB_DEFAULT_SOLO_BOTS)", defaultBots)
-	}
-	serverCfg, cfgErr := ai.LoadServerConfig("")
-	if cfgErr != nil {
-		log.Printf("AI disabled: configuration error: %v", cfgErr)
+		slog.Info("config.solo_bots_configured", "solo_bots", defaultBots)
 	}
 	applyGCSettings(serverCfg)
 	if cfgErr == nil && serverCfg.AI.Enabled && serverCfg.APIKey != "" {
@@ -282,11 +293,11 @@ func main() {
 		hub.SetAIService(func() *glue.AIService {
 			return glue.NewAIService(serverCfg, manualCorpus)
 		})
-		log.Printf("AI enabled: model=%s manual_sections=%d rounds=%d player_tokens=%d global_tokens=%d concurrency=%d",
-			serverCfg.AI.Model, len(manualCorpus), serverCfg.Quota.PlayerRounds, serverCfg.Quota.PlayerTokens,
-			serverCfg.Quota.GlobalTokens, serverCfg.Quota.MaxConcurrency)
+		slog.Info("ai.enabled", "model", serverCfg.AI.Model, "manual_sections", len(manualCorpus),
+			"rounds", serverCfg.Quota.PlayerRounds, "player_tokens", serverCfg.Quota.PlayerTokens,
+			"global_tokens", serverCfg.Quota.GlobalTokens, "concurrency", serverCfg.Quota.MaxConcurrency)
 	} else {
-		log.Printf("AI disabled: set ai.enabled=true in config.yaml and DEEPSEEK_API_KEY in .env")
+		slog.Info("ai.disabled", "enabled_in_config", serverCfg.AI.Enabled, "key_configured", serverCfg.APIKey != "")
 	}
 
 	mux := http.NewServeMux()
@@ -312,7 +323,7 @@ func main() {
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		log.Print("pprof enabled at /debug/pprof/ (OMB_PPROF)")
+		slog.Info("pprof.enabled", "path", "/debug/pprof/")
 	}
 
 	// 回放 API：对局列表 + 单局事件流（JSONL 原样透传，客户端逐行解析）
@@ -397,7 +408,7 @@ func main() {
 			exportErr = copyCompleteRecords(w, source)
 		}
 		if exportErr != nil {
-			log.Printf("replay %s: %v", id, exportErr)
+			observability.Logger(r.Context()).Error("replay.export_failed", "match_id", id, "error", exportErr)
 		}
 	})
 	mux.Handle("/ws", sessionHandler(hub, verifier))
@@ -416,31 +427,36 @@ func main() {
 
 	ln, err := listen.Listen(*addr)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("server.listen_failed", "address", *addr, "error", err)
+		os.Exit(1)
 	}
 
 	// Graceful shutdown: listeners close first (unlinking a unix socket file),
 	// then in-flight requests get 10s to finish. Hijacked WebSocket sessions
 	// end with the process, unchanged from the previous hard-exit behavior.
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{
+		Handler:  observability.HTTP(logger, mux),
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 
-	log.Printf("oh-my-bot %s listening on %s (%s)", version, ln.Addr(), ln.Addr().Network())
+	slog.Info("server.listening", "address", ln.Addr().String(), "network", ln.Addr().Network())
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			_ = ln.Close() // best-effort socket file cleanup before dying
-			log.Fatal(err)
+			slog.Error("server.serve_failed", "error", err)
+			os.Exit(1)
 		}
 	case <-ctx.Done():
-		log.Print("shutting down, waiting up to 10s for in-flight requests")
+		slog.Info("server.shutting_down", "timeout", "10s")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown: %v", err)
+			slog.Error("server.shutdown_failed", "error", err)
 		}
 	}
 }
@@ -525,6 +541,7 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 		if verifier != nil {
 			_, name, err := verifier.VerifyToken(r.URL.Query().Get("token"))
 			if err != nil {
+				observability.Logger(r.Context()).Warn("auth.ws_rejected")
 				serveAuthRejectedWS(w, r)
 				return
 			}
@@ -533,6 +550,8 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 		var mu sync.Mutex
 		var sess *glue.Session
 		closed := false
+		compact := netws.OffersCompactProtocol(r)
+		logger := observability.Logger(r.Context()).With("component", "session")
 		defer func() {
 			mu.Lock()
 			defer mu.Unlock()
@@ -546,7 +565,25 @@ func sessionHandler(hub *glue.Hub, verifier *auth.Auth) http.Handler {
 				mu.Lock()
 				defer mu.Unlock()
 				if !closed {
+					// Input is 60Hz and may carry player code or chat. Log only
+					// low-frequency command kinds, never their payloads.
+					switch up.GetPayload().(type) {
+					case *ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput:
+					default:
+						logger.Debug("ws.command", "kind", fmt.Sprintf("%T", up.GetPayload()))
+					}
+					previous := sess
 					handleUpstream(hub, up, reliable, lossy, frame, closeConn, &sess, authName)
+					if sess != nil && sess != previous {
+						code := up.GetJoin().GetRoomCode()
+						if code == "" {
+							code = up.GetSpectate().GetRoomCode()
+						}
+						logger.Info("session.bound", "room_code", code, "spectator", sess.IsSpectator())
+					}
+					if sess != nil {
+						sess.SetCompactSnapshots(compact)
+					}
 				}
 			}
 		}).ServeHTTP(w, r)
@@ -577,9 +614,9 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	if up == nil {
 		return
 	}
-	// Spectator sockets are strictly read-only: only resync and leave may flow.
-	// Everything else — including a second Spectate (no role-hop/rebind spam) or
-	// a player Join (no promotion) — is rejected up front.
+	// External SpectateRoom sockets are strictly read-only. A host spectator is
+	// a normal Join control socket: it may issue host room actions but still
+	// cannot send player actions.
 	if cur := (*sess); cur != nil && cur.IsSpectator() {
 		switch up.Payload.(type) {
 		case *ombv1.ClientMsg_ResyncRequest:
@@ -600,6 +637,26 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "readonly spectator connection"))
 			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
 			return
+		}
+		return
+	}
+	if cur := (*sess); cur != nil && cur.IsHostSpectator() {
+		switch p := up.Payload.(type) {
+		case *ombv1.ClientMsg_RoomAction:
+			cur.HostCommand(p.RoomAction.GetKind())
+		case *ombv1.ClientMsg_ResyncRequest:
+			cur.Resync()
+		case *ombv1.ClientMsg_Leave:
+			cur.LeaveRoom()
+			hub.Unregister(cur)
+			*sess = nil
+		case *ombv1.ClientMsg_Join, *ombv1.ClientMsg_Spectate,
+			*ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput,
+			*ombv1.ClientMsg_ScriptSubmit, *ombv1.ClientMsg_ScriptRollback,
+			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
+			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig,
+			*ombv1.ClientMsg_UpgradeRequest:
+			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "观战主持人不能发送玩家操作"))
 		}
 		return
 	}
@@ -699,21 +756,21 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	rc := hub.EnsureRoom(code)
 	// 房主建房时长设置（JoinRoom.match_minutes/core_open_minutes）：仅创建
-	// 窗口（房间空闲且无人入座）生效，后进房者携带的值被静默忽略；非法
+	// 窗口（首次 Join 前）生效，后进房者携带的值被静默忽略；非法
 	// 组合（越界/核心区不早于终局）按 join 拒绝处理，给出可读原因。
-	if matchTicks, coreTicks, err := sim.ValidateDurations(
+	matchTicks, coreTicks, err := sim.ValidateDurations(
 		uint32(join.GetMatchMinutes())*60*uint32(sim.TickRate),
-		uint32(join.GetCoreOpenMinutes())*60*uint32(sim.TickRate)); err != nil {
+		uint32(join.GetCoreOpenMinutes())*60*uint32(sim.TickRate))
+	if err != nil {
 		sendJoinFailedReliable(sendReliable, "时长设置无效：游玩时长需为 1-30 分钟，且核心区开放时间须早于游玩时长")
 		return
-	} else if matchTicks != sim.MatchTicks || coreTicks != sim.CoreOpenTick {
-		rc.Room.SetDurationConfig(matchTicks, coreTicks)
 	}
 	rc.EnsureLauncher()
 	sess := glue.NewSession(sendReliable, sendLossy, sendReliableFrame)
 	sess.SetCloser(closeConn) // 同身份接管时由 glue 关闭本连接（S-33）
 	hub.Register(sess)
-	if err := rc.Bind(sess, nick, join.GetColor()); err != nil {
+	if err := rc.BindJoinWithDurations(sess, nick, join.GetColor(), join.GetSpectatorMode(),
+		glue.MatchDurations{MatchTicks: matchTicks, CoreOpenTick: coreTicks}); err != nil {
 		hub.Unregister(sess)
 		sendJoinFailedReliable(sendReliable, err.Error())
 		return
@@ -721,8 +778,10 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	if old := *sessOut; old != nil {
 		hub.Unregister(old)
 	}
+	if !sess.IsHostSpectator() {
+		rc.BroadcastRoomState()
+	}
 	*sessOut = sess
-	rc.BroadcastRoomState()
 }
 
 // truncateNick 按 rune 截断昵称到客户端表单上限（16）；rune 计数与 JS 的

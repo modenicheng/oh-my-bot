@@ -1,18 +1,23 @@
 // 进房连接会话：WsTransport 拨号 + JoinRoom 握手 + 断线自动重连（指数退避）。
-// 帧协议见 packages/protocol/src/messages.ts（0x02 上行 / 0x03 下行）。
+// Frames: protobuf controls plus negotiated compact snapshots/ordered batches.
 // 心跳与存活检测完全下沉到 WsTransport；本层负责握手超时、重试节奏与状态上报。
 // 断线后以相同 room/nick/color 自动重进；close() 后会话不可复用（重新 joinRoom）。
-import { WsTransport, decodeServer, encodeClient,
+import { WsTransport, ServerFrameDecoder, encodeClient,
          JoinRoomSchema, SpectateRoomSchema, ClientMsgSchema, frame, joinRejection,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
 import { wsAuthQuery } from './auth'
+import { createLogger, createRequestId } from './observability/logger'
+
+const log = createLogger('session')
 
 export interface JoinOptions {
   roomCode: string
   nick: string
   color: string
   spectator?: boolean
+  /** First-join intent for a host control session without a player seat. */
+  spectatorMode?: boolean
   /** 建房时长设置（分钟；仅创建房间时生效，重连沿用同一会话参数）。 */
   matchMinutes?: number
   coreOpenMinutes?: number
@@ -70,6 +75,9 @@ export class RoomSession {
   private closed = false
   private netBound = false
   private docTarget?: EventTarget
+  private readonly decoder = new ServerFrameDecoder()
+  private requestId = ''
+  private malformedFrames = 0
   state: SessionState = 'idle'
 
   /** 启动首个连接尝试；立即返回，后续节奏经 onStateChange/onDisconnect 上报。 */
@@ -102,7 +110,8 @@ export class RoomSession {
     try {
       this.transport.send(msg)
       return true
-    } catch {
+    } catch (error) {
+      log.warn('ws.send_failed', { request_id: this.requestId, error })
       this.loseConnection(this.gen, '连接已中断')
       return false
     }
@@ -137,6 +146,9 @@ export class RoomSession {
     }
     const opts = this.opts
     const gen = ++this.gen
+    this.requestId = createRequestId()
+    this.malformedFrames = 0
+    this.decoder.reset()
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
     this.retryPaused = false
@@ -146,9 +158,10 @@ export class RoomSession {
     this.transport = t
     t.onMessage((data) => this.onFrame(gen, data))
     t.onClose((reason) => this.onTransportClosed(gen, reason))
-    this.handshakeTimer = setTimeout(() => this.failAttempt(gen), HANDSHAKE_TIMEOUT_MS)
+    this.handshakeTimer = setTimeout(() => this.failAttempt(gen, 'handshake_timeout'), HANDSHAKE_TIMEOUT_MS)
 
-    t.connect(wsUrl()).then(
+    log.info('ws.connecting', { request_id: this.requestId, room_code: opts.roomCode, spectator: !!opts.spectator, attempt: this.attempts + 1 })
+    t.connect(wsUrl(this.requestId)).then(
       () => {
         if (this.closed || gen !== this.gen) return
         try {
@@ -157,30 +170,40 @@ export class RoomSession {
             : create(ClientMsgSchema, { payload: { case: 'join', value: create(JoinRoomSchema, {
               roomCode: opts.roomCode, nick: opts.nick, color: opts.color,
               matchMinutes: opts.matchMinutes ?? 0, coreOpenMinutes: opts.coreOpenMinutes ?? 0,
+              spectatorMode: opts.spectatorMode ?? false,
             }) } })
           t.send(encodeClient(message))
-        } catch {
-          this.failAttempt(gen)
+        } catch (error) {
+          this.failAttempt(gen, 'join_send_failed', error)
         }
       },
-      () => this.failAttempt(gen),
+      (error: unknown) => this.failAttempt(gen, 'connect_failed', error),
     )
   }
 
   private onFrame(gen: number, data: Uint8Array): void {
     if (this.closed || gen !== this.gen || !this.opts) return
-    let msg: ServerMsg | null
+    let messages: ServerMsg[]
     try {
-      msg = decodeServer(data)
-    } catch {
+      messages = this.decoder.decode(data)
+    } catch (error) {
+      this.malformedFrames += 1
+      if (this.malformedFrames === 1) log.warn('ws.decode_failed', { request_id: this.requestId, bytes: data.byteLength, error })
       return // 畸形帧丢弃
     }
-    if (!msg) return
+    for (const msg of messages) {
+      if (this.closed || gen !== this.gen || !this.opts) break
+      this.onDecodedMessage(msg)
+    }
+  }
+
+  private onDecodedMessage(msg: ServerMsg): void {
+    if (!this.opts) return
     // X-4：结构化 join 拒绝通知优先；旧服务器回退解析 "join failed:" 前缀 say
     const rejection = joinRejection(msg)
     if (rejection !== undefined) {
       // 进房被拒（房间满/码无效等）：终结会话，原因交上层展示
-      this.terminalFail(gen, rejection.reason, msg)
+      this.terminalFail(this.gen, rejection.reason, msg)
       return
     }
     if (this.state !== 'online' && isJoinAck(msg)) this.confirmOnline()
@@ -200,12 +223,13 @@ export class RoomSession {
   private onTransportClosed(gen: number, reason: string): void {
     if (this.closed || gen !== this.gen) return
     if (this.state === 'online') this.loseConnection(gen, reason)
-    else this.failAttempt(gen) // 握手期断开：不算“已连上后掉线”
+    else this.failAttempt(gen, reason) // 握手期断开：不算“已连上后掉线”
   }
 
   /** 已在线连接的丢失：先立 fence（状态/换代/摘 transport）再回调，防 release→send 递归。 */
   private loseConnection(gen: number, reason: string): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.disconnected', { request_id: this.requestId, room_code: this.opts.roomCode, reason, malformed_frames: this.malformedFrames })
     this.gen += 1 // 立即作废本连接的一切后续事件
     this.clearTimers()
     const opts = this.opts
@@ -219,6 +243,7 @@ export class RoomSession {
 
   private terminalFail(gen: number, reason: string, msg: ServerMsg): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.join_rejected', { request_id: this.requestId, room_code: this.opts.roomCode, reason })
     this.gen += 1
     this.clearTimers()
     const opts = this.opts
@@ -232,8 +257,9 @@ export class RoomSession {
     opts.onDisconnect(`进房失败：${reason}`)
   }
 
-  private failAttempt(gen: number): void {
+  private failAttempt(gen: number, reason = 'connection_lost', error?: unknown): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.attempt_failed', { request_id: this.requestId, room_code: this.opts.roomCode, attempt: this.attempts + 1, reason, error })
     this.gen += 1 // 本次尝试终结：在途回调全部作废，防重复 schedule
     this.clearTimers()
     this.transport?.close()
@@ -266,6 +292,7 @@ export class RoomSession {
   }
 
   private setState(state: SessionState, retryInMs?: number): void {
+    log.info('ws.state_changed', { request_id: this.requestId, room_code: this.opts?.roomCode, previous: this.state, state, retry_in_ms: retryInMs })
     this.state = state
     this.opts?.onStateChange?.(state, retryInMs)
   }
@@ -335,9 +362,10 @@ export class RoomSession {
   }
 }
 
-function wsUrl(): string {
+function wsUrl(requestId: string): string {
   // 同源端口（服务器 embed 前端，HTTP/WS 同端口）；vite dev 由 proxy 转发。
   // 认证开启时附 ?token=（服务端 internal/auth 升级门禁；浏览器 WS 无自定义头）。
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws${wsAuthQuery()}`
+  const auth = wsAuthQuery()
+  return `${proto}://${location.host}/ws${auth}${auth ? '&' : '?'}request_id=${encodeURIComponent(requestId)}`
 }

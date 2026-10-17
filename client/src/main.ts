@@ -10,6 +10,7 @@ import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
+import { hasBattleFocus } from './game/battle-focus'
 import { Workbench } from './workbench/workbench'
 import { battleKeyAction, upgradeTrackKey } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
@@ -22,8 +23,12 @@ import { Lobby } from './app/lobby'
 import { AuxiliaryViews } from './app/auxiliary-views'
 import { $ } from './ui/dom'
 import { startupReady } from './startup-resources'
+import { DebugPanel } from './debug/panel'
 
 export const ready = startupReady
+
+const debugPanel = new DebugPanel()
+if (import.meta.hot) import.meta.hot.dispose(() => debugPanel.dispose())
 
 mountIcons(document)
 // 登录回跳的 ?token= 必须在任何 writeRoute 快照 URL 之前落入存储并清洗。
@@ -47,7 +52,7 @@ const viewReplays = $<HTMLElement>('view-replays')
 const viewReplayPlayer = $<HTMLElement>('view-replay-player')
 const viewLive = $<HTMLElement>('view-live')
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
-viewJoin.appendChild(audioSettings)
+viewJoin.querySelector('.join-utilities')!.appendChild(audioSettings)
 
 // ---- 对局帮助面板：默认折叠，? 展开/收起，Esc 关闭 ------------------------------
 
@@ -98,7 +103,8 @@ function showView(view: View, extra?: RouteExtra): void {
     : view === 'game' ? viewGame.querySelector('.game-tools')!
     : view === 'manual' ? viewManual.querySelector('.manual-top')!
     : view === 'replay-player' || spectatorPlayer ? viewReplayPlayer.querySelector('.rp-buttons')!
-    : view === 'room' ? viewRoom : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin
+    : view === 'room' ? viewRoom.querySelector('.room-footer')!
+    : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin.querySelector('.join-utilities')!
   if (audioSettings.parentElement !== audioHost) { audioSettings.open = false; audioHost.appendChild(audioSettings) }
   if (enteringGame) {
     if (workbench.isOpen && matchMedia('(max-width: 760px)').matches) workbench.activate()
@@ -115,9 +121,9 @@ function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
 
 function isInGame(): boolean { return game !== null && !viewGame.hidden }
 
-function sendRoomAction(kind: RoomAction_Kind): void {
-  if (session?.state !== 'online') return
-  session.send(encodeClient(create(ClientMsgSchema, {
+function sendRoomAction(kind: RoomAction_Kind): boolean {
+  if (session?.state !== 'online') return false
+  return session.send(encodeClient(create(ClientMsgSchema, {
     payload: { case: 'roomAction', value: create(RoomActionSchema, { kind }) },
   })))
 }
@@ -188,7 +194,8 @@ async function joinWith(profile: JoinProfile): Promise<void> {
   }
   lobby.beginJoin(profile.roomCode)
   lastJoin = { roomCode: profile.roomCode, nick: effectiveNick, color: profile.color,
-    matchMinutes: profile.matchMinutes, coreOpenMinutes: profile.coreOpenMinutes }
+    matchMinutes: profile.matchMinutes, coreOpenMinutes: profile.coreOpenMinutes,
+    spectatorMode: profile.spectatorMode === true }
   saveProfile(lastJoin)
   workbench.setIdentity(profile.roomCode, effectiveNick)
   showView('room')
@@ -205,6 +212,7 @@ async function joinWith(profile: JoinProfile): Promise<void> {
       color: profile.color,
       matchMinutes: profile.matchMinutes,
       coreOpenMinutes: profile.coreOpenMinutes,
+      spectatorMode: profile.spectatorMode === true,
       onMessage: (msg) => { if (session === s) onServerMsg(profile.roomCode, msg) },
       onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
       onStateChange: (state, retryInMs) => { if (session === s) onConnectionState(state, retryInMs) },
@@ -273,8 +281,11 @@ const workbench = new Workbench({
   docsButton: $<HTMLButtonElement>('btn-game-manual'),
   editorButton: $<HTMLButtonElement>('btn-game-editor'),
   initial: initialRoute,
-  onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
-  send: frame => session?.state === 'online' ? session.send(frame) : false,
+  onLayout: () => {
+    if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route)
+    syncGameInput()
+  },
+  send: frame => session?.state === 'online' && !lobby.isHostSpectator ? session.send(frame) : false,
   toggleAssist: () => game?.toggleAssist(),
   activateAssist: () => {
     if (!game || viewGame.hidden) {
@@ -299,9 +310,10 @@ function syncHostControls(): void {
   gameOptions.setHostState(lobby.isHost && lobby.state === EvRoomState_State.R_RUNNING, lobby.paused)
 }
 
-/** 面板可以并排打开，只有战场获得焦点时才接收手操。 */
+/** 战场控件共用焦点域；技能按钮不会中断另一只拇指。 */
 function syncGameInput(): void {
-  game?.setInputEnabled(!gameOptions.isOpen && !viewGame.hidden && !document.hidden && document.hasFocus() && document.activeElement === gameCanvas)
+  game?.setPanelBlocked(!!game.touchLayout && workbench.isOpen)
+  game?.setInputEnabled(!gameOptions.isOpen && !viewGame.hidden && !document.hidden && document.hasFocus() && hasBattleFocus(document.activeElement, gameCanvas))
 }
 
 gameCanvas.addEventListener('pointerdown', () => gameCanvas.focus({ preventScroll: true }))
@@ -312,18 +324,35 @@ window.addEventListener('focus', syncGameInput)
 document.addEventListener('visibilitychange', syncGameInput)
 
 function syncWorkbench(): void {
-  workbench.setAvailability(session?.state === 'online', game !== null && !game.isMatchEndShown() && !awaitingFull &&
+  workbench.setAvailability(session?.state === 'online' && !lobby.isHostSpectator, game !== null && !game.isMatchEndShown() && !awaitingFull &&
     (lobby.state === EvRoomState_State.R_WARMUP || lobby.state === EvRoomState_State.R_RUNNING))
 }
+
+function syncHostPresentation(): void {
+  const spectator = lobby.isHostSpectator
+  viewGame.dataset.hostSpectator = String(spectator)
+  hudRoot.dataset.hostSpectator = String(spectator)
+  $('game-host-spectator').hidden = !spectator
+  $('btn-game-menu').hidden = !spectator
+  gameCanvas.setAttribute('aria-label', spectator ? '全图观战战场；使用菜单管理房间' : '实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，R 夺回手动瞄准，普通 Enter 发言')
+  if (spectator && workbench.isOpen) workbench.close()
+}
+$('btn-game-menu').addEventListener('click', () => gameOptions.open())
 
 function enterGame(): void {
   if (!session) return
   game?.exit()
+  syncHostPresentation()
   game = new GameController({
     canvas: gameCanvas,
     hudRoot,
     send: (data) => session?.state === 'online' && session.send(data),
     onExitToRoom: exitGame,
+    onMenu: () => { gameOptions.open() },
+    onInputGateChange: syncGameInput,
+    hostSpectator: () => lobby.isHostSpectator,
+    canStartNextRound: () => lobby.isHost,
+    onNextRound: () => lobby.isHost && sendRoomAction(RoomAction_Kind.START),
   })
   // 瞄准能力信号桥：脚本装载/Snippet 应用即重算 guard（早于服务器回显）。
   workbench.setAssistAimListener(capable => game?.setAssistAimCapable(capable))
@@ -337,6 +366,7 @@ function exitGame(): void {
   game = null
   workbench.resetMatch()
   showView('room')
+  delete viewGame.dataset.hostSpectator
   // 用缓存状态立即刷新操作栏，下一次 roomState 会覆盖
   lobby.refresh(); syncWorkbench(); syncHostControls()
 }
@@ -345,6 +375,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (session && roomCode) setStatus('ok', 'connected')
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
+    if (ev.kind.case === 'tickTelemetry') { debugPanel.acceptServerTick(ev.kind.value); return }
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
     if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
     if (ev.kind.case === 'scriptVersions') { workbench.acceptScriptVersions(ev.kind.value); return }
@@ -373,6 +404,21 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0) {
       if (dedupeControlNoticeSay(msg, lastControlNotice)) { lastControlNotice = undefined; return }
       if (workbench.consumeAiDirectedSay(ev.kind.value.text)) return
+      if (ev.kind.value.text === '至少需要一名真人参赛者或自动 Bot' || ev.kind.value.text.startsWith('command failed: ')) {
+        lobby.showRoomError(ev.kind.value.text)
+        game?.showRoomError(ev.kind.value.text)
+        return
+      }
+      const launchFailedPrefix = 'match launch failed: '
+      if (ev.kind.value.text.startsWith(launchFailedPrefix)) {
+        awaitingFull = false
+        connectionNotice.hidden = true
+        const message = `对局启动失败：${ev.kind.value.text.slice(launchFailedPrefix.length)}。请重试开始对局或热身场。`
+        lobby.showRoomError(message)
+        if (game?.isMatchEndShown()) game.showRoomError(message)
+        else if (game) exitGame()
+        return
+      }
     }
     const joinFailed = joinRejection(msg)
     if (joinFailed !== undefined) {
@@ -387,7 +433,9 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       if (!game) enterGame()
       awaitingFull = true
       game?.setActive(false)
-      const ok = game?.onMapBootstrap(ev.kind.value.mapJson, ev.kind.value.tuning) ?? false
+      const bootstrap = ev.kind.value
+      const ok = game?.onMapBootstrap(bootstrap.mapJson, bootstrap.tuning, bootstrap.discreteShotSupported, bootstrap.generation) ?? false
+      if (ok) lobby.showRoomError('')
       syncWorkbench()
       if (ok && !utilityView) showView('game')
       if (ok && utilityView) showView(utilityView, utilityRoute)
@@ -413,7 +461,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
         }
       }
       const paused = rs.paused === true && rs.state === EvRoomState_State.R_RUNNING
-      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots, paused)
+      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots, paused, rs.hostSpectator)
+      syncHostPresentation()
       game?.setPaused(paused && !game.isMatchEndShown(), lobby.isHost)
       syncHostControls()
       syncWorkbench()
@@ -509,6 +558,7 @@ window.addEventListener('keydown', (e) => {
   // 选项层（aria-modal）打开期间其余全局快捷键一律短路（审计 C-32③）：
   // M/C 会把焦点移出模态对话框，Tab 焦点圈随之失效。
   if (gameOptions.isOpen) return
+  if (!viewGame.hidden && lobby.isHostSpectator) return
   if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return

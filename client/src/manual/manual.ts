@@ -10,6 +10,7 @@ import { icon } from '../icons'
 
 import { bindTabInteractions } from './tabs'
 import { normalizeManualTree } from './manual-order'
+import { observedFetch } from '../observability/http'
 
 // ---- API 契约（与主线服务器侧对齐） -----------------------------------------
 
@@ -28,13 +29,13 @@ export interface ManualNode {
 const MANUAL_API = '/api/manual'
 
 async function fetchTree(): Promise<ManualNode[]> {
-  const res = await fetch(`${MANUAL_API}`)
+  const res = await observedFetch(`${MANUAL_API}`)
   if (!res.ok) throw new Error(`manual tree ${res.status}`)
   return (await res.json()) as ManualNode[]
 }
 
 async function fetchDoc(path: string): Promise<string> {
-  const res = await fetch(`${MANUAL_API}/${path}`)
+  const res = await observedFetch(`${MANUAL_API}/${path}`)
   if (!res.ok) throw new Error(`manual doc ${res.status}`)
   return res.text()
 }

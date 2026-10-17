@@ -6,6 +6,8 @@
 // 登录流程：/auth/login → IdP → /auth/callback → 302 /?token=…，本模块在
 // 启动时把 token 落入存储并立即清洗地址栏（服务端已设 Referrer-Policy）。
 
+import { observedFetch } from './observability/http'
+
 const TOKEN_KEY = 'omb.oidc.token'
 
 /** 时钟偏移容忍：exp 前 30s 内即视为过期（本机时钟略快于签发端）。 */
@@ -83,7 +85,7 @@ export function wsAuthQuery(): string {
 /** 服务端是否启用认证；404（旧服务器）/网络错误一律视为未启用。 */
 export async function fetchAuthEnabled(): Promise<boolean> {
   try {
-    const res = await fetch('/auth/status', { cache: 'no-store' })
+    const res = await observedFetch('/auth/status', { cache: 'no-store' })
     if (!res.ok) return false
     const body = await res.json() as { enabled?: boolean }
     return body.enabled === true

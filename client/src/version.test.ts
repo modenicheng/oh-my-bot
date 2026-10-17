@@ -38,7 +38,7 @@ describe('initAppVersion', () => {
     vi.stubGlobal('fetch', fetchVersion)
 
     const pending = initAppVersion()
-    expect(fetchVersion).toHaveBeenCalledWith('/api/version')
+    expect(fetchVersion).toHaveBeenCalledWith('/api/version', expect.objectContaining({ headers: expect.any(Headers) }))
     expect(footer.textContent).toBe('dev')
     complete({ ok: true, json: async () => ({ version: 'v0.1.0-rc.1' }) })
     await pending

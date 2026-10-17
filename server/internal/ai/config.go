@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modenicheng/oh-my-bot/server/internal/observability"
 )
 
 // ServerConfig 服务端运行配置（config.yaml 非秘密段 + .env 秘密段）。
@@ -18,6 +20,7 @@ type ServerConfig struct {
 	Quota  QuotaConfig
 	GC     GCConfig
 	Auth   AuthConfig
+	Log    observability.Config
 	APIKey string // DeepSeek key（.env/环境变量 DEEPSEEK_API_KEY；不写日志）
 }
 
@@ -113,6 +116,7 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 		// auth 默认开启：配齐 issuer/client_id/client_secret 即生效；残缺时
 		// setupAuth 降级并打日志。显式关闭用 auth.enabled: false / AUTH_ENABLED=false。
 		Auth: AuthConfig{Enabled: true, TokenTTL: AuthDefaultTokenTTL},
+		Log:  observability.DefaultConfig(),
 	}
 
 	if raw, err := os.ReadFile(filepath.Join(dir, "config.yaml")); err == nil {
@@ -146,6 +150,7 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 		cfg.Auth.HMACSecret = firstNonEmpty(kv["OMB_AUTH_SECRET"], cfg.Auth.HMACSecret)
 		cfg.Auth.Enabled = parseBoolKV(kv, "AUTH_ENABLED", cfg.Auth.Enabled)
 		cfg.Auth.BypassProxy = parseBoolKV(kv, "AUTH_BYPASS_PROXY", cfg.Auth.BypassProxy)
+		cfg.applyLogConfig(kv, "OMB_LOG_")
 	} else if !os.IsNotExist(err) {
 		return ServerConfig{}, fmt.Errorf(".env: %w", err)
 	}
@@ -196,6 +201,13 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 		cfg.Auth.HMACSecret = v
 	}
 	applyAuthEnv(&cfg.Auth)
+	logEnv := make(map[string]string)
+	for _, key := range []string{"OMB_LOG_LEVEL", "OMB_LOG_FORMAT", "OMB_LOG_SOURCE"} {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			logEnv[key] = value
+		}
+	}
+	cfg.applyLogConfig(logEnv, "OMB_LOG_")
 
 	if cfg.AI.Model == "" {
 		cfg.AI.Model = DeepSeekDefaultModel
@@ -211,6 +223,7 @@ func LoadServerConfig(dir string) (ServerConfig, error) {
 
 // applyYAML 应用 config.yaml 键值（ai.* 与 quota.* 段；扁平键名）。
 func (c *ServerConfig) applyYAML(kv map[string]string) {
+	c.applyLogConfig(kv, "LOG_")
 	c.AI.Enabled = parseBoolKV(kv, "AI_ENABLED", c.AI.Enabled)
 	if v := firstNonEmpty(kv["AI_MODEL"], kv["AI.MODEL"]); v != "" {
 		c.AI.Model = v
@@ -260,6 +273,16 @@ func (c *ServerConfig) applyYAML(kv map[string]string) {
 	if v, err := parseSecondsKV(kv, "AUTH_TOKEN_TTL", 0); err == nil && v > 0 {
 		c.Auth.TokenTTL = v
 	}
+}
+
+func (c *ServerConfig) applyLogConfig(kv map[string]string, prefix string) {
+	if value, ok := kv[prefix+"LEVEL"]; ok && value != "" {
+		c.Log.Level = value
+	}
+	if value, ok := kv[prefix+"FORMAT"]; ok && value != "" {
+		c.Log.Format = value
+	}
+	c.Log.Source = parseBoolKV(kv, prefix+"SOURCE", c.Log.Source)
 }
 
 // applyAuthEnv 应用 auth.* 非秘密键的进程环境覆盖（秘密键已在 LoadServerConfig
