@@ -74,7 +74,9 @@ func layoutFor(participants int) layout {
 		midMaxR:     55 * s,
 		coreZoneR:   28 * s,
 		spawnRadius: 67.5 * s,
-		spawnHalf:   6.5 * s,
+		// The spawn AABB is wider than the old 13m square.  Its diagonal
+		// corners still stay inside the outer ring at the 45-degree sectors.
+		spawnHalf:   8.5 * s,
 		uplinkRLo:   40 * s,
 		uplinkRHi:   45 * s,
 		uplinkPairs: uplinkNormSteps / 2,
@@ -210,7 +212,9 @@ func (l layout) coverCells() []coverCell {
 //
 // 11: Exhausted cover strata widen their candidate lattice without relaxing clearance.
 // Successful v10 geometry is unchanged; the version increment changes MapHash.
-const GeneratorVer = 11
+// 12: Spawn areas grow with the scaled arena so large matches have enough
+// room for deterministic safe-point selection.
+const GeneratorVer = 12
 
 // 分段盐：各生成阶段使用独立随机流，避免阶段间拒绝采样纠缠。
 const (

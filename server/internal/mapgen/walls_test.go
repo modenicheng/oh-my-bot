@@ -11,20 +11,20 @@ import (
 )
 
 func TestCoverPlacementPreservesValidSeedWalls(t *testing.T) {
-	// Hash only walls, captured from v10: the v11 metadata intentionally
-	// changes MapHash, but successful candidate searches must keep geometry.
+	// Hash only walls, captured from v12. The expanded spawn areas intentionally
+	// change candidate rejection for the affected large-room layouts.
 	for _, tc := range []struct {
 		players int
 		hash    string
 	}{
 		{1, "88ab00b65d15b5e183bad4678db4a5ee5e2064d83d48c8679ec66618e186cf7d"},
-		{50, "f71d86e1a481fd61d4bf815cc8990acdf7ad6244cfb9b5fd96b111069bf41363"},
+		{50, "26ad33a794ad31ddf784ba102ed617be3fa879bffbb178d7b71cff071c0715e5"},
 		{64, "d207d1e2ec1ed4c125501fce78a56d5eac2be01b5a57c4e4904afe7b845e6020"},
 		{65, "5054223aae4cc6ed3f624a2ddc9c50e2a89dac279fe20a5a62117405c9c506b2"},
 		{96, "216f7b6de5ca0526cdbc2d204b4f90131534b0bbe821e08b79ecba54efca2e7f"},
 		{150, "0e68ca9f5af23c06332d26ddf76b6cf9e7b2bcf1b6851fc5c4141bc69722e25b"},
-		{200, "b8e2dcf5d2aebe4215f502d4f1e4df07ce523fc913cb45d42f9df5a6579e97f6"},
-		{256, "1e93b0ee191cbf436ab397b83937a3f2ef311e8896b66201fe4cf14215b7f2bf"},
+		{200, "58f0704c49bedc64fc2008aa1380d44e0ec456fd36f3872b6e3215bdd5435f03"},
+		{256, "f4cf8da47df5950c431429b816b554743e51ae95e8a83eaff7ac57e8f20c01f0"},
 	} {
 		t.Run(fmt.Sprintf("players=%d", tc.players), func(t *testing.T) {
 			def, err := GenerateForPlayers(42, tc.players)
@@ -36,7 +36,7 @@ func TestCoverPlacementPreservesValidSeedWalls(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != tc.hash {
-				t.Fatalf("successful v10 wall search changed: hash %s, want %s", got, tc.hash)
+				t.Fatalf("successful v12 wall search changed: hash %s, want %s", got, tc.hash)
 			}
 		})
 	}
