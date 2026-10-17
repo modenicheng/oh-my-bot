@@ -280,7 +280,7 @@ func (s *Sim) respawnRobot(r *Robot) {
 	s.resetLifeShots(r)
 	pos := r.SpawnPosition
 	if s.mapDef != nil {
-		if next, ok := s.spawnInSector(r.Sector); ok {
+		if next, ok := s.spawnInSectorFor(r.Sector, r.ID); ok {
 			pos = next
 		}
 	}
