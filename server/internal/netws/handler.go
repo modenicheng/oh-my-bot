@@ -5,6 +5,8 @@
 //	0x01 pong（收到 ping 的一方回显载荷）
 //	0x02 上行 ClientMsg（protobuf）
 //	0x03 下行 ServerMsg（protobuf）
+//	0x04 negotiated compact snapshot (omb.binary.v1)
+//	0x05 negotiated ordered batch (omb.binary.v1)
 //
 // 双通道语义（Round 2 计划 A2）：
 //   - reliable：事件/tombstone 混合帧/MapBootstrap/ScriptResult/AiUsage——
@@ -20,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -28,7 +31,9 @@ import (
 	"github.com/coder/websocket"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/modenicheng/oh-my-bot/server/internal/observability"
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"github.com/modenicheng/oh-my-bot/server/internal/wire"
 )
 
 // 帧字节与心跳/写超时从生成协议 ombv1.TransportTiming 取值（审计 X-5：单一权威源，
@@ -75,6 +80,7 @@ type queuedFrame struct {
 	epoch     uint64
 	bootstrap bool
 	scriptLog *ombv1.EvScriptLog
+	snapshot  *ombv1.SnapshotDelta
 }
 
 // Handler 返回 /ws 端点。sessionFactory 在每次握手成功后调用一次，返回该连接
@@ -89,8 +95,10 @@ type queuedFrame struct {
 // 路由到返回的 onUp。
 func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg), sendReliableFrame func([]byte), closeConn func()) (onUp func(up *ombv1.ClientMsg))) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+		logger := observability.Logger(r.Context()).With("component", "netws")
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{wire.Subprotocol}})
 		if err != nil {
+			logger.Warn("ws.upgrade_failed", "error", err)
 			return
 		}
 		// 默认读上限 32 KiB 装不下 TS 脚本提交帧；超限帧会被库直接断连。
@@ -98,6 +106,24 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 		defer func() { _ = c.CloseNow() }() // 强制关闭属正常路径，close 错误无信息量
 
 		ctx := r.Context()
+		compact := c.Subprotocol() == wire.Subprotocol
+		started := time.Now()
+		logger.Info("ws.connected", "compact", compact)
+		var receivedBytes, malformed, lossyDropped, reliableOverflows, logsDropped atomic.Uint64
+		var writtenBytes uint64 // Owned by the writer loop only.
+		closeReason := "handler_returned"
+		defer func() {
+			level := slog.LevelInfo
+			if reliableOverflows.Load() > 0 {
+				level = slog.LevelWarn
+				closeReason = "reliable_queue_overflow"
+			}
+			logger.Log(ctx, level, "ws.closed", "reason", closeReason,
+				"duration_ms", time.Since(started).Milliseconds(), "received_bytes", receivedBytes.Load(),
+				"written_bytes", writtenBytes, "malformed_frames", malformed.Load(),
+				"lossy_dropped", lossyDropped.Load(), "script_logs_dropped", logsDropped.Load(),
+				"reliable_overflows", reliableOverflows.Load())
+		}()
 
 		// 下行队列：游戏可靠消息优先；Console 有独立小队列且可丢。
 		reliableCh := make(chan queuedFrame, reliableQueueLn)
@@ -134,15 +160,21 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 				default:
 					droppedScriptLogs.Add(1)
 					transportStats.scriptLogsDropped.Add(1)
+					logsDropped.Add(1)
 				}
 				return
 			}
 
-			b := encode(msg)
-			if b == nil {
-				return
+			frame := queuedFrame{epoch: epoch.Load()}
+			if compact && msg.GetSnapshot() != nil {
+				// Compact baselines belong to delivery order, never enqueue order.
+				frame.snapshot = msg.GetSnapshot()
+			} else {
+				frame.data = encode(msg)
+				if frame.data == nil {
+					return
+				}
 			}
-			frame := queuedFrame{data: b}
 			if msg.GetEvent().GetMapBootstrap() != nil {
 				frame.bootstrap = true
 				frame.epoch = epoch.Add(1)
@@ -150,20 +182,27 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			select {
 			case reliableCh <- frame:
 			default:
-				kill() // 可靠通道满 = 一致性已破坏，断开由客户端重连+Resync 恢复
 				transportStats.reliableKilled.Add(1)
+				reliableOverflows.Add(1)
+				kill() // 可靠通道满 = 一致性已破坏，断开由客户端重连+Resync 恢复
 			}
 		}
 		sendLossy := func(msg *ombv1.ServerMsg) {
-			b := encode(msg)
-			if b == nil {
-				return
+			frame := queuedFrame{epoch: epoch.Load()}
+			if compact && msg.GetSnapshot() != nil {
+				frame.snapshot = msg.GetSnapshot()
+			} else {
+				frame.data = encode(msg)
+				if frame.data == nil {
+					return
+				}
 			}
 			select {
-			case lossyCh <- queuedFrame{data: b, epoch: epoch.Load()}:
+			case lossyCh <- frame:
 			default: // 慢消费者：丢 delta，客户端 base_tick 检测后重同步
 
 				transportStats.lossyDropped.Add(1)
+				lossyDropped.Add(1)
 			}
 		}
 		sendReliableFrame := func(b []byte) {
@@ -174,8 +213,9 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			select {
 			case reliableCh <- frame:
 			default:
-				kill() // 与 sendReliable 同语义：可靠通道满 = 一致性已破坏
 				transportStats.reliableKilled.Add(1)
+				reliableOverflows.Add(1)
+				kill() // 与 sendReliable 同语义：可靠通道满 = 一致性已破坏
 			}
 		}
 
@@ -195,12 +235,16 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 				if len(data) == 0 {
 					continue
 				}
+				receivedBytes.Add(uint64(len(data)))
 				switch data[0] {
 				case framePing:
 					sendLossyRaw(reliableCh, append([]byte{framePong}, data[1:]...))
 				case frameUp:
 					msg := &ombv1.ClientMsg{}
 					if err := proto.Unmarshal(data[1:], msg); err != nil {
+						if malformed.Add(1) == 1 {
+							logger.Warn("ws.decode_failed", "bytes", len(data), "error", err)
+						}
 						continue // 畸形上行丢弃
 					}
 					if connOnUp != nil {
@@ -216,17 +260,63 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 		write := func(b []byte) error {
 			wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 			defer cancel()
-			return c.Write(wctx, websocket.MessageBinary, b)
+			err := c.Write(wctx, websocket.MessageBinary, b)
+			if err != nil {
+				closeReason = "write_failed"
+				logger.Warn("ws.write_failed", "error", err)
+			} else {
+				writtenBytes += uint64(len(b))
+			}
+			return err
 		}
 
 		var deliveredEpoch uint64
+		compactEncoder := wire.NewEncoder()
+		var lastSnapshotTick uint32
+		var hasSnapshot bool
+		writeSnapshot := func(frame queuedFrame) error {
+			if frame.epoch != deliveredEpoch || (hasSnapshot && (frame.snapshot.Tick < lastSnapshotTick || (!frame.snapshot.Full && frame.snapshot.Tick == lastSnapshotTick))) {
+				return nil
+			}
+			b, err := compactEncoder.EncodeSnapshot(frame.snapshot)
+			if err != nil {
+				closeReason = "snapshot_encode_failed"
+				logger.Error("ws.snapshot_encode_failed", "tick", frame.snapshot.Tick, "error", err)
+				return err // Invalid authoritative state must not corrupt the stream.
+			}
+			if err := write(b); err != nil {
+				return err
+			}
+			lastSnapshotTick, hasSnapshot = frame.snapshot.Tick, true
+			return nil
+		}
 		var lastScriptLog *ombv1.EvScriptLog
 		var lastDropNotice time.Time
+		var pendingReliable *queuedFrame
 		writeReliable := func(frame queuedFrame) error {
 			if frame.bootstrap {
 				deliveredEpoch = frame.epoch
 				droppedScriptLogs.Store(0)
 				lastScriptLog = nil
+				compactEncoder.Reset()
+				hasSnapshot = false
+			}
+			if frame.snapshot != nil {
+				return writeSnapshot(frame)
+			}
+			if compact && batchable(frame) {
+				b, pending := collectReliableBatch(frame, reliableCh, graceful)
+				pendingReliable = pending
+				return write(b)
+			}
+			return write(frame.data)
+		}
+		writeLossy := func(frame queuedFrame) error {
+			if frame.epoch != deliveredEpoch {
+				return nil
+			}
+			if frame.snapshot != nil {
+				return writeSnapshot(frame)
 			}
 			return write(frame.data)
 		}
@@ -260,6 +350,14 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 		}
 
 		for {
+			if pendingReliable != nil {
+				frame := *pendingReliable
+				pendingReliable = nil
+				if err := writeReliable(frame); err != nil {
+					return
+				}
+				continue
+			}
 			// 优先级：reliable > lossy > script log。先排空高优先通道。
 			select {
 			case frame := <-reliableCh:
@@ -271,10 +369,8 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 			}
 			select {
 			case frame := <-lossyCh:
-				if frame.epoch == deliveredEpoch {
-					if err := write(frame.data); err != nil {
-						return
-					}
+				if err := writeLossy(frame); err != nil {
+					return
 				}
 				continue
 			default:
@@ -290,28 +386,35 @@ func Handler(sessionFactory func(sendReliable, sendLossy func(*ombv1.ServerMsg),
 
 			select {
 			case <-ctx.Done():
+				closeReason = "request_cancelled"
 				return
 			case <-dead:
+				closeReason = "reliable_queue_overflow"
 				return
 			case <-graceful:
 				// 优雅关闭：三队皆空才返回；否则回到循环顶部按既有优先级排空。
 				// closeConn 之后新入队的帧不保证送达（调用方语义：先发完、
 				// 后 close，不再发新帧）。
 				if len(reliableCh) == 0 && len(lossyCh) == 0 && len(scriptLogCh) == 0 {
+					closeReason = "server_closed"
 					return
 				}
 			case err := <-readerErr:
-				_ = err
+				closeReason = "peer_closed"
+				status := websocket.CloseStatus(err)
+				if status != websocket.StatusNormalClosure && status != websocket.StatusGoingAway && ctx.Err() == nil {
+					closeReason = "read_failed"
+					logger.Warn("ws.read_failed", "close_status", int(status), "error", err)
+				} else {
+					logger.Debug("ws.peer_closed", "close_status", int(status))
+				}
 				return
 			case frame := <-reliableCh:
 				if err := writeReliable(frame); err != nil {
 					return
 				}
 			case frame := <-lossyCh:
-				if frame.epoch != deliveredEpoch {
-					continue
-				}
-				if err := write(frame.data); err != nil {
+				if err := writeLossy(frame); err != nil {
 					return
 				}
 			case frame := <-scriptLogCh:

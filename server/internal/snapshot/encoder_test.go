@@ -73,8 +73,8 @@ func TestFirstFrameFull(t *testing.T) {
 	if len(d2.Robots) != 0 || len(d2.RobotGone) != 0 {
 		t.Fatalf("无变化帧应全空：robots=%v gone=%v", d2.Robots, d2.RobotGone)
 	}
-	if len(d2.HealthPacks) != 1 || d2.HealthPacks[0].RespawnInS != 12 {
-		t.Fatalf("delta must carry full health pack state: %+v", d2.HealthPacks)
+	if len(d2.HealthPacks) != 0 {
+		t.Fatalf("unchanged health packs must be omitted: %+v", d2.HealthPacks)
 	}
 
 	// 第三帧 base_tick 链到 101。

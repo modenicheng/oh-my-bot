@@ -306,6 +306,9 @@ try {
   await preload.locator('#in-nick').fill('preload-test')
   await preload.locator('#btn-join').click()
   await preload.locator('#view-room').waitFor({ state: 'visible', timeout: 10000 })
+  // Room view appears before WebSocket connection/join completes; do not drop
+  // bootstrap by broadcasting before the mock server knows this subscription.
+  await assertEventually(() => [...sockets.clients].some(socket => socket.testRoom === 'PREL'))
   // Mock 服务器 join 只回 roomState；游戏视图由 mapBootstrap 触发（真实服
   // 务器同样如此），下发后 enterGame 进战斗视图。
   event('PREL', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
@@ -643,9 +646,9 @@ try {
   }
   assert.equal(await weights(), titleWeights, 'returning to lobby restores title stage')
   await scoring.locator('#audio-settings summary').click()
-  await scoring.locator('#audio-mute').click()
+  await scoring.locator('#audio-bgm-mute').click()
   await scoring.waitForFunction(() => window.__musicSources.every(entry => !entry.source.loop || entry.stopped))
-  await scoring.locator('#audio-mute').click()
+  await scoring.locator('#audio-bgm-mute').click()
   await scoring.waitForFunction(() => window.__musicSources.some(entry => entry.source.loop && !entry.stopped))
   assert.equal(await scoring.evaluate(() => window.__startupContexts.length), 1, 'music and effects keep one context')
   event('SCOR', 'mapBootstrap', EvMapBootstrapSchema, { mapJson: JSON.stringify(map), mapHash: 'scorefix', generatorVersion: 2 })
@@ -714,6 +717,22 @@ try {
   await touchScores.locator('#view-game').waitFor({ state: 'visible' })
   snapshot('TOUC', 1, 1)
   await touchScores.waitForFunction(() => document.querySelector('#hud-hp-text')?.textContent === '100')
+  // Older bootstrap has no discrete-shot capability. Never hide that behind a
+  // boolean fire fallback; the user can still select the desktop input layout.
+  await touchScores.setViewportSize({ width: 667, height: 375 })
+  const touchGate = touchScores.locator('[data-mobile-gate]')
+  await touchGate.waitFor({ state: 'visible' })
+  assert.match(await touchGate.innerText(), /版本不兼容/)
+  await touchGate.locator('[data-mobile-action="menu"]').tap()
+  await touchScores.locator('[data-mobile-layout]').selectOption('desktop')
+  await touchScores.keyboard.press('Escape')
+  assert.equal(await touchGate.isVisible(), false)
+  await touchScores.locator('#game-canvas').focus()
+  await touchScores.keyboard.press('Escape')
+  await touchScores.locator('[data-mobile-layout]').selectOption('touch')
+  await touchScores.keyboard.press('Escape')
+  await touchGate.waitFor({ state: 'visible' })
+  await touchScores.setViewportSize({ width: 390, height: 844 })
   event('TOUC', 'matchEnd', EvMatchEndSchema, { scores: [{ robot: 101, score: 0, titles: [Title.OLD_SCHOOL] }] }, 2)
   const touchBadge = touchScores.locator('.end-list .score-title')
   await touchBadge.waitFor()
@@ -727,6 +746,7 @@ try {
   assert.equal(await touchDetail.isVisible(), false)
   await touchScores.locator('.end-back').tap()
   await touchScores.locator('#view-room').waitFor({ state: 'visible' })
+  assert.equal(await touchScores.locator('.mobile-controls, .mobile-layout-choice').count(), 0, 'battle teardown removes touch surfaces and settings')
   await touchScores.close()
 
   const replay = await open()

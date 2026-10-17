@@ -141,17 +141,35 @@ func (s *Sim) say(r *Robot, text string) bool {
 func (s *Sim) fireProjectiles() {
 	for i := range s.robots {
 		r := &s.robots[i]
-		if r.State == Dead || !r.Control.Output.Fire || r.Combat.ShieldOn || s.tick < r.Combat.FireReady || r.Energy+collisionEpsilon < FireCost || s.nextProjectile == 0 {
+		if s.consumeSingleShots(r) || !r.Control.Output.Fire {
 			continue
 		}
-		r.Energy = math.Max(0, r.Energy-FireCost)
-		r.Combat.FireReady = s.tick + FireInterval
-		s.projectiles = append(s.projectiles, Projectile{ID: s.nextProjectile, Owner: r.ID, Pos: r.Position, Heading: r.Heading, BaseHeading: r.Heading, Spread: (s.randomUnit()*2 - 1) * MaxSpread})
-		// Telemetry only: announce the attack at the muzzle; impacts follow below.
-		s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Shot{Shot: &ombv1.EvShot{
-			Projectile: s.nextProjectile, Owner: r.ID, Color: r.Color, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Heading: float32(r.Heading)}}})
-		s.nextProjectile++ // zero means exhausted IDs: never wrap and reuse an entity.
+		s.tryFireProjectile(r, r.Heading)
 	}
+}
+
+// Both held and discrete fire share all eligibility checks and side effects.
+func (s *Sim) tryFireProjectile(r *Robot, heading float64) string {
+	switch {
+	case r.State == Dead:
+		return "dead"
+	case r.Combat.ShieldOn:
+		return "shield"
+	case s.tick < r.Combat.FireReady:
+		return "cooldown"
+	case r.Energy+collisionEpsilon < FireCost:
+		return "energy"
+	case s.nextProjectile == 0:
+		return "projectile_capacity"
+	}
+	r.Energy = math.Max(0, r.Energy-FireCost)
+	r.Combat.FireReady = s.tick + FireInterval
+	s.projectiles = append(s.projectiles, Projectile{ID: s.nextProjectile, Owner: r.ID, Pos: r.Position, Heading: heading, BaseHeading: heading, Spread: (s.randomUnit()*2 - 1) * MaxSpread})
+	// Telemetry only: announce the attack at the muzzle; impacts follow below.
+	s.events = append(s.events, &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Shot{Shot: &ombv1.EvShot{
+		Projectile: s.nextProjectile, Owner: r.ID, Color: r.Color, At: &ombv1.Vec2{X: r.Position.X, Y: r.Position.Y}, Heading: float32(heading)}}})
+	s.nextProjectile++ // zero means exhausted IDs: never wrap and reuse an entity.
+	return "fired"
 }
 
 func (s *Sim) stepProjectiles() {
@@ -248,6 +266,7 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 	}
 	killSteal := totalDamage > 0 && r.Combat.DamageBy[attacker]*2 < totalDamage
 	r.State, r.Velocity = Dead, Vec2{}
+	s.resetLifeShots(r)
 	r.Input, r.PendingInput, r.InputPending = Input{}, Input{}, false
 	r.Control = ControlState{Assist: r.Control.Assist}
 	r.Combat.ShieldOn, r.Combat.DashUntil, r.Combat.RespawnAt = false, 0, s.tick+RespawnDelay
@@ -258,6 +277,7 @@ func (s *Sim) damage(attacker uint32, r *Robot, amount float64) {
 }
 
 func (s *Sim) respawnRobot(r *Robot) {
+	s.resetLifeShots(r)
 	pos := r.SpawnPosition
 	if s.mapDef != nil {
 		if next, ok := s.spawnInSector(r.Sector); ok {

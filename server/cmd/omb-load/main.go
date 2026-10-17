@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
+	"github.com/modenicheng/oh-my-bot/server/internal/wire"
 )
 
 const (
@@ -54,6 +55,8 @@ type connStats struct {
 	lastTick  atomic.Int64
 	gaps      atomic.Uint64 // base_tick 跳变 > 1：丢帧，客户端将请求重同步
 	snapshots atomic.Uint64
+	messages  atomic.Uint64
+	fulls     atomic.Uint64
 }
 
 func main() {
@@ -65,7 +68,12 @@ func main() {
 	scriptFrac := flag.Float64("scripts", 0, "提交脚本的玩家比例 [0,1]")
 	duration := flag.Duration("duration", 30*time.Second, "持续时长")
 	inputHz := flag.Float64("input", 30, "每连接上行输入频率 Hz")
+	legacy := flag.Bool("legacy", false, "使用旧 Protobuf 下行，供同服务对照")
+	battle := flag.Bool("battle", false, "激活瞄准与开火轴，覆盖战斗流量")
 	flag.Parse()
+	if *inputHz <= 0 || *inputHz > 240 || *n < 1 || *n > 256 {
+		log.Fatal("input must be (0,240], n must be [1,256]")
+	}
 
 	// -url 用于经反代的公网入口：stats 接口与 WS 同域，scheme 换成 http(s) 即可。
 	wsBase, statsBase := "ws://"+*addr, "http://"+*addr
@@ -95,7 +103,7 @@ func main() {
 		withScript := i < int(*scriptFrac*float64(*n))
 		go func(idx int, st *connStats, withScript bool) {
 			defer wg.Done()
-			runClient(ctx, wsBase, *dialAddr, *room, idx, withScript, *inputHz, st)
+			runClient(ctx, wsBase, *dialAddr, *room, idx, withScript, *inputHz, !*legacy, *battle, st)
 		}(i, st, withScript)
 	}
 
@@ -122,17 +130,20 @@ report:
 // connected 记录成功建立 WS 的连接数（公网入口下个别拨号可能失败）。
 var connected atomic.Uint64
 
-func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, withScript bool, inputHz float64, st *connStats) {
+func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, withScript bool, inputHz float64, compact, battle bool, st *connStats) {
 	// 单连接握手限时：200 并发过公网时个别超时不该拖住整个进程的统计周期。
 	dialCtx, cancelDial := context.WithTimeout(ctx, 15*time.Second)
-	var opts *websocket.DialOptions
+	opts := &websocket.DialOptions{}
+	if compact {
+		opts.Subprotocols = []string{wire.Subprotocol}
+	}
 	if dialAddr != "" {
 		// 只改写 TCP 拨号目标；TLS SNI 与 HTTP Host 仍取 URL 域名，证书校验不变。
-		opts = &websocket.DialOptions{HTTPClient: &http.Client{Transport: &http.Transport{
+		opts.HTTPClient = &http.Client{Transport: &http.Transport{
 			DialContext: func(c context.Context, network, addr string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(c, "tcp", dialAddr)
 			},
-		}}}
+		}}
 	}
 	c, _, err := websocket.Dial(dialCtx, wsBase+"/ws", opts)
 	cancelDial()
@@ -145,7 +156,7 @@ func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, with
 	// coder/websocket 的 Write 非并发安全：读循环回 pong 与输入/warmup 写并发，统一串行化。
 	var wmu sync.Mutex
 	defer func() { _ = c.CloseNow() }()
-	c.SetReadLimit(1 << 20)
+	c.SetReadLimit(128 << 20) // Diagnostic client budget, not a realtime protocol cap.
 
 	send := func(msg *ombv1.ClientMsg) {
 		body, err := proto.Marshal(msg)
@@ -183,7 +194,10 @@ func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, with
 	}
 
 	// 读循环：统计帧/字节/缺口。
+	decoder := wire.NewDecoder()
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		for {
 			_, data, err := c.Read(ctx)
 			if err != nil {
@@ -201,28 +215,34 @@ func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, with
 				cancel()
 				wmu.Unlock()
 			}
-			if len(data) == 0 || data[0] != frameDown {
+			if len(data) == 0 || data[0] == framePing || data[0] == framePong {
 				continue
 			}
-			msg := &ombv1.ServerMsg{}
-			if err := proto.Unmarshal(data[1:], msg); err != nil {
+			messages, err := decoder.DecodeFrame(data)
+			if err != nil {
+				log.Printf("client %d: malformed downstream: %v", idx, err)
 				continue
 			}
-			if snap := msg.GetSnapshot(); snap != nil {
-				st.snapshots.Add(1)
-				tick := int64(snap.BaseTick)
-				if tick == 0 {
-					tick = int64(snap.Tick)
-				}
-				if prev := st.lastTick.Swap(tick); prev > 0 && tick-prev > 1 {
-					st.gaps.Add(1)
+			st.messages.Add(uint64(len(messages)))
+			for _, msg := range messages {
+				if snap := msg.GetSnapshot(); snap != nil {
+					st.snapshots.Add(1)
+					if snap.Full {
+						st.fulls.Add(1)
+					}
+					if prev := st.lastTick.Load(); !snap.Full && prev != int64(snap.BaseTick) {
+						st.gaps.Add(1)
+						send(&ombv1.ClientMsg{Payload: &ombv1.ClientMsg_ResyncRequest{ResyncRequest: &ombv1.ResyncRequest{}}})
+						continue
+					}
+					st.lastTick.Store(int64(snap.Tick))
 				}
 			}
 		}
 	}()
 
 	// 输入循环：往返移动 + 间歇开火。
-	interval := time.Second / time.Duration(inputHz)
+	interval := time.Duration(float64(time.Second) / inputHz)
 	seq := uint32(0)
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
@@ -230,30 +250,38 @@ func runClient(ctx context.Context, wsBase, dialAddr, room string, idx int, with
 		select {
 		case <-ctx.Done():
 			return
+		case <-readerDone:
+			return
 		case <-tick.C:
 			seq++
 			move := int32(1000)
 			if (seq/30)%2 == 1 {
 				move = -1000
 			}
+			axes := uint32(1)
+			if battle {
+				axes |= 2 | 4
+			}
 			send(&ombv1.ClientMsg{Payload: &ombv1.ClientMsg_Input{Input: &ombv1.ClientInput{
-				Seq: seq, AxisMask: uint32(1), MoveX: move, MoveY: 0,
+				Seq: seq, AxisMask: axes, MoveX: move, MoveY: 0,
 				Aim: float64(seq%360) * 0.01745, Fire: seq%8 == 0}}})
 		}
 	}
 }
 
 func aggregate(stats []*connStats, elapsed time.Duration) string {
-	var frames, bytes, gaps, snaps uint64
+	var frames, bytes, gaps, snaps, messages, fulls uint64
 	for _, s := range stats {
 		frames += s.frames.Load()
 		bytes += s.bytes.Load()
 		gaps += s.gaps.Load()
 		snaps += s.snapshots.Load()
+		messages += s.messages.Load()
+		fulls += s.fulls.Load()
 	}
-	mbps := float64(bytes) / elapsed.Seconds() / 1e6
-	return fmt.Sprintf("dialed=%d connected=%d frames=%d snapshots=%d gaps=%d down=%.1f Mbps",
-		len(stats), connected.Load(), frames, snaps, gaps, mbps)
+	mbps := float64(bytes) * 8 / elapsed.Seconds() / 1e6
+	return fmt.Sprintf("dialed=%d connected=%d frames=%d snapshots=%d fulls=%d gaps=%d down=%.1f Mbps ws_msg_s=%.0f app_msg_s=%.0f",
+		len(stats), connected.Load(), frames, snaps, fulls, gaps, mbps, float64(frames)/elapsed.Seconds(), float64(messages)/elapsed.Seconds())
 }
 
 func fetchStats(base, phase string) {

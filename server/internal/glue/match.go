@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
+	"log/slog"
 	"runtime"
 	"sort"
 	"strconv"
@@ -46,6 +46,7 @@ type Match struct {
 	// scoreboard 记录最近一次已广播的实时积分榜指纹与事件，用于变更时才重发与观战者 catch-up。
 	lastScoreboard     string
 	lastScoreboardTick uint32
+	lastTelemetryTick  uint32
 
 	encoders map[uint32]*snapshot.DeltaEncoder
 	wallIX   *snapshot.WallIndex
@@ -152,6 +153,9 @@ func (m *Match) encoderFor(rid uint32) *snapshot.DeltaEncoder {
 		enc.ForceFull()
 		m.encoders[rid] = enc
 	}
+	if session := m.rc.sessions[m.playerOf[rid]]; session != nil {
+		enc.SetCompactMetadata(session.CompactSnapshots())
+	}
 	return enc
 }
 
@@ -174,7 +178,19 @@ func (m *Match) specEncoderFor(pid uint64) *snapshot.DeltaEncoder {
 		enc.ForceFull()
 		m.specEncoders[pid] = enc
 	}
+	if session := m.spectatorSessionLocked(pid); session != nil {
+		enc.SetCompactMetadata(session.CompactSnapshots())
+	}
 	return enc
+}
+
+// spectatorSessionLocked returns either an external observer or the host's
+// control session. Both receive the public full-world projection.
+func (m *Match) spectatorSessionLocked(pid uint64) *Session {
+	if s := m.rc.hostSession; s != nil && s.playerID == pid {
+		return s
+	}
+	return m.rc.spectators[pid]
 }
 
 func (m *Match) takeSpecReliableFull(pid uint64) bool {
@@ -297,7 +313,10 @@ func NewMatch(rc *RoomConn, seed uint64, matchSeq int, players map[uint64]Sessio
 		}
 	}
 	m.wallIX = snapshot.NewWallIndex(def.Walls, 4.0)
-	scriptCfg := script.Config{TickTimeout: scriptTickQuota(len(players))}
+	// Built-ins are initialized during asynchronous assembly, outside the
+	// simulation clock. A busy machine must not spend their 4ms tick quota on
+	// startup scheduling; gameplay still uses the unchanged per-tick limit.
+	scriptCfg := script.Config{TickTimeout: scriptTickQuota(len(players)), InitTimeout: time.Second}
 	m.scriptPool = script.NewRunPool(scriptCfg)
 	for rid := range m.botRobots {
 		rt := script.NewGojaRuntime(scriptCfg)
@@ -342,6 +361,12 @@ func scriptTickQuota(players int) time.Duration {
 type glueSink struct{ m *Match }
 
 func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	if result := ev.GetSingleShotResult(); result != nil {
+		if g.m.activeLocked() {
+			g.m.sendSingleShotResultLocked(result, tick)
+		}
+		return
+	}
 	if ev.GetMatchEnd() != nil {
 		// The final checkpoint is delivered after Sim emits this marker.
 		// Settle only then so RUNNER includes the last checkpoint interval.
@@ -438,6 +463,11 @@ func (m *Match) ForceResync(pid uint64) {
 	}
 }
 func (m *Match) forceResyncLocked(pid uint64) {
+	m.rotateInputGenerationLocked(pid)
+	m.sendResyncScoreboardLocked(pid)
+}
+
+func (m *Match) sendResyncScoreboardLocked(pid uint64) {
 	m.reliableFull[pid] = true
 	if rid, ok := m.robotOf[pid]; ok {
 		if enc := m.encoders[rid]; enc != nil {
@@ -491,8 +521,58 @@ func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
 }
 func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
 	if rid, ok := m.robotOf[pid]; ok {
-		m.sim.ApplyInput(rid, in)
+		if in != nil && in.SingleShot != nil && m.sim.SingleShotFeedbackSuppressed(rid, in.Seq, in.SingleShot.Generation) {
+			// Reliable terminal feedback belongs to the original accepted request;
+			// duplicates (including ambiguous evicted IDs) cannot contradict it.
+			return
+		}
+		if in != nil && in.SingleShot != nil && m.reliableFull[pid] {
+			// Reject the action but consume the ordinary frame/sequence, including
+			// its fire release. The same request cannot be replayed after readiness.
+			neutral := &ombv1.ClientInput{Seq: in.Seq, AxisMask: in.AxisMask | uint32(sim.AxisFire), Aim: in.Aim,
+				MoveX: in.MoveX, MoveY: in.MoveY, Dash: in.Dash, Shield: in.Shield, Interact: in.Interact}
+			outcome := m.sim.ApplyInputOutcome(rid, neutral)
+			if outcome == "" {
+				outcome = "not_ready"
+			}
+			m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: in.Seq, Outcome: outcome}, m.sim.CurrentTick())
+			return
+		}
+		if outcome := m.sim.ApplyInputOutcome(rid, in); outcome != "" && in != nil && in.SingleShot != nil {
+			m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: in.Seq, Outcome: outcome}, m.sim.CurrentTick())
+		}
 	}
+}
+
+func (m *Match) sendSingleShotResultLocked(result *ombv1.EvSingleShotResult, tick uint32) {
+	if session := m.rc.sessions[m.playerOf[result.Robot]]; session != nil {
+		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_SingleShotResult{SingleShotResult: result}}}})
+	}
+}
+
+// Called only under rc.mu. Match assembly is asynchronous, so tokens are
+// allocated at publication/resync rather than read from room state in NewMatch.
+func (m *Match) rotateInputGenerationLocked(pid uint64) {
+	rid, ok := m.robotOf[pid]
+	if !ok {
+		return
+	}
+	robot, _ := m.sim.Robot(rid)
+	if m.rc.inputGenerations == nil {
+		m.rc.inputGenerations = make(map[uint64]uint32)
+	}
+	previous := max(m.rc.inputGenerations[pid], robot.SingleShots.Generation)
+	generation := previous + 1
+	// Exhaustion fails closed; never wrap a token into a previous lifetime.
+	if previous == ^uint32(0) || (robot.SingleShots.Generation == 0 && m.rc.inputGenerations[pid] != 0) {
+		generation = 0
+	}
+	for _, shot := range robot.SingleShots.Pending {
+		m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: shot.Seq, Outcome: "cancelled"}, m.sim.CurrentTick())
+	}
+	m.sim.SetInputGeneration(rid, generation)
+	// Keep an exhaustion tombstone even if the Sim's disabled generation is 0.
+	m.rc.inputGenerations[pid] = max(previous, generation)
 }
 
 // buyUpgradeLocked 购买一条升级轨的下一级（ADR-0016）。仅正式局（Running）
@@ -528,6 +608,7 @@ type MatchStats struct {
 	Tick            uint32  `json:"tick"`
 	TickAvgMs       float64 `json:"tick_avg_ms"`
 	TickP95Ms       float64 `json:"tick_p95_ms"`
+	WindowTicks     uint32  `json:"window_ticks"`
 	Warmup          bool    `json:"warmup"`
 	ScriptDeferrals uint64  `json:"script_deferrals"`
 }
@@ -540,7 +621,7 @@ func (m *Match) StatSnapshot() MatchStats {
 	copy(window, m.tickWindow)
 	m.statMu.Unlock()
 	sort.Slice(window, func(i, j int) bool { return window[i] < window[j] })
-	out := MatchStats{Tick: m.tick, Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
+	out := MatchStats{Tick: m.tick, WindowTicks: uint32(len(window)), Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
 	if len(window) > 0 {
 		// 纳秒分辨率：小房单机 warmup 的 tick 可为亚微秒级，µs 取整会归零。
 		var total int64
@@ -554,12 +635,27 @@ func (m *Match) StatSnapshot() MatchStats {
 	return out
 }
 
+// tickTelemetryEventOf projects the same bounded wall-clock window used by
+// /api/stats into the low-frequency client diagnostics stream.
+func tickTelemetryEventOf(st MatchStats) *ombv1.ServerEvent {
+	return &ombv1.ServerEvent{
+		Tick: st.Tick,
+		Kind: &ombv1.ServerEvent_TickTelemetry{TickTelemetry: &ombv1.EvTickTelemetry{
+			Tick: st.Tick, TickAvgMs: st.TickAvgMs, TickP95Ms: st.TickP95Ms,
+			WindowTicks: st.WindowTicks, ScriptDeferrals: st.ScriptDeferrals,
+			TickRate: uint32(sim.TickRate), FrameBudgetMs: sim.FrameBudget.Seconds() * 1000,
+			Warmup: st.Warmup,
+		}},
+	}
+}
+
 // Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
 func (m *Match) Abort() { m.Stop() }
 
 // Release held human controls through the ordinary input/log path. Script-owned
 // axes and assist state survive; the next full snapshot acknowledges this sequence.
 func (m *Match) releaseHumanLocked(pid uint64) {
+	m.rotateInputGenerationLocked(pid)
 	rid, ok := m.robotOf[pid]
 	if !ok {
 		return
@@ -597,12 +693,29 @@ func (m *Match) activeLocked() bool {
 	return m.rc.match == m && (m.handle == nil || (!m.handle.cancelled.Load() && m.rc.launch.Load() == m.handle))
 }
 func (m *Match) bootstrapLocked(s *Session) {
+	// Rotate before publishing the map capability so a reconnect or a
+	// replacement match never advertises a token from an older lifetime.
+	m.rotateInputGenerationLocked(s.playerID)
 	m.sendMapBootstrapLocked(s)
-	m.forceResyncLocked(s.playerID)
+	m.sendResyncScoreboardLocked(s.playerID)
 	m.sendSnippetStateLocked(s)
 	// 版本链补发：异步 NewMatch 装配期间发生的写入只到旧会话；接管/重连
 	// 后由此对齐（Bind 已对无对局场景补发，这里覆盖发布时点）。
 	m.rc.sendScriptVersionsStateLocked(s.playerID)
+}
+
+func (m *Match) bootstrapHostSpectatorLocked(s *Session) {
+	if m.activeLocked() {
+		m.sendMapBootstrapLocked(s)
+		m.forceHostSpectatorResyncLocked(s.playerID)
+		if m.lastScoreboardEv != nil {
+			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.lastScoreboardEv}})
+		}
+		return
+	}
+	if m.finalEnd != nil {
+		m.spectatorReplayEndLocked(s)
+	}
 }
 
 // applySavedPlayerScripts restores room-scoped player code before snippets are
@@ -643,7 +756,11 @@ func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(definition)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
-	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(definition.GeneratorVer), Tuning: simTuning()}}}}})
+	var generation uint32
+	if robot, ok := m.sim.Robot(m.robotOf[s.playerID]); ok {
+		generation = robot.SingleShots.Generation
+	}
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(definition.GeneratorVer), Tuning: simTuning(), Generation: generation, DiscreteShotSupported: true}}}}})
 }
 
 // simTuning 下发客户端可见的对局数值（审计 X-3）：仅漂移高危集（HUD/渲染/
@@ -702,8 +819,23 @@ func (m *Match) forceSpectatorResyncLocked(pid uint64) {
 	if m.finalEnd == nil {
 		return
 	}
-	if s := m.rc.spectators[pid]; s != nil {
+	if s := m.spectatorSessionLocked(pid); s != nil {
 		m.spectatorReplayEndLocked(s)
+	}
+}
+
+func (m *Match) forceHostSpectatorResyncLocked(pid uint64) {
+	if m.activeLocked() {
+		m.specReliableFull[pid] = true
+		if enc := m.specEncoders[pid]; enc != nil {
+			enc.ForceFull()
+		}
+		return
+	}
+	if m.finalEnd != nil {
+		if s := m.spectatorSessionLocked(pid); s != nil {
+			m.spectatorReplayEndLocked(s)
+		}
 	}
 }
 
@@ -749,6 +881,7 @@ func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInp
 		ShieldReadyTick:   robot.Combat.ShieldReady,
 		ShieldStartedTick: robot.Combat.ShieldStarted,
 		Upg:               robot.Upg, // 私密升级状态（ADR-0016）：点数 + 五维等级
+		InputGeneration:   robot.SingleShots.Generation,
 	}
 	if m.ai != nil && m.ai.quota != nil {
 		if pid, ok := m.playerOf[rv.ID]; ok {
@@ -805,7 +938,7 @@ func (m *Match) flushPausedResyncs() {
 		if !m.takeSpecReliableFull(pid) {
 			continue
 		}
-		s := m.rc.spectators[pid]
+		s := m.spectatorSessionLocked(pid)
 		if s == nil {
 			continue
 		}
@@ -850,9 +983,10 @@ func (m *Match) run() {
 		m.scriptPool.Close()
 		if m.log != nil {
 			if err := m.log.Close(); err != nil {
-				log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
+				slog.Error("match.event_log_close_failed", "room_code", m.rc.Code, "error", err)
 			}
 		}
+		slog.Info("match.stopped", "room_code", m.rc.Code, "warmup", m.warmup, "tick", m.tick)
 	}()
 	ticker := time.NewTicker(time.Second / sim.TickRate)
 	defer ticker.Stop()
@@ -949,15 +1083,21 @@ func (m *Match) step() {
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
-	if len(m.rc.spectators) > 0 {
+	if len(m.rc.spectators) > 0 || m.rc.hostSession != nil {
 		obs := snapshot.BuildSpectatorObservation(world)
-		specIDs := make([]uint64, 0, len(m.rc.spectators))
+		specIDs := make([]uint64, 0, len(m.rc.spectators)+1)
 		for pid := range m.rc.spectators {
 			specIDs = append(specIDs, pid)
 		}
+		if m.rc.hostSession != nil {
+			specIDs = append(specIDs, m.rc.hostSession.playerID)
+		}
 		m.parallelFor(len(specIDs), func(i int) {
 			pid := specIDs[i]
-			s := m.rc.spectators[pid]
+			s := m.spectatorSessionLocked(pid)
+			if s == nil {
+				return
+			}
 			enc := m.specEncoderFor(pid)
 			if ended {
 				// No next tick can repair a dropped final frame.
@@ -987,18 +1127,25 @@ func (m *Match) step() {
 	}
 
 	m.maybeBroadcastScoreboard(wv)
+	m.maybeBroadcastTickTelemetry()
 }
 
-// persistAssistStateLocked snapshots post-toggle authority into the room identity
-// so a replacement Match starts with the same assist preference.
+// persistAssistStateLocked snapshots room identity state after a tick, including
+// the generation high-water mark, so replacement matches cannot reuse tokens.
 func (m *Match) persistAssistStateLocked() {
 	for pid, rid := range m.robotOf {
+		robot, ok := m.sim.Robot(rid)
+		if !ok {
+			continue
+		}
+		if m.rc.inputGenerations == nil {
+			m.rc.inputGenerations = make(map[uint64]uint32)
+		}
+		m.rc.inputGenerations[pid] = max(m.rc.inputGenerations[pid], robot.SingleShots.Generation)
 		if m.botRobots[rid] {
 			continue
 		}
-		if robot, ok := m.sim.Robot(rid); ok {
-			m.rc.assist[pid] = robot.Control.Assist
-		}
+		m.rc.assist[pid] = robot.Control.Assist
 	}
 }
 
@@ -1028,7 +1175,19 @@ func (m *Match) maybeBroadcastScoreboard(wv sim.WorldView) {
 	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}}) // 玩家 + 观战者，可靠通道（低频事件，不值得丢）
 }
 
-// scoreboardFingerprint 用 榜位+分数 序列做指纹：顺序或分数变化即视为变更。
+// maybeBroadcastTickTelemetry sends one shared diagnostic sample per second.
+// It uses reliable delivery because the payload is tiny and sparse; the F3
+// panel treats the event as a reading rather than gameplay state.
+func (m *Match) maybeBroadcastTickTelemetry() {
+	if m.tick != 1 && m.tick-m.lastTelemetryTick < sim.TickRate {
+		return
+	}
+	m.lastTelemetryTick = m.tick
+	st := m.StatSnapshot()
+	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: tickTelemetryEventOf(st)}})
+}
+
+// scoreboardFingerprint includes public identity so name-only updates are published.
 func scoreboardFingerprint(rows []stats.ScoreRow) string {
 	var b strings.Builder
 	for i, r := range rows {
@@ -1038,6 +1197,10 @@ func scoreboardFingerprint(rows []stats.ScoreRow) string {
 		b.WriteString(strconv.FormatUint(uint64(r.RobotID), 10))
 		b.WriteByte(':')
 		b.WriteString(strconv.FormatInt(int64(r.Score), 10))
+		b.WriteByte(':')
+		b.WriteString(strconv.Itoa(len(r.Nick)))
+		b.WriteByte(':')
+		b.WriteString(r.Nick)
 	}
 	return b.String()
 }
@@ -1046,7 +1209,7 @@ func scoreboardFingerprint(rows []stats.ScoreRow) string {
 func scoreboardEventOf(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 	out := make([]*ombv1.ScoreRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &ombv1.ScoreRow{Robot: r.RobotID, Score: int32(r.Score)})
+		out = append(out, &ombv1.ScoreRow{Robot: r.RobotID, Score: int32(r.Score), Nick: r.Nick})
 	}
 	return &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_Scoreboard{Scoreboard: &ombv1.EvScoreboard{Rows: out, Tick: tick}}}
 }
@@ -1118,6 +1281,7 @@ func (m *Match) finish(wv sim.WorldView) {
 }
 
 func (m *Match) finishLocked(wv sim.WorldView) {
+	slog.Info("match.finished", "room_code", m.rc.Code, "warmup", m.warmup, "tick", wv.Frame.Tick)
 	rows := m.proj.Final()
 	scores := map[uint64]int32{}
 	for _, r := range rows {
@@ -1137,7 +1301,7 @@ func settledMatchEnd(tick uint32, rows []stats.ScoreRow) *ombv1.ServerEvent {
 func finalRowsOf(rows []stats.ScoreRow) *ombv1.EvMatchEnd {
 	out := &ombv1.EvMatchEnd{}
 	for _, r := range rows {
-		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: r.RobotID, Score: r.Score, Titles: r.Titles})
+		out.Scores = append(out.Scores, &ombv1.ScoreRow{Robot: r.RobotID, Score: r.Score, Titles: r.Titles, Nick: r.Nick})
 	}
 	return out
 }

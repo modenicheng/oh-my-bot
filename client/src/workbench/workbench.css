@@ -153,6 +153,17 @@ html[data-console-resize] * { cursor: ns-resize !important; user-select: none !i
   #workbench-close { margin-left: 0; }
 }
 
+/* Touch battle remains full size; auxiliary tools become an explicit overlay. */
+#view-game.has-workbench:has(.touch-battle) { grid-template-columns: minmax(0, 1fr); }
+/* Keep all battle chrome below the sibling overlay, including nested help/audio. */
+#view-game.has-workbench:has(.touch-battle) #game-stage { isolation: isolate; }
+#view-game:has(.touch-battle) #workbench { position: absolute; inset: 0; z-index: 50; border-left: 0; padding: var(--app-safe-top, env(safe-area-inset-top, 0px)) var(--app-safe-right, env(safe-area-inset-right, 0px)) var(--app-safe-bottom, env(safe-area-inset-bottom, 0px)) var(--app-safe-left, env(safe-area-inset-left, 0px)); }
+#view-game:has(.touch-battle) #workbench-resize { display: none; }
+#view-game:has(.touch-battle) .workbench-tools { align-items: center; min-height: 56px; gap: 6px; padding: 6px 10px; flex-wrap: nowrap; }
+#view-game:has(.touch-battle) #workbench .workbench-tools button { flex: none; min-height: 44px; padding-inline: 10px; white-space: nowrap; }
+#view-game:has(.touch-battle) #workbench #workbench-close { margin-left: auto; border-color: var(--accent); color: var(--accent); background: #15313d; font-weight: 650; }
+#view-game:has(.touch-battle) #workbench #workbench-close:hover { color: var(--bg); background: var(--accent); }
+
 /* ---- 工具面板（Snippet / AI）：整列信息密度，列表滚动、操作条钉底 ---- */
 .workbench-tool-pane { overflow: hidden; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

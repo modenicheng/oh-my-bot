@@ -12,8 +12,8 @@ import (
 // 派生值表（docs/plans/upgrade-system.md 数值冻结）：L1–5 满步长、L6–10 半步长。
 func TestUpgradeDerivedValues(t *testing.T) {
 	s := NewSim(1, []uint32{1}, nil)
-	if s.simulationVersion != 7 {
-		t.Fatalf("simulation version = %d, want 7", s.simulationVersion)
+	if s.simulationVersion != SimulationVersion {
+		t.Fatalf("simulation version = %d, want %d", s.simulationVersion, SimulationVersion)
 	}
 	cases := []struct {
 		level                                              int
