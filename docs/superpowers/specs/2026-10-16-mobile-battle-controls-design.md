@@ -2,7 +2,7 @@
 
 Date: 2026-10-16
 
-Status: interaction proposal confirmed in conversation; written specification awaiting review. This document does not authorize implementation.
+Status: written specification confirmed in conversation; implementation authorized and present on `feat/mobile-battle-controls`. Automated verification is recorded in the implementation plan; Android/iPhone hardware acceptance remains pending.
 
 Confirmed firing-mode decision: continuous fire requires holding the right stick outside its dead zone. Releasing or returning to the dead zone stops firing. Enabling the mode never starts firing by itself.
 
@@ -36,13 +36,13 @@ The design is based on repository HEAD `7e28841`.
 
 ## 3. Landscape Policy And Input Availability
 
-Landscape is mandatory for touch-controlled Warmup and Running battle views. Join, lobby, settings, and full-page manual views may remain portrait. Desktop keyboard/mouse play is not landscape-gated.
+Updated by the user's October 17 layout review: touch devices use a landscape application surface from startup through lobby, battle, workbench, settings, and settlement. Desktop keyboard/mouse play keeps its existing layout.
 
-On an explicit user gesture, attempt fullscreen and then landscape orientation lock when those APIs are available. Failure is a supported path, not an error that prevents landscape play. A device that is already landscape may play without fullscreen or a successful orientation lock.
+Attempt native landscape lock on the first user gesture when supported. Fullscreen is not required and has no mobile battlefield button. If the viewport remains portrait, immediately rotate the complete application surface clockwise and swap its logical width and height. Canvas backing resolution, pointer coordinates, drag geometry, popovers, and safe-area insets share the same logical coordinate space.
 
-In portrait, show a localized rotate-device overlay above the battlefield and controls. It must explain that local manual control is suspended and provide access to leaving/settings; do not rotate the entire document with CSS. Portrait gating does not pause the server or automatically disable Driving Assist.
+Portrait is playable through the rotated surface; do not show a rotate-device blocking screen. A soft keyboard may shrink the visible surface but must not change its orientation. Keep options and workbench controls inside the same transformed surface.
 
-Entering portrait, losing visibility/focus, opening a modal or text-entry panel, disconnecting, awaiting a full snapshot, dying, or leaving the battle cancels all owned gestures. Attempt an explicit neutral update for operated axes while the connection is usable. Clear unsent shot requests, held abilities, continuous fire, and pointer ownership. Do not synthesize a release-to-fire action.
+Changing viewport geometry, losing visibility/focus, opening a modal or text-entry panel, disconnecting, awaiting a full snapshot, dying, or leaving the battle cancels all owned gestures. Attempt an explicit neutral update for operated axes while the connection is usable. Clear unsent shot requests, held abilities, continuous fire, and pointer ownership. Do not synthesize a release-to-fire action.
 
 After recovery, require a new pointer-down gesture. An old finger still on the glass, a repeated key event, or an acknowledgement cannot rearm controls. Only the firing-mode preference survives; held state and pending actions do not.
 
@@ -62,7 +62,7 @@ Prefer the touch layout for touch-primary/coarse-pointer devices, not solely for
 | Inner/upper arc around right stick | Dash, shield, and contextual Uplink interaction buttons |
 | Upper edge of right control cluster | Explicit single-shot / continuous-fire switch |
 
-Use the current Chinese product terminology in visible labels. On touch, do not rely on keyboard hints such as Q, Shift, E/F, R, or Space to explain actions. The mode switch must display its selected mode in text as well as visual state.
+Use the current Chinese product terminology for navigation and accessible labels. On touch, do not rely on keyboard hints such as Q, Shift, E/F, R, or Space to explain actions. The mode switch and abilities use distinct pixel icons, with pressed/active/unavailable/cooldown feedback and Chinese accessible descriptions. Move touch instructions into the options menu; hide battlefield help, audio, replay and fullscreen clutter.
 
 Initial prototype dimensions are 112-128 CSS px for a stick, 52-60 CSS px for ability targets, and at least 8 CSS px between distinct targets. These are UI tuning defaults, not combat constants. Preserve semantic circles for sticks and keep ability buttons consistent with the existing square-button system.
 
@@ -144,7 +144,7 @@ In single-shot aiming, takeover of the fire axis carries false so a Bot Script c
 
 Define a battle interaction domain containing the canvas, touch sticks, and battle-action controls. Focus on a skill or firing-mode control must not release the other thumb. Text inputs, editable content, workbench/manual panels, menus, and modals remain outside the domain and release manual controls. Preserve native keyboard navigation and button activation for non-touch users.
 
-All input gating also checks connection/snapshot readiness, battle visibility, match end, death, portrait blocking, and modal state. A focused control alone cannot enable input while another gate is closed.
+All input gating also checks connection/snapshot readiness, battle visibility, match end, death, and modal state. A focused control alone cannot enable input while another gate is closed. A rotated portrait viewport remains playable.
 
 ## 9. Reliable Single-Shot Contract
 
@@ -187,7 +187,8 @@ Suggested new modules are responsibility boundaries, not a request for a framewo
 | `client/src/game/input/touch-state.ts` | Pure stick geometry, pointer-role state, right-hand transitions, and cancellation; no DOM/network |
 | `client/src/game/input/touch.ts` | Pointer capture and DOM-to-state adapter; no authoritative combat decisions |
 | `client/src/game/mobile-controls.ts` and `.css` | Touch control presentation, hit regions, settings, and state feedback |
-| `client/src/game/orientation.ts` | Best-effort fullscreen/orientation API use and portrait/viewport lifecycle state |
+| `client/src/app/landscape.ts` | Landscape application geometry, native lock enhancement, rotated portrait fallback and shared pointer/rect mapping |
+| `client/src/game/orientation.ts` | Battle viewport geometry lifecycle invalidation |
 | `client/src/game/controls.ts` | Sample/send, local preview, state availability, and lifecycle integration |
 | `client/src/main.ts` | Battle interaction-domain focus and view/panel routing |
 | `protocol/proto/omb.proto` | Additive request, capability, and correlated result definitions |
@@ -204,7 +205,7 @@ DOM listeners, geometry observers, pointer captures, orientation listeners, and 
 4. Add ability transfer, mobile HUD, touch auxiliary actions, mode persistence, and authoritative feedback.
 5. Validate browser fixtures and a real server, then perform Android Chrome and iPhone Safari hardware checks. Browser emulation alone does not establish mobile input feel or orientation support.
 
-Each stage needs focused failing-then-passing tests before proceeding. A detailed task-by-task implementation plan follows written-spec approval; no game implementation is part of this documentation change.
+Each stage needs focused failing-then-passing tests before proceeding. The execution plan and verification record are in `docs/superpowers/plans/2026-10-16-mobile-battle-controls.md`.
 
 ## 13. Acceptance Matrix
 
@@ -232,7 +233,7 @@ Each stage needs focused failing-then-passing tests before proceeding. A detaile
 
 - Exercise landscape viewports at 667x375, 844x390, 932x430, and 1024x768 CSS px, including safe-area variants and portrait transitions. Controls, HUD, and auxiliary drawers do not overlap interactive targets.
 - Exercise multitouch rather than only mouse emulation. Verify default scrolling/zoom suppression is restricted to battle surfaces and text panels still scroll normally.
-- Unsupported/rejected fullscreen and orientation lock still allow landscape play; portrait remains gated. Capability absence shows the explicit mobile compatibility notice.
+- Unsupported/rejected orientation lock still allows native landscape or rotated portrait play without fullscreen. Capability absence shows the explicit mobile compatibility notice.
 - Verify HP/EN, skill state, upgrades, Assist, chat, menu, and room-host actions remain reachable without keyboard shortcuts. Touch controls have localized accessible names and visible non-color-only state.
 - Regress desktop movement/fire, aim guard, focus navigation, panel typing, upgrades, startup, spectating, and replay controls.
 - On real Android Chrome and iPhone Safari, verify two-thumb reach, browser-bar behavior, system gesture edges, cancellation, background/resume, and entry without orientation-lock support. Record tested device/browser versions and any remaining limitations.

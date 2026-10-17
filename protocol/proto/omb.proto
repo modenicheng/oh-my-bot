@@ -79,6 +79,13 @@ message ClientInput {
   // 本帧实际操作过的轴才置位（bit0 move / bit1 aim / bit2 fire / bit3 ability）。
   // 未置位轴 = 本帧未操作：仲裁器不视为抢占，脚本轴保持。
   uint32 axis_mask = 9;
+  SingleShot single_shot = 10; // Discrete release; request ID is this frame's seq.
+}
+
+message SingleShot {
+  double aim = 1;
+  uint32 observed_tick = 2;
+  uint32 generation = 3; // Latest owner bootstrap generation; never resend after resync.
 }
 
 // match_minutes / core_open_minutes：对局时长与核心区开放时点（开局后第几分钟），
@@ -427,6 +434,15 @@ message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务�
   string map_hash = 2;        // 一致性校验
   uint32 generator_version = 3;
   SimTuning tuning = 4;        // 客户端可见对局数值（审计 X-3；缺失 = 旧服务器，客户端用本地兜底）
+  uint32 generation = 5; // Owner input generation, refreshed on match/connection/life changes.
+  bool discrete_shot_supported = 6;
+}
+
+// Terminal feedback, reliable and owner-only (including admission rejections).
+message EvSingleShotResult {
+  uint32 robot = 1;
+  uint32 seq = 2;
+  string outcome = 3; // fired, cooldown, energy, shield, dead, projectile_capacity, etc.
 }
 
 // SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
@@ -545,6 +561,7 @@ message ServerEvent {
     EvScriptRollbackResult script_rollback_result = 36; // 版本回退定向回执（不落事件日志）
     EvPointDropSpawn point_drop_spawn = 37; // 赏金阵亡散落（全场可见，落事件日志）
     EvPointDropPickup point_drop_pickup = 38; // 晶片拾取（全场可见，落事件日志）
+    EvSingleShotResult single_shot_result = 39; // Owner-only; never broadcast to spectators.
   }
 }
 

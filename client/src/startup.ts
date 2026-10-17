@@ -3,12 +3,12 @@ import { advanceProgress, asciiProgress, loadingDots, progressPercent, progressT
 import { hash32 } from './lib/hash'
 import { startupResources } from './startup-resources'
 import { initAppVersion } from './version'
-import { createLogger } from './observability/logger'
-import { initObservability } from './observability/runtime'
+import { initLandscapeViewport, viewportRect } from './app/landscape'
+import './app/mobile-shell.css'
 
-const log = createLogger('startup')
-const disposeObservability = initObservability()
-if (import.meta.hot) import.meta.hot.dispose(disposeObservability)
+const landscapeViewport = initLandscapeViewport()
+if (import.meta.hot) import.meta.hot.dispose(() => landscapeViewport.dispose())
+
 
 const root = document.getElementById('startup')!
 const status = document.getElementById('startup-status')!
@@ -124,7 +124,7 @@ function settleLoadTask(id: LoadTaskId, state: Exclude<ResourceState, 'loading'>
 
 function paint(): void {
   title.textContent = asciiTitle(frame)
-  field.textContent = asciiField(frame++, Math.ceil(innerWidth / 18), Math.ceil(innerHeight / 30))
+  field.textContent = asciiField(frame++, Math.ceil(root.clientWidth / 18), Math.ceil(root.clientHeight / 30))
   renderProgress()
 }
 function stopAnimation(): void { window.clearInterval(animation); animation = undefined }
@@ -136,7 +136,7 @@ function erodeScreen(): void {
   canvas.width = width; canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) { enter(); return }
-  const rect = startPrompt.getBoundingClientRect()
+  const rect = viewportRect(startPrompt)
   const ox = rect.left + rect.width / 2, oy = rect.top + rect.height / 2
   const farthest = Math.hypot(Math.max(ox, width - ox), Math.max(oy, height - oy))
   const cell = 24
@@ -235,7 +235,7 @@ function activate(event: MouseEvent | KeyboardEvent): void {
     if (motion.matches) enter()
     else erodeScreen()
   } catch (error) {
-    log.error('startup.failed', { error })
+    console.error('Startup failed', error)
     starting = false
     fail()
     retry.focus()
@@ -248,7 +248,7 @@ async function prepare(): Promise<void> {
     resource.promise.then(
       loaded => settleLoadTask(resource.id, loaded ? 'done' : 'error'),
       error => {
-        log.warn('startup.resource_unavailable', { resource_id: resource.id, error })
+        console.warn(`Startup resource unavailable: ${resource.id}`, error)
         settleLoadTask(resource.id, 'error')
       },
     )
@@ -269,7 +269,7 @@ async function prepare(): Promise<void> {
     entryPermitted = true
     renderProgress()
   } catch (error) {
-    log.error('startup.client_load_failed', { error })
+    console.error('Client loading failed', error)
     settleLoadTask('client', 'error')
     fail()
   } finally { window.clearTimeout(slow) }

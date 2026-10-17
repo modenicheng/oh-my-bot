@@ -16,6 +16,7 @@ import { fmtClock, setText } from '../ui/dom'
 import { parseReplayNDJSONAsync, type ReplayData } from './model'
 import { ReplayRenderer } from './render'
 import { fetchReplayText, ReplayApiError } from './api'
+import { viewportPoint, viewportRect } from '../app/landscape'
 
 const TICK_HZ = 60
 const SPEEDS = [0.5, 1, 2, 4] as const
@@ -402,7 +403,7 @@ export class ReplayPlayer {
 
   private resize(): void {
     const canvas = this.deps.canvas
-    const rect = canvas.getBoundingClientRect()
+    const rect = viewportRect(canvas)
     if (rect.width <= 0 || rect.height <= 0) return
     const dpr = this.stage.dpr || window.devicePixelRatio || 1
     this.bindRenderer()
@@ -455,9 +456,10 @@ export class ReplayPlayer {
 
   private onCanvasClick(e: PointerEvent): void {
     if (!this.index) return
-    const rect = this.deps.canvas.getBoundingClientRect()
-    const wx = this.cam.toWorldX(e.clientX - rect.left)
-    const wy = this.cam.toWorldY(e.clientY - rect.top)
+    const rect = viewportRect(this.deps.canvas)
+    const point = viewportPoint(e.clientX, e.clientY)
+    const wx = this.cam.toWorldX(point.x - rect.left)
+    const wy = this.cam.toWorldY(point.y - rect.top)
     // Full-map targets retain a 12px hit area at small viewport scales.
     const hitR = Math.max(1.1, 12 / this.cam.scale)
     let bestId: number | null = null

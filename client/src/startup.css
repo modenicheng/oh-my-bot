@@ -1,6 +1,7 @@
 /* 静态首屏先于应用模块显示，ASCII 字符是唯一主视觉。 */
 body[data-startup] { overflow: hidden; }
 body[data-startup]:not([data-startup="eroding"]) > :not(#startup) { visibility: hidden; }
+.startup-content { display: contents; }
 #startup {
   position: fixed; inset: 0; z-index: 10000; overflow: hidden; isolation: isolate;
   background: var(--bg); color: var(--fg); font-family: var(--pixel); outline: none;

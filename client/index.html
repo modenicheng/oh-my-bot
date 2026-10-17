@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <title>oh-my-bot</title>
   <!-- 启动屏首视觉依赖像素字体：提前发起请求，避免 CSS 解析后才发现字体的 swap 闪烁。
@@ -14,6 +14,7 @@
 <body data-startup>
   <section id="startup" role="dialog" tabindex="0" aria-modal="true" aria-labelledby="startup-title" aria-describedby="startup-help startup-status startup-load-note" aria-busy="true" data-state="loading" data-assets="pending">
     <pre id="startup-field" class="startup-field" aria-hidden="true"></pre>
+    <div class="startup-content">
     <div class="startup-brand">
       <h1 id="startup-title" class="startup-sr">OH MY BOT</h1>
       <pre id="startup-ascii" class="startup-ascii" aria-hidden="true">  ####  ##  ##    ##   ## ##  ##    #####   ####  ######
@@ -34,6 +35,7 @@
         <p id="startup-load-note" class="startup-load-note">PREPARING SYSTEMS</p>
       </div>
     </div>
+    </div>
     <p id="startup-status" class="startup-sr" role="status" aria-live="polite" aria-atomic="true">Loading client, fonts, audio, sprites and editor.</p>
     <div class="startup-footer">
       <p id="startup-help">点击任意位置或按键开始 · 启用背景音乐与音效</p>
@@ -44,9 +46,13 @@
   <div class="panel" id="app" inert>
     <!-- 进房界面 -->
     <section id="view-join">
+      <div class="join-brand">
       <img class="robot-mark" src="/src/assets/robot.svg" alt="" width="72" height="72">
       <h1>OH-MY-BOT</h1>
       <div class="sub">进入房间</div>
+      </div>
+      <div class="join-form">
+      <div class="join-identity">
       <label>房间码
         <input type="text" id="in-room" maxlength="8" spellcheck="false" autocomplete="off"
                placeholder="ABC123">
@@ -55,6 +61,7 @@
         <input type="text" id="in-nick" maxlength="16" spellcheck="false" autocomplete="off"
                placeholder="1-16 个字符">
       </label>
+      </div>
       <div id="auth-row" hidden>
         <span id="auth-state"></span>
         <a id="auth-login" href="/auth/login">OIDC 登录</a>
@@ -92,16 +99,25 @@
       </div>
       <button type="button" class="act" id="btn-join"><span data-icon="forward"></span><span>进入房间</span></button>
       <div class="error-line" id="form-error"></div>
+      </div>
+      <div class="join-utilities">
+      <div class="join-secondary">
       <button type="button" class="live-entry" id="btn-live"><span data-icon="spectator"></span><span>实时观战</span></button>
       <button type="button" class="act" id="btn-spectator"><span data-icon="spectator"></span><span>只读观战 · 录像</span></button>
+      </div>
       <p id="app-version">dev</p>
+      </div>
     </section>
     <!-- 房间大厅 -->
     <section id="view-room" hidden>
+      <header class="room-heading">
       <h1>OH-MY-BOT</h1>
       <div id="room-code">······</div>
+      </header>
+      <div class="room-members">
       <div class="field-label">在线成员</div>
       <ul id="members"><li class="placeholder">等待房间状态…</li></ul>
+      </div>
       <div id="room-actions">
         <button type="button" class="act" id="btn-start" hidden><span data-icon="play"></span><span>开始对局</span></button>
         <button type="button" class="act" id="btn-warmup" hidden><span data-icon="target"></span><span>热身场</span></button>
@@ -113,10 +129,12 @@
         <button type="button" class="act" id="btn-leave"><span data-icon="back"></span><span>返回大厅</span></button>
         <div class="room-notice" id="room-notice" hidden></div>
       </div>
+      <footer class="room-footer">
       <div class="error-line" id="room-error" role="alert" hidden></div>
       <div id="room-state">—</div>
       <div id="status"><span class="dot"></span><span id="status-text">connecting…</span></div>
       <button type="button" class="act" id="btn-reconnect" hidden>重新连接</button>
+      </footer>
     </section>
     <!-- 游戏视图（mapBootstrap 后显示） -->
     <section id="view-game" hidden>
@@ -146,6 +164,10 @@
           <label for="game-chat-input">全场发言 <span>· 与脚本 say 共用 3s 冷却</span></label>
           <input id="game-chat-input" type="text" maxlength="320" autocomplete="off" aria-describedby="game-chat-count" placeholder="说点什么…">
           <output id="game-chat-count" for="game-chat-input">0/160 · Enter 发送 · Esc 取消</output>
+          <div class="game-chat-actions">
+            <button type="submit">发送</button>
+            <button type="button" id="game-chat-cancel">取消</button>
+          </div>
         </form>
         <div class="hud-left" id="hud-left">
           <div class="hud-bar-label"><span><span data-icon="heart"></span>HP · 机体</span><span class="hud-bar-num" id="hud-hp-text">100</span></div>

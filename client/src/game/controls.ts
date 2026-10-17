@@ -2,7 +2,7 @@
 // main.ts 在收到 mapBootstrap 事件时调用 enterGame()，收到房间回到大厅信号时调用 exitGame()。
 import { create } from '@bufbuild/protobuf'
 import {
-  AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema, UpgradeRequestSchema,
+  AssistToggleSchema, ClientMsgSchema, ControlSource, SaySchema, UpgradeRequestSchema, SingleShotSchema,
   type ServerMsg, type EvMatchEnd, type SimTuning,
 } from '@omb/protocol'
 import { encodeClient } from '@omb/protocol'
@@ -12,7 +12,8 @@ import { emptyWorld, applySnapshot, buildResync, extractSnapshot, type WorldStat
 import { Camera } from './camera'
 import { CanvasStage } from './canvas-stage'
 import { Renderer, type RenderExtras, type SayBubble } from './render'
-import { InputSampler, AXIS_AIM } from './input'
+import { InputSampler, AXIS_AIM, type TouchInputSnapshot } from './input'
+import { MobileControls } from './mobile-controls'
 import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
 import { UpgradePanel } from './upgrades'
@@ -21,9 +22,8 @@ import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
 import { bgm } from '../music/bgm'
 import { artReady, prepareArt } from './art'
-import { createLogger } from '../observability/logger'
+import { viewportRect } from '../app/landscape'
 
-const log = createLogger('game')
 
 const SEND_HZ = 60
 const FRAME_MS = 1000 / SEND_HZ
@@ -35,6 +35,8 @@ export interface GameDeps {
   send: (data: Uint8Array) => void
   /** 「回到房间」回调：结算层关闭后由大厅接手视图与操作栏（不发 RoomAction） */
   onExitToRoom?: () => void
+  onMenu?: () => void
+  onInputGateChange?: () => void
 }
 
 /** 升级轨展示名（下标与协议 levels 一致；反馈文案专用）。 */
@@ -67,12 +69,21 @@ export class GameController {
   private pausedNote = document.getElementById('game-paused-note') as HTMLElement
   private active = true
   private inputEnabled = true
+  private requestedInput = true
+  private mobile?: MobileControls
+  private shotSupported = false
+  private inputGeneration = 0
+  private paused = false
+  private panelBlocked = false
+  private readonly pendingShots = new Set<number>()
   private resyncAt = -Infinity
   private startCuePending = false
   private assistPreference = false
   private chat = document.getElementById('game-chat') as HTMLFormElement
   private chatInput = document.getElementById('game-chat-input') as HTMLInputElement
   private chatCount = document.getElementById('game-chat-count')!
+  private chatCancel = document.getElementById('game-chat-cancel')
+  private readonly cancelChat = () => this.closeChat(true)
   private chatReadyTick = 0
   private readonly submitChat = (event: Event) => {
     event.preventDefault()
@@ -88,7 +99,8 @@ export class GameController {
   private readonly chatKey = (event: KeyboardEvent) => {
     if (event.isComposing || event.keyCode === 229) return
     if (event.code === 'Escape') { event.preventDefault(); this.closeChat(true) }
-    if (event.code === 'Enter') {
+    // Buttons keep native keyboard activation; only the text field uses this shortcut.
+    if (event.code === 'Enter' && event.target === this.chatInput) {
       event.preventDefault()
       if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) this.submitChat(event)
     }
@@ -96,12 +108,13 @@ export class GameController {
   private readonly countChat = (event?: Event) => {
     const chars = [...this.chatInput.value]
     if (!(event instanceof InputEvent && event.isComposing) && chars.length > 160) this.chatInput.value = chars.slice(0, 160).join('')
-    this.chatCount.textContent = `${Math.min(chars.length, 160)}/160 · Enter 发送 · Esc 取消`
+    this.chatCount.textContent = this.mobile?.touch ? `${Math.min(chars.length, 160)}/160` : `${Math.min(chars.length, 160)}/160 · Enter 发送 · Esc 取消`
   }
   private readonly leaveChat = (event: FocusEvent) => {
     if (!(event.relatedTarget instanceof Node) || !this.chat.contains(event.relatedTarget)) this.closeChat(false)
   }
   private readonly releaseOnBlur = () => {
+    this.mobile?.cancel()
     this.input.release()
     this.sampleAndSend()
   }
@@ -127,11 +140,21 @@ export class GameController {
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )
+    this.mobile = new MobileControls(deps.canvas.parentElement!, {
+      onInput: snapshot => this.applyMobileInput(snapshot),
+      onShot: aim => this.submitMobileShot(aim),
+      onGateChange: () => { this.refreshMobileGate(); deps.onInputGateChange?.() },
+      onAssist: () => this.toggleAssist(),
+      onChat: () => this.openChat(),
+      onMenu: () => deps.onMenu?.(),
+    })
+    this.refreshMobileGate()
     // 瞄准 guard 生效期间鼠标移动被吞时提示按 R（节流在 HUD 内部）。
     this.input.onAimGuarded = () => {
       if (this.active && !this.ended && !document.hidden) this.hud.flashAimGuardHint()
     }
     this.chat.addEventListener('submit', this.submitChat)
+    this.chatCancel?.addEventListener('click', this.cancelChat)
     this.chat.addEventListener('keydown', this.chatKey)
     this.chat.addEventListener('focusout', this.leaveChat)
     this.chatInput.addEventListener('input', this.countChat)
@@ -148,14 +171,21 @@ export class GameController {
   }
 
   /** 收到 mapBootstrap：解析地图，进入游戏态 */
-  onMapBootstrap(mapJson: string, tuning?: SimTuning): boolean {
+  onMapBootstrap(mapJson: string, tuning?: SimTuning, shotSupported = false, generation = 0): boolean {
     try {
       this.map = parseMapDef(mapJson)
     } catch (err) {
-      log.error('game.map_decode_failed', { error: err })
+      console.error('[game] 地图解析失败:', err)
       return false
     }
     this.stopLoops()
+    this.mobile?.resetTakeover()
+    this.input.resetTakeover()
+    this.pendingShots.clear()
+    this.mobile?.setBattleVisible(true)
+    this.shotSupported = shotSupported
+    this.inputGeneration = generation
+    this.mobile?.setCapability(shotSupported && generation !== 0)
     this.ended = false
     this.chatReadyTick = 0
     this.closeChat(false)
@@ -188,6 +218,8 @@ export class GameController {
   /** 房间回到大厅 / 断线：退出游戏态，释放循环 */
   exit(): void {
     this.stopLoops()
+    this.mobile?.dispose()
+    this.pendingShots.clear()
     this.input.detach()
     this.feedback.reset()
     this.hud.dispose()
@@ -195,6 +227,7 @@ export class GameController {
     this.renderer.dispose()
     this.closeChat(false)
     this.chat.removeEventListener('submit', this.submitChat)
+    this.chatCancel?.removeEventListener('click', this.cancelChat)
     this.chat.removeEventListener('keydown', this.chatKey)
     this.chat.removeEventListener('focusout', this.leaveChat)
     this.chatInput.removeEventListener('input', this.countChat)
@@ -218,8 +251,17 @@ export class GameController {
    * 世界本身因服务器停推快照而冻结，这里只负责呈现与提示文案。
    */
   setPaused(paused: boolean, isHost: boolean): void {
+    if (paused && !this.paused && this.mobile?.touch) {
+      this.mobile.cancel()
+      this.input.release()
+      this.sampleAndSend()
+    }
+    this.paused = paused
+    this.syncMobileEnabled()
     this.pausedOverlay.hidden = !paused
-    if (paused) this.pausedNote.textContent = isHost ? '按 ESC 打开选项可继续对局' : '等待房主继续'
+    if (paused) this.pausedNote.textContent = isHost
+      ? this.mobile?.touch ? '打开菜单可继续对局' : '按 ESC 打开选项可继续对局'
+      : '等待房主继续'
   }
 
   /** 「回到房间」：本地关闭结算层并退回大厅视图；不发 RoomAction，
@@ -239,10 +281,20 @@ export class GameController {
     if (snap) {
       const result = applySnapshot(this.world, snap)
       if (result === 'resync-needed' && performance.now() - this.resyncAt > 500) {
-        log.debug('game.resync_requested', { tick: snap.tick, base_tick: snap.baseTick, local_tick: this.world.tick })
+        this.mobile?.setEnabled(false)
+        this.input.release()
+        this.sampleAndSend()
+        this.world.initialized = false
         this.resyncAt = performance.now()
         this.send(buildResync())
       } else if (result === 'applied') {
+        if (snap.self?.inputGeneration !== undefined && snap.self.inputGeneration !== this.inputGeneration) {
+          this.mobile?.resetTakeover()
+          this.input.resetTakeover()
+          this.pendingShots.clear()
+          this.inputGeneration = snap.self.inputGeneration
+          this.mobile?.setCapability(this.shotSupported && this.inputGeneration !== 0)
+        }
         this.scores.observe(this.world.robots)
         this.input.acknowledge(snap.ackSeq)
         if (snap.self?.assistOn !== undefined) {
@@ -263,6 +315,12 @@ export class GameController {
     const ev = msg.payload.value
     if (!(ev.kind.case === 'matchEnd' && this.endShown)) this.feedback.event(ev, this.world, this.map, this.active)
     switch (ev.kind.case) {
+      case 'singleShotResult': {
+        if (ev.kind.value.robot !== this.world.self?.robotId || !this.pendingShots.delete(ev.kind.value.seq) || ev.kind.value.outcome === 'fired') break
+        const reasons: Record<string, string> = { cooldown: '射击冷却中', energy: '射击能量不足', shield: '护盾中无法射击', dead: '阵亡期间无法射击', stale: '射击请求已过期', generation: '射击状态已更新，请重试', overflow: '射击请求过于频繁', projectile_capacity: '暂时无法生成弹丸' }
+        this.hud.flashMsg(reasons[ev.kind.value.outcome] ?? '本次射击未生效')
+        break
+      }
       case 'matchStart':
         // The reliable start event precedes the first full snapshot.
         this.startCuePending = !this.active
@@ -289,6 +347,10 @@ export class GameController {
       case 'matchEnd': {
         if (this.endShown) break // 事件去重：服务器幂等重发时不再重复渲染
         this.scores.accept(ev.kind.value.scores, this.world.tick, true)
+        this.mobile?.setEnabled(false)
+        this.mobile?.setBattleVisible(false)
+        this.input.release()
+        this.sampleAndSend()
         this.ended = true
         this.closeChat(false)
         this.endShown = true
@@ -331,11 +393,13 @@ export class GameController {
   setActive(active: boolean): void {
     if (this.active === active) return
     if (!active && this.map) {
+      this.mobile?.setEnabled(false)
       this.input.release()
       this.sampleAndSend()
       this.input.detach()
     }
     this.active = active
+    this.mobile?.setBattleVisible(active && !this.ended)
     if (!active) { this.feedback.pause(); this.closeChat(false); this.bubbles = [] }
     if (active && this.map) {
       if (this.inputEnabled) this.input.attach(this.canvas, this.cam)
@@ -349,27 +413,42 @@ export class GameController {
       this.feedback.ambience(this.world, this.map, !this.ended)
       this.stage.requestDraw()
     }
+    this.syncMobileEnabled()
   }
 
   /** 焦点离开战场时释放手操；画面、快照和脚本继续运行。 */
   setInputEnabled(enabled: boolean): void {
+    this.requestedInput = enabled
+    enabled = enabled && !this.mobile?.blocked && !this.panelBlocked
     if (this.inputEnabled === enabled) return
     if (!enabled) {
+      this.mobile?.setEnabled(false)
       this.input.release()
       this.sampleAndSend()
       this.input.detach()
     }
     this.inputEnabled = enabled
     if (enabled && this.active && this.map) this.input.attach(this.canvas, this.cam)
+    this.syncMobileEnabled()
   }
+
+  setPanelBlocked(blocked: boolean): void {
+    if (this.panelBlocked === blocked) return
+    this.panelBlocked = blocked
+    this.setInputEnabled(this.requestedInput)
+  }
+
+  get touchLayout(): boolean { return this.mobile?.touch ?? false }
 
   /** 选项层等本地覆盖层打开时释放全部 held 输入，不暂停服务端模拟。 */
   releaseInput(): void {
     if (!this.map || !this.active || !this.inputEnabled) return
+    this.mobile?.setEnabled(false)
     this.input.release()
     this.sampleAndSend()
     this.input.detach()
     this.inputEnabled = false
+    this.requestedInput = false
   }
 
   /** 显式应用 Snippet / AI 结果时开启辅助并归还手操轴，绝不反向关闭。
@@ -421,6 +500,7 @@ export class GameController {
    * 切换成功后同样交回战场，手操抢占立即可用（Space 路径幂等）。 */
   toggleAssist(): void {
     if (!this.active || !this.map || this.ended || !this.world.initialized) return
+    this.mobile?.resetTakeover()
     if (this.input.toggleAssist(this.world.self?.manualAxesMask ?? 0)) {
       this.syncAimGuard()
       audio.play('assist')
@@ -448,6 +528,43 @@ export class GameController {
     this.chatInput.focus({ preventScroll: true })
   }
 
+  private applyMobileInput(snapshot: TouchInputSnapshot): void {
+    if (!this.active || !this.inputEnabled || !this.map || this.ended || this.paused || this.panelBlocked || !this.world.initialized) return
+    if (this.world.robots.get(this.world.self?.robotId ?? 0)?.dead) return
+    this.input.setTouchMode(this.mobile?.touch ?? true)
+    this.input.applyTouch(snapshot)
+    this.sampleAndSend()
+    this.stage.requestDraw()
+  }
+
+  /** Send the release immediately; held input coalescing cannot erase this action. */
+  private submitMobileShot(aim: number): void {
+    if (!this.shotSupported || !this.inputGeneration || !this.mobile?.touch || this.mobile.blocked || !Number.isFinite(aim)
+      || !this.active || !this.inputEnabled || !this.map || this.ended || this.paused || this.panelBlocked || !this.world.initialized) return
+    const self = this.world.robots.get(this.world.self?.robotId ?? 0)
+    if (!self || self.dead) return
+    this.input.prepareSingleShot(aim)
+    const pos = self.base?.pos
+    const { msg } = this.input.sample(pos?.x ?? 0, pos?.y ?? 0)
+    msg.singleShot = create(SingleShotSchema, { aim, observedTick: this.world.tick, generation: this.inputGeneration })
+    if (this.pendingShots.size >= 32) this.pendingShots.delete(this.pendingShots.values().next().value!)
+    this.pendingShots.add(msg.seq)
+    this.send(encodeClient(create(ClientMsgSchema, { payload: { case: 'input', value: msg } })))
+  }
+
+  private refreshMobileGate(): void {
+    if (!this.mobile) return
+    this.input.setTouchMode(this.mobile.touch)
+    this.setInputEnabled(this.requestedInput)
+    this.syncMobileEnabled()
+  }
+
+  private syncMobileEnabled(): void {
+    if (!this.mobile) return
+    const self = this.world.robots.get(this.world.self?.robotId ?? 0)
+    this.mobile?.setEnabled(this.active && this.inputEnabled && !!this.map && this.world.initialized && !this.ended && !this.paused && !self?.dead)
+  }
+
   private closeChat(returnFocus: boolean): void {
     const wasOpen = !this.chat.hidden
     this.chat.hidden = true
@@ -467,7 +584,7 @@ export class GameController {
   private resizeCanvas(w?: number, h?: number, dpr?: number): void {
     if (!this.map) return
     if (w === undefined || h === undefined) {
-      const rect = this.canvas.getBoundingClientRect()
+      const rect = viewportRect(this.canvas)
       w = rect.width; h = rect.height
     }
     if (w <= 0 || h <= 0) return
@@ -523,7 +640,12 @@ export class GameController {
     const self = this.world.robots.get(selfId)
     // 死亡：人工接管归零（服务端重生时已重置控制状态），本地同步清粘滞轴，
     // 防止重生后残余 held 键第一帧重新抢占。
-    if (self?.dead) this.input.resetTakeover()
+    if (self?.dead) {
+      this.mobile?.resetTakeover()
+      this.input.resetTakeover()
+      this.pendingShots.clear()
+    }
+    this.syncMobileEnabled()
     const pos = self?.base?.pos
     const hacking = this.selfHacking(selfId)
     this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
@@ -560,6 +682,7 @@ export class GameController {
     const selfId = this.world.self?.robotId ?? 0, self = this.world.robots.get(selfId)
     this.hud.update(this.world, this.map, this.scores, this.assistAimCapable,
       self ? this.feedback.delayedHealth(selfId, self.hpX10) : undefined)
+    this.mobile?.update()
   }
 
   private sampleAndSend(): void {

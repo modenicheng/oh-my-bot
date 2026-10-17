@@ -1,5 +1,6 @@
 import { Title } from '@omb/protocol'
 import type { RobotEnt } from './world'
+import { landscapeSize, viewportRect } from '../app/landscape'
 import { icon } from '../icons'
 import { setText } from '../ui/dom'
 import './scoreboard.css'
@@ -131,16 +132,17 @@ const titleCleanupByAward = new WeakMap<HTMLElement, () => void>()
 
 function positionTitleDetail(button: HTMLElement, detail: HTMLElement): void {
   const margin = 12, gap = 6
-  detail.style.maxHeight = `${Math.max(120, window.innerHeight - margin * 2)}px`
+  const { width, height } = landscapeSize()
+  detail.style.maxHeight = `${Math.max(120, height - margin * 2)}px`
   detail.style.left = `${margin}px`
   detail.style.top = `${margin}px`
-  const anchor = button.getBoundingClientRect()
-  const popup = detail.getBoundingClientRect()
-  const maxLeft = Math.max(margin, window.innerWidth - popup.width - margin)
+  const anchor = viewportRect(button)
+  const popup = viewportRect(detail)
+  const maxLeft = Math.max(margin, width - popup.width - margin)
   const left = Math.min(Math.max(anchor.left, margin), maxLeft)
   const below = anchor.bottom + gap
   const above = anchor.top - popup.height - gap
-  const top = below + popup.height <= window.innerHeight - margin ? below : Math.max(margin, above)
+  const top = below + popup.height <= height - margin ? below : Math.max(margin, above)
   detail.style.left = `${Math.round(left)}px`
   detail.style.top = `${Math.round(top)}px`
 }
@@ -198,9 +200,11 @@ function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence):
     if (open) {
       positionTitleDetail(button, detail)
       window.addEventListener('resize', onViewportChange)
+      window.addEventListener('landscapechange', onViewportChange)
       window.addEventListener('scroll', onViewportChange, true)
     } else {
       window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('landscapechange', onViewportChange)
       window.removeEventListener('scroll', onViewportChange, true)
     }
   }
@@ -227,6 +231,7 @@ function titleBadge(title: number, score: number, replay?: ReplayTitleEvidence):
   titleCleanupByAward.set(award, () => {
     if (closeTimer) clearTimeout(closeTimer)
     window.removeEventListener('resize', onViewportChange)
+    window.removeEventListener('landscapechange', onViewportChange)
     window.removeEventListener('scroll', onViewportChange, true)
     detail.remove()
   })
@@ -411,17 +416,36 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
     summary.append(text('end-placement', `第 ${ownRank + 1} 名`), text('end-personal', `${own.nick || names.get(self) || `robot-${self}`} · ${own.score} 分`))
   } else summary.append(text('end-placement', '最终战果'))
   summary.append(text('end-field', `${rows.length} 位参赛者`))
-  const help = text('end-help', '悬停或聚焦称号即可浮动查看依据；点击可固定，Esc 关闭。')
+  const help = document.createElement('p'); help.className = 'end-help'
+  help.append(text('end-help-desktop', '悬停或聚焦称号即可浮动查看依据；点击可固定，Esc 关闭。'),
+    text('end-help-touch', '点按称号查看依据，再次点按收起。'))
   const list = document.createElement('ol'); list.className = 'end-list'
   list.setAttribute('aria-label', '最终积分与称号')
   for (const [i, row] of ranked.entries()) {
     list.append(scoreRow({ ...row, rank: i + 1, nick: row.nick || names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
   const footer = document.createElement('footer'); footer.className = 'end-footer'
-  footer.append(text('end-source', '积分与称号以服务器结算为准；未提供的统计不作估算。'))
+  const source = text('end-source', '积分与称号以服务器结算为准')
+  source.append(text('end-source-detail', '；未提供的统计不作估算'), document.createTextNode('。'))
+  footer.append(source)
   if (onBack) {
     const back = document.createElement('button'); back.type = 'button'; back.className = 'end-back'
-    back.textContent = '回到房间'; back.addEventListener('click', onBack); footer.append(back)
+    back.textContent = '回到房间'
+    let activated = false
+    const activate = () => {
+      if (activated) return
+      activated = true
+      onBack()
+      window.setTimeout(() => { activated = false }, 0)
+    }
+    back.addEventListener('click', activate)
+    // A transformed root may receive touchend without Chromium synthesizing click.
+    back.addEventListener('pointerup', event => {
+      if (event.pointerType !== 'touch') return
+      event.preventDefault()
+      activate()
+    })
+    footer.append(back)
   }
   panel.append(header, summary, help)
   if (!rows.length) panel.append(text('end-empty', '本局无得分记录'))

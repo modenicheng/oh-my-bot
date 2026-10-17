@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Camera } from './camera'
-import { AXIS_ABILITY, AXIS_AIM, InputSampler } from './input'
+import { AXIS_ABILITY, AXIS_AIM, AXIS_FIRE, AXIS_MOVE, InputSampler } from './input'
 import { Target, send } from './test-targets'
 
 describe('human input continuity', () => {
@@ -102,5 +102,59 @@ describe('human input continuity', () => {
     expect(stop.msg.aim).toBeCloseTo(Math.PI / 2)
     expect(input.sample(10, 10).active).toBe(false)
     expect(input.aimAt(10, 10)).toBeUndefined()
+  })
+
+  it('samples analog touch movement and directional aim without camera projection', () => {
+    input.setTouchMode(true)
+    input.applyTouch({ moveX: 300, moveY: -400, aim: 1.2, fire: false,
+      dash: false, shield: false, interact: false, axisMask: AXIS_MOVE | AXIS_AIM | AXIS_FIRE })
+    cam.follow(50, -30)
+    const frame = input.sample(-10, 40)
+    expect(frame.msg).toMatchObject({ moveX: 300, moveY: -400, aim: 1.2, fire: false, axisMask: 7 })
+    expect(input.aimAt(-10, 40)).toBe(1.2)
+    expect(input.holdsAim()).toBe(true)
+  })
+
+  it('prevents compatibility mouse events from firing or bending touch aim', () => {
+    input.setTouchMode(true)
+    input.aimUnderScript = true
+    input.applyTouch({ moveX: 0, moveY: 0, aim: 0.7, fire: false,
+      dash: false, shield: false, interact: false, axisMask: AXIS_AIM | AXIS_FIRE })
+    send(canvas, 'mousedown', { button: 0, clientX: 640, clientY: 320 })
+    send(canvas, 'mousemove', { clientX: 440, clientY: 420 })
+    expect(input.sample(10, 10).msg).toMatchObject({ aim: 0.7, fire: false, axisMask: AXIS_AIM | AXIS_FIRE })
+    expect(input.aimUnderScript).toBe(true)
+  })
+
+  it('releases every touch hold without giving operated axes back to scripts', () => {
+    input.setTouchMode(true)
+    input.applyTouch({ moveX: 1000, moveY: 0, aim: 0.3, fire: true,
+      dash: true, shield: false, interact: false, axisMask: 15 })
+    input.release()
+    expect(input.sample(0, 0).msg).toMatchObject({ moveX: 0, moveY: 0, fire: false, dash: false, axisMask: 15 })
+    input.resetTakeover()
+    expect(input.sample(0, 0).active).toBe(false)
+    send(win, 'keydown', { code: 'KeyW', repeat: true })
+    expect(input.sample(0, 0).active).toBe(false)
+  })
+
+  it('cancels the previous source when changing input layouts', () => {
+    send(canvas, 'mousedown', { button: 0, clientX: 640, clientY: 320 })
+    expect(input.sample(10, 10).msg.fire).toBe(true)
+    input.setTouchMode(true)
+    expect(input.sample(10, 10).msg.fire).toBe(false)
+    input.applyTouch({ moveX: 0, moveY: 0, fire: false,
+      dash: false, shield: true, interact: false, axisMask: AXIS_ABILITY })
+    input.setTouchMode(false)
+    expect(input.sample(10, 10).msg.shield).toBe(false)
+  })
+
+  it('prepares one release snapshot without overwriting the other thumb movement', () => {
+    input.setTouchMode(true)
+    input.applyTouch({ moveX: 500, moveY: -200, fire: true,
+      dash: false, shield: false, interact: false, axisMask: AXIS_MOVE | AXIS_FIRE })
+    input.prepareSingleShot(0.8)
+    expect(input.sample(10, 10).msg).toMatchObject({ moveX: 500, moveY: -200, aim: 0.8, fire: false, axisMask: 7 })
+    expect(input.sample(10, 10).msg.fire).toBe(false)
   })
 })

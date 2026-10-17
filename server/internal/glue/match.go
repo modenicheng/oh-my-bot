@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log/slog"
+	"log"
 	"runtime"
 	"sort"
 	"strconv"
@@ -351,6 +351,12 @@ func scriptTickQuota(players int) time.Duration {
 type glueSink struct{ m *Match }
 
 func (g glueSink) OnEvent(tick uint32, ev *ombv1.ServerEvent) {
+	if result := ev.GetSingleShotResult(); result != nil {
+		if g.m.activeLocked() {
+			g.m.sendSingleShotResultLocked(result, tick)
+		}
+		return
+	}
 	if ev.GetMatchEnd() != nil {
 		// The final checkpoint is delivered after Sim emits this marker.
 		// Settle only then so RUNNER includes the last checkpoint interval.
@@ -447,6 +453,7 @@ func (m *Match) ForceResync(pid uint64) {
 	}
 }
 func (m *Match) forceResyncLocked(pid uint64) {
+	m.rotateInputGenerationLocked(pid)
 	m.reliableFull[pid] = true
 	if rid, ok := m.robotOf[pid]; ok {
 		if enc := m.encoders[rid]; enc != nil {
@@ -500,8 +507,58 @@ func (m *Match) ApplyClientInput(pid uint64, in *ombv1.ClientInput) {
 }
 func (m *Match) applyInputLocked(pid uint64, in *ombv1.ClientInput) {
 	if rid, ok := m.robotOf[pid]; ok {
-		m.sim.ApplyInput(rid, in)
+		if in != nil && in.SingleShot != nil && m.sim.SingleShotFeedbackSuppressed(rid, in.Seq, in.SingleShot.Generation) {
+			// Reliable terminal feedback belongs to the original accepted request;
+			// duplicates (including ambiguous evicted IDs) cannot contradict it.
+			return
+		}
+		if in != nil && in.SingleShot != nil && m.reliableFull[pid] {
+			// Reject the action but consume the ordinary frame/sequence, including
+			// its fire release. The same request cannot be replayed after readiness.
+			neutral := &ombv1.ClientInput{Seq: in.Seq, AxisMask: in.AxisMask | uint32(sim.AxisFire), Aim: in.Aim,
+				MoveX: in.MoveX, MoveY: in.MoveY, Dash: in.Dash, Shield: in.Shield, Interact: in.Interact}
+			outcome := m.sim.ApplyInputOutcome(rid, neutral)
+			if outcome == "" {
+				outcome = "not_ready"
+			}
+			m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: in.Seq, Outcome: outcome}, m.sim.CurrentTick())
+			return
+		}
+		if outcome := m.sim.ApplyInputOutcome(rid, in); outcome != "" && in != nil && in.SingleShot != nil {
+			m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: in.Seq, Outcome: outcome}, m.sim.CurrentTick())
+		}
 	}
+}
+
+func (m *Match) sendSingleShotResultLocked(result *ombv1.EvSingleShotResult, tick uint32) {
+	if session := m.rc.sessions[m.playerOf[result.Robot]]; session != nil {
+		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Tick: tick, Kind: &ombv1.ServerEvent_SingleShotResult{SingleShotResult: result}}}})
+	}
+}
+
+// Called only under rc.mu. Match assembly is asynchronous, so tokens are
+// allocated at publication/resync rather than read from room state in NewMatch.
+func (m *Match) rotateInputGenerationLocked(pid uint64) {
+	rid, ok := m.robotOf[pid]
+	if !ok {
+		return
+	}
+	robot, _ := m.sim.Robot(rid)
+	if m.rc.inputGenerations == nil {
+		m.rc.inputGenerations = make(map[uint64]uint32)
+	}
+	previous := max(m.rc.inputGenerations[pid], robot.SingleShots.Generation)
+	generation := previous + 1
+	// Exhaustion fails closed; never wrap a token into a previous lifetime.
+	if previous == ^uint32(0) || (robot.SingleShots.Generation == 0 && m.rc.inputGenerations[pid] != 0) {
+		generation = 0
+	}
+	for _, shot := range robot.SingleShots.Pending {
+		m.sendSingleShotResultLocked(&ombv1.EvSingleShotResult{Robot: rid, Seq: shot.Seq, Outcome: "cancelled"}, m.sim.CurrentTick())
+	}
+	m.sim.SetInputGeneration(rid, generation)
+	// Keep an exhaustion tombstone even if the Sim's disabled generation is 0.
+	m.rc.inputGenerations[pid] = max(previous, generation)
 }
 
 // buyUpgradeLocked 购买一条升级轨的下一级（ADR-0016）。仅正式局（Running）
@@ -569,6 +626,7 @@ func (m *Match) Abort() { m.Stop() }
 // Release held human controls through the ordinary input/log path. Script-owned
 // axes and assist state survive; the next full snapshot acknowledges this sequence.
 func (m *Match) releaseHumanLocked(pid uint64) {
+	m.rotateInputGenerationLocked(pid)
 	rid, ok := m.robotOf[pid]
 	if !ok {
 		return
@@ -606,8 +664,8 @@ func (m *Match) activeLocked() bool {
 	return m.rc.match == m && (m.handle == nil || (!m.handle.cancelled.Load() && m.rc.launch.Load() == m.handle))
 }
 func (m *Match) bootstrapLocked(s *Session) {
-	m.sendMapBootstrapLocked(s)
 	m.forceResyncLocked(s.playerID)
+	m.sendMapBootstrapLocked(s)
 	m.sendSnippetStateLocked(s)
 	// 版本链补发：异步 NewMatch 装配期间发生的写入只到旧会话；接管/重连
 	// 后由此对齐（Bind 已对无对局场景补发，这里覆盖发布时点）。
@@ -652,7 +710,11 @@ func (m *Match) sendMapBootstrapLocked(s *Session) {
 	data, _ := json.Marshal(definition)
 	h := fnv.New128a()
 	_, _ = h.Write(data)
-	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(definition.GeneratorVer), Tuning: simTuning()}}}}})
+	var generation uint32
+	if robot, ok := m.sim.Robot(m.robotOf[s.playerID]); ok {
+		generation = robot.SingleShots.Generation
+	}
+	s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: &ombv1.ServerEvent{Kind: &ombv1.ServerEvent_MapBootstrap{MapBootstrap: &ombv1.EvMapBootstrap{MapJson: string(data), MapHash: hex.EncodeToString(h.Sum(nil)), GeneratorVersion: uint32(definition.GeneratorVer), Tuning: simTuning(), Generation: generation, DiscreteShotSupported: true}}}}})
 }
 
 // simTuning 下发客户端可见的对局数值（审计 X-3）：仅漂移高危集（HUD/渲染/
@@ -758,6 +820,7 @@ func (m *Match) selfInputOf(wv sim.WorldView, rv sim.RobotView) snapshot.SelfInp
 		ShieldReadyTick:   robot.Combat.ShieldReady,
 		ShieldStartedTick: robot.Combat.ShieldStarted,
 		Upg:               robot.Upg, // 私密升级状态（ADR-0016）：点数 + 五维等级
+		InputGeneration:   robot.SingleShots.Generation,
 	}
 	if m.ai != nil && m.ai.quota != nil {
 		if pid, ok := m.playerOf[rv.ID]; ok {
@@ -859,10 +922,9 @@ func (m *Match) run() {
 		m.scriptPool.Close()
 		if m.log != nil {
 			if err := m.log.Close(); err != nil {
-				slog.Error("match.event_log_close_failed", "room_code", m.rc.Code, "error", err)
+				log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
 			}
 		}
-		slog.Info("match.stopped", "room_code", m.rc.Code, "warmup", m.warmup, "tick", m.tick)
 	}()
 	ticker := time.NewTicker(time.Second / sim.TickRate)
 	defer ticker.Stop()
@@ -999,16 +1061,22 @@ func (m *Match) step() {
 	m.maybeBroadcastScoreboard(wv)
 }
 
-// persistAssistStateLocked snapshots post-toggle authority into the room identity
-// so a replacement Match starts with the same assist preference.
+// persistAssistStateLocked snapshots room identity state after a tick, including
+// the generation high-water mark, so replacement matches cannot reuse tokens.
 func (m *Match) persistAssistStateLocked() {
 	for pid, rid := range m.robotOf {
+		robot, ok := m.sim.Robot(rid)
+		if !ok {
+			continue
+		}
+		if m.rc.inputGenerations == nil {
+			m.rc.inputGenerations = make(map[uint64]uint32)
+		}
+		m.rc.inputGenerations[pid] = max(m.rc.inputGenerations[pid], robot.SingleShots.Generation)
 		if m.botRobots[rid] {
 			continue
 		}
-		if robot, ok := m.sim.Robot(rid); ok {
-			m.rc.assist[pid] = robot.Control.Assist
-		}
+		m.rc.assist[pid] = robot.Control.Assist
 	}
 }
 
@@ -1132,7 +1200,6 @@ func (m *Match) finish(wv sim.WorldView) {
 }
 
 func (m *Match) finishLocked(wv sim.WorldView) {
-	slog.Info("match.finished", "room_code", m.rc.Code, "warmup", m.warmup, "tick", wv.Frame.Tick)
 	rows := m.proj.Final()
 	scores := map[uint64]int32{}
 	for _, r := range rows {

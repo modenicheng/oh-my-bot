@@ -10,6 +10,7 @@ import { RoomSession, type SessionState } from './net'
 import { extractSnapshot } from './game/world'
 import { GameController } from './game/controls'
 import { GameOptions } from './game/options'
+import { hasBattleFocus } from './game/battle-focus'
 import { Workbench } from './workbench/workbench'
 import { battleKeyAction, upgradeTrackKey } from './game/shortcut'
 import { bindHelpToggle } from './game/help-toggle'
@@ -51,7 +52,7 @@ const viewReplays = $<HTMLElement>('view-replays')
 const viewReplayPlayer = $<HTMLElement>('view-replay-player')
 const viewLive = $<HTMLElement>('view-live')
 const audioSettings = $<HTMLDetailsElement>('audio-settings')
-viewJoin.appendChild(audioSettings)
+viewJoin.querySelector('.join-utilities')!.appendChild(audioSettings)
 
 // ---- 对局帮助面板：默认折叠，? 展开/收起，Esc 关闭 ------------------------------
 
@@ -102,7 +103,8 @@ function showView(view: View, extra?: RouteExtra): void {
     : view === 'game' ? viewGame.querySelector('.game-tools')!
     : view === 'manual' ? viewManual.querySelector('.manual-top')!
     : view === 'replay-player' || spectatorPlayer ? viewReplayPlayer.querySelector('.rp-buttons')!
-    : view === 'room' ? viewRoom : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin
+    : view === 'room' ? viewRoom.querySelector('.room-footer')!
+    : view === 'replays' || view === 'spectator' ? viewReplays : viewJoin.querySelector('.join-utilities')!
   if (audioSettings.parentElement !== audioHost) { audioSettings.open = false; audioHost.appendChild(audioSettings) }
   if (enteringGame) {
     if (workbench.isOpen && matchMedia('(max-width: 760px)').matches) workbench.activate()
@@ -277,7 +279,10 @@ const workbench = new Workbench({
   docsButton: $<HTMLButtonElement>('btn-game-manual'),
   editorButton: $<HTMLButtonElement>('btn-game-editor'),
   initial: initialRoute,
-  onLayout: () => { if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route) },
+  onLayout: () => {
+    if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route)
+    syncGameInput()
+  },
   send: frame => session?.state === 'online' ? session.send(frame) : false,
   toggleAssist: () => game?.toggleAssist(),
   activateAssist: () => {
@@ -303,9 +308,10 @@ function syncHostControls(): void {
   gameOptions.setHostState(lobby.isHost && lobby.state === EvRoomState_State.R_RUNNING, lobby.paused)
 }
 
-/** 面板可以并排打开，只有战场获得焦点时才接收手操。 */
+/** 战场控件共用焦点域；技能按钮不会中断另一只拇指。 */
 function syncGameInput(): void {
-  game?.setInputEnabled(!gameOptions.isOpen && !viewGame.hidden && !document.hidden && document.hasFocus() && document.activeElement === gameCanvas)
+  game?.setPanelBlocked(!!game.touchLayout && workbench.isOpen)
+  game?.setInputEnabled(!gameOptions.isOpen && !viewGame.hidden && !document.hidden && document.hasFocus() && hasBattleFocus(document.activeElement, gameCanvas))
 }
 
 gameCanvas.addEventListener('pointerdown', () => gameCanvas.focus({ preventScroll: true }))
@@ -328,6 +334,8 @@ function enterGame(): void {
     hudRoot,
     send: (data) => session?.state === 'online' && session.send(data),
     onExitToRoom: exitGame,
+    onMenu: () => { gameOptions.open() },
+    onInputGateChange: syncGameInput,
   })
   // 瞄准能力信号桥：脚本装载/Snippet 应用即重算 guard（早于服务器回显）。
   workbench.setAssistAimListener(capable => game?.setAssistAimCapable(capable))
@@ -399,7 +407,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
       if (!game) enterGame()
       awaitingFull = true
       game?.setActive(false)
-      const ok = game?.onMapBootstrap(ev.kind.value.mapJson, ev.kind.value.tuning) ?? false
+      const bootstrap = ev.kind.value
+      const ok = game?.onMapBootstrap(bootstrap.mapJson, bootstrap.tuning, bootstrap.discreteShotSupported, bootstrap.generation) ?? false
       if (ok) lobby.showRoomError('')
       syncWorkbench()
       if (ok && !utilityView) showView('game')

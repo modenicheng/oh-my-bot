@@ -11,6 +11,7 @@ import { Scoreboard, type ScoreDisplay, ScoreRowRenderer } from './game/scoreboa
 import { bgm } from './music/bgm'
 import { applySnapshot, buildResync, emptyWorld } from './game/world'
 import { el as domEl, fmtClock, setText } from './ui/dom'
+import { viewportRect } from './app/landscape'
 
 export interface LiveSpectatorDeps {
   root: HTMLElement
@@ -298,7 +299,7 @@ export class LiveSpectator {
 
   private resize(): void {
     if (this.disposed) return
-    const rect = this.deps.canvas.getBoundingClientRect()
+    const rect = viewportRect(this.deps.canvas)
     if (rect.width <= 0 || rect.height <= 0) return
     const dpr = this.stage.dpr || window.devicePixelRatio || 1
     this.renderer.resize(rect.width, rect.height, dpr)
