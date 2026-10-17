@@ -7,6 +7,9 @@ import { WsTransport, ServerFrameDecoder, encodeClient,
          type ServerMsg } from '@omb/protocol'
 import { create, fromBinary } from '@bufbuild/protobuf'
 import { wsAuthQuery } from './auth'
+import { createLogger, createRequestId } from './observability/logger'
+
+const log = createLogger('session')
 
 export interface JoinOptions {
   roomCode: string
@@ -71,6 +74,8 @@ export class RoomSession {
   private netBound = false
   private docTarget?: EventTarget
   private readonly decoder = new ServerFrameDecoder()
+  private requestId = ''
+  private malformedFrames = 0
   state: SessionState = 'idle'
 
   /** 启动首个连接尝试；立即返回，后续节奏经 onStateChange/onDisconnect 上报。 */
@@ -103,7 +108,8 @@ export class RoomSession {
     try {
       this.transport.send(msg)
       return true
-    } catch {
+    } catch (error) {
+      log.warn('ws.send_failed', { request_id: this.requestId, error })
       this.loseConnection(this.gen, '连接已中断')
       return false
     }
@@ -138,6 +144,8 @@ export class RoomSession {
     }
     const opts = this.opts
     const gen = ++this.gen
+    this.requestId = createRequestId()
+    this.malformedFrames = 0
     this.decoder.reset()
     clearTimeout(this.retryTimer)
     this.retryTimer = undefined
@@ -148,9 +156,10 @@ export class RoomSession {
     this.transport = t
     t.onMessage((data) => this.onFrame(gen, data))
     t.onClose((reason) => this.onTransportClosed(gen, reason))
-    this.handshakeTimer = setTimeout(() => this.failAttempt(gen), HANDSHAKE_TIMEOUT_MS)
+    this.handshakeTimer = setTimeout(() => this.failAttempt(gen, 'handshake_timeout'), HANDSHAKE_TIMEOUT_MS)
 
-    t.connect(wsUrl()).then(
+    log.info('ws.connecting', { request_id: this.requestId, room_code: opts.roomCode, spectator: !!opts.spectator, attempt: this.attempts + 1 })
+    t.connect(wsUrl(this.requestId)).then(
       () => {
         if (this.closed || gen !== this.gen) return
         try {
@@ -161,11 +170,11 @@ export class RoomSession {
               matchMinutes: opts.matchMinutes ?? 0, coreOpenMinutes: opts.coreOpenMinutes ?? 0,
             }) } })
           t.send(encodeClient(message))
-        } catch {
-          this.failAttempt(gen)
+        } catch (error) {
+          this.failAttempt(gen, 'join_send_failed', error)
         }
       },
-      () => this.failAttempt(gen),
+      (error: unknown) => this.failAttempt(gen, 'connect_failed', error),
     )
   }
 
@@ -174,7 +183,9 @@ export class RoomSession {
     let messages: ServerMsg[]
     try {
       messages = this.decoder.decode(data)
-    } catch {
+    } catch (error) {
+      this.malformedFrames += 1
+      if (this.malformedFrames === 1) log.warn('ws.decode_failed', { request_id: this.requestId, bytes: data.byteLength, error })
       return // 畸形帧丢弃
     }
     for (const msg of messages) {
@@ -209,12 +220,13 @@ export class RoomSession {
   private onTransportClosed(gen: number, reason: string): void {
     if (this.closed || gen !== this.gen) return
     if (this.state === 'online') this.loseConnection(gen, reason)
-    else this.failAttempt(gen) // 握手期断开：不算“已连上后掉线”
+    else this.failAttempt(gen, reason) // 握手期断开：不算“已连上后掉线”
   }
 
   /** 已在线连接的丢失：先立 fence（状态/换代/摘 transport）再回调，防 release→send 递归。 */
   private loseConnection(gen: number, reason: string): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.disconnected', { request_id: this.requestId, room_code: this.opts.roomCode, reason, malformed_frames: this.malformedFrames })
     this.gen += 1 // 立即作废本连接的一切后续事件
     this.clearTimers()
     const opts = this.opts
@@ -228,6 +240,7 @@ export class RoomSession {
 
   private terminalFail(gen: number, reason: string, msg: ServerMsg): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.join_rejected', { request_id: this.requestId, room_code: this.opts.roomCode, reason })
     this.gen += 1
     this.clearTimers()
     const opts = this.opts
@@ -241,8 +254,9 @@ export class RoomSession {
     opts.onDisconnect(`进房失败：${reason}`)
   }
 
-  private failAttempt(gen: number): void {
+  private failAttempt(gen: number, reason = 'connection_lost', error?: unknown): void {
     if (this.closed || gen !== this.gen || !this.opts) return
+    log.warn('ws.attempt_failed', { request_id: this.requestId, room_code: this.opts.roomCode, attempt: this.attempts + 1, reason, error })
     this.gen += 1 // 本次尝试终结：在途回调全部作废，防重复 schedule
     this.clearTimers()
     this.transport?.close()
@@ -275,6 +289,7 @@ export class RoomSession {
   }
 
   private setState(state: SessionState, retryInMs?: number): void {
+    log.info('ws.state_changed', { request_id: this.requestId, room_code: this.opts?.roomCode, previous: this.state, state, retry_in_ms: retryInMs })
     this.state = state
     this.opts?.onStateChange?.(state, retryInMs)
   }
@@ -344,9 +359,10 @@ export class RoomSession {
   }
 }
 
-function wsUrl(): string {
+function wsUrl(requestId: string): string {
   // 同源端口（服务器 embed 前端，HTTP/WS 同端口）；vite dev 由 proxy 转发。
   // 认证开启时附 ?token=（服务端 internal/auth 升级门禁；浏览器 WS 无自定义头）。
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws${wsAuthQuery()}`
+  const auth = wsAuthQuery()
+  return `${proto}://${location.host}/ws${auth}${auth ? '&' : '?'}request_id=${encodeURIComponent(requestId)}`
 }

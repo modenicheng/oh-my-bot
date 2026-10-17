@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
+	"log/slog"
 	"runtime"
 	"sort"
 	"strconv"
@@ -859,9 +859,10 @@ func (m *Match) run() {
 		m.scriptPool.Close()
 		if m.log != nil {
 			if err := m.log.Close(); err != nil {
-				log.Printf("[match %s] event log close error: %v", m.rc.Code, err)
+				slog.Error("match.event_log_close_failed", "room_code", m.rc.Code, "error", err)
 			}
 		}
+		slog.Info("match.stopped", "room_code", m.rc.Code, "warmup", m.warmup, "tick", m.tick)
 	}()
 	ticker := time.NewTicker(time.Second / sim.TickRate)
 	defer ticker.Stop()
@@ -1131,6 +1132,7 @@ func (m *Match) finish(wv sim.WorldView) {
 }
 
 func (m *Match) finishLocked(wv sim.WorldView) {
+	slog.Info("match.finished", "room_code", m.rc.Code, "warmup", m.warmup, "tick", wv.Frame.Tick)
 	rows := m.proj.Final()
 	scores := map[uint64]int32{}
 	for _, r := range rows {

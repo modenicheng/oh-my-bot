@@ -3,6 +3,12 @@ import { advanceProgress, asciiProgress, loadingDots, progressPercent, progressT
 import { hash32 } from './lib/hash'
 import { startupResources } from './startup-resources'
 import { initAppVersion } from './version'
+import { createLogger } from './observability/logger'
+import { initObservability } from './observability/runtime'
+
+const log = createLogger('startup')
+const disposeObservability = initObservability()
+if (import.meta.hot) import.meta.hot.dispose(disposeObservability)
 
 const root = document.getElementById('startup')!
 const status = document.getElementById('startup-status')!
@@ -229,7 +235,7 @@ function activate(event: MouseEvent | KeyboardEvent): void {
     if (motion.matches) enter()
     else erodeScreen()
   } catch (error) {
-    console.error('Startup failed', error)
+    log.error('startup.failed', { error })
     starting = false
     fail()
     retry.focus()
@@ -242,7 +248,7 @@ async function prepare(): Promise<void> {
     resource.promise.then(
       loaded => settleLoadTask(resource.id, loaded ? 'done' : 'error'),
       error => {
-        console.warn(`Startup resource unavailable: ${resource.id}`, error)
+        log.warn('startup.resource_unavailable', { resource_id: resource.id, error })
         settleLoadTask(resource.id, 'error')
       },
     )
@@ -263,7 +269,7 @@ async function prepare(): Promise<void> {
     entryPermitted = true
     renderProgress()
   } catch (error) {
-    console.error('Client loading failed', error)
+    log.error('startup.client_load_failed', { error })
     settleLoadTask('client', 'error')
     fail()
   } finally { window.clearTimeout(slow) }
