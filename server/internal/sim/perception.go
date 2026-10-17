@@ -5,6 +5,30 @@ import (
 	"sort"
 )
 
+const boundarySampleCount = 512
+
+var (
+	boundarySampleAngles = makeBoundarySampleAngles()
+	boundarySampleUnits  = makeBoundarySampleUnits()
+)
+
+func makeBoundarySampleAngles() [boundarySampleCount + 1]float64 {
+	var out [boundarySampleCount + 1]float64
+	for index := range out {
+		out[index] = -math.Pi + 2*math.Pi*float64(index)/boundarySampleCount
+	}
+	return out
+}
+
+func makeBoundarySampleUnits() [boundarySampleCount + 1]Vec2 {
+	var out [boundarySampleCount + 1]Vec2
+	for index, angle := range boundarySampleAngles {
+		sine, cosine := math.Sincos(angle)
+		out[index] = Vec2{X: cosine, Y: sine}
+	}
+	return out
+}
+
 func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2, walls []Wall) *MapDef {
 	local := &MapDef{Version: 1, Partial: true}
 	source := world.Frame.Map
@@ -85,16 +109,17 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 	if math.Abs(center.Len()-boundaryRadius) >= radius {
 		return nil
 	}
-	angles := make([]float64, 0, 514+len(corners)*2)
-	for index := 0; index <= 512; index++ {
-		angles = append(angles, -math.Pi+2*math.Pi*float64(index)/512)
+	type boundaryAngle struct {
+		value  float64
+		sample int // >= 0 for one of the fixed tessellation samples
 	}
+	dynamic := make([]boundaryAngle, 0, 2+len(corners)*2)
 	if distance := center.Len(); distance > 0 {
 		cosine := (distance*distance + boundaryRadius*boundaryRadius - radius*radius) / (2 * distance * boundaryRadius)
 		if cosine > -1 && cosine < 1 {
 			base, offset := math.Atan2(center.Y, center.X), math.Acos(cosine)
 			for _, angle := range []float64{base - offset, base + offset} {
-				angles = append(angles, math.Atan2(math.Sin(angle), math.Cos(angle)))
+				dynamic = append(dynamic, boundaryAngle{value: math.Atan2(math.Sin(angle), math.Cos(angle)), sample: -1})
 			}
 		}
 	}
@@ -114,12 +139,26 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 				continue
 			}
 			point := center.Add(ray.Scale(fraction))
-			angles = append(angles, math.Atan2(point.Y, point.X))
+			dynamic = append(dynamic, boundaryAngle{value: math.Atan2(point.Y, point.X), sample: -1})
 		}
 	}
-	sort.Float64s(angles)
-	pointAt := func(angle float64) Vec2 {
-		sine, cosine := math.Sincos(angle)
+	sort.Slice(dynamic, func(i, j int) bool { return dynamic[i].value < dynamic[j].value })
+	angles := make([]boundaryAngle, 0, len(boundarySampleAngles)+len(dynamic))
+	dynamicIndex := 0
+	for sample, angle := range boundarySampleAngles {
+		for dynamicIndex < len(dynamic) && dynamic[dynamicIndex].value < angle {
+			angles = append(angles, dynamic[dynamicIndex])
+			dynamicIndex++
+		}
+		angles = append(angles, boundaryAngle{value: angle, sample: sample})
+	}
+	angles = append(angles, dynamic[dynamicIndex:]...)
+	pointAt := func(angle boundaryAngle) Vec2 {
+		if angle.sample >= 0 {
+			unit := boundarySampleUnits[angle.sample]
+			return Vec2{unit.X * boundaryRadius, unit.Y * boundaryRadius}
+		}
+		sine, cosine := math.Sincos(angle.value)
 		return Vec2{cosine * boundaryRadius, sine * boundaryRadius}
 	}
 	type visibleArc struct{ start, end float64 }
@@ -128,32 +167,32 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 	endpointRadiusSquared := (radius + 1e-7) * (radius + 1e-7)
 	for index := 1; index < len(angles); index++ {
 		left, right := angles[index-1], angles[index]
-		if right-left < 1e-10 {
+		if right.value-left.value < 1e-10 {
 			continue
 		}
-		midpoint, start, end := pointAt((left+right)/2), pointAt(left), pointAt(right)
+		midpoint, start, end := pointAt(boundaryAngle{value: (left.value + right.value) / 2, sample: -1}), pointAt(left), pointAt(right)
 		if distanceSquared(center, midpoint) > radiusSquared || distanceSquared(center, start) > endpointRadiusSquared || distanceSquared(center, end) > endpointRadiusSquared || !visible(center, midpoint) {
 			continue
 		}
-		if len(arcs) > 0 && math.Abs(arcs[len(arcs)-1].end-left) < 1e-10 {
-			arcs[len(arcs)-1].end = right
+		if len(arcs) > 0 && math.Abs(arcs[len(arcs)-1].end-left.value) < 1e-10 {
+			arcs[len(arcs)-1].end = right.value
 		} else {
-			arcs = append(arcs, visibleArc{start: left, end: right})
+			arcs = append(arcs, visibleArc{start: left.value, end: right.value})
 		}
 	}
 	var edges []BoundaryEdge
 	for _, arc := range arcs {
-		start := pointAt(arc.start)
-		for index := 1; index < 512; index++ {
-			angle := -math.Pi + 2*math.Pi*float64(index)/512
+		start := pointAt(boundaryAngle{value: arc.start, sample: -1})
+		for index := 1; index < boundarySampleCount; index++ {
+			angle := boundarySampleAngles[index]
 			if angle <= arc.start+1e-10 || angle >= arc.end-1e-10 {
 				continue
 			}
-			end := pointAt(angle)
+			end := pointAt(boundaryAngle{sample: index})
 			edges = append(edges, BoundaryEdge{Kind: kind, Start: start, End: end})
 			start = end
 		}
-		edges = append(edges, BoundaryEdge{Kind: kind, Start: start, End: pointAt(arc.end)})
+		edges = append(edges, BoundaryEdge{Kind: kind, Start: start, End: pointAt(boundaryAngle{value: arc.end, sample: -1})})
 	}
 	return edges
 }
