@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0-rc.5](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.5...v1.2.0-rc.5) (2026-10-17)
+
+
+### Features
+
+* expose bounded simulation stage timings ([a3e4065](https://github.com/modenicheng/oh-my-bot/commit/a3e4065994592a3b3cc2bb1feb3610ac19980a21))
+* optimize mobile battle controls ([30fa088](https://github.com/modenicheng/oh-my-bot/commit/30fa0887ecba2a98579cfdd854e0244b665952aa))
+
+
+### Performance Improvements
+
+* avoid repeated script roster lookups ([3601fb2](https://github.com/modenicheng/oh-my-bot/commit/3601fb2668638efba5124246d9b676ad8e04e8f2))
+* cache boundary tessellation samples ([8bc781e](https://github.com/modenicheng/oh-my-bot/commit/8bc781e766e71701f43788a2a6bd0432494def2d))
+* lazily materialize script observations ([be847f2](https://github.com/modenicheng/oh-my-bot/commit/be847f21ad6f3d2ae5b0ed8ebb620ec0f5603669))
+* narrow local map wall candidates ([5a2073d](https://github.com/modenicheng/oh-my-bot/commit/5a2073d78c72d931396365dcd2a43840d3996f4c))
+* optimize large-room perception scheduling ([9d1d2b1](https://github.com/modenicheng/oh-my-bot/commit/9d1d2b1ffec4832e2100d7c5439a801285ed7050))
+* reduce perception geometry math ([8757bd6](https://github.com/modenicheng/oh-my-bot/commit/8757bd6cf32bcb1e367e6da53018560bddb836e7))
+* reject distant pickups before collision sweeps ([a8e102a](https://github.com/modenicheng/oh-my-bot/commit/a8e102a64027097615f1894f412fad8aaeccf066))
+
 ## [1.1.0-rc.5](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.4...v1.1.0-rc.5) (2026-10-17)
 
 
