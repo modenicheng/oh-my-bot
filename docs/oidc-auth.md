@@ -117,6 +117,47 @@ OMB_AUTH_SECRET=<32 字节以上随机串>   # openssl rand -hex 32
 - `server/cmd/omb`：/auth/* 路由行为（502/400/401）、/ws 门禁（无 token/过期
   token 401）、合法 token 放行且昵称接管、认证关闭时行为与历史版本一致。
 - `client/src/auth.test.ts`：token 解码与 URL 提取纯函数。
+- `client/scripts/oidc-check.mjs`：真实 Keycloak 授权码登录 → 房间身份 →
+  开局失败后重试 → 200 席位对局地图与玩家快照 → 刷新和 WS 重连后恢复同一
+  Robot。脚本使用临时配置与数据目录，监听 `127.0.0.1:18430`，不读取本地
+  生产配置，也不修改现有开发服务。
+
+在仓库根目录先启动测试 Keycloak（Windows 可在 Debian WSL 中执行）：
+
+```bash
+podman run --rm -d --name omb-oidc-test \
+  -p 127.0.0.1:18080:8080 \
+  -v "$(pwd)/client/scripts/fixtures/oidc:/opt/keycloak/data/import:ro" \
+  quay.io/keycloak/keycloak:26.5.2 start-dev --import-realm
+```
+
+构建后执行测试，完成后停止测试容器：
+
+```bash
+bash build.sh
+pnpm --filter client test:oidc
+podman stop omb-oidc-test
+```
+
+`OMB_BINARY` 可指定已有服务端二进制（绝对路径）；Linux 下设置为
+`<仓库绝对路径>/server/omb`。测试也可通过 `OMB_TEST_OIDC_ISSUER`、
+`OMB_TEST_OIDC_USERNAME`、`OMB_TEST_OIDC_PASSWORD` 与
+`OMB_TEST_OIDC_CLIENT_SECRET` 接入另一个测试 realm，其 confidential client
+ID 仍为 `omb`，回调需登记 `http://127.0.0.1:18430/auth/callback`。
+`OMB_TEST_AUTH_ENABLED=false` 可运行关闭认证的对照组。
+
+### 已定位：登录后房间在线，但游戏不出现
+
+若房间显示“对局中”、WS 心跳正常，却没有地图与快照，先检查开局组装是否失败。
+200 席位房间自动补充 199 个 Bot 时，每个 Bot 的 tick 配额为 4ms；此前脚本
+初始化也复用了这个配额，机器繁忙时可能出现
+`match launch failed: test bot …: evaluate: script: tick quota exceeded`。
+这发生在认证成功之后，不是 token 交换或 WS 门禁拒绝。
+
+内置 Bot 现在在异步开局期间使用独立的 1s 初始化预算，运行中的 tick
+配额不变。任何开局组装失败都会让当前房间回到可重试的结束状态、保留成员与
+房主，并在房间页显示原因。服务端日志同时记录房码、seed、人数与错误；
+修复原因后可直接重试开始对局或热身场。
 
 ## 已知边界
 

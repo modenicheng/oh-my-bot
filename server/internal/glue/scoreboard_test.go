@@ -3,6 +3,8 @@ package glue
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/stats"
 )
@@ -47,7 +49,7 @@ func TestScoreboardEventOfConvertsLiveRows(t *testing.T) {
 	}
 	for i, want := range rows {
 		got := sb.Rows[i]
-		if got.Robot != want.RobotID || got.Score != int32(want.Score) {
+		if got.Robot != want.RobotID || got.Score != int32(want.Score) || got.Nick != want.Nick {
 			t.Fatalf("row %d mismatch: got=%+v want=%+v", i, got, want)
 		}
 		if len(got.Titles) != 0 {
@@ -56,7 +58,30 @@ func TestScoreboardEventOfConvertsLiveRows(t *testing.T) {
 	}
 }
 
-// TestScoreboardFingerprintDetectsChange 指纹应能区分榜位与分数变化，忽略昵称等不影响排序的因素。
+func TestScoreboardNamesSurviveWireAndSettlement(t *testing.T) {
+	rows := []stats.ScoreRow{{RobotID: 723663206, Nick: "TEST-BOT-134", Score: 2178}}
+	for _, ev := range []*ombv1.ServerEvent{scoreboardEventOf(60, rows), settledMatchEnd(120, rows)} {
+		data, err := proto.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded ombv1.ServerEvent
+		if err := proto.Unmarshal(data, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		var got []*ombv1.ScoreRow
+		if sb := decoded.GetScoreboard(); sb != nil {
+			got = sb.Rows
+		} else {
+			got = decoded.GetMatchEnd().Scores
+		}
+		if len(got) != 1 || got[0].Nick != rows[0].Nick {
+			t.Fatalf("global name lost on the wire: %+v", got)
+		}
+	}
+}
+
+// TestScoreboardFingerprintDetectsChange includes every field published in live rows.
 func TestScoreboardFingerprintDetectsChange(t *testing.T) {
 	base := []stats.ScoreRow{{RobotID: 1, Score: 30}, {RobotID: 2, Score: 10}}
 	if scoreboardFingerprint(base) != scoreboardFingerprint([]stats.ScoreRow{{RobotID: 1, Score: 30}, {RobotID: 2, Score: 10}}) {
@@ -68,10 +93,16 @@ func TestScoreboardFingerprintDetectsChange(t *testing.T) {
 	if scoreboardFingerprint(base) == scoreboardFingerprint([]stats.ScoreRow{{RobotID: 1, Score: 31}, {RobotID: 2, Score: 10}}) {
 		t.Fatal("fingerprint ignores score change")
 	}
-	// 昵称/PlayerID 变化不影响指纹：榜的展示由客户端拼，服务器只重发榜序与分数。
+	// Nick changes must refresh names even when scores stay equal.
 	same := []stats.ScoreRow{{RobotID: 1, PlayerID: 9, Nick: "新昵称", Score: 30}, {RobotID: 2, PlayerID: 8, Nick: "乙", Score: 10}}
+	if scoreboardFingerprint(base) == scoreboardFingerprint(same) {
+		t.Fatal("fingerprint ignores nickname change")
+	}
+	for i := range same {
+		same[i].Nick = ""
+	}
 	if scoreboardFingerprint(base) != scoreboardFingerprint(same) {
-		t.Fatal("fingerprint should not depend on nick/player id")
+		t.Fatal("fingerprint should not depend on private player id")
 	}
 }
 

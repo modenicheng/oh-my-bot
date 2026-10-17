@@ -14,6 +14,7 @@ import { AI_SCRIPT_RESULT_ID } from './ai-assist'
 import { applyScriptVersions, currentVersion, emptyScriptVersionState, normalizeScriptLanguage, planEditorSync, shouldAutoFillEditor, type LoadedScript, type ScriptVersionState } from './script-versions'
 import { ScriptVersionDrawer } from './script-version-drawer'
 import { el as domEl } from '../ui/dom'
+import { landscapeSize, viewportPoint, viewportRect } from '../app/landscape'
 import './workbench.css'
 
 export const INITIAL_SOURCE_TS = `import type { BotContext } from '@omb/bot-api'
@@ -289,7 +290,7 @@ export class Workbench {
 
   activate(): void {
     this.renderSizes()
-    if (this.isOpen && window.matchMedia('(max-width: 760px)').matches) this.focusPanel(this.primaryPanel())
+    if (this.isOpen && this.usesOverlay()) this.focusPanel(this.primaryPanel())
     if (this.panels.has('docs')) void this.manual.open(this.docPath)
     if (this.panels.has('editor')) void this.ensureEditor()
     if (this.panels.has('snippets') || this.panels.has('ai')) this.renderToolPanels()
@@ -388,7 +389,11 @@ export class Workbench {
   }
 
   private maxWidth(): number {
-    return Math.max(MIN_WIDTH, (this.deps.gameView.clientWidth || document.documentElement.clientWidth) - MIN_BATTLEFIELD_WIDTH)
+    return Math.max(MIN_WIDTH, (this.deps.gameView.clientWidth || landscapeSize().width) - MIN_BATTLEFIELD_WIDTH)
+  }
+
+  private usesOverlay(): boolean {
+    return landscapeSize().width <= 760 || this.deps.gameView.querySelector('.touch-battle') !== null
   }
 
   private renderSizes(): void {
@@ -411,7 +416,7 @@ export class Workbench {
     this.splitHandle.setAttribute('aria-valuenow', String(this.ratio))
     this.splitHandle.setAttribute('aria-valuetext', `文档 ${this.ratio}%，编辑器 ${100 - this.ratio}%`)
     const restoreFocus = document.activeElement === this.resizeHandle
-    this.resizeHandle.hidden = window.matchMedia('(max-width: 760px)').matches
+    this.resizeHandle.hidden = this.usesOverlay()
     if (restoreFocus && this.resizeHandle.hidden && this.isOpen) this.focusPanel(this.primaryPanel())
   }
 
@@ -459,11 +464,12 @@ export class Workbench {
       event.preventDefault()
       handle.focus({ preventScroll: true })
       handle.setPointerCapture(event.pointerId)
+      const point = viewportPoint(event.clientX, event.clientY)
       drag = {
         pointerId: event.pointerId,
-        start: isWidth ? event.clientX : event.clientY,
+        start: isWidth ? point.x : point.y,
         value: isWidth ? Math.min(this.width, this.maxWidth()) : this.ratio,
-        span: Math.max(1, this.docsPane.getBoundingClientRect().height + this.editorPane.getBoundingClientRect().height),
+        span: Math.max(1, viewportRect(this.docsPane).height + viewportRect(this.editorPane).height),
       }
       this.stopResizing = finish
       document.documentElement.dataset.workbenchResize = axis
@@ -472,8 +478,9 @@ export class Workbench {
     handle.addEventListener('pointermove', event => {
       if (!drag || event.pointerId !== drag.pointerId) return
       event.preventDefault()
-      if (isWidth) this.width = Math.max(MIN_WIDTH, Math.min(this.maxWidth(), drag.value - (event.clientX - drag.start)))
-      else this.ratio = drag.value + (event.clientY - drag.start) / drag.span * 100
+      const point = viewportPoint(event.clientX, event.clientY)
+      if (isWidth) this.width = Math.max(MIN_WIDTH, Math.min(this.maxWidth(), drag.value - (point.x - drag.start)))
+      else this.ratio = drag.value + (point.y - drag.start) / drag.span * 100
       this.renderSizes()
     })
     handle.addEventListener('pointerup', finish)

@@ -144,8 +144,10 @@ async function visionOps(phase: number, unlockPhase: number, walls: MapWall[] = 
   const cam = new Camera()
   cam.resize(800, 500, 80)
   cam.follow(self.x, self.y)
+  const world = worldAt(phase, self.x, self.y), terrain = map(unlockPhase, walls)
+  renderer.prepare(world, terrain, cam, { bubbles: [] })
   ;(renderer as unknown as { drawVisionMask(w: WorldState, m: MapDefParsed, c: Camera): void })
-    .drawVisionMask(worldAt(phase, self.x, self.y), map(unlockPhase, walls), cam)
+    .drawVisionMask(world, terrain, cam)
   return { ops, cam }
 }
 
@@ -224,6 +226,7 @@ describe('drawVisionMask exact projected wall shadows', () => {
     const restoreIdx = ops.findIndex((o, i) => o.op === 'restore' && i > clipIdx)
     const innerFills = ops.slice(clipIdx, restoreIdx).filter(o => o.op === 'fill')
     expect(innerFills).toHaveLength(1)
+    expect(innerFills[0]?.args).toEqual([]) // nonzero: overlapping wall shadows must not cancel
     // 影多边形顶点有限（无 NaN 进入 Canvas 路径）。
     for (const p of paths) for (const v of p) expect(Number.isFinite(v.x) && Number.isFinite(v.y)).toBe(true)
   })
@@ -327,7 +330,7 @@ describe('drawVisionMask exact projected wall shadows', () => {
 
   it('edge feather gradient stays after the shadow block (unchanged contract)', async () => {
     const { ops, cam } = await visionOps(1, 2, [wall(46, -2, 50, 2)])
-    // 最后一块纯圆填充 = 边缘渐变（自机圆心 + 视野半径）。
+    // The last disc is the feather, centered on the observer rather than the arena.
     const discs = discFills(ops)
     expect(discs[discs.length - 1]).toEqual({ x: cam.toPxX(40), y: cam.toPxY(0), r: 20 * cam.scale })
   })
@@ -483,6 +486,74 @@ describe('render() uplink anchoring', () => {
   })
 })
 
+describe('prepared rendering', () => {
+  it('precomputes fixed arena directions before repeated drawing', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera(); cam.resize(800, 500, 80)
+    const world = emptyWorld(), terrain = map(2)
+    renderer.prepare(world, terrain, cam, { bubbles: [] })
+    const sin = vi.spyOn(Math, 'sin'), cos = vi.spyOn(Math, 'cos')
+    try {
+      for (let i = 0; i < 20; i++) renderer.render(world, terrain, cam, { bubbles: [] })
+      expect(sin.mock.calls.length).toBe(0)
+      expect(cos.mock.calls.length).toBe(0)
+    } finally { sin.mockRestore(); cos.mockRestore() }
+  })
+
+  it('invalidates prepared vision geometry when observer, range, or map changes', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx, ops } = recordingCtx()
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera(); cam.resize(800, 500, 80); cam.follow(40, 0)
+    const world = worldAt(2, 40, 0), terrain = map(2, [wall(46, -2, 50, 2)])
+    const drawMask = () => {
+      ops.length = 0
+      ;(renderer as unknown as { drawVisionMask(w: WorldState, m: MapDefParsed, c: Camera): void }).drawVisionMask(world, terrain, cam)
+      return shadowSubpaths(ops)
+    }
+    renderer.prepare(world, terrain, cam, { bubbles: [] })
+    const first = drawMask()
+    expect(first).toHaveLength(1)
+    world.robots.get(1)!.base!.pos!.y = 5
+    renderer.prepare(world, terrain, cam, { bubbles: [] })
+    expect(drawMask()).not.toEqual(first)
+    world.visionRadius = 1
+    renderer.prepare(world, terrain, cam, { bubbles: [] })
+    expect(drawMask()).toHaveLength(0)
+  })
+
+  it('prepares speech and gradients before drawing and reuses them until inputs change', async () => {
+    const { Renderer } = await import('./render')
+    const { ctx, ops } = recordingCtx()
+    const measure = vi.fn((value: string) => ({ width: value.length * 8 }))
+    const radial = vi.fn(() => ({ addColorStop: () => {} }))
+    const linear = vi.fn(() => ({ addColorStop: () => {} }))
+    Object.assign(ctx, { measureText: measure, createRadialGradient: radial, createLinearGradient: linear })
+    const renderer = new Renderer({ getContext: () => ctx, width: 800, height: 500 } as unknown as HTMLCanvasElement)
+    const cam = new Camera()
+    cam.resize(800, 500, 80); cam.follow(40, 0)
+    const world = worldAt(2, 40, 0), terrain = map(2)
+    const bubble = { robotId: 1, text: 'Prepared speech '.repeat(8), at: performance.now() }
+    const extras = { bubbles: [bubble] }
+    renderer.prepare(world, terrain, cam, extras)
+    expect(measure).toHaveBeenCalled()
+    expect(radial).toHaveBeenCalledOnce()
+    measure.mockClear(); radial.mockClear(); linear.mockClear()
+    renderer.prepare(world, terrain, cam, extras)
+    for (let i = 0; i < 20; i++) renderer.render(world, terrain, cam, extras)
+    expect(measure).not.toHaveBeenCalled()
+    expect(radial).not.toHaveBeenCalled()
+    expect(linear).not.toHaveBeenCalled()
+    expect(ops.some(op => op.op === 'fillText' && String(op.args[0]).includes('Prepared'))).toBe(true)
+    cam.resize(160, 500, 80)
+    renderer.prepare(world, terrain, cam, extras)
+    expect(measure).toHaveBeenCalled()
+    expect(radial).toHaveBeenCalledOnce()
+  })
+})
+
 // 64 人房间固定相机夹具：世界状态可含 64 台，但机器人本体/白条热路径只处理
 // 当前画布附近的实体。20m 视野与阴影仍由 render() 的统一遮罩在后续层约束。
 describe('render() local health-pack visibility', () => {
@@ -504,6 +575,7 @@ describe('render() local health-pack visibility', () => {
     expect(ops).toEqual(baseline)
     world.localMap.healthPacks = terrain.healthPacks
     world.healthPacks.set(5, { available: false, respawnInS: 9, seenAt: 0 } as never)
+    renderer.prepare(world, terrain, cam, { bubbles: [] })
     ops.length = 0
     renderer.render(world, terrain, cam, { bubbles: [] })
     expect(ops.some(operation => operation.op === 'fillText' && operation.args[0] === '9s')).toBe(true)

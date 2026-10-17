@@ -1,5 +1,10 @@
 # Copy to config.yaml beside the omb executable (or in the process cwd).
 # Secrets do not belong here; put DEEPSEEK_API_KEY in .env.
+log:
+  level: info   # debug | info | warn | error | off
+  format: text  # text for local debugging; json for log collection
+  source: false # include Go source locations
+
 ai:
   enabled: false
   model: deepseek-flash

@@ -101,7 +101,7 @@ describe('confirmed feedback transitions', () => {
     expect(sound.play.mock.calls.filter(c => c[0] === 'shieldHit')).toHaveLength(1)
   })
 
-  it('deduplicates banners by tick, kind and payload while keeping distinct kills and remote uplinks', () => {
+  it('keeps kill feedback deduplicated without emitting kill messages', () => {
     const f = fixture(); f.consume(snap(10, 0, true))
     f.world.robots.get(1)!.nick = '阿甲'
     f.world.robots.set(2, { ...create(RobotStateSchema, { base: { id: 2, pos: { x: 42, y: 0 } }, nick: '阿乙' }), seenAt: 0 })
@@ -109,10 +109,7 @@ describe('confirmed feedback transitions', () => {
     const other = create(ServerEventSchema, { tick: 11, kind: { case: 'kill', value: { killer: 1, victim: 3, at: { x: 42, y: 0 } } } })
     const hack = create(ServerEventSchema, { tick: 11, kind: { case: 'uplinkHack', value: { by: 2, uplinkId: 10, value: 15 } } })
     for (const ev of [kill, kill, other, other, hack, hack]) f.feedback.event(ev, f.world, map, true)
-    expect(f.message.mock.calls).toEqual([
-      ['阿甲 击毁 阿乙', 'kill', { id: 1, name: '阿甲' }],
-      ['阿甲 击毁 robot-3', 'kill', { id: 1, name: '阿甲' }], ['阿乙 黑入完成 · +15 分', 'uplink'],
-    ])
+    expect(f.message.mock.calls).toEqual([['阿乙 黑入完成 · +15 分', 'uplink']])
     expect(cueCount('death')).toBe(2)
     expect(cueCount('uplinkSuccess')).toBe(1)
     f.feedback.event(create(ServerEventSchema, { tick: 12, kind: kill.kind }), f.world, map, true)
@@ -648,8 +645,10 @@ describe('canvas quiescence gate (C-26 idle skip)', () => {
       if (f.feedback.quiet(tick)) converged = tick
     }
     expect(converged).toBeGreaterThan(0)
-    f.feedback.cameraZoom(converged + 1, false) // 目标切回 1：重新推进
-    expect(f.feedback.quiet(converged + 1)).toBe(false)
+    expect(f.feedback.cameraZoom(converged, true)).toBe(.92)
+    expect(f.feedback.cameraZoom(converged + 1, true)).toBe(.92)
+    f.feedback.cameraZoom(converged + 2, false) // 目标切回 1：重新推进
+    expect(f.feedback.quiet(converged + 2)).toBe(false)
   })
 
   it('recovers from a quiet canvas immediately when a new effect appears', () => {

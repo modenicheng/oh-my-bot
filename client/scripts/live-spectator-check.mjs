@@ -223,9 +223,12 @@ try {
     }
     assert.ok(await pixels(watch) > 20, `nonblank narrow canvas ${width}px`)
     await watch.locator('#audio-settings summary').click()
-    const audioBounds = await watch.locator('.audio-row').boundingBox()
-    assert.ok(audioBounds.x >= 0 && audioBounds.x + audioBounds.width <= width, `audio popup fits at ${width}px`)
-    await watch.locator('#audio-mute').click()
+    for (const row of await watch.locator('.audio-row').all()) {
+      const audioBounds = await row.boundingBox()
+      assert.ok(audioBounds.x >= 0 && audioBounds.x + audioBounds.width <= width, `audio popup fits at ${width}px`)
+    }
+    await watch.locator('#audio-sfx-mute').click()
+    await watch.locator('#audio-bgm-mute').click()
     await watch.screenshot({ path: join(shots, `narrow-${width}.png`) })
     await watch.locator('#audio-settings summary').click()
   }

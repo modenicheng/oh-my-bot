@@ -4,6 +4,7 @@ import type { Camera } from '../camera'
 import type { MapVec2 } from '../mapdef'
 import { red } from './constants'
 import type { DamagePopup, HealthVisual } from './types'
+import { drawPreparedText, prepareText, type PreparedText } from '../text-raster'
 
 // 延迟血条：受击保持 420ms 后 620ms 线性排空。
 const DAMAGE_HOLD_MS = 420
@@ -41,7 +42,7 @@ const LOW_BAND_OPACITY = [0.9, 0.52, 0.24] as const
 
 export class Vitals {
   private health = new Map<number, HealthVisual>()
-  private popups: DamagePopup[] = []
+  private popups: (DamagePopup & { label: PreparedText; shadow: PreparedText })[] = []
   private selfLow = false
   private lowHitAt = -Infinity
 
@@ -69,7 +70,11 @@ export class Vitals {
 
   popup(robot: number, pos: MapVec2, amountX10: number, at: number, seed: number, color = red, prefix = '-'): void {
     if (this.popups.length >= MAX_POPUPS) this.popups.shift()
-    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed, color, prefix })
+    const text = `${prefix}${(amountX10 / 10).toFixed(amountX10 % 10 ? 1 : 0)}`
+    const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
+    const shadow = prepareText(text, POPUP_FONT, POPUP_SHADOW_COLOR, dpr)
+    const label = prepareText(text, POPUP_FONT, color, dpr)
+    this.popups.push({ robot, pos: { x: pos.x, y: pos.y }, amountX10, at, seed, color, prefix, text, label, shadow })
   }
 
   /** 低血状态下再次被确认命中：短暂增亮并外扩同一边框。 */
@@ -101,17 +106,15 @@ export class Vitals {
     }
     this.popups.length = damageKept
     ctx.globalAlpha = 1
-    ctx.font = POPUP_FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     for (const popup of this.popups) {
       if (layer === 'screen') continue
       const t = Math.min(1, (now - popup.at) / DAMAGE_POPUP_MS)
       const drift = this.reduced.matches ? 0 : (POPUP_DRIFT_BASE + (popup.seed % POPUP_DRIFT_SEED)) * t
       const x = cam.toPxX(popup.pos.x) + ((popup.seed % POPUP_X_SEED) - POPUP_X_OFFSET)
       const y = cam.toPxY(popup.pos.y) - POPUP_RISE - drift
-      const text = `${popup.prefix}${(popup.amountX10 / 10).toFixed(popup.amountX10 % 10 ? 1 : 0)}`
       ctx.globalAlpha = t < POPUP_FULL_UNTIL ? 1 : (1 - t) / (1 - POPUP_FULL_UNTIL)
-      ctx.fillStyle = POPUP_SHADOW_COLOR; ctx.fillText(text, x + POPUP_SHADOW_OFFSET, y + POPUP_SHADOW_OFFSET)
-      ctx.fillStyle = popup.color; ctx.fillText(text, x, y)
+      drawPreparedText(ctx, popup.shadow, x + POPUP_SHADOW_OFFSET, y + POPUP_SHADOW_OFFSET, 'center', 'middle')
+      drawPreparedText(ctx, popup.label, x, y, 'center', 'middle')
     }
     if (this.selfLow && layer !== 'world') {
       const hit = this.reduced.matches ? 0 : Math.max(0, 1 - (now - this.lowHitAt) / LOW_HIT_FLASH_MS)
