@@ -121,14 +121,32 @@ func (s *Sim) SetMap(def *MapDef) error {
 			}
 		}
 	}
-	candidate := &Sim{mapDef: m, walls: m.Walls, phase: s.phase, rng: s.rng}
+	sectors := make([]uint32, len(s.robots))
+	for i := range sectors {
+		sectors[i] = s.robots[i].Sector
+		if m.GeneratorVer >= 12 {
+			sectors[i] = adaptiveSpawnSector(len(s.robots), i)
+		}
+	}
+	candidate := &Sim{mapDef: m, walls: m.Walls, phase: s.phase, rng: s.rng,
+		robots: append([]Robot(nil), s.robots...)}
+	if m.GeneratorVer >= 12 {
+		// NewSim starts every robot at the origin. During initial assembly those
+		// placeholders are not occupied spawn points yet.
+		for i := range candidate.robots {
+			candidate.robots[i].State = Dead
+		}
+	}
 	positions := make([]Vec2, len(s.robots))
 	for i, r := range s.robots {
-		p, ok := candidate.spawnInSector(r.Sector)
+		candidate.robots[i].Sector = sectors[i]
+		p, ok := candidate.spawnInSectorFor(sectors[i], r.ID)
 		if !ok {
-			return fmt.Errorf("sim: no legal spawn in sector %d", r.Sector)
+			return fmt.Errorf("sim: no legal spawn in sector %d", sectors[i])
 		}
 		positions[i] = p
+		candidate.robots[i].Position = p
+		candidate.robots[i].State = Alive
 	}
 	s.mapDef, s.walls, s.rng = m, m.Walls, candidate.rng
 	s.rebuildWallIndex()
@@ -152,6 +170,7 @@ func (s *Sim) SetMap(def *MapDef) error {
 	}
 	for i := range s.robots {
 		s.robots[i].Position, s.robots[i].SpawnPosition = positions[i], positions[i]
+		s.robots[i].Sector = sectors[i]
 	}
 	s.publishView()
 	return nil
@@ -180,11 +199,29 @@ func (s *Sim) freePosition(p Vec2) bool {
 	}
 	return true
 }
+func adaptiveSpawnSector(participants, index int) uint32 {
+	if participants < 1 {
+		participants = 1
+	}
+	active := (participants + 7) / 8
+	if active > 8 {
+		active = 8
+	}
+	return uint32(index % active)
+}
+
 func (s *Sim) spawnInSector(sector uint32) (Vec2, bool) {
+	return s.spawnInSectorFor(sector, 0)
+}
+
+func (s *Sim) spawnInSectorFor(sector uint32, ignoreID uint32) (Vec2, bool) {
 	if s.mapDef == nil || sector >= 8 {
 		return Vec2{}, false
 	}
 	area := s.mapDef.Sectors[sector].SpawnArea
+	if s.mapDef.GeneratorVer >= 12 {
+		return s.safeSpawnInArea(area, ignoreID)
+	}
 	for i := 0; i < 128; i++ {
 		p := Vec2{area.Min.X + s.randomUnit()*(area.Max.X-area.Min.X), area.Min.Y + s.randomUnit()*(area.Max.Y-area.Min.Y)}
 		if s.freePosition(p) {
@@ -202,6 +239,44 @@ func (s *Sim) spawnInSector(sector uint32) (Vec2, bool) {
 		}
 	}
 	return Vec2{}, false
+}
+
+// safeSpawnInArea samples both deterministic jitter and a small lattice, then
+// keeps the legal point with the largest nearest-neighbor distance. The lattice
+// makes the result robust when a random sample misses the safest edge of a
+// large area; all ordering remains deterministic for replay and checkpoints.
+func (s *Sim) safeSpawnInArea(area Rect, ignoreID uint32) (Vec2, bool) {
+	best := Vec2{}
+	bestScore := -1.0
+	found := false
+	consider := func(p Vec2) {
+		if !s.freePosition(p) {
+			return
+		}
+		score := math.Inf(1)
+		for _, robot := range s.robots {
+			if robot.ID == ignoreID || robot.State != Alive {
+				continue
+			}
+			d := p.Sub(robot.Position)
+			distance := d.X*d.X + d.Y*d.Y
+			if distance < score {
+				score = distance
+			}
+		}
+		if !found || score > bestScore {
+			best, bestScore, found = p, score, true
+		}
+	}
+	for i := 0; i < 128; i++ {
+		consider(Vec2{X: area.Min.X + s.randomUnit()*(area.Max.X-area.Min.X), Y: area.Min.Y + s.randomUnit()*(area.Max.Y-area.Min.Y)})
+	}
+	for x := 0; x <= 16; x++ {
+		for y := 0; y <= 16; y++ {
+			consider(Vec2{X: area.Min.X + float64(x)/16*(area.Max.X-area.Min.X), Y: area.Min.Y + float64(y)/16*(area.Max.Y-area.Min.Y)})
+		}
+	}
+	return best, found
 }
 
 func (s *Sim) uplinkActive(u *Uplink) bool {

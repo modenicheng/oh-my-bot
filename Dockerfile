@@ -4,7 +4,7 @@
 # 不依赖 BuildKit 外部 frontend（syntax 指令对 podman 是 no-op）。
 # syntax=docker/dockerfile:1
 
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.26
 ARG NODE_VERSION=22
 
 # ---- web：构建 client/dist（JS 产物与架构无关，只在构建平台跑）----
