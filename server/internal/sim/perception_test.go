@@ -103,3 +103,44 @@ func TestLocalMapIncludesOnlyVisibleBoundarySegments(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalMapUsesProvidedVisibilityForBoundaries(t *testing.T) {
+	world := WorldView{
+		Frame:  FrameView{Phase: PhaseOuterRing, Map: &MapDef{GeneratorVer: 2, ArenaRadius: 80}},
+		Robots: []RobotView{{ID: 1, Pos: Vec2{79, 0}}},
+	}
+	var calls int
+	visible := func(Vec2, Vec2) bool {
+		calls++
+		return true
+	}
+	if _, found := world.ObserveLocalWithVisibility(1, VisionRadius, visible, visible); !found {
+		t.Fatal("observer should be found")
+	}
+	if calls == 0 {
+		t.Fatal("boundary visibility must use the supplied visibility function")
+	}
+}
+
+func TestLocalMapUsesProvidedWallCorners(t *testing.T) {
+	world := WorldView{
+		Frame:  FrameView{Map: &MapDef{Walls: []Wall{{Min: Vec2{4, -2}, Max: Vec2{5, 2}}}}},
+		Robots: []RobotView{{ID: 1, Pos: Vec2{0, 0}}},
+	}
+	withoutCalls := 0
+	withoutCorners, found := world.ObserveLocalWithVisibilityAndCorners(1, VisionRadius, func(Vec2, Vec2) bool {
+		withoutCalls++
+		return true
+	}, func(Vec2, Vec2) bool { return true }, []Vec2{})
+	if !found {
+		t.Fatal("observer should be found")
+	}
+	withCalls := 0
+	withCorners, _ := world.ObserveLocalWithVisibility(1, VisionRadius, func(Vec2, Vec2) bool {
+		withCalls++
+		return true
+	}, func(Vec2, Vec2) bool { return true })
+	if len(withoutCorners.Frame.Map.Walls) != len(withCorners.Frame.Map.Walls) || withoutCalls >= withCalls {
+		t.Fatalf("provided corner set was ignored: without=%d calls/%d walls, with=%d calls/%d walls", withoutCalls, len(withoutCorners.Frame.Map.Walls), withCalls, len(withCorners.Frame.Map.Walls))
+	}
+}

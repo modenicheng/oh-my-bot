@@ -148,4 +148,16 @@ func TestParallelForThresholdAndConcurrency(t *testing.T) {
 	}
 }
 
+func TestParallelForReusesObserverWorkers(t *testing.T) {
+	m := &Match{obsWorkers: 2}
+	m.startObserverPool()
+	t.Cleanup(m.closeObserverPool)
+	jobs := m.obsJobs
+
+	m.parallelFor(16, func(int) {})
+	if jobs == nil || m.obsJobs != jobs {
+		t.Fatal("parallelFor did not retain the match observer worker pool")
+	}
+}
+
 func nickOf(i int) string { return "bot" + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) }

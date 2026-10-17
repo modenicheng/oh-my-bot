@@ -13,7 +13,8 @@ import (
 // 观察者复用同一实例。
 type WallIndex struct {
 	// walls 扁平存储全部墙（ID+Min+Max），格子只存下标。
-	walls []sim.Wall
+	walls   []sim.Wall
+	corners []sim.Vec2
 	// cellSide 为格子边长（米）；cells[y][x] 为该格内的墙下标列表。
 	cellSide   float64
 	cells      [][]([]int32)
@@ -29,6 +30,10 @@ func NewWallIndex(walls []sim.Wall, cellSide float64) *WallIndex {
 		cellSide = visionRadius
 	}
 	ix := &WallIndex{walls: append([]sim.Wall(nil), walls...), cellSide: cellSide}
+	ix.corners = make([]sim.Vec2, 0, len(ix.walls)*4)
+	for _, wall := range ix.walls {
+		ix.corners = append(ix.corners, wall.Min, wall.Max, sim.Vec2{X: wall.Min.X, Y: wall.Max.Y}, sim.Vec2{X: wall.Max.X, Y: wall.Min.Y})
+	}
 	if len(ix.walls) == 0 {
 		return ix
 	}
@@ -71,6 +76,9 @@ func NewWallIndex(walls []sim.Wall, cellSide float64) *WallIndex {
 	return ix
 }
 
+// Corners returns immutable wall-corner geometry prepared with the index.
+func (ix *WallIndex) Corners() []sim.Vec2 { return ix.corners }
+
 // Visible 判断 from→to 视线是否无遮挡。零墙直接可见；否则遍历视线包围盒
 // 覆盖的格子，先做墙 AABB 与视线包围盒的重叠粗筛，再做精确线段-AABB
 // 相交测试。同一墙可能登记在多个格子，但跨格重复测试只影响少量性能，
@@ -111,6 +119,58 @@ func (ix *WallIndex) Visible(from, to sim.Vec2) bool {
 	return true
 }
 
+// SurfaceVisible matches sim.WorldView.SurfaceVisible: a wall is occluding
+// only when it is hit before the destination endpoint, using the same scale
+// aware tolerance. This keeps boundary clipping on the indexed path without
+// changing the endpoint visibility contract.
+func (ix *WallIndex) SurfaceVisible(from, to sim.Vec2) bool {
+	if len(ix.walls) == 0 {
+		return true
+	}
+	if !finiteVec(from) || !finiteVec(to) {
+		return false
+	}
+	delta := to.Sub(from)
+	tolerance := 1e-7 / math.Max(1, delta.Len())
+	return ix.visibleBefore(from, to, 1-tolerance)
+}
+
+func (ix *WallIndex) visibleBefore(from, to sim.Vec2, maxFraction float64) bool {
+	if len(ix.walls) == 0 {
+		return true
+	}
+	bx0, by0, bx1, by1 := from.X, from.Y, to.X, to.Y
+	if bx0 > bx1 {
+		bx0, bx1 = bx1, bx0
+	}
+	if by0 > by1 {
+		by0, by1 = by1, by0
+	}
+	cx0 := ix.clampCol(ix.colOf(bx0))
+	cx1 := ix.clampCol(ix.colOf(bx1))
+	cy0 := ix.clampRow(ix.rowOf(by0))
+	cy1 := ix.clampRow(ix.rowOf(by1))
+	delta := to.Sub(from)
+	for y := cy0; y <= cy1; y++ {
+		row := ix.cells[y]
+		if row == nil {
+			continue
+		}
+		for x := cx0; x <= cx1; x++ {
+			for _, wi := range row[x] {
+				w := &ix.walls[wi]
+				if w.Max.X < bx0 || w.Min.X > bx1 || w.Max.Y < by0 || w.Min.Y > by1 {
+					continue
+				}
+				if fraction, hit := segmentAABBFraction(from, delta, w.Min, w.Max); hit && fraction < maxFraction {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // colOf/rowOf：坐标 → 格子序号（可为负/越界，由 clamp 收敛）。
 func (ix *WallIndex) colOf(x float64) int { return int(math.Floor((x - ix.minX) / ix.cellSide)) }
 func (ix *WallIndex) rowOf(y float64) int { return int(math.Floor((y - ix.minY) / ix.cellSide)) }
@@ -126,6 +186,10 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func finiteVec(v sim.Vec2) bool {
+	return !math.IsNaN(v.X) && !math.IsInf(v.X, 0) && !math.IsNaN(v.Y) && !math.IsInf(v.Y, 0)
 }
 
 // axisClip：slab 法单轴裁剪。返回 false 表示区间已空（不相交）。
@@ -153,12 +217,17 @@ func axisClip(p0, d, lo, hi float64, tmin, tmax *float64) bool {
 // segmentIntersectsAABB：精确测试线段 p0→p1 是否与 AABB (min,max) 相交。
 // slab 法 + 参数区间裁剪：t ∈ [tmin,tmax] ⊆ [0,1] 非空即相交。
 func segmentIntersectsAABB(p0, p1, min, max sim.Vec2) bool {
+	_, hit := segmentAABBFraction(p0, p1.Sub(p0), min, max)
+	return hit
+}
+
+func segmentAABBFraction(p0, d, min, max sim.Vec2) (float64, bool) {
 	tmin, tmax := 0.0, 1.0
-	if !axisClip(p0.X, p1.X-p0.X, min.X, max.X, &tmin, &tmax) {
-		return false
+	if !axisClip(p0.X, d.X, min.X, max.X, &tmin, &tmax) {
+		return 0, false
 	}
-	if !axisClip(p0.Y, p1.Y-p0.Y, min.Y, max.Y, &tmin, &tmax) {
-		return false
+	if !axisClip(p0.Y, d.Y, min.Y, max.Y, &tmin, &tmax) {
+		return 0, false
 	}
-	return true
+	return tmin, true
 }

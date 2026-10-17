@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-func (world WorldView) localMap(center Vec2, radius float64, visible func(Vec2, Vec2) bool) *MapDef {
+func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) *MapDef {
 	local := &MapDef{Version: 1, Partial: true}
 	source := world.Frame.Map
 	if source == nil {
@@ -35,9 +35,10 @@ func (world WorldView) localMap(center Vec2, radius float64, visible func(Vec2, 
 			}
 		}
 	}
-	var corners []Vec2
-	for _, wall := range source.Walls {
-		corners = append(corners, wall.Min, wall.Max, Vec2{wall.Min.X, wall.Max.Y}, Vec2{wall.Max.X, wall.Min.Y})
+	if corners == nil {
+		for _, wall := range source.Walls {
+			corners = append(corners, wall.Min, wall.Max, Vec2{wall.Min.X, wall.Max.Y}, Vec2{wall.Max.X, wall.Min.Y})
+		}
 	}
 	zone := source.CoreZone
 	if zone.Radius > 0 && world.Frame.Phase < zone.UnlockPhase && center.Len() > zone.Radius {
@@ -69,15 +70,15 @@ func (world WorldView) localMap(center Vec2, radius float64, visible func(Vec2, 
 		if arenaRadius <= 0 {
 			arenaRadius = 80
 		}
-		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, arenaRadius, "arena", corners)...)
+		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, arenaRadius, "arena", corners, surfaceVisible)...)
 	}
 	if zone.Radius > 0 && world.Frame.Phase < zone.UnlockPhase {
-		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, zone.Radius, "lock", corners)...)
+		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, zone.Radius, "lock", corners, surfaceVisible)...)
 	}
 	return local
 }
 
-func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float64, kind string, corners []Vec2) []BoundaryEdge {
+func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float64, kind string, corners []Vec2, visible func(Vec2, Vec2) bool) []BoundaryEdge {
 	if math.Abs(center.Len()-boundaryRadius) >= radius {
 		return nil
 	}
@@ -125,7 +126,7 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 			continue
 		}
 		midpoint, start, end := pointAt((left+right)/2), pointAt(left), pointAt(right)
-		if center.Sub(midpoint).Len() > radius || center.Sub(start).Len() > radius+1e-7 || center.Sub(end).Len() > radius+1e-7 || !world.SurfaceVisible(center, midpoint) {
+		if center.Sub(midpoint).Len() > radius || center.Sub(start).Len() > radius+1e-7 || center.Sub(end).Len() > radius+1e-7 || !visible(center, midpoint) {
 			continue
 		}
 		if len(arcs) > 0 && math.Abs(arcs[len(arcs)-1].end-left) < 1e-10 {

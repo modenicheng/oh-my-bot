@@ -163,13 +163,7 @@ func (v WorldView) LineOfSight(from, to Vec2) bool {
 			return false
 		}
 	}
-	z := v.Frame.Map.CoreZone
-	if z.Radius > 0 && v.Frame.Phase < z.UnlockPhase {
-		if _, hit := sweepCircle(from, d, Vec2{}, z.Radius); hit {
-			return false
-		}
-	}
-	return true
+	return v.ZoneLineOfSight(from, to)
 }
 
 func (v WorldView) SurfaceVisible(from, to Vec2) bool {
@@ -186,13 +180,36 @@ func (v WorldView) SurfaceVisible(from, to Vec2) bool {
 			return false
 		}
 	}
-	zone := v.Frame.Map.CoreZone
-	if zone.Radius > 0 && v.Frame.Phase < zone.UnlockPhase {
-		if fraction, hit := sweepCircle(from, delta, Vec2{}, zone.Radius); hit && fraction < 1-tolerance {
-			return false
-		}
+	return v.ZoneSurfaceVisible(from, to, tolerance)
+}
+
+// ZoneLineOfSight applies only the locked-core occlusion rule. Snapshot code
+// uses it after an indexed wall query so the wall scan is not repeated.
+func (v WorldView) ZoneLineOfSight(from, to Vec2) bool {
+	if v.Frame.Map == nil {
+		return true
 	}
-	return true
+	zone := v.Frame.Map.CoreZone
+	if zone.Radius <= 0 || v.Frame.Phase >= zone.UnlockPhase {
+		return true
+	}
+	_, hit := sweepCircle(from, to.Sub(from), Vec2{}, zone.Radius)
+	return !hit
+}
+
+// ZoneSurfaceVisible is the endpoint-tolerant counterpart of
+// ZoneLineOfSight. tolerance is supplied by the caller because surface
+// visibility scales it by the full segment length.
+func (v WorldView) ZoneSurfaceVisible(from, to Vec2, tolerance float64) bool {
+	if v.Frame.Map == nil {
+		return true
+	}
+	zone := v.Frame.Map.CoreZone
+	if zone.Radius <= 0 || v.Frame.Phase >= zone.UnlockPhase {
+		return true
+	}
+	fraction, hit := sweepCircle(from, to.Sub(from), Vec2{}, zone.Radius)
+	return !hit || fraction >= 1-tolerance
 }
 
 // Observe is a standalone convenience for integrations without a T3 builder.
@@ -202,6 +219,29 @@ func (v WorldView) Observe(id uint32) (Observation, bool) {
 }
 
 func (v WorldView) ObserveLocal(id uint32, radius float64, visible func(Vec2, Vec2) bool) (Observation, bool) {
+	return v.observeLocal(id, radius, visible, v.SurfaceVisible)
+}
+
+// ObserveLocalWithVisibility lets a caller provide the same indexed geometry
+// query for both entity line-of-sight and map-surface clipping. Keeping the
+// two callbacks separate preserves SurfaceVisible's endpoint tolerance while
+// allowing snapshot builders to avoid a second full-wall scan.
+func (v WorldView) ObserveLocalWithVisibility(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool) (Observation, bool) {
+	return v.observeLocalWithVisibilityAndCorners(id, radius, visible, surfaceVisible, nil)
+}
+
+func (v WorldView) ObserveLocalWithVisibilityAndCorners(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) (Observation, bool) {
+	if surfaceVisible == nil {
+		surfaceVisible = v.SurfaceVisible
+	}
+	return v.observeLocalWithVisibilityAndCorners(id, radius, visible, surfaceVisible, corners)
+}
+
+func (v WorldView) observeLocal(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool) (Observation, bool) {
+	return v.observeLocalWithVisibilityAndCorners(id, radius, visible, surfaceVisible, nil)
+}
+
+func (v WorldView) observeLocalWithVisibilityAndCorners(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) (Observation, bool) {
 	var self RobotView
 	found := false
 	for _, r := range v.Robots {
@@ -218,7 +258,7 @@ func (v WorldView) ObserveLocal(id uint32, radius float64, visible func(Vec2, Ve
 		visible = v.LineOfSight
 	}
 	canSee := func(position Vec2) bool { return self.Pos.Sub(position).Len() <= radius && visible(self.Pos, position) }
-	frame.Map = v.localMap(self.Pos, radius, visible)
+	frame.Map = v.localMap(self.Pos, radius, visible, surfaceVisible, corners)
 	obs := Observation{Frame: frame, VisionRadius: radius}
 	for _, r := range v.Robots {
 		if r.ID == id || canSee(r.Pos) {

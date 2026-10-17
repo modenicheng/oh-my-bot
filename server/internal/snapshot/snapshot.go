@@ -69,10 +69,29 @@ func BuildObservation(w World, ix *WallIndex, observerID, _ uint32, radii ...flo
 	}
 	world := sim.WorldView{Frame: w.FrameView, Robots: w.Robots, Projectiles: w.Projectiles, Cores: w.Cores, HealthPacks: w.HealthPacks, Uplinks: w.Uplinks, PointDrops: w.PointDrops}
 	var visibility func(sim.Vec2, sim.Vec2) bool
-	if ix != nil && (w.Map == nil || w.Map.CoreZone.Radius == 0 || w.Phase >= w.Map.CoreZone.UnlockPhase) {
-		visibility = ix.Visible
+	var surfaceVisibility func(sim.Vec2, sim.Vec2) bool
+	if ix != nil {
+		if w.Map == nil || w.Map.CoreZone.Radius == 0 || w.Phase >= w.Map.CoreZone.UnlockPhase {
+			visibility = ix.Visible
+			surfaceVisibility = ix.SurfaceVisible
+		} else {
+			// The index covers walls only; keep locked-core occlusion in the sim
+			// geometry helper so indexed and legacy paths have identical semantics.
+			visibility = func(from, to sim.Vec2) bool {
+				return ix.Visible(from, to) && world.ZoneLineOfSight(from, to)
+			}
+			surfaceVisibility = func(from, to sim.Vec2) bool {
+				delta := to.Sub(from)
+				tolerance := 1e-7 / math.Max(1, delta.Len())
+				return ix.SurfaceVisible(from, to) && world.ZoneSurfaceVisible(from, to, tolerance)
+			}
+		}
 	}
-	obs, found := world.ObserveLocal(observerID, visionRadius, visibility)
+	var corners []sim.Vec2
+	if ix != nil {
+		corners = ix.Corners()
+	}
+	obs, found := world.ObserveLocalWithVisibilityAndCorners(observerID, visionRadius, visibility, surfaceVisibility, corners)
 	if !found {
 		return sim.Observation{Frame: sim.FrameView{Tick: w.Tick, Phase: w.Phase, TimeLeftS: w.TimeLeftS, Map: &sim.MapDef{Version: 1, Partial: true}}, VisionRadius: visionRadius}
 	}

@@ -87,6 +87,9 @@ type Match struct {
 	// rc.mu → encMu，无反向嵌套。rc.mu 本身保证 step 期间无房间级写者。
 	encMu      sync.Mutex
 	obsWorkers int
+	obsJobs    chan observerJob
+	obsStop    chan struct{}
+	obsDone    chan struct{}
 
 	// tickStatWindow（批 2 可观测性）：最近 tick 环形窗口的墙钟（默认
 	// 600 tick = 10s）与脚本顺延累计。statMu 在 step 尾部落账，锁序
@@ -101,9 +104,8 @@ type Match struct {
 // 任务分发的调度开销。包级 var 供确定性对照测试改写（强制串行/并行）。
 var parallelObserverThreshold = 16
 
-// observerWorkers 默认并行度 = clamp(NumCPU, 1, 8)。每 tick 的
-// parallelFor 按需起临时 goroutine（60Hz 下调度开销可忽略），避免
-// 常驻 worker 的生命周期管理。
+// observerWorkers 默认并行度 = clamp(NumCPU, 1, 8)。观察者 worker 在首个
+// 大房间 tick 惰性启动，并在 Match 结束时回收，避免每 tick 重建 goroutine。
 func observerWorkers() int {
 	w := runtime.NumCPU()
 	if w > 8 {
@@ -115,6 +117,50 @@ func observerWorkers() int {
 	return w
 }
 
+type observerJob struct {
+	index int
+	fn    func(int)
+	done  *sync.WaitGroup
+}
+
+func (m *Match) startObserverPool() {
+	if m.obsJobs != nil || m.obsWorkers < 2 {
+		return
+	}
+	m.obsJobs = make(chan observerJob)
+	m.obsStop = make(chan struct{})
+	m.obsDone = make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(m.obsWorkers)
+	for i := 0; i < m.obsWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case job := <-m.obsJobs:
+					job.fn(job.index)
+					job.done.Done()
+				case <-m.obsStop:
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(m.obsDone)
+	}()
+}
+
+func (m *Match) closeObserverPool() {
+	if m.obsStop == nil {
+		return
+	}
+	close(m.obsStop)
+	<-m.obsDone
+	m.obsJobs, m.obsStop, m.obsDone = nil, nil, nil
+}
+
 // parallelFor 对 n 个下标并行执行 fn（少于 2 项、单 worker 或未过阈值时
 // 串行）。必须在 rc.mu 持有下调用；fn 不得再获取 rc.mu。
 func (m *Match) parallelFor(n int, fn func(i int)) {
@@ -124,20 +170,11 @@ func (m *Match) parallelFor(n int, fn func(i int)) {
 		}
 		return
 	}
-	jobs := make(chan int, n)
-	for i := 0; i < n; i++ {
-		jobs <- i
-	}
-	close(jobs)
+	m.startObserverPool()
 	var wg sync.WaitGroup
-	wg.Add(m.obsWorkers)
-	for w := 0; w < m.obsWorkers; w++ {
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				fn(i)
-			}
-		}()
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		m.obsJobs <- observerJob{index: i, fn: fn, done: &wg}
 	}
 	wg.Wait()
 }
@@ -980,6 +1017,7 @@ func (m *Match) run() {
 	defer func() {
 		m.rc.mu.Lock()
 		defer m.rc.mu.Unlock()
+		m.closeObserverPool()
 		m.scriptPool.Close()
 		if m.log != nil {
 			if err := m.log.Close(); err != nil {
