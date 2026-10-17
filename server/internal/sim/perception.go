@@ -2,15 +2,47 @@ package sim
 
 import (
 	"math"
+	"slices"
 	"sort"
+	"sync"
 )
 
 const boundarySampleCount = 512
 
 var (
-	boundarySampleAngles = makeBoundarySampleAngles()
-	boundarySampleUnits  = makeBoundarySampleUnits()
+	boundarySampleAngles  = makeBoundarySampleAngles()
+	boundarySampleUnits   = makeBoundarySampleUnits()
+	perceptionScratchPool = sync.Pool{New: func() any { return &perceptionScratch{} }}
 )
+
+type boundaryAngle struct {
+	value  float64
+	sample int // >= 0 for one of the fixed tessellation samples
+}
+
+type visibleArc struct{ start, end float64 }
+
+// Only calculation scratch is pooled. Returned map geometry owns its backing
+// arrays, so scripts and network encoders can retain observations across ticks.
+type perceptionScratch struct {
+	corners []Vec2
+	dynamic []boundaryAngle
+	angles  []boundaryAngle
+	arcs    []visibleArc
+}
+
+func releasePerceptionScratch(scratch *perceptionScratch) {
+	// Bound retained capacity for unusually large custom maps. Pool eviction
+	// during GC remains safe: every call also works with a fresh empty scratch.
+	if cap(scratch.corners) > 8192 || cap(scratch.dynamic) > 32768 || cap(scratch.angles) > 32768 || cap(scratch.arcs) > 8192 {
+		return
+	}
+	scratch.corners = scratch.corners[:0]
+	scratch.dynamic = scratch.dynamic[:0]
+	scratch.angles = scratch.angles[:0]
+	scratch.arcs = scratch.arcs[:0]
+	perceptionScratchPool.Put(scratch)
+}
 
 func makeBoundarySampleAngles() [boundarySampleCount + 1]float64 {
 	var out [boundarySampleCount + 1]float64
@@ -35,6 +67,8 @@ func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVis
 	if source == nil {
 		return local
 	}
+	scratch := perceptionScratchPool.Get().(*perceptionScratch)
+	defer releasePerceptionScratch(scratch)
 	if walls == nil {
 		walls = source.Walls
 	}
@@ -63,17 +97,24 @@ func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVis
 		}
 	}
 	if corners == nil {
+		corners = scratch.corners[:0]
 		for _, wall := range source.Walls {
 			corners = append(corners, wall.Min, wall.Max, Vec2{wall.Min.X, wall.Max.Y}, Vec2{wall.Max.X, wall.Min.Y})
 		}
+		scratch.corners = corners
 	}
 	zone := source.CoreZone
 	if zone.Radius > 0 && world.Frame.Phase < zone.UnlockPhase && center.Len() > zone.Radius {
 		angle := math.Atan2(center.Y, center.X)
 		offset := math.Acos(zone.Radius / center.Len())
+		// Caller-supplied corners may have spare capacity and be shared by
+		// parallel observers. Never append per-observer tangents into them.
+		scratch.corners = append(scratch.corners[:0], corners...)
+		corners = scratch.corners
 		for _, direction := range []float64{angle - offset, angle + offset} {
 			corners = append(corners, Vec2{math.Cos(direction) * zone.Radius, math.Sin(direction) * zone.Radius})
 		}
+		scratch.corners = corners
 	}
 	for _, wall := range walls {
 		if center.X < wall.Min.X {
@@ -97,23 +138,19 @@ func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVis
 		if arenaRadius <= 0 {
 			arenaRadius = 80
 		}
-		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, arenaRadius, "arena", corners, surfaceVisible)...)
+		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, arenaRadius, "arena", corners, surfaceVisible, scratch)...)
 	}
 	if zone.Radius > 0 && world.Frame.Phase < zone.UnlockPhase {
-		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, zone.Radius, "lock", corners, surfaceVisible)...)
+		local.Boundaries = append(local.Boundaries, world.visibleBoundary(center, radius, zone.Radius, "lock", corners, surfaceVisible, scratch)...)
 	}
 	return local
 }
 
-func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float64, kind string, corners []Vec2, visible func(Vec2, Vec2) bool) []BoundaryEdge {
+func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float64, kind string, corners []Vec2, visible func(Vec2, Vec2) bool, scratch *perceptionScratch) []BoundaryEdge {
 	if math.Abs(center.Len()-boundaryRadius) >= radius {
 		return nil
 	}
-	type boundaryAngle struct {
-		value  float64
-		sample int // >= 0 for one of the fixed tessellation samples
-	}
-	dynamic := make([]boundaryAngle, 0, 2+len(corners)*2)
+	dynamic := slices.Grow(scratch.dynamic[:0], 2+len(corners)*2)
 	if distance := center.Len(); distance > 0 {
 		cosine := (distance*distance + boundaryRadius*boundaryRadius - radius*radius) / (2 * distance * boundaryRadius)
 		if cosine > -1 && cosine < 1 {
@@ -142,8 +179,9 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 			dynamic = append(dynamic, boundaryAngle{value: math.Atan2(point.Y, point.X), sample: -1})
 		}
 	}
+	scratch.dynamic = dynamic
 	sort.Slice(dynamic, func(i, j int) bool { return dynamic[i].value < dynamic[j].value })
-	angles := make([]boundaryAngle, 0, len(boundarySampleAngles)+len(dynamic))
+	angles := slices.Grow(scratch.angles[:0], len(boundarySampleAngles)+len(dynamic))
 	dynamicIndex := 0
 	for sample, angle := range boundarySampleAngles {
 		for dynamicIndex < len(dynamic) && dynamic[dynamicIndex].value < angle {
@@ -153,6 +191,7 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 		angles = append(angles, boundaryAngle{value: angle, sample: sample})
 	}
 	angles = append(angles, dynamic[dynamicIndex:]...)
+	scratch.angles = angles
 	pointAt := func(angle boundaryAngle) Vec2 {
 		if angle.sample >= 0 {
 			unit := boundarySampleUnits[angle.sample]
@@ -161,8 +200,7 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 		sine, cosine := math.Sincos(angle.value)
 		return Vec2{cosine * boundaryRadius, sine * boundaryRadius}
 	}
-	type visibleArc struct{ start, end float64 }
-	var arcs []visibleArc
+	arcs := scratch.arcs[:0]
 	radiusSquared := radius * radius
 	endpointRadiusSquared := (radius + 1e-7) * (radius + 1e-7)
 	for index := 1; index < len(angles); index++ {
@@ -180,6 +218,7 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 			arcs = append(arcs, visibleArc{start: left.value, end: right.value})
 		}
 	}
+	scratch.arcs = arcs
 	var edges []BoundaryEdge
 	for _, arc := range arcs {
 		start := pointAt(boundaryAngle{value: arc.start, sample: -1})
