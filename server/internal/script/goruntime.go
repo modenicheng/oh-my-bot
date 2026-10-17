@@ -51,6 +51,9 @@ func NewGojaRuntime(cfg Config) *GojaRuntime {
 	if cfg.TickTimeout <= 0 {
 		cfg.TickTimeout = DefaultTickTimeout
 	}
+	if cfg.InitTimeout <= 0 {
+		cfg.InitTimeout = cfg.TickTimeout
+	}
 	if cfg.PoolSize <= 0 {
 		cfg.PoolSize = NumWorkers()
 	}
@@ -182,7 +185,7 @@ func (r *GojaRuntime) loadLocked(baseSource string, snips []snippet.Setting) err
 	}
 	// 初始化预算覆盖整个候选 VM 装载阶段，而不只是 RunProgram：
 	// 玩家可以把死循环藏在 bot.tick getter 或注册表属性读取中。
-	timer := time.AfterFunc(r.cfg.TickTimeout, func() { vm.Interrupt(r.interruptVal) })
+	timer := time.AfterFunc(r.cfg.InitTimeout, func() { vm.Interrupt(r.interruptVal) })
 	defer func() {
 		timer.Stop()
 		vm.ClearInterrupt()

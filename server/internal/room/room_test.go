@@ -70,6 +70,36 @@ func newTestRoom(t *testing.T) (*Room, *fakeLauncher) {
 	return r, l
 }
 
+func TestFailLaunchOnlyEndsCurrentHandle(t *testing.T) {
+	for _, action := range []Action{ActionStart, ActionWarmup} {
+		t.Run(action.String(), func(t *testing.T) {
+			r, launcher := newTestRoom(t)
+			if err := r.HostCommand(1, action); err != nil {
+				t.Fatal(err)
+			}
+			current := launcher.handles[0]
+			before := r.State()
+			if r.FailLaunch(newFakeHandle()) || r.State() != before {
+				t.Fatal("unrelated assembly failure changed the room")
+			}
+			if !r.FailLaunch(current) || r.State() != Ended {
+				t.Fatal("current failure did not release the room for retry")
+			}
+			select {
+			case <-current.aborted:
+			default:
+				t.Fatal("failed handle was not cancelled")
+			}
+			if err := r.HostCommand(1, ActionStart); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			if r.FailLaunch(current) || r.State() != Running {
+				t.Fatal("obsolete failure ended a newer launch")
+			}
+		})
+	}
+}
+
 // --- room code ----------------------------------------------------------
 
 func TestGenerateCodeFormat(t *testing.T) {

@@ -8,7 +8,6 @@ import type { Camera } from '../camera'
 import { type MapDefParsed, type MapUplink, type MapVec2 } from '../mapdef'
 import { hackMaxX10 } from '../tuning'
 import type { WorldState } from '../world'
-import type { KillFeedSource } from '../kill-feed'
 import { amber, cyan, green, red, white } from './constants'
 import { CameraFeel } from './camera-feel'
 import { Effects, EFFECT_MS } from './effects'
@@ -67,7 +66,7 @@ export class GameFeedback {
   private reduced = matchMedia('(prefers-reduced-motion: reduce)')
 
   constructor(
-    private message: (text: string, kind?: FeedbackKind, source?: KillFeedSource) => void,
+    private message: (text: string, kind?: FeedbackKind) => void,
     private onInnerRing?: () => void,
     private onCountdown?: (seconds: number) => void,
   ) {
@@ -277,8 +276,6 @@ export class GameFeedback {
       case 'kill':
         if (k.value.at) { this.fx.add('death', k.value.at, red, k.value.victim, EFFECT_MS.death); this.sound('death', k.value.at, world, 1, k.value.victim === selfId) }
         if (k.value.victim === selfId) this.camFeel.jolt(ev.tick, ev.tick + k.value.killer * 3 + k.value.victim * 7)
-        this.message(`${this.nickOf(k.value.killer, world)} 击毁 ${this.nickOf(k.value.victim, world)}`, 'kill',
-          { id: k.value.killer, name: this.nickOf(k.value.killer, world) })
         break
       case 'respawn':
         if (k.value.robot === selfId) { this.camFeel.calm(); this.vitals.clearSelfHit(); audio.play('respawn'); this.message('机体已重生') }

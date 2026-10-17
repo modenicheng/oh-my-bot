@@ -12,7 +12,7 @@ import (
 
 // ---- 测试种子集 ----
 
-var testSeeds = []uint64{0, 1, 2, 3, 42, 0xDEADBEEF, 0xFFFFFFFFFFFFFFFF, 1234567890}
+var testSeeds = []uint64{0, 1, 2, 3, 42, 0xDEADBEEF, 0xFFFFFFFFFFFFFFFF, 1234567890, 3731973273936997066}
 
 // angleDeg 返回点 (x,y) 的方位角（度，[0,360)）。
 func angleDeg(x, y float64) float64 {
@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 10 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 11 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {

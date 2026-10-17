@@ -72,6 +72,8 @@ export class GameOptions {
   private readonly pauseButton = document.getElementById('options-pause') as HTMLButtonElement
   private readonly finishButton = document.getElementById('options-finish') as HTMLButtonElement
   private previousFocus: HTMLElement | null = null
+  private backdropPointer: number | null = null
+  private backdropClick = false
 
   constructor(private readonly deps: GameOptionsDeps) {
     this.continueButton.addEventListener('click', () => this.close())
@@ -89,6 +91,22 @@ export class GameOptions {
       deps.onFinish()
     })
     this.root.addEventListener('keydown', event => this.onDialogKey(event))
+    // A slider/text drag can end with a click on the common backdrop ancestor.
+    // Dismiss only when the same pointer both began and ended on the backdrop.
+    this.root.addEventListener('pointerdown', event => {
+      this.backdropClick = false
+      this.backdropPointer = this.isOpen && event.button === 0 && event.target === this.root ? event.pointerId : null
+    })
+    this.root.addEventListener('pointerup', event => {
+      this.backdropClick = this.backdropPointer === event.pointerId && event.target === this.root
+      this.backdropPointer = null
+    })
+    this.root.addEventListener('pointercancel', () => this.resetBackdrop())
+    this.root.addEventListener('click', event => {
+      const dismiss = this.backdropClick && event.target === this.root && !event.defaultPrevented
+      this.resetBackdrop()
+      if (dismiss) this.close()
+    })
   }
 
   get isOpen(): boolean { return !this.root.hidden }
@@ -105,6 +123,7 @@ export class GameOptions {
 
   open(): boolean {
     if (this.isOpen || !this.deps.canOpen()) return false
+    this.resetBackdrop()
     this.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     this.reflectAudio()
     this.root.hidden = false
@@ -115,11 +134,17 @@ export class GameOptions {
 
   close(restoreFocus = true, notify = true): void {
     if (!this.isOpen) return
+    this.resetBackdrop()
     this.root.hidden = true
     const previous = this.previousFocus
     this.previousFocus = null
     if (restoreFocus && previous?.isConnected) previous.focus({ preventScroll: true })
     if (notify) this.deps.onClose()
+  }
+
+  private resetBackdrop(): void {
+    this.backdropPointer = null
+    this.backdropClick = false
   }
 
   /** 由入口的统一快捷键处理调用，确保聊天与编辑器先消费 Esc。 */

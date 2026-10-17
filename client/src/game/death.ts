@@ -37,12 +37,12 @@ export class DeathNotice {
   update(self: RobotEnt | undefined, initialized: boolean, ended: boolean, score?: number): void {
     const status = deathStatus(self, initialized, ended)
     if (status === undefined) {
-      this.root.hidden = true
+      if (!this.root.hidden) this.root.hidden = true
       setText(this.announcement, '')
       return
     }
     if (this.root.hidden) setText(this.announcement, '机体已损毁，等待自动重生。')
-    this.root.hidden = false
+    if (this.root.hidden) this.root.hidden = false
     setText(this.countdown, status)
     setText(this.score, score === undefined ? '当前积分等待同步' : `当前积分 ${score}`)
   }

@@ -1,6 +1,7 @@
 // Hand-drawn UI glyphs on one 16×16 pixel grid. Paths contain integer, axis-aligned steps.
 // DOM and canvas use the same geometry; labels stay on the surrounding control.
 const paths = {
+  menu: 'M2 2h12v2H2ZM2 7h12v2H2ZM2 12h12v2H2Z',
   play: 'M4 2h2v2h3v2h3v2h2v2h-2v2H9v2H6v2H4Z',
   pause: 'M3 2h4v12H3ZM10 2h4v12h-4Z',
   back: 'M6 2h2v4h6v4H8v4H6v-2H4v-2H2V6h2V4h2Z',
@@ -27,6 +28,7 @@ const paths = {
   chevron: 'M5 2h2v2h2v2h2v4H9v2H7v2H5v-4h2V6H5Z',
   // 技能卡组与音频面板：全部整数轴对齐矩形
   fire: 'M7 0h2v4H7ZM7 12h2v4H7ZM0 7h4v2H0ZM12 7h4v2h-4ZM5 5h6v6H5Z',
+  fireBurst: 'M2 1h2v2h1v11H1V3h1ZM7 1h2v2h1v11H6V3h1ZM12 1h2v2h1v11h-4V3h1Z',
   dash: 'M1 3h5v2H1ZM1 7h7v2H1ZM1 11h5v2H1ZM8 4h2v2h2v4h-2v2H8v-2h2V6H8Z',
   shield: 'M2 1h12v6h-1v2h-2v2h-1v2h-1v1H7v-1H6v-2H5V9H3V7H2Z',
   uplink: 'M5 1h6v5H5ZM3 3h1v3H3ZM12 3h1v3h-1ZM7 6h2v7H7ZM4 13h8v2H4Z',
