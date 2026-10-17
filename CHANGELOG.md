@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0-rc.4](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.3...v1.1.0-rc.4) (2026-10-17)
+
+
+### Features
+
+* add host spectator rooms and direct rematches ([9b3ee30](https://github.com/modenicheng/oh-my-bot/commit/9b3ee3054c1d2dfc6f8d770bb88b5e9c983d0fa4))
+* add landscape mobile controls and responsive game layouts ([93462d2](https://github.com/modenicheng/oh-my-bot/commit/93462d20f0cfe4dc9c27d4cab158f9177ff4c4dc))
+* **debug:** show server tick telemetry in F3 panel ([152a39c](https://github.com/modenicheng/oh-my-bot/commit/152a39cd28e0badd06ecdd2707394052eb5d3ecb))
+* **observability:** add configurable structured logging ([3c8cbd1](https://github.com/modenicheng/oh-my-bot/commit/3c8cbd14554ef77a251d0e87eed4a02ebac9836d))
+* **protocol:** add compact binary snapshots and bounded event batching ([0e94f1a](https://github.com/modenicheng/oh-my-bot/commit/0e94f1a4b8e7a7272c49dab3870477b85b671d0e))
+
+
+### Bug Fixes
+
+* **observability:** retain logging across mobile merge ([669292c](https://github.com/modenicheng/oh-my-bot/commit/669292c5a9e5837f6be1d1e69d41992713116cd9))
+
 ## [1.1.0-rc.3](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.2...v1.1.0-rc.3) (2026-10-16)
 
 
