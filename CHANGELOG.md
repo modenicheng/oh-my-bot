@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0...v1.1.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **client:** clear stale scoreboard rows when leaving battle ([41998d4](https://github.com/modenicheng/oh-my-bot/commit/41998d4aa7bd2cf83702d71906e14f834c86b111))
+
 ## [1.1.0](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0...v1.1.0) (2026-10-17)
 
 ### Stable Release
