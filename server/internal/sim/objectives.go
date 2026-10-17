@@ -359,6 +359,14 @@ const (
 // sweptReach reports whether a robot moving start->end this tick came within
 // RobotRadius+itemR of center (inclusive), without crossing solid geometry.
 func (s *Sim) sweptReach(start, end, center Vec2, itemR float64) bool {
+	// Clipping can only shorten the chord. Reject items outside its expanded
+	// AABB before querying walls for every robot/item pair; keep extra epsilon
+	// here so exact endpoint tangencies still reach the original narrow phase.
+	margin := RobotRadius + itemR + 2*collisionEpsilon
+	if center.X < min(start.X, end.X)-margin || center.X > max(start.X, end.X)+margin ||
+		center.Y < min(start.Y, end.Y)-margin || center.Y > max(start.Y, end.Y)+margin {
+		return false
+	}
 	touches := func(p Vec2) bool {
 		return p.Sub(center).Len() <= RobotRadius+itemR+collisionEpsilon && s.LineOfSight(p, center)
 	}
