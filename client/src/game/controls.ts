@@ -22,8 +22,10 @@ import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
 import { bgm } from '../music/bgm'
 import { artReady, prepareArt } from './art'
+import { createLogger } from '../observability/logger'
 import { viewportRect } from '../app/landscape'
 
+const log = createLogger('game')
 
 const SEND_HZ = 60
 const FRAME_MS = 1000 / SEND_HZ
@@ -175,7 +177,7 @@ export class GameController {
     try {
       this.map = parseMapDef(mapJson)
     } catch (err) {
-      console.error('[game] 地图解析失败:', err)
+      log.error('game.map_decode_failed', { error: err })
       return false
     }
     this.stopLoops()
@@ -281,6 +283,7 @@ export class GameController {
     if (snap) {
       const result = applySnapshot(this.world, snap)
       if (result === 'resync-needed' && performance.now() - this.resyncAt > 500) {
+        log.debug('game.resync_requested', { tick: snap.tick, base_tick: snap.baseTick, local_tick: this.world.tick })
         this.mobile?.setEnabled(false)
         this.input.release()
         this.sampleAndSend()

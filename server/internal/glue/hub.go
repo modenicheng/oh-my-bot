@@ -3,7 +3,7 @@ package glue
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -103,6 +103,7 @@ func (h *Hub) EnsureRoom(code string) *RoomConn {
 		rc.ai = h.aiNew()
 	}
 	h.rooms[code] = rc
+	slog.Info("room.created", "room_code", code)
 	return rc
 }
 func (h *Hub) Register(s *Session) {
@@ -188,6 +189,7 @@ func (h *Hub) janitorSweep() {
 		}
 		idle := now.Sub(rc.emptySince)
 		if m := rc.match; m != nil && m.warmup && idle >= h.warmupIdleStop {
+			slog.Info("room.warmup_idle_stopped", "room_code", rc.Code, "idle", idle)
 			m.Stop()
 			rc.match = nil
 			// Room 转 Ended（幂等；Ended → WARMUP/START/RESTART 均合法，
@@ -198,6 +200,7 @@ func (h *Hub) janitorSweep() {
 			rc.broadcastRoomStateLocked()
 		}
 		if idle >= h.roomEvictAfter {
+			slog.Info("room.evicted", "room_code", rc.Code, "idle", idle)
 			rc.closed = true
 			if rc.match != nil {
 				rc.match.Stop()
@@ -573,6 +576,7 @@ func (s *Session) SubmitScript(sub *ombv1.ScriptSubmit) {
 		runtimeSource := sub.GetSource()
 		editorSource, language := normalizeScriptEditorSource(sub)
 		ok, errMsg, rev := m.submitScriptLocked(s.playerID, runtimeSource)
+		slog.Debug("script.submitted", "room_code", rc.Code, "player_id", s.playerID, "accepted", ok, "script_rev", rev, "source_bytes", len(runtimeSource))
 		var versionID uint32
 		if ok {
 			// 版本记录（不推送）：ScriptResult 回执先发，版本链快照随后，
@@ -876,7 +880,7 @@ func (la *launcherAdapter) launchSync(a *asyncHandle, seed uint64, ids []uint64,
 		if rc.launch.Load() == a && !a.cancelled.Load() && rc.Room.FailLaunch(a) {
 			rc.launch.CompareAndSwap(a, nil)
 			rc.match = nil
-			log.Printf("room %s: match launch failed (seed=%d players=%d warmup=%t): %v", rc.Code, seed, len(players), warmup, err)
+			slog.Error("match.launch_failed", "room_code", rc.Code, "seed", seed, "players", len(players), "warmup", warmup, "error", err)
 			rc.broadcastLocked(say("match launch failed: " + err.Error()))
 			rc.broadcastRoomStateLocked()
 		}
@@ -905,6 +909,7 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	m.handle = a
 	m.syncRoomSnippetsLocked()
 	rc.match = m
+	slog.Info("match.started", "room_code", rc.Code, "warmup", m.warmup, "players", len(m.robotOf))
 	for _, s := range rc.sessions {
 		// S-27 花名册守卫（与 Bind 同款）：HostCommand 冻结 ids 与异步 publish
 		// 之间存在装配窗口，窗口内 Bind 的会话是房间成员但不在本轮 robotOf。
