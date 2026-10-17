@@ -1,7 +1,9 @@
 package glue
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
@@ -49,6 +51,61 @@ func TestMatchStatSnapshotRecordsTickWindow(t *testing.T) {
 	}
 	if !st.Warmup {
 		t.Fatal("warmup flag lost")
+	}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Stages map[string]struct {
+			Avg float64 `json:"avg_ms"`
+			P95 float64 `json:"p95_ms"`
+			Max float64 `json:"max_ms"`
+		} `json:"stages"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	var accounted float64
+	for _, name := range []string{"lock_wait", "simulation", "observation", "scripts", "snapshot"} {
+		stage, ok := decoded.Stages[name]
+		if !ok || stage.Avg < 0 || stage.P95 < 0 || stage.Max < stage.P95 {
+			t.Fatalf("missing/invalid stage %s: %s", name, raw)
+		}
+		accounted += stage.Avg
+	}
+	if accounted <= 0 || accounted > st.TickAvgMs {
+		t.Fatalf("stage accounting %.6f exceeds total %.6f", accounted, st.TickAvgMs)
+	}
+}
+
+func TestDurationStatsNearestRank(t *testing.T) {
+	samples := make([]time.Duration, 100)
+	for i := range samples {
+		samples[i] = time.Duration(100-i) * time.Microsecond
+	}
+	got := durationStats(samples)
+	if got.AvgMs != 0.0505 || got.P95Ms != 0.095 || got.MaxMs != 0.1 {
+		t.Fatalf("duration summary = %+v", got)
+	}
+	if got := durationStats(nil); got != (DurationStats{}) {
+		t.Fatalf("empty summary = %+v", got)
+	}
+}
+
+func TestTickStageWindowRotatesTogether(t *testing.T) {
+	m := &Match{}
+	for i := 0; i <= tickStatWindowLen; i++ {
+		m.tick = uint32(i + 1)
+		sample := tickSample{observation: time.Microsecond}
+		if i == 0 {
+			sample.observation = time.Second
+		}
+		m.recordTickStat(time.Now(), sample)
+	}
+	got := m.StatSnapshot()
+	if got.Tick != tickStatWindowLen+1 || got.WindowTicks != tickStatWindowLen || got.Stages.Observation.MaxMs != 0.001 {
+		t.Fatalf("stage window failed to evict oldest sample: %+v", got)
 	}
 }
 

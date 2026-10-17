@@ -95,8 +95,9 @@ type Match struct {
 	// 600 tick = 10s）与脚本顺延累计。statMu 在 step 尾部落账，锁序
 	// rc.mu → statMu（与 encMu 平级叶子）。
 	statMu     sync.Mutex
-	tickWindow []time.Duration
+	tickWindow []tickSample
 	tickCursor int
+	statTick   uint32
 	deferrals  atomic.Uint64
 }
 
@@ -632,54 +633,6 @@ func (m *Match) buyUpgradeLocked(pid uint64, track uint32) {
 	}
 }
 
-// tickStatWindowLen 可观测性窗口：600 tick ≈ 10s。
-const tickStatWindowLen = 600
-
-// recordTickStat 在 step 返回前记录本 tick 墙钟（未激活 tick 不计——
-// inactive 提前 return 不经过本 defer 的注册点）。
-func (m *Match) recordTickStat(started time.Time) {
-	m.statMu.Lock()
-	defer m.statMu.Unlock()
-	if len(m.tickWindow) < tickStatWindowLen {
-		m.tickWindow = append(m.tickWindow, time.Since(started))
-		return
-	}
-	m.tickWindow[m.tickCursor] = time.Since(started)
-	m.tickCursor = (m.tickCursor + 1) % tickStatWindowLen
-}
-
-// MatchStats 是 /api/stats 的单对局快照。
-type MatchStats struct {
-	Tick            uint32  `json:"tick"`
-	TickAvgMs       float64 `json:"tick_avg_ms"`
-	TickP95Ms       float64 `json:"tick_p95_ms"`
-	WindowTicks     uint32  `json:"window_ticks"`
-	Warmup          bool    `json:"warmup"`
-	ScriptDeferrals uint64  `json:"script_deferrals"`
-}
-
-// StatSnapshot 汇总本对局观测窗口。并发安全（statMu / atomic）；tick 与
-// warmup 读取不加 rc.mu——两者为单调/装配期冻结字段，撕裂读取无危害。
-func (m *Match) StatSnapshot() MatchStats {
-	m.statMu.Lock()
-	window := make([]time.Duration, len(m.tickWindow))
-	copy(window, m.tickWindow)
-	m.statMu.Unlock()
-	sort.Slice(window, func(i, j int) bool { return window[i] < window[j] })
-	out := MatchStats{Tick: m.tick, WindowTicks: uint32(len(window)), Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
-	if len(window) > 0 {
-		// 纳秒分辨率：小房单机 warmup 的 tick 可为亚微秒级，µs 取整会归零。
-		var total int64
-		for _, d := range window {
-			total += int64(d)
-		}
-		out.TickAvgMs = float64(total) / float64(len(window)) / 1e6
-		// nearest-rank p95：第 ceil(0.95·n) 个次序统计量（下标从 0）。
-		out.TickP95Ms = float64(window[(95*len(window)+99)/100-1]) / 1e6
-	}
-	return out
-}
-
 // tickTelemetryEventOf projects the same bounded wall-clock window used by
 // /api/stats into the low-frequency client diagnostics stream.
 func tickTelemetryEventOf(st MatchStats) *ombv1.ServerEvent {
@@ -1054,6 +1007,7 @@ func (m *Match) run() {
 func (m *Match) step() {
 	started := time.Now()
 	m.rc.mu.Lock()
+	locked := time.Now()
 	defer m.rc.mu.Unlock()
 	if !m.activeLocked() {
 		return
@@ -1065,7 +1019,8 @@ func (m *Match) step() {
 		m.flushPausedResyncs()
 		return
 	}
-	defer m.recordTickStat(started)
+	sample := tickSample{lockWait: locked.Sub(started)}
+	defer func() { m.recordTickStat(started, sample) }()
 	if m.finishReq {
 		m.finishReq = false
 		m.sim.FinishEarly()
@@ -1075,6 +1030,8 @@ func (m *Match) step() {
 	m.persistAssistStateLocked()
 
 	wv := m.sim.WorldView()
+	stageStarted := time.Now()
+	sample.simulation = stageStarted.Sub(locked)
 	// 审计 S-6：每 tick 对同一机器人只构建一次 AOI，脚本池与快照循环共用
 	// 同一观测（此前各自构建一遍，SOLO 63 机下每 tick 128 次 LOS 计算）。
 	// 批 2：AOI 构建与逐观察者编码均按机器人独立，大房经 parallelFor
@@ -1088,7 +1045,11 @@ func (m *Match) step() {
 	for i, rv := range wv.Robots {
 		obsByRobot[rv.ID] = obsSlice[i]
 	}
+	sample.observation = time.Since(stageStarted)
+	stageStarted = time.Now()
 	m.runScripts(wv, obsByRobot)
+	sample.scripts = time.Since(stageStarted)
+	stageStarted = time.Now()
 
 	// 每在线观察者：AOI 裁剪 → delta 编码 → lossy 下行
 	// ended：终局帧（审计 S-34）——没有下一个 tick 可以修复丢失的末帧，
@@ -1166,6 +1127,7 @@ func (m *Match) step() {
 		})
 	}
 
+	sample.snapshot = time.Since(stageStarted)
 	if ended {
 		m.finish(wv)
 		m.Stop()
