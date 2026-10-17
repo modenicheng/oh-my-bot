@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 // Decoder validates complete frames before publishing messages or state changes.

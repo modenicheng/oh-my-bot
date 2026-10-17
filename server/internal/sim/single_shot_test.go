@@ -117,7 +117,9 @@ func TestSingleShotEligibilityIsTerminalAndShared(t *testing.T) {
 				s.robots[0].State = Dead
 			}
 			s.Tick()
-			log.Flush()
+			if err := log.Flush(); err != nil {
+				t.Fatal(err)
+			}
 			records, err := ReadMatchEventLog(bytes.NewReader(buf.Bytes()))
 			if err != nil {
 				t.Fatal(err)
@@ -224,7 +226,9 @@ func TestSingleShotCheckpointAndLogReplay(t *testing.T) {
 	// Force target coverage without manufacturing an extra event.
 	s.Say(1, "coverage")
 	s.Tick()
-	log.Flush()
+	if err := log.Flush(); err != nil {
+		t.Fatal(err)
+	}
 	replayed, err := ReplayTo(bytes.NewReader(buf.Bytes()), s.CurrentTick(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +389,9 @@ func TestSingleShotReplayEventsAndPendingBoundary(t *testing.T) {
 	}
 	s.Say(1, "coverage")
 	s.Tick()
-	log.Flush()
+	if err := log.Flush(); err != nil {
+		t.Fatal(err)
+	}
 	records, err := ReadMatchEventLog(bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)

@@ -4,8 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 
-	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"google.golang.org/protobuf/proto"
+
+	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 )
 
 func cloneSelf(s *ombv1.SelfState) *ombv1.SelfState {

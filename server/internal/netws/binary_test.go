@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/wire"
 )
