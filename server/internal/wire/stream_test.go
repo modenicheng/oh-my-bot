@@ -10,6 +10,7 @@ import (
 
 	ombv1 "github.com/modenicheng/oh-my-bot/server/internal/protocol/gen/proto"
 	"github.com/modenicheng/oh-my-bot/server/internal/wire"
+
 	"google.golang.org/protobuf/proto"
 )
 
