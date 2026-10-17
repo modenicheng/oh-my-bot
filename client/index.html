@@ -70,6 +70,7 @@
       <div class="field-label">颜色</div>
       <div id="swatches"></div>
       <div class="field-label">对局设置 <span class="field-note">仅创建房间时生效</span></div>
+      <label class="join-spectator-toggle"><input type="checkbox" id="in-spectator-mode"> 观战模式开房 <span class="field-note">房主保留控制权，不占参赛席位</span></label>
       <div class="join-durations">
         <label>游玩时长
           <select id="in-match-min" autocomplete="off">
@@ -142,6 +143,7 @@
       <canvas id="game-canvas" tabindex="0" aria-label="实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，R 夺回手动瞄准，普通 Enter 发言"></canvas>
       <div id="hud">
         <div class="game-header">
+          <span id="game-host-spectator" hidden>观战主持 · 全图</span>
           <div class="game-help">
             <button type="button" id="btn-game-help" aria-controls="hud-help" aria-expanded="false" aria-label="操作帮助" title="操作帮助"><span data-icon="help"></span></button>
             <div class="hud-help" id="hud-help" role="dialog" aria-label="操作帮助" tabindex="-1" hidden>
@@ -149,6 +151,7 @@
             </div>
           </div>
           <nav class="game-tools" aria-label="对局操作">
+            <button type="button" id="btn-game-menu" hidden aria-controls="game-options"><span data-icon="menu"></span><span>菜单</span></button>
             <button type="button" id="btn-game-start" hidden><span data-icon="play"></span><span>开始正式对局</span></button>
             <button type="button" id="btn-game-manual" aria-keyshortcuts="m" aria-controls="workbench-docs" aria-expanded="false"><span data-icon="book"></span><span>文档</span> <kbd>M</kbd></button>
             <button type="button" id="btn-game-editor" aria-keyshortcuts="c" aria-controls="workbench-editor" aria-expanded="false"><span data-icon="code"></span><span>编辑器</span> <kbd>C</kbd></button>

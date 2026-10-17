@@ -178,10 +178,19 @@ func (m *Match) specEncoderFor(pid uint64) *snapshot.DeltaEncoder {
 		enc.ForceFull()
 		m.specEncoders[pid] = enc
 	}
-	if session := m.rc.spectators[pid]; session != nil {
+	if session := m.spectatorSessionLocked(pid); session != nil {
 		enc.SetCompactMetadata(session.CompactSnapshots())
 	}
 	return enc
+}
+
+// spectatorSessionLocked returns either an external observer or the host's
+// control session. Both receive the public full-world projection.
+func (m *Match) spectatorSessionLocked(pid uint64) *Session {
+	if s := m.rc.hostSession; s != nil && s.playerID == pid {
+		return s
+	}
+	return m.rc.spectators[pid]
 }
 
 func (m *Match) takeSpecReliableFull(pid uint64) bool {
@@ -455,6 +464,10 @@ func (m *Match) ForceResync(pid uint64) {
 }
 func (m *Match) forceResyncLocked(pid uint64) {
 	m.rotateInputGenerationLocked(pid)
+	m.sendResyncScoreboardLocked(pid)
+}
+
+func (m *Match) sendResyncScoreboardLocked(pid uint64) {
 	m.reliableFull[pid] = true
 	if rid, ok := m.robotOf[pid]; ok {
 		if enc := m.encoders[rid]; enc != nil {
@@ -680,12 +693,29 @@ func (m *Match) activeLocked() bool {
 	return m.rc.match == m && (m.handle == nil || (!m.handle.cancelled.Load() && m.rc.launch.Load() == m.handle))
 }
 func (m *Match) bootstrapLocked(s *Session) {
-	m.forceResyncLocked(s.playerID)
+	// Rotate before publishing the map capability so a reconnect or a
+	// replacement match never advertises a token from an older lifetime.
+	m.rotateInputGenerationLocked(s.playerID)
 	m.sendMapBootstrapLocked(s)
+	m.sendResyncScoreboardLocked(s.playerID)
 	m.sendSnippetStateLocked(s)
 	// 版本链补发：异步 NewMatch 装配期间发生的写入只到旧会话；接管/重连
 	// 后由此对齐（Bind 已对无对局场景补发，这里覆盖发布时点）。
 	m.rc.sendScriptVersionsStateLocked(s.playerID)
+}
+
+func (m *Match) bootstrapHostSpectatorLocked(s *Session) {
+	if m.activeLocked() {
+		m.sendMapBootstrapLocked(s)
+		m.forceHostSpectatorResyncLocked(s.playerID)
+		if m.lastScoreboardEv != nil {
+			s.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: m.lastScoreboardEv}})
+		}
+		return
+	}
+	if m.finalEnd != nil {
+		m.spectatorReplayEndLocked(s)
+	}
 }
 
 // applySavedPlayerScripts restores room-scoped player code before snippets are
@@ -789,8 +819,23 @@ func (m *Match) forceSpectatorResyncLocked(pid uint64) {
 	if m.finalEnd == nil {
 		return
 	}
-	if s := m.rc.spectators[pid]; s != nil {
+	if s := m.spectatorSessionLocked(pid); s != nil {
 		m.spectatorReplayEndLocked(s)
+	}
+}
+
+func (m *Match) forceHostSpectatorResyncLocked(pid uint64) {
+	if m.activeLocked() {
+		m.specReliableFull[pid] = true
+		if enc := m.specEncoders[pid]; enc != nil {
+			enc.ForceFull()
+		}
+		return
+	}
+	if m.finalEnd != nil {
+		if s := m.spectatorSessionLocked(pid); s != nil {
+			m.spectatorReplayEndLocked(s)
+		}
 	}
 }
 
@@ -893,7 +938,7 @@ func (m *Match) flushPausedResyncs() {
 		if !m.takeSpecReliableFull(pid) {
 			continue
 		}
-		s := m.rc.spectators[pid]
+		s := m.spectatorSessionLocked(pid)
 		if s == nil {
 			continue
 		}
@@ -1038,15 +1083,21 @@ func (m *Match) step() {
 	// Spectators: full-map observation, no AOI/occlusion, no self, per-connection
 	// encoders keyed by connection id. New mid-match joiners get reliable full on
 	// their next frame via specReliableFull.
-	if len(m.rc.spectators) > 0 {
+	if len(m.rc.spectators) > 0 || m.rc.hostSession != nil {
 		obs := snapshot.BuildSpectatorObservation(world)
-		specIDs := make([]uint64, 0, len(m.rc.spectators))
+		specIDs := make([]uint64, 0, len(m.rc.spectators)+1)
 		for pid := range m.rc.spectators {
 			specIDs = append(specIDs, pid)
 		}
+		if m.rc.hostSession != nil {
+			specIDs = append(specIDs, m.rc.hostSession.playerID)
+		}
 		m.parallelFor(len(specIDs), func(i int) {
 			pid := specIDs[i]
-			s := m.rc.spectators[pid]
+			s := m.spectatorSessionLocked(pid)
+			if s == nil {
+				return
+			}
 			enc := m.specEncoderFor(pid)
 			if ended {
 				// No next tick can repair a dropped final frame.

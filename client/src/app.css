@@ -48,6 +48,8 @@ input[type=text]:focus { border-color: var(--accent); }
 .join-durations select { border: 1px solid var(--line); background: var(--bg); color: var(--fg);
                          padding: 8px 10px; font: inherit; outline: none; cursor: pointer; }
 .join-durations select:focus { border-color: var(--accent); }
+.join-spectator-toggle { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); }
+.join-spectator-toggle input { accent-color: var(--accent); }
 button.act { border: 1px solid var(--accent); background: transparent; color: var(--accent);
              padding: 9px 0; font: inherit; letter-spacing: .04em; cursor: pointer; }
 button.act:hover:not(:disabled) { background: #22d3ee16; }
@@ -176,6 +178,18 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .game-tools button:hover, #btn-game-help:hover { color: var(--accent); background: #1c3340; }
 #btn-game-help { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 8px; pointer-events: auto; }
 #btn-game-help[aria-expanded="true"] { color: var(--accent); border-bottom-color: var(--accent); background: #122733; }
+/* Host spectators keep room controls but never see player-only controls. */
+#view-game[data-host-spectator="true"] #btn-game-manual,
+#view-game[data-host-spectator="true"] #btn-game-editor,
+#hud[data-host-spectator="true"] #hud-left,
+#hud[data-host-spectator="true"] .game-help,
+#hud[data-host-spectator="true"] .hud-axes,
+#hud[data-host-spectator="true"] .hud-skills,
+#hud[data-host-spectator="true"] #hud-uplink,
+#hud[data-host-spectator="true"] #game-chat,
+#view-game[data-host-spectator="true"] #workbench { display: none !important; }
+#game-host-spectator { color: var(--accent); font: 12px var(--mono); }
+.mobile-landscape .join-spectator-toggle input { width: auto; }
 #btn-game-start { color: var(--accent); }
 /* Esc 选项：本地输入覆盖层，不遮蔽服务器继续运行的语义。 */
 .game-options { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center;

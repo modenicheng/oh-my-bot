@@ -280,6 +280,23 @@ describe('RoomSession', () => {
     s.close()
   })
 
+  it('host spectator intent stays on the normal Join handshake across reconnects', async () => {
+    const s = new RoomSession()
+    await s.connect({ ...opts, spectatorMode: true })
+    const first = await ack(s)
+    const handshake = fromBinary(ClientMsgSchema, new Uint8Array(first.upFrames()[0]!).subarray(1))
+    expect(handshake.payload).toMatchObject({ case: 'join', value: { roomCode: opts.roomCode, spectatorMode: true } })
+    first.closeEvent()
+    await flush()
+    await vi.advanceTimersByTimeAsync(1000)
+    const second = FakeWebSocket.instances.at(-1)!
+    second.open()
+    await flush()
+    const reconnect = fromBinary(ClientMsgSchema, new Uint8Array(second.upFrames()[0]!).subarray(1))
+    expect(reconnect.payload).toMatchObject({ case: 'join', value: { spectatorMode: true } })
+    s.close()
+  })
+
   it('观战握手不带玩家身份；重连保持角色并仅允许 resync/leave 上行', async () => {
     const s = new RoomSession()
     await s.connect({ ...opts, spectator: true })

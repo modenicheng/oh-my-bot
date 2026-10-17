@@ -614,9 +614,9 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 	if up == nil {
 		return
 	}
-	// Spectator sockets are strictly read-only: only resync and leave may flow.
-	// Everything else — including a second Spectate (no role-hop/rebind spam) or
-	// a player Join (no promotion) — is rejected up front.
+	// External SpectateRoom sockets are strictly read-only. A host spectator is
+	// a normal Join control socket: it may issue host room actions but still
+	// cannot send player actions.
 	if cur := (*sess); cur != nil && cur.IsSpectator() {
 		switch up.Payload.(type) {
 		case *ombv1.ClientMsg_ResyncRequest:
@@ -637,6 +637,26 @@ func handleUpstream(hub *glue.Hub, up *ombv1.ClientMsg, sendReliable, sendLossy 
 			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "readonly spectator connection"))
 			sendReliable(glue.SystemSay(joinFailedPrefix + " readonly spectator connection"))
 			return
+		}
+		return
+	}
+	if cur := (*sess); cur != nil && cur.IsHostSpectator() {
+		switch p := up.Payload.(type) {
+		case *ombv1.ClientMsg_RoomAction:
+			cur.HostCommand(p.RoomAction.GetKind())
+		case *ombv1.ClientMsg_ResyncRequest:
+			cur.Resync()
+		case *ombv1.ClientMsg_Leave:
+			cur.LeaveRoom()
+			hub.Unregister(cur)
+			*sess = nil
+		case *ombv1.ClientMsg_Join, *ombv1.ClientMsg_Spectate,
+			*ombv1.ClientMsg_Input, *ombv1.ClientMsg_WarmupInput,
+			*ombv1.ClientMsg_ScriptSubmit, *ombv1.ClientMsg_ScriptRollback,
+			*ombv1.ClientMsg_Say, *ombv1.ClientMsg_AiPrompt,
+			*ombv1.ClientMsg_AssistToggle, *ombv1.ClientMsg_SnippetConfig,
+			*ombv1.ClientMsg_UpgradeRequest:
+			sendReliable(glue.ControlNotice(ombv1.EvControlNotice_CN_READONLY_SPECTATOR, "观战主持人不能发送玩家操作"))
 		}
 		return
 	}
@@ -736,21 +756,21 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	}
 	rc := hub.EnsureRoom(code)
 	// 房主建房时长设置（JoinRoom.match_minutes/core_open_minutes）：仅创建
-	// 窗口（房间空闲且无人入座）生效，后进房者携带的值被静默忽略；非法
+	// 窗口（首次 Join 前）生效，后进房者携带的值被静默忽略；非法
 	// 组合（越界/核心区不早于终局）按 join 拒绝处理，给出可读原因。
-	if matchTicks, coreTicks, err := sim.ValidateDurations(
+	matchTicks, coreTicks, err := sim.ValidateDurations(
 		uint32(join.GetMatchMinutes())*60*uint32(sim.TickRate),
-		uint32(join.GetCoreOpenMinutes())*60*uint32(sim.TickRate)); err != nil {
+		uint32(join.GetCoreOpenMinutes())*60*uint32(sim.TickRate))
+	if err != nil {
 		sendJoinFailedReliable(sendReliable, "时长设置无效：游玩时长需为 1-30 分钟，且核心区开放时间须早于游玩时长")
 		return
-	} else if matchTicks != sim.MatchTicks || coreTicks != sim.CoreOpenTick {
-		rc.Room.SetDurationConfig(matchTicks, coreTicks)
 	}
 	rc.EnsureLauncher()
 	sess := glue.NewSession(sendReliable, sendLossy, sendReliableFrame)
 	sess.SetCloser(closeConn) // 同身份接管时由 glue 关闭本连接（S-33）
 	hub.Register(sess)
-	if err := rc.Bind(sess, nick, join.GetColor()); err != nil {
+	if err := rc.BindJoinWithDurations(sess, nick, join.GetColor(), join.GetSpectatorMode(),
+		glue.MatchDurations{MatchTicks: matchTicks, CoreOpenTick: coreTicks}); err != nil {
 		hub.Unregister(sess)
 		sendJoinFailedReliable(sendReliable, err.Error())
 		return
@@ -758,8 +778,10 @@ func handleJoin(hub *glue.Hub, join *ombv1.JoinRoom, sendReliable, sendLossy fun
 	if old := *sessOut; old != nil {
 		hub.Unregister(old)
 	}
+	if !sess.IsHostSpectator() {
+		rc.BroadcastRoomState()
+	}
 	*sessOut = sess
-	rc.BroadcastRoomState()
 }
 
 // truncateNick 按 rune 截断昵称到客户端表单上限（16）；rune 计数与 JS 的

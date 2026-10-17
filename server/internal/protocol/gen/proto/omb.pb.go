@@ -1106,6 +1106,7 @@ type JoinRoom struct {
 	Color           string                 `protobuf:"bytes,3,opt,name=color,proto3" json:"color,omitempty"`
 	MatchMinutes    uint32                 `protobuf:"varint,4,opt,name=match_minutes,json=matchMinutes,proto3" json:"match_minutes,omitempty"`
 	CoreOpenMinutes uint32                 `protobuf:"varint,5,opt,name=core_open_minutes,json=coreOpenMinutes,proto3" json:"core_open_minutes,omitempty"`
+	SpectatorMode   bool                   `protobuf:"varint,6,opt,name=spectator_mode,json=spectatorMode,proto3" json:"spectator_mode,omitempty"` // First-join intent: keep host control without taking a player seat.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1173,6 +1174,13 @@ func (x *JoinRoom) GetCoreOpenMinutes() uint32 {
 		return x.CoreOpenMinutes
 	}
 	return 0
+}
+
+func (x *JoinRoom) GetSpectatorMode() bool {
+	if x != nil {
+		return x.SpectatorMode
+	}
+	return false
 }
 
 // Read-only full-world connection; never allocates a player or robot.
@@ -5164,8 +5172,9 @@ type EvRoomState struct {
 	State         EvRoomState_State      `protobuf:"varint,1,opt,name=state,proto3,enum=omb.v1.EvRoomState_State" json:"state,omitempty"`
 	RobotsOnline  uint32                 `protobuf:"varint,2,opt,name=robots_online,json=robotsOnline,proto3" json:"robots_online,omitempty"`
 	HostNick      string                 `protobuf:"bytes,3,opt,name=host_nick,json=hostNick,proto3" json:"host_nick,omitempty"`
-	SoloBots      uint32                 `protobuf:"varint,4,opt,name=solo_bots,json=soloBots,proto3" json:"solo_bots,omitempty"` // room-scoped deterministic test opponents; zero when disabled
-	Paused        bool                   `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`                     // 房主已暂停正式对局（仅 state=R_RUNNING 时有意义）；缺失 = 旧服务器未暂停
+	SoloBots      uint32                 `protobuf:"varint,4,opt,name=solo_bots,json=soloBots,proto3" json:"solo_bots,omitempty"`                // room-scoped deterministic test opponents; zero when disabled
+	Paused        bool                   `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`                                    // 房主已暂停正式对局（仅 state=R_RUNNING 时有意义）；缺失 = 旧服务器未暂停
+	HostSpectator bool                   `protobuf:"varint,6,opt,name=host_spectator,json=hostSpectator,proto3" json:"host_spectator,omitempty"` // Host controls the room without occupying a player seat.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5231,6 +5240,13 @@ func (x *EvRoomState) GetSoloBots() uint32 {
 func (x *EvRoomState) GetPaused() bool {
 	if x != nil {
 		return x.Paused
+	}
+	return false
+}
+
+func (x *EvRoomState) GetHostSpectator() bool {
+	if x != nil {
+		return x.HostSpectator
 	}
 	return false
 }
@@ -6455,13 +6471,14 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\robserved_tick\x18\x02 \x01(\rR\fobservedTick\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x03 \x01(\rR\n" +
-	"generation\"\xa2\x01\n" +
+	"generation\"\xc9\x01\n" +
 	"\bJoinRoom\x12\x1b\n" +
 	"\troom_code\x18\x01 \x01(\tR\broomCode\x12\x12\n" +
 	"\x04nick\x18\x02 \x01(\tR\x04nick\x12\x14\n" +
 	"\x05color\x18\x03 \x01(\tR\x05color\x12#\n" +
 	"\rmatch_minutes\x18\x04 \x01(\rR\fmatchMinutes\x12*\n" +
-	"\x11core_open_minutes\x18\x05 \x01(\rR\x0fcoreOpenMinutes\"+\n" +
+	"\x11core_open_minutes\x18\x05 \x01(\rR\x0fcoreOpenMinutes\x12%\n" +
+	"\x0espectator_mode\x18\x06 \x01(\bR\rspectatorMode\"+\n" +
 	"\fSpectateRoom\x12\x1b\n" +
 	"\troom_code\x18\x01 \x01(\tR\broomCode\"\v\n" +
 	"\tLeaveRoom\"\x0e\n" +
@@ -6842,13 +6859,14 @@ const file_proto_omb_proto_rawDesc = "" +
 	"\x05robot\x18\x01 \x01(\rR\x05robot\x12!\n" +
 	"\frounds_delta\x18\x02 \x01(\rR\vroundsDelta\x12!\n" +
 	"\ftokens_delta\x18\x03 \x01(\rR\vtokensDelta\x12\"\n" +
-	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\xf4\x01\n" +
+	"\rglobal_left_k\x18\x04 \x01(\rR\vglobalLeftK\"\x9b\x02\n" +
 	"\vEvRoomState\x12/\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.omb.v1.EvRoomState.StateR\x05state\x12#\n" +
 	"\rrobots_online\x18\x02 \x01(\rR\frobotsOnline\x12\x1b\n" +
 	"\thost_nick\x18\x03 \x01(\tR\bhostNick\x12\x1b\n" +
 	"\tsolo_bots\x18\x04 \x01(\rR\bsoloBots\x12\x16\n" +
-	"\x06paused\x18\x05 \x01(\bR\x06paused\"=\n" +
+	"\x06paused\x18\x05 \x01(\bR\x06paused\x12%\n" +
+	"\x0ehost_spectator\x18\x06 \x01(\bR\rhostSpectator\"=\n" +
 	"\x05State\x12\n" +
 	"\n" +
 	"\x06R_IDLE\x10\x00\x12\f\n" +

@@ -121,9 +121,9 @@ function setStatus(kind: 'ok' | 'down' | 'off', text: string): void {
 
 function isInGame(): boolean { return game !== null && !viewGame.hidden }
 
-function sendRoomAction(kind: RoomAction_Kind): void {
-  if (session?.state !== 'online') return
-  session.send(encodeClient(create(ClientMsgSchema, {
+function sendRoomAction(kind: RoomAction_Kind): boolean {
+  if (session?.state !== 'online') return false
+  return session.send(encodeClient(create(ClientMsgSchema, {
     payload: { case: 'roomAction', value: create(RoomActionSchema, { kind }) },
   })))
 }
@@ -194,7 +194,8 @@ async function joinWith(profile: JoinProfile): Promise<void> {
   }
   lobby.beginJoin(profile.roomCode)
   lastJoin = { roomCode: profile.roomCode, nick: effectiveNick, color: profile.color,
-    matchMinutes: profile.matchMinutes, coreOpenMinutes: profile.coreOpenMinutes }
+    matchMinutes: profile.matchMinutes, coreOpenMinutes: profile.coreOpenMinutes,
+    spectatorMode: profile.spectatorMode === true }
   saveProfile(lastJoin)
   workbench.setIdentity(profile.roomCode, effectiveNick)
   showView('room')
@@ -211,6 +212,7 @@ async function joinWith(profile: JoinProfile): Promise<void> {
       color: profile.color,
       matchMinutes: profile.matchMinutes,
       coreOpenMinutes: profile.coreOpenMinutes,
+      spectatorMode: profile.spectatorMode === true,
       onMessage: (msg) => { if (session === s) onServerMsg(profile.roomCode, msg) },
       onDisconnect: (reason) => { if (session === s) onDisconnected(reason) },
       onStateChange: (state, retryInMs) => { if (session === s) onConnectionState(state, retryInMs) },
@@ -283,7 +285,7 @@ const workbench = new Workbench({
     if (!viewGame.hidden) writeRoute('game', lastJoin?.roomCode, workbench.route)
     syncGameInput()
   },
-  send: frame => session?.state === 'online' ? session.send(frame) : false,
+  send: frame => session?.state === 'online' && !lobby.isHostSpectator ? session.send(frame) : false,
   toggleAssist: () => game?.toggleAssist(),
   activateAssist: () => {
     if (!game || viewGame.hidden) {
@@ -322,13 +324,25 @@ window.addEventListener('focus', syncGameInput)
 document.addEventListener('visibilitychange', syncGameInput)
 
 function syncWorkbench(): void {
-  workbench.setAvailability(session?.state === 'online', game !== null && !game.isMatchEndShown() && !awaitingFull &&
+  workbench.setAvailability(session?.state === 'online' && !lobby.isHostSpectator, game !== null && !game.isMatchEndShown() && !awaitingFull &&
     (lobby.state === EvRoomState_State.R_WARMUP || lobby.state === EvRoomState_State.R_RUNNING))
 }
+
+function syncHostPresentation(): void {
+  const spectator = lobby.isHostSpectator
+  viewGame.dataset.hostSpectator = String(spectator)
+  hudRoot.dataset.hostSpectator = String(spectator)
+  $('game-host-spectator').hidden = !spectator
+  $('btn-game-menu').hidden = !spectator
+  gameCanvas.setAttribute('aria-label', spectator ? '全图观战战场；使用菜单管理房间' : '实时战场；点击或聚焦后操作，Space 或小键盘 Enter 切换辅助，R 夺回手动瞄准，普通 Enter 发言')
+  if (spectator && workbench.isOpen) workbench.close()
+}
+$('btn-game-menu').addEventListener('click', () => gameOptions.open())
 
 function enterGame(): void {
   if (!session) return
   game?.exit()
+  syncHostPresentation()
   game = new GameController({
     canvas: gameCanvas,
     hudRoot,
@@ -336,6 +350,9 @@ function enterGame(): void {
     onExitToRoom: exitGame,
     onMenu: () => { gameOptions.open() },
     onInputGateChange: syncGameInput,
+    hostSpectator: () => lobby.isHostSpectator,
+    canStartNextRound: () => lobby.isHost,
+    onNextRound: () => lobby.isHost && sendRoomAction(RoomAction_Kind.START),
   })
   // 瞄准能力信号桥：脚本装载/Snippet 应用即重算 guard（早于服务器回显）。
   workbench.setAssistAimListener(capable => game?.setAssistAimCapable(capable))
@@ -349,6 +366,7 @@ function exitGame(): void {
   game = null
   workbench.resetMatch()
   showView('room')
+  delete viewGame.dataset.hostSpectator
   // 用缓存状态立即刷新操作栏，下一次 roomState 会覆盖
   lobby.refresh(); syncWorkbench(); syncHostControls()
 }
@@ -386,12 +404,19 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
     if (ev.kind.case === 'say' && ev.kind.value.robot === 0) {
       if (dedupeControlNoticeSay(msg, lastControlNotice)) { lastControlNotice = undefined; return }
       if (workbench.consumeAiDirectedSay(ev.kind.value.text)) return
+      if (ev.kind.value.text === '至少需要一名真人参赛者或自动 Bot' || ev.kind.value.text.startsWith('command failed: ')) {
+        lobby.showRoomError(ev.kind.value.text)
+        game?.showRoomError(ev.kind.value.text)
+        return
+      }
       const launchFailedPrefix = 'match launch failed: '
       if (ev.kind.value.text.startsWith(launchFailedPrefix)) {
         awaitingFull = false
         connectionNotice.hidden = true
-        lobby.showRoomError(`对局启动失败：${ev.kind.value.text.slice(launchFailedPrefix.length)}。请重试开始对局或热身场。`)
-        if (game) exitGame()
+        const message = `对局启动失败：${ev.kind.value.text.slice(launchFailedPrefix.length)}。请重试开始对局或热身场。`
+        lobby.showRoomError(message)
+        if (game?.isMatchEndShown()) game.showRoomError(message)
+        else if (game) exitGame()
         return
       }
     }
@@ -436,7 +461,8 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
         }
       }
       const paused = rs.paused === true && rs.state === EvRoomState_State.R_RUNNING
-      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots, paused)
+      lobby.update(rs.state, rs.hostNick, rs.robotsOnline, rs.soloBots, paused, rs.hostSpectator)
+      syncHostPresentation()
       game?.setPaused(paused && !game.isMatchEndShown(), lobby.isHost)
       syncHostControls()
       syncWorkbench()
@@ -532,6 +558,7 @@ window.addEventListener('keydown', (e) => {
   // 选项层（aria-modal）打开期间其余全局快捷键一律短路（审计 C-32③）：
   // M/C 会把焦点移出模态对话框，Tab 焦点圈随之失效。
   if (gameOptions.isOpen) return
+  if (!viewGame.hidden && lobby.isHostSpectator) return
   if (e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')) return

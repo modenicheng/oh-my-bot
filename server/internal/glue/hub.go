@@ -2,6 +2,7 @@
 package glue
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -133,6 +134,14 @@ func (h *Hub) Unregister(s *Session) {
 					m.dropSpectatorLocked(s.playerID)
 				}
 			}
+		} else if s.hostSpectator {
+			if rc.hostSession == s {
+				rc.hostSession = nil
+				if m := rc.match; m != nil {
+					m.dropSpectatorLocked(s.playerID)
+				}
+				rc.maybeAutoResumeLocked()
+			}
 		} else if rc.sessions[s.playerID] == s {
 			if m := rc.match; m != nil && m.activeLocked() {
 				m.releaseHumanLocked(s.playerID)
@@ -179,7 +188,7 @@ func (h *Hub) janitorSweep() {
 	now := time.Now()
 	for _, rc := range rooms {
 		rc.mu.Lock()
-		if len(rc.sessions) > 0 || len(rc.spectators) > 0 {
+		if len(rc.sessions) > 0 || len(rc.spectators) > 0 || rc.hostSession != nil {
 			rc.emptySince = time.Time{}
 			rc.mu.Unlock()
 			continue
@@ -229,10 +238,13 @@ type RoomConn struct {
 	Room *room.Room
 	// One owner lock covers membership, active-session checks, sim mutations,
 	// encoder state and publication. Launcher/Abort never acquire it under Room.mu.
-	mu         sync.Mutex
-	sessions   map[uint64]*Session
-	spectators map[uint64]*Session
-	identities map[string]SessionInfo
+	mu              sync.Mutex
+	sessions        map[uint64]*Session
+	spectators      map[uint64]*Session
+	identities      map[string]SessionInfo
+	hostSession     *Session
+	hostIdentity    SessionInfo
+	hostIdentitySet bool
 	// Bot 配置按玩家身份保存：同房间换局保留，显式离开才清理。
 	snippets         map[uint64][]snippet.Setting
 	scriptSource     map[uint64]string
@@ -270,14 +282,15 @@ func newRoomConn(code string) *RoomConn {
 }
 
 type Session struct {
-	mu           sync.Mutex // binding fields; lock before RoomConn.mu, then Hub.mu
-	hub          *Hub
-	playerID     uint64
-	nick, color  string
-	rc           *RoomConn
-	spectator    bool // read-only observer; never joins Room/identities/match players
-	SendReliable func(*ombv1.ServerMsg)
-	SendLossy    func(*ombv1.ServerMsg)
+	mu            sync.Mutex // binding fields; lock before RoomConn.mu, then Hub.mu
+	hub           *Hub
+	playerID      uint64
+	nick, color   string
+	rc            *RoomConn
+	spectator     bool // read-only observer; never joins Room/identities/match players
+	hostSpectator bool // host control session; never joins player membership/match roster
+	SendReliable  func(*ombv1.ServerMsg)
+	SendLossy     func(*ombv1.ServerMsg)
 
 	compactSnapshots atomic.Bool
 
@@ -315,11 +328,19 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	defer s.mu.Unlock()
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	return rc.bindPlayerLocked(s, nick, color)
+}
+
+// bindPlayerLocked requires s.mu then rc.mu, like the shared Join admission path.
+func (rc *RoomConn) bindPlayerLocked(s *Session, nick, color string) error {
 	if s.rc != nil {
 		return fmt.Errorf("session already bound")
 	}
 	if rc.closed {
 		return fmt.Errorf("room closed")
+	}
+	if rc.hostIdentitySet && rc.hostIdentity.Nick == nick {
+		return fmt.Errorf("host identity is reserved for spectator control")
 	}
 	info, restore := rc.identities[nick]
 	if !restore {
@@ -368,6 +389,98 @@ func (rc *RoomConn) Bind(s *Session, nick, color string) error {
 	}
 	return nil
 }
+
+// BindJoin applies the first-join spectator intent while keeping later Join
+// requests from changing the room mode. A matching host nickname always
+// restores the dedicated host control identity.
+func (rc *RoomConn) BindJoin(s *Session, nick, color string, spectatorIntent bool) error {
+	return rc.bindJoin(s, nick, color, spectatorIntent, nil)
+}
+
+// BindJoinWithDurations selects the creator's validated durations in the same
+// admission transaction as its role, so simultaneous joins cannot swap configs.
+func (rc *RoomConn) BindJoinWithDurations(s *Session, nick, color string, spectatorIntent bool, durations MatchDurations) error {
+	return rc.bindJoin(s, nick, color, spectatorIntent, &durations)
+}
+
+func (rc *RoomConn) bindJoin(s *Session, nick, color string, spectatorIntent bool, durations *MatchDurations) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if s.rc != nil {
+		return fmt.Errorf("session already bound")
+	}
+	if rc.closed {
+		return fmt.Errorf("room closed")
+	}
+	creating := rc.Room.CreationOpen()
+	if creating && durations != nil {
+		rc.Room.SetDurationConfig(durations.MatchTicks, durations.CoreOpenTick)
+	}
+	if (rc.hostIdentitySet && rc.hostIdentity.Nick == nick) ||
+		(spectatorIntent && creating && rc.Room.HostID() == 0) {
+		return rc.bindHostSpectatorLocked(s, nick, color)
+	}
+	return rc.bindPlayerLocked(s, nick, color)
+}
+
+// BindHostSpectator binds the room creator's control identity without seating a
+// player. The identity remains in hostIdentity after disconnect so a same-nick
+// reconnect can restore the host role without creating a robot.
+func (rc *RoomConn) BindHostSpectator(s *Session, nick, color string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.bindHostSpectatorLocked(s, nick, color)
+}
+
+// bindHostSpectatorLocked requires s.mu then rc.mu; role selection and binding
+// must share that critical section with player admission.
+func (rc *RoomConn) bindHostSpectatorLocked(s *Session, nick, color string) error {
+	if s.rc != nil {
+		return fmt.Errorf("session already bound")
+	}
+	if rc.closed {
+		return fmt.Errorf("room closed")
+	}
+	if rc.hostIdentitySet && rc.hostIdentity.Nick != nick {
+		return fmt.Errorf("host identity already belongs to another nickname")
+	}
+	registeredID := s.playerID
+	if !rc.hostIdentitySet {
+		if err := rc.Room.SetHostSpectator(s.playerID); err != nil {
+			return err
+		}
+		rc.hostIdentity = SessionInfo{PlayerID: s.playerID, Nick: nick, Color: color}
+		rc.hostIdentitySet = true
+	} else {
+		s.playerID = rc.hostIdentity.PlayerID
+	}
+	rc.Room.SetPendingNick(rc.hostIdentity.PlayerID, rc.hostIdentity.Nick)
+	if s.hub != nil {
+		s.hub.mu.Lock()
+		if s.hub.player[registeredID] == s {
+			delete(s.hub.player, registeredID)
+		}
+		s.playerID = rc.hostIdentity.PlayerID
+		s.hub.player[s.playerID] = s
+		s.hub.mu.Unlock()
+	}
+	s.nick, s.color, s.rc = rc.hostIdentity.Nick, rc.hostIdentity.Color, rc
+	s.hostSpectator = true
+	if old := rc.hostSession; old != nil {
+		sendNotice(old, ombv1.EvControlNotice_CN_TAKEOVER, takeoverNoticeText)
+		old.CloseConn()
+	}
+	rc.hostSession = s
+	rc.broadcastRoomStateLocked()
+	if m := rc.match; m != nil {
+		m.bootstrapHostSpectatorLocked(s)
+	}
+	return nil
+}
 func (s *Session) BindRoom(rc *RoomConn) { s.mu.Lock(); defer s.mu.Unlock(); s.rc = rc }
 
 // BindSpectator attaches a read-only observer. It uses the registered connection
@@ -408,6 +521,22 @@ func (s *Session) withRoom(fn func(*RoomConn)) {
 		rc.mu.Lock()
 		defer rc.mu.Unlock()
 		if !s.spectator && rc.sessions[s.playerID] == s {
+			fn(rc)
+		}
+	}
+}
+
+// withControlRoom admits either a seated player or the dedicated host
+// spectator. It is intentionally used only by room-control methods; player
+// actions continue through withRoom and therefore cannot reach the host
+// spectator session.
+func (s *Session) withControlRoom(fn func(*RoomConn)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rc := s.rc; rc != nil {
+		rc.mu.Lock()
+		defer rc.mu.Unlock()
+		if !s.spectator && ((!s.hostSpectator && rc.sessions[s.playerID] == s) || (s.hostSpectator && rc.hostSession == s)) {
 			fn(rc)
 		}
 	}
@@ -474,9 +603,13 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 	if act == 0 {
 		return
 	}
-	s.withRoom(func(rc *RoomConn) {
+	s.withControlRoom(func(rc *RoomConn) {
 		if err := rc.Room.HostCommand(s.playerID, act); err != nil {
-			s.SendReliable(say("command failed: " + err.Error()))
+			if errors.Is(err, room.ErrNoPlayers) {
+				s.SendReliable(say("至少需要一名真人参赛者或自动 Bot"))
+			} else {
+				s.SendReliable(say("command failed: " + err.Error()))
+			}
 			return
 		}
 		rc.broadcastRoomStateLocked()
@@ -487,7 +620,7 @@ func (s *Session) HostCommand(kind ombv1.RoomAction_Kind) {
 // EvRoomState.paused 随广播下发（含暂停期间的进房 catch-up），客户端据此
 // 展示/撤下暂停覆盖层。
 func (s *Session) PauseCommand(paused bool) {
-	s.withRoom(func(rc *RoomConn) {
+	s.withControlRoom(func(rc *RoomConn) {
 		if !rc.Room.IsHost(s.playerID) {
 			s.SendReliable(say("command failed: only the host may pause the match"))
 			return
@@ -510,7 +643,7 @@ func (s *Session) PauseCommand(paused bool) {
 // FinishCommand 房主提前结算：当前正式对局在下一拍按正常结算流收口（计分、
 // 称号、事件日志、结算广播），房间进入 Ended。
 func (s *Session) FinishCommand() {
-	s.withRoom(func(rc *RoomConn) {
+	s.withControlRoom(func(rc *RoomConn) {
 		if !rc.Room.IsHost(s.playerID) {
 			s.SendReliable(say("command failed: only the host may finish the match"))
 			return
@@ -638,6 +771,14 @@ func (s *Session) AiPrompt(p *ombv1.AiPrompt) {
 	})
 }
 func (s *Session) Resync() {
+	if s.IsHostSpectator() {
+		s.withControlRoom(func(rc *RoomConn) {
+			if m := rc.match; m != nil {
+				m.forceHostSpectatorResyncLocked(s.playerID)
+			}
+		})
+		return
+	}
 	if s.IsSpectator() {
 		s.withSpectatorRoom(func(rc *RoomConn) {
 			if m := rc.match; m != nil {
@@ -666,6 +807,30 @@ func (s *Session) LeaveRoom() {
 			if m := rc.match; m != nil {
 				m.dropSpectatorLocked(s.playerID)
 			}
+		})
+		return
+	}
+	if s.IsHostSpectator() {
+		s.withControlRoom(func(rc *RoomConn) {
+			if rc.hostSession != s {
+				return
+			}
+			rc.hostSession = nil
+			rc.hostIdentity = SessionInfo{}
+			rc.hostIdentitySet = false
+			if m := rc.match; m != nil {
+				m.dropSpectatorLocked(s.playerID)
+			}
+			_ = rc.Room.ReleaseHostSpectator(s.playerID)
+			if s.hub != nil {
+				s.hub.mu.Lock()
+				if s.hub.player[s.playerID] == s {
+					delete(s.hub.player, s.playerID)
+				}
+				s.hub.mu.Unlock()
+			}
+			rc.maybeAutoResumeLocked()
+			rc.broadcastRoomStateLocked()
 		})
 		return
 	}
@@ -720,12 +885,20 @@ func (rc *RoomConn) broadcastLocked(msg *ombv1.ServerMsg) {
 				s.SendReliable(msg)
 			}
 		}
+		if s := rc.hostSession; s != nil && s.SendReliableFrame != nil {
+			s.SendReliableFrame(frame)
+		} else if s != nil {
+			s.SendReliable(msg)
+		}
 		return
 	}
 	for _, s := range rc.sessions {
 		s.SendReliable(msg)
 	}
 	for _, s := range rc.spectators {
+		s.SendReliable(msg)
+	}
+	if s := rc.hostSession; s != nil {
 		s.SendReliable(msg)
 	}
 }
@@ -769,7 +942,7 @@ func (rc *RoomConn) maybeAutoResumeLocked() {
 	if !rc.paused {
 		return
 	}
-	if host := rc.sessions[rc.Room.HostID()]; host != nil {
+	if rc.hostSession != nil || rc.sessions[rc.Room.HostID()] != nil {
 		return
 	}
 	rc.paused = false
@@ -910,6 +1083,7 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	m.syncRoomSnippetsLocked()
 	rc.match = m
 	slog.Info("match.started", "room_code", rc.Code, "warmup", m.warmup, "players", len(m.robotOf))
+	rc.broadcastRoomStateLocked()
 	for _, s := range rc.sessions {
 		// S-27 花名册守卫（与 Bind 同款）：HostCommand 冻结 ids 与异步 publish
 		// 之间存在装配窗口，窗口内 Bind 的会话是房间成员但不在本轮 robotOf。
@@ -923,7 +1097,9 @@ func (la *launcherAdapter) publish(a *asyncHandle, m *Match) {
 	for _, s := range rc.spectators {
 		m.bootstrapSpectatorLocked(s)
 	}
-	rc.broadcastRoomStateLocked()
+	if s := rc.hostSession; s != nil {
+		m.bootstrapHostSpectatorLocked(s)
+	}
 	m.start()
 }
 
@@ -992,4 +1168,18 @@ func (rc *RoomConn) EnsureLauncher() {
 		rc.launcher = &launcherAdapter{rc: rc}
 		rc.Room.SetSimLauncher(rc.launcher)
 	}
+}
+
+func (s *Session) IsHostSpectator() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hostSpectator
+}
+
+func (s *Session) IsHost() bool {
+	var host bool
+	s.withControlRoom(func(rc *RoomConn) {
+		host = rc.Room.IsHost(s.playerID)
+	})
+	return host
 }

@@ -400,7 +400,12 @@ export class ScoreRowRenderer {
   clear(): void { for (const element of this.rows.values()) disposeRowTitles(element); this.rows.clear(); this.renderedRows.clear(); this.renderedOptions = '' }
 }
 
-export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], names: ReadonlyMap<number, string>, onBack?: () => void, self = -1): void {
+export interface MatchEndActions {
+  /** Host-only action for starting the next round without leaving the game view. */
+  onNextRound?: () => boolean | void
+}
+
+export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], names: ReadonlyMap<number, string>, onBack?: () => void, self = -1, actions?: MatchEndActions): void {
   hideMatchEnd(root)
   const overlay = document.createElement('div'); overlay.className = 'end-overlay'
   overlay.setAttribute('role', 'region'); overlay.setAttribute('aria-label', '对局结算')
@@ -425,9 +430,32 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
     list.append(scoreRow({ ...row, rank: i + 1, nick: row.nick || names.get(row.robot) || `robot-${row.robot}`, self: row.robot === self, dead: false }, 'li', true))
   }
   const footer = document.createElement('footer'); footer.className = 'end-footer'
+  const error = document.createElement('p'); error.className = 'end-error'; error.hidden = true
+  error.setAttribute('role', 'alert')
   const source = text('end-source', '积分与称号以服务器结算为准')
   source.append(text('end-source-detail', '；未提供的统计不作估算'), document.createTextNode('。'))
   footer.append(source)
+  if (actions?.onNextRound) {
+    const next = document.createElement('button'); next.type = 'button'; next.className = 'end-next'
+    next.textContent = '开始下一局'
+    const activate = () => {
+      if (next.disabled) return
+      next.disabled = true
+      error.hidden = true
+      if (actions.onNextRound!() === false) {
+        next.disabled = false
+        error.textContent = '连接恢复后可开始下一局'
+        error.hidden = false
+      }
+    }
+    next.addEventListener('click', activate)
+    next.addEventListener('pointerup', event => {
+      if (event.pointerType !== 'touch') return
+      event.preventDefault()
+      activate()
+    })
+    footer.append(next)
+  }
   if (onBack) {
     const back = document.createElement('button'); back.type = 'button'; back.className = 'end-back'
     back.textContent = '回到房间'
@@ -450,12 +478,22 @@ export function showMatchEnd(root: HTMLElement, rows: readonly ScoreEntry[], nam
   panel.append(header, summary, help)
   if (!rows.length) panel.append(text('end-empty', '本局无得分记录'))
   else panel.append(list)
-  panel.append(footer)
+  panel.append(error, footer)
   overlay.append(panel)
   root.append(overlay)
   // A region, not a modal: workbench and room controls remain accessible.
   // Move focus only when the battle canvas owned it, never out of an editor.
   if (document.activeElement?.id === 'game-canvas') { heading.tabIndex = -1; heading.focus({ preventScroll: true }) }
+}
+
+/** A rejected START keeps the settlement visible and allows a deliberate retry. */
+export function showMatchEndError(root: HTMLElement, message: string): void {
+  const error = root.querySelector<HTMLElement>('.end-error')
+  if (!error) return
+  error.textContent = message
+  error.hidden = false
+  const next = root.querySelector<HTMLButtonElement>('.end-next')
+  if (next) next.disabled = false
 }
 
 export function hideMatchEnd(root: HTMLElement): void {

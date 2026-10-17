@@ -1,6 +1,7 @@
 // Hand-drawn UI glyphs on one 16×16 pixel grid. Paths contain integer, axis-aligned steps.
 // DOM and canvas use the same geometry; labels stay on the surrounding control.
 const paths = {
+  menu: 'M2 2h12v2H2ZM2 7h12v2H2ZM2 12h12v2H2Z',
   play: 'M4 2h2v2h3v2h3v2h2v2h-2v2H9v2H6v2H4Z',
   pause: 'M3 2h4v12H3ZM10 2h4v12h-4Z',
   back: 'M6 2h2v4h6v4H8v4H6v-2H4v-2H2V6h2V4h2Z',

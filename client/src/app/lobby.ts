@@ -20,6 +20,7 @@ export class Lobby {
   private hostNick = ''
   private robotsOnline = 0
   private soloBots = 0
+  private hostSpectator = false
   private pausedState = false
   private color = COLORS[0]!
   // OIDC 认证态（服务端 auth.* 开启时）：未登录阻止进房，已登录昵称锁定为
@@ -31,6 +32,7 @@ export class Lobby {
   private nickInput = $<HTMLInputElement>('in-nick')
   private matchInput = $<HTMLSelectElement>('in-match-min')
   private coreInput = $<HTMLSelectElement>('in-core-min')
+  private spectatorModeInput = $<HTMLInputElement>('in-spectator-mode')
   private swatches = $('swatches')
   private joinButton = $<HTMLButtonElement>('btn-join')
   private startButton = $<HTMLButtonElement>('btn-start')
@@ -93,7 +95,8 @@ export class Lobby {
     if (this.authEnabled && !this.authClaims) return this.showError('需要先通过 OIDC 登录（认证后昵称自动取认证身份）')
     const { matchMinutes, coreOpenMinutes } = this.selectedDurations()
     if (coreOpenMinutes >= matchMinutes) return this.showError('核心区开放时间需早于游玩时长')
-    this.deps.join({ roomCode: this.roomInput.value, nick, color: this.color, matchMinutes, coreOpenMinutes })
+    this.deps.join({ roomCode: this.roomInput.value, nick, color: this.color, matchMinutes, coreOpenMinutes,
+      spectatorMode: this.spectatorModeInput.checked })
   }
 
   /** 当前表单时长（分钟）。 */
@@ -149,6 +152,7 @@ export class Lobby {
     // 认证锁定昵称时保持认证名：存量 profile 可能是接入认证前的旧昵称。
     if (!this.nickInput.disabled) this.nickInput.value = profile.nick
     this.color = profile.color
+    this.spectatorModeInput.checked = profile.spectatorMode === true
     if (profile.matchMinutes && [...this.matchInput.options].some(o => o.value === String(profile.matchMinutes))) {
       this.matchInput.value = String(profile.matchMinutes)
     }
@@ -163,6 +167,7 @@ export class Lobby {
     // 认证锁定时昵称恒定：清空会让禁用输入框过不了进房校验（死锁）。
     this.nickInput.value = this.authClaims ? this.authClaims.name.slice(0, 16) : ''
     this.showError('')
+    this.spectatorModeInput.checked = false
     this.setJoining(false)
     if (!this.nickInput.disabled) this.nickInput.focus({ preventScroll: true })
   }
@@ -178,15 +183,16 @@ export class Lobby {
     this.showRoomError('')
     $('room-code').textContent = roomCode
     $<HTMLAnchorElement>('room-live').href = `?view=live&room=${encodeURIComponent(roomCode)}`
-    this.hostNick = ''; this.robotsOnline = 0; this.state = -1; this.soloBots = 0; this.pausedState = false
+    this.hostNick = ''; this.robotsOnline = 0; this.state = -1; this.soloBots = 0; this.pausedState = false; this.hostSpectator = false
     $('members').replaceChildren()
     this.startButton.hidden = this.warmupButton.hidden = this.botsButton.hidden = true
     $('room-notice').hidden = true
     $('room-state').textContent = '已发送进房请求，等待服务器…'
   }
 
-  update(state: number, hostNick: string, robotsOnline: number, soloBots: number, paused: boolean): void {
+  update(state: number, hostNick: string, robotsOnline: number, soloBots: number, paused: boolean, hostSpectator = false): void {
     this.state = state; this.hostNick = hostNick; this.robotsOnline = robotsOnline; this.soloBots = soloBots
+    this.hostSpectator = hostSpectator
     this.pausedState = paused
     this.refresh()
   }
@@ -194,13 +200,18 @@ export class Lobby {
   /** 本机是否房主（由房间状态广播的 host_nick 与本机昵称对齐判定）。 */
   get isHost(): boolean { return this.hostNick !== '' && this.hostNick === this.deps.selfNick() }
 
+  /** Final room mode from the server, scoped to the local host identity. */
+  get isHostSpectator(): boolean { return this.isHost && this.hostSpectator }
+
   /** 房主是否已暂停正式对局（EvRoomState.paused）。 */
   get paused(): boolean { return this.pausedState }
 
   refresh(): void {
     const { state, hostNick, robotsOnline } = this
     const stateName = ['空闲', '热身中', this.pausedState ? '对局中（已暂停）' : '对局中', '已结束'][state] ?? `状态${state}`
-    $('room-state').textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}` + (this.soloBots ? ` · 自动 Bot 上限 ${this.soloBots}（开场补满空位）` : '')
+    $('room-state').textContent = `房间 ${stateName} · 房主 ${hostNick || '—'} · 真人 ${robotsOnline}`
+      + (this.hostSpectator ? ' · 观战主持' : '')
+      + (this.soloBots ? ` · 自动 Bot 上限 ${this.soloBots}（开场补满空位）` : '')
     const isHost = this.isHost
     // 正式局可直接从 Ended 连开（不必先回热身）：canStart 与服务端
     // room.HostCommand 的 START 合法集（Idle/Warmup/Ended）一致。

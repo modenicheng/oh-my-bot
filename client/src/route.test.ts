@@ -46,4 +46,17 @@ describe('spectator routes', () => {
     values.set('omb.join', JSON.stringify({ roomCode: 'DURA1', nick: 'pilot', color: '#22d3ee', matchMinutes: -2, coreOpenMinutes: 'x' }))
     expect(loadProfile('DURA1')).toEqual({ roomCode: 'DURA1', nick: 'pilot', color: '#22d3ee' })
   })
+
+  it('round-trips the host spectator creation intent without changing read-only routes', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    })
+    saveProfile({ roomCode: 'HOST1', nick: 'host', color: '#22d3ee', spectatorMode: true })
+    expect(loadProfile('HOST1')).toMatchObject({ spectatorMode: true })
+    expect(loadProfile('HOST1')?.spectatorMode).toBe(true)
+    expect(readRoute(new URL('http://localhost/?view=live&room=HOST1')).view).toBe('live')
+  })
 })

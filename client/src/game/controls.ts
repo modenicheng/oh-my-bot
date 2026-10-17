@@ -17,7 +17,7 @@ import { MobileControls } from './mobile-controls'
 import { isAimUnderScript } from './axis-src'
 import { Hud } from './hud'
 import { UpgradePanel } from './upgrades'
-import { Scoreboard, showMatchEnd, hideMatchEnd } from './scoreboard'
+import { Scoreboard, showMatchEnd, hideMatchEnd, showMatchEndError } from './scoreboard'
 import { GameFeedback, canvasAwake } from './feedback'
 import { audio } from '../audio'
 import { bgm } from '../music/bgm'
@@ -39,6 +39,11 @@ export interface GameDeps {
   onExitToRoom?: () => void
   onMenu?: () => void
   onInputGateChange?: () => void
+  /** True only for the local host connection created in host-spectator mode. */
+  hostSpectator?: () => boolean
+  /** Sends the authoritative START room action from settlement. */
+  onNextRound?: () => boolean | void
+  canStartNextRound?: () => boolean
 }
 
 /** 升级轨展示名（下标与协议 levels 一致；反馈文案专用）。 */
@@ -67,6 +72,9 @@ export class GameController {
   private hudRoot: HTMLElement
   private send: (data: Uint8Array) => void
   private onExitToRoom?: () => void
+  private hostSpectator?: () => boolean
+  private onNextRound?: () => boolean | void
+  private canStartNextRound?: () => boolean
   private pausedOverlay = document.getElementById('game-paused') as HTMLElement
   private pausedNote = document.getElementById('game-paused-note') as HTMLElement
   private active = true
@@ -89,7 +97,7 @@ export class GameController {
   private chatReadyTick = 0
   private readonly submitChat = (event: Event) => {
     event.preventDefault()
-    if (!this.active || this.ended || this.chat.hidden || this.world.tick < this.chatReadyTick) return
+    if (this.isHostSpectator() || !this.active || this.ended || this.chat.hidden || this.world.tick < this.chatReadyTick) return
     const self = this.world.robots.get(this.world.self?.robotId ?? 0)
     if (!self || self.dead) { this.closeChat(true); return }
     const text = [...this.chatInput.value.replace(/[\s\p{Cc}]+/gu, ' ').trim()].slice(0, 160).join('')
@@ -127,6 +135,14 @@ export class GameController {
     this.hudRoot = deps.hudRoot
     this.send = deps.send
     this.onExitToRoom = deps.onExitToRoom
+    this.hostSpectator = deps.hostSpectator
+    this.onNextRound = deps.onNextRound
+    this.canStartNextRound = deps.canStartNextRound
+    if (this.isHostSpectator()) {
+      this.inputEnabled = false
+      this.requestedInput = false
+      this.hudRoot.dataset.hostSpectator = 'true'
+    }
     this.renderer = new Renderer(deps.canvas)
     // 审计 C-26：rAF/RO/DPR 漂移交给 CanvasStage。游戏画面含时间驱动动效
     // （飘字/震动/拖尾）与指针瞄准预览，恒绘改为 awake 谓词：frameAwake 为
@@ -142,14 +158,16 @@ export class GameController {
       () => this.hud.showInnerRing(),
       seconds => this.hud.pulseCountdown(seconds),
     )
-    this.mobile = new MobileControls(deps.canvas.parentElement!, {
-      onInput: snapshot => this.applyMobileInput(snapshot),
-      onShot: aim => this.submitMobileShot(aim),
-      onGateChange: () => { this.refreshMobileGate(); deps.onInputGateChange?.() },
-      onAssist: () => this.toggleAssist(),
-      onChat: () => this.openChat(),
-      onMenu: () => deps.onMenu?.(),
-    })
+    if (!this.isHostSpectator()) {
+      this.mobile = new MobileControls(deps.canvas.parentElement!, {
+        onInput: snapshot => this.applyMobileInput(snapshot),
+        onShot: aim => this.submitMobileShot(aim),
+        onGateChange: () => { this.refreshMobileGate(); deps.onInputGateChange?.() },
+        onAssist: () => this.toggleAssist(),
+        onChat: () => this.openChat(),
+        onMenu: () => deps.onMenu?.(),
+      })
+    }
     this.refreshMobileGate()
     // 瞄准 guard 生效期间鼠标移动被吞时提示按 R（节流在 HUD 内部）。
     this.input.onAimGuarded = () => {
@@ -184,10 +202,10 @@ export class GameController {
     this.mobile?.resetTakeover()
     this.input.resetTakeover()
     this.pendingShots.clear()
-    this.mobile?.setBattleVisible(true)
+    this.mobile?.setBattleVisible(!this.isHostSpectator())
     this.shotSupported = shotSupported
     this.inputGeneration = generation
-    this.mobile?.setCapability(shotSupported && generation !== 0)
+    this.mobile?.setCapability(!this.isHostSpectator() && shotSupported && generation !== 0)
     this.ended = false
     this.chatReadyTick = 0
     this.closeChat(false)
@@ -212,7 +230,7 @@ export class GameController {
     // 新地图首帧必画：awake 门下若开局即静默（无特效/指针/气泡），不能沿用
     // 上一局的残帧（恒绘时代由 always 模式隐式保证）。
     this.stage.requestDraw()
-    if (this.active && this.inputEnabled) this.input.attach(this.canvas, this.cam)
+    if (this.active && this.inputEnabled && !this.isHostSpectator()) this.input.attach(this.canvas, this.cam)
     this.startLoops()
     return true
   }
@@ -241,11 +259,17 @@ export class GameController {
     this.endShown = false
     this.setPaused(false, false)
     hideMatchEnd(this.hudRoot)
+    delete this.hudRoot.dataset.hostSpectator
   }
 
   /** 结算覆盖层是否在场（main.ts 据此决定 roomState 回大厅时不抢切视图） */
   isMatchEndShown(): boolean {
     return this.endShown && this.map !== null
+  }
+
+  showRoomError(message: string): void {
+    if (this.endShown) showMatchEndError(this.hudRoot, message)
+    else this.hud.flashMsg(message)
   }
 
   /**
@@ -291,6 +315,7 @@ export class GameController {
         this.resyncAt = performance.now()
         this.send(buildResync())
       } else if (result === 'applied') {
+        if (this.isHostSpectator()) this.world.self = undefined
         if (snap.self?.inputGeneration !== undefined && snap.self.inputGeneration !== this.inputGeneration) {
           this.mobile?.resetTakeover()
           this.input.resetTakeover()
@@ -370,7 +395,7 @@ export class GameController {
 
   /** 购买升级（ADR-0016）：低频事件直投；点数不足/满级由服务器静默拒绝。 */
   buyUpgrade(track: number): void {
-    if (!this.active || this.ended) return
+    if (this.isHostSpectator() || !this.active || this.ended) return
     this.send(encodeClient(create(ClientMsgSchema, {
       payload: { case: 'upgradeRequest', value: create(UpgradeRequestSchema, { track }) },
     })))
@@ -402,10 +427,10 @@ export class GameController {
       this.input.detach()
     }
     this.active = active
-    this.mobile?.setBattleVisible(active && !this.ended)
+    this.mobile?.setBattleVisible(active && !this.ended && !this.isHostSpectator())
     if (!active) { this.feedback.pause(); this.closeChat(false); this.bubbles = [] }
     if (active && this.map) {
-      if (this.inputEnabled) this.input.attach(this.canvas, this.cam)
+      if (this.inputEnabled && !this.isHostSpectator()) this.input.attach(this.canvas, this.cam)
       if (this.startCuePending && this.world.initialized && !this.ended) {
         this.startCuePending = false
         audio.play('matchStart')
@@ -421,6 +446,7 @@ export class GameController {
 
   /** 焦点离开战场时释放手操；画面、快照和脚本继续运行。 */
   setInputEnabled(enabled: boolean): void {
+    if (this.isHostSpectator()) enabled = false
     this.requestedInput = enabled
     enabled = enabled && !this.mobile?.blocked && !this.panelBlocked
     if (this.inputEnabled === enabled) return
@@ -445,7 +471,7 @@ export class GameController {
 
   /** 选项层等本地覆盖层打开时释放全部 held 输入，不暂停服务端模拟。 */
   releaseInput(): void {
-    if (!this.map || !this.active || !this.inputEnabled) return
+    if (this.isHostSpectator() || !this.map || !this.active || !this.inputEnabled) return
     this.mobile?.setEnabled(false)
     this.input.release()
     this.sampleAndSend()
@@ -458,7 +484,7 @@ export class GameController {
    * 激活成功后把焦点交回战场画布：面板按钮激活时焦点留在面板，输入采样
    * 处于挂起状态，WASD 将无法抢占脚本轴（服务端仲裁本身正常）。 */
   activateAssist(): boolean {
-    if (!this.active || !this.map || this.ended || !this.world.initialized) return false
+    if (this.isHostSpectator() || !this.active || !this.map || this.ended || !this.world.initialized) return false
     if (!this.input.assistOn || (this.world.self?.manualAxesMask ?? 0) !== 0) this.toggleAssist()
     if (this.input.assistOn) this.canvas.focus({ preventScroll: true })
     return this.input.assistOn
@@ -466,7 +492,7 @@ export class GameController {
 
   /** 瞄准 guard：脚本控制炮塔时鼠标移动不抢炮塔轴，R 显式夺取。 */
   seizeAim(): void {
-    if (!this.active || !this.map || this.ended || !this.world.initialized) return
+    if (this.isHostSpectator() || !this.active || !this.map || this.ended || !this.world.initialized) return
     if (!this.input.seizeAim()) return
     audio.play('assist')
     this.hud.flashMsg('手动瞄准 · Space 交回辅助')
@@ -502,7 +528,7 @@ export class GameController {
   /** Space assist 开关：转发给服务器。从工作台辅助按钮触发时焦点不在画布，
    * 切换成功后同样交回战场，手操抢占立即可用（Space 路径幂等）。 */
   toggleAssist(): void {
-    if (!this.active || !this.map || this.ended || !this.world.initialized) return
+    if (this.isHostSpectator() || !this.active || !this.map || this.ended || !this.world.initialized) return
     this.mobile?.resetTakeover()
     if (this.input.toggleAssist(this.world.self?.manualAxesMask ?? 0)) {
       this.syncAimGuard()
@@ -518,7 +544,7 @@ export class GameController {
 
   /** Enter 打开全场发言；文本输入获得焦点，手操随之释放。 */
   openChat(): void {
-    if (!this.active || this.ended || !this.world.initialized) return
+    if (this.isHostSpectator() || !this.active || this.ended || !this.world.initialized) return
     const self = this.world.robots.get(this.world.self?.robotId ?? 0)
     if (!self || self.dead) { this.hud.flashMsg('重生后可以发言'); return }
     if (this.world.tick < this.chatReadyTick) {
@@ -532,7 +558,7 @@ export class GameController {
   }
 
   private applyMobileInput(snapshot: TouchInputSnapshot): void {
-    if (!this.active || !this.inputEnabled || !this.map || this.ended || this.paused || this.panelBlocked || !this.world.initialized) return
+    if (this.isHostSpectator() || !this.active || !this.inputEnabled || !this.map || this.ended || this.paused || this.panelBlocked || !this.world.initialized) return
     if (this.world.robots.get(this.world.self?.robotId ?? 0)?.dead) return
     this.input.setTouchMode(this.mobile?.touch ?? true)
     this.input.applyTouch(snapshot)
@@ -542,7 +568,7 @@ export class GameController {
 
   /** Send the release immediately; held input coalescing cannot erase this action. */
   private submitMobileShot(aim: number): void {
-    if (!this.shotSupported || !this.inputGeneration || !this.mobile?.touch || this.mobile.blocked || !Number.isFinite(aim)
+    if (this.isHostSpectator() || !this.shotSupported || !this.inputGeneration || !this.mobile?.touch || this.mobile.blocked || !Number.isFinite(aim)
       || !this.active || !this.inputEnabled || !this.map || this.ended || this.paused || this.panelBlocked || !this.world.initialized) return
     const self = this.world.robots.get(this.world.self?.robotId ?? 0)
     if (!self || self.dead) return
@@ -565,7 +591,7 @@ export class GameController {
   private syncMobileEnabled(): void {
     if (!this.mobile) return
     const self = this.world.robots.get(this.world.self?.robotId ?? 0)
-    this.mobile?.setEnabled(this.active && this.inputEnabled && !!this.map && this.world.initialized && !this.ended && !this.paused && !self?.dead)
+    this.mobile?.setEnabled(!this.isHostSpectator() && this.active && this.inputEnabled && !!this.map && this.world.initialized && !this.ended && !this.paused && !self?.dead)
   }
 
   private closeChat(returnFocus: boolean): void {
@@ -595,6 +621,7 @@ export class GameController {
     this.input.refreshBounds()
     this.renderer.resize(w, h, dpr)
     this.cam.resize(w, h, this.map.extent)
+    if (this.isHostSpectator()) this.cam.fitWorld()
     prepareArt(this.cam.scale * 1.05, dpr)
     this.preparePresentation()
   }
@@ -638,7 +665,7 @@ export class GameController {
   private preparePresentation(): void {
     if (!this.map || !this.active) return
     bgm.phase('game', this.world.phase)
-    this.syncAimGuard()
+    if (!this.isHostSpectator()) this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
     // 死亡：人工接管归零（服务端重生时已重置控制状态），本地同步清粘滞轴，
@@ -651,10 +678,13 @@ export class GameController {
     this.syncMobileEnabled()
     const pos = self?.base?.pos
     const hacking = this.selfHacking(selfId)
-    this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
+    if (this.isHostSpectator()) this.cam.fitWorld()
+    else this.cam.setZoom(this.feedback.cameraZoom(this.world.tick, !!self?.dashing && !self.dead, hacking))
     if (self?.dead && !this.chat.hidden) this.closeChat(document.activeElement === this.chatInput)
-    if (pos) this.cam.follow(pos.x, pos.y)
-    else this.cam.follow(0, 0)
+    if (!this.isHostSpectator()) {
+      if (pos) this.cam.follow(pos.x, pos.y)
+      else this.cam.follow(0, 0)
+    }
     this.extras.bubbles = this.bubbles
     this.extras.localAim = pos ? this.input.aimAt(pos.x, pos.y) : undefined
     this.extras.feedback = this.feedback
@@ -689,7 +719,7 @@ export class GameController {
   }
 
   private sampleAndSend(): void {
-    if (!this.map || !this.active || !this.inputEnabled || this.ended || !this.world.initialized) return
+    if (this.isHostSpectator() || !this.map || !this.active || !this.inputEnabled || this.ended || !this.world.initialized) return
     this.syncAimGuard()
     const selfId = this.world.self?.robotId ?? 0
     const self = this.world.robots.get(selfId)
@@ -707,6 +737,11 @@ export class GameController {
   }
 
   private showEnd(ev: EvMatchEnd): void {
-    showMatchEnd(this.hudRoot, ev.scores, this.scores.names, () => this.dismissMatchEnd(), this.world.self?.robotId)
+    showMatchEnd(this.hudRoot, ev.scores, this.scores.names, () => this.dismissMatchEnd(), this.world.self?.robotId,
+      this.onNextRound && (this.canStartNextRound?.() ?? true) ? { onNextRound: this.onNextRound } : undefined)
+  }
+
+  private isHostSpectator(): boolean {
+    return this.hostSpectator?.() === true
   }
 }

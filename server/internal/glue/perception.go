@@ -24,6 +24,9 @@ func (match *Match) broadcastPerceivedEventLocked(event *ombv1.ServerEvent) {
 	for _, session := range match.rc.spectators {
 		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: event}})
 	}
+	if session := match.rc.hostSession; session != nil {
+		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: event}})
+	}
 }
 
 func eventPerceived(world sim.WorldView, observerID uint32, event *ombv1.ServerEvent) bool {

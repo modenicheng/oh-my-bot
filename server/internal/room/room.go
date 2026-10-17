@@ -154,9 +154,11 @@ type Member struct {
 
 // Room is one private room (ADR-0008). Create with NewRoom.
 type Room struct {
-	mu   sync.Mutex
-	code string
-	host uint64 // host player id
+	mu             sync.Mutex
+	code           string
+	host           uint64 // host control identity; may be absent from members in spectator mode
+	hostSpectator  bool
+	creationClosed bool // first successful Join fixes creation settings, even without a seat
 
 	state State
 
@@ -177,7 +179,7 @@ type Room struct {
 	soloBots     uint32
 
 	// matchTicks/coreOpenTicks：本房正式局时长配置（tick，0/0 = 默认 8/4 分钟）。
-	// 建房语义：仅房间空闲且无人入座时（创建窗口）可写入，进房/开局后固定。
+	// 建房语义：仅首次 Join 前（创建窗口）可写入，进房/开局后固定。
 	matchTicks   uint32
 	coreOpenTick uint32
 }
@@ -242,6 +244,51 @@ func (r *Room) HostID() uint64 {
 	return r.host
 }
 
+// SetHostSpectator selects the room's host control identity without seating a
+// player. It is only valid while the room is still in its creation window.
+func (r *Room) SetHostSpectator(playerID uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if playerID == 0 {
+		return ErrNotHost
+	}
+	if r.state != Idle || r.creationClosed {
+		return fmt.Errorf("room: spectator host can only be selected before the first join")
+	}
+	if r.host != 0 && r.host != playerID {
+		return ErrNotHost
+	}
+	r.host = playerID
+	r.hostSpectator = true
+	r.creationClosed = true
+	return nil
+}
+
+// ReleaseHostSpectator clears the dedicated host control identity. It is used
+// only when the host explicitly leaves; a socket disconnect must not call it.
+// As with a seated host leaving, the first remaining player inherits control.
+func (r *Room) ReleaseHostSpectator(playerID uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.hostSpectator || playerID != r.host {
+		return ErrNotHost
+	}
+	r.host = 0
+	r.hostSpectator = false
+	delete(r.pendingNicks, playerID)
+	if len(r.joinOrder) > 0 {
+		r.host = r.joinOrder[0]
+	}
+	return nil
+}
+
+// HostSpectator reports whether the room was created with a non-player host.
+func (r *Room) HostSpectator() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hostSpectator
+}
+
 // IsHost reports whether playerID is the host.
 func (r *Room) IsHost(playerID uint64) bool {
 	r.mu.Lock()
@@ -268,13 +315,21 @@ func (r *Room) SetSoloBots(count uint32) {
 	r.soloBots = count
 }
 
+// CreationOpen reports whether the first Join can still choose room settings.
+// Explicit leave does not reopen this window.
+func (r *Room) CreationOpen() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state == Idle && !r.creationClosed
+}
+
 // SetDurationConfig 记录本房正式局时长（tick，0/0 = 默认）。仅创建窗口
-// （Idle 且无人入座）接受写入并返回 true；其余时点静默忽略（后进房者携带
+// （Idle 且首次 Join 前）接受写入并返回 true；其余时点静默忽略（后进房者携带
 // 的设置不覆盖房主配置）。数值合法性由调用侧（glue/入口）用 sim 规则校验。
 func (r *Room) SetDurationConfig(matchTicks, coreOpenTicks uint32) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.state != Idle || len(r.members) > 0 {
+	if r.state != Idle || r.creationClosed {
 		return false
 	}
 	r.matchTicks, r.coreOpenTick = matchTicks, coreOpenTicks
@@ -322,6 +377,7 @@ func (r *Room) Join(playerID uint64, nick, color string) error {
 		return ErrRoomFull
 	}
 	r.members[playerID] = &Member{PlayerID: playerID, Nick: nick, Color: color}
+	r.creationClosed = true
 	r.joinOrder = append(r.joinOrder, playerID)
 	// Ensure the player exists on the session board even before scoring.
 	if _, ok := r.session[playerID]; !ok {
@@ -479,7 +535,7 @@ func (r *Room) HostCommand(playerID uint64, action Action) error {
 // SoloBotLauncher capability when solo bots are configured. Nothing is
 // mutated on failure. Caller holds mu.
 func (r *Room) prepareLaunchLocked() (seed uint64, playerIDs []uint64, soloLauncher SoloBotLauncher, err error) {
-	if len(r.members) == 0 {
+	if len(r.members) == 0 && r.soloBots == 0 {
 		return 0, nil, nil, ErrNoPlayers
 	}
 	if r.launcher == nil {
@@ -620,10 +676,11 @@ func (r *Room) StateBroadcast() *ombv1.EvRoomState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return &ombv1.EvRoomState{
-		State:        r.state.protoState(),
-		RobotsOnline: uint32(len(r.members)),
-		HostNick:     r.nickLocked(r.host),
-		SoloBots:     r.soloBots,
+		State:         r.state.protoState(),
+		RobotsOnline:  uint32(len(r.members)),
+		HostNick:      r.nickLocked(r.host),
+		SoloBots:      r.soloBots,
+		HostSpectator: r.hostSpectator,
 	}
 }
 

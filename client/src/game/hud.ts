@@ -95,7 +95,8 @@ export class Hud {
     this.msgLine.setAttribute('aria-atomic', 'true')
     this.comms.className = 'hud-comms'
     this.comms.append(this.msgLine)
-    this.leftPanel.append(this.comms)
+    if (root.dataset.hostSpectator === 'true') root.append(this.comms)
+    else this.leftPanel.append(this.comms)
     this.innerBanner = document.createElement('div')
     this.innerBanner.id = 'hud-inner-ring'
     this.innerBanner.className = 'hud-inner-ring'

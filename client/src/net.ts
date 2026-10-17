@@ -16,6 +16,8 @@ export interface JoinOptions {
   nick: string
   color: string
   spectator?: boolean
+  /** First-join intent for a host control session without a player seat. */
+  spectatorMode?: boolean
   /** 建房时长设置（分钟；仅创建房间时生效，重连沿用同一会话参数）。 */
   matchMinutes?: number
   coreOpenMinutes?: number
@@ -168,6 +170,7 @@ export class RoomSession {
             : create(ClientMsgSchema, { payload: { case: 'join', value: create(JoinRoomSchema, {
               roomCode: opts.roomCode, nick: opts.nick, color: opts.color,
               matchMinutes: opts.matchMinutes ?? 0, coreOpenMinutes: opts.coreOpenMinutes ?? 0,
+              spectatorMode: opts.spectatorMode ?? false,
             }) } })
           t.send(encodeClient(message))
         } catch (error) {

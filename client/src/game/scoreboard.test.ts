@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
 import { RobotStateSchema, Title } from '@omb/protocol'
-import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, showMatchEnd, titleName, titleDetails } from './scoreboard'
+import { rankedScores, Scoreboard, ScoreRowRenderer, scoreRow, showMatchEnd, showMatchEndError, hideMatchEnd, titleName, titleDetails } from './scoreboard'
 import { deathStatus } from './death'
 import type { RobotEnt } from './world'
 
@@ -72,6 +72,56 @@ describe('authoritative scoreboard', () => {
     showMatchEnd(root, [{ robot: 2, score: 100, nick: 'TEST-BOT-134' }], new Map(), undefined, 2)
     expect(root.querySelector('.end-personal')?.textContent).toBe('TEST-BOT-134 · 100 分')
     expect(root.querySelector('.score-name')?.textContent).toBe('TEST-BOT-134')
+  })
+
+  it('keeps the normal settlement back action without offering host actions', () => {
+    const root = document.createElement('div'), onBack = vi.fn()
+    showMatchEnd(root, [], new Map(), onBack)
+    expect(root.querySelector('.end-next')).toBeNull()
+    root.querySelector<HTMLButtonElement>('.end-back')!.click()
+    expect(onBack).toHaveBeenCalledOnce()
+    hideMatchEnd(root)
+  })
+
+  it('starts the next round only once across touch and click while keeping results visible', () => {
+    const root = document.createElement('div'), onNextRound = vi.fn(), onBack = vi.fn()
+    showMatchEnd(root, [{ robot: 1, score: 20 }], new Map(), onBack, -1, { onNextRound })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', cancelable: true }))
+    next.click()
+    next.dispatchEvent(new Event('click'))
+    expect(next.disabled).toBe(true)
+    expect(onNextRound).toHaveBeenCalledOnce()
+    expect(onBack).not.toHaveBeenCalled()
+    expect(root.querySelector('.end-overlay')).not.toBeNull()
+    expect(root.querySelector('.score-value')?.textContent).toBe('20')
+    hideMatchEnd(root)
+  })
+
+  it('keeps a rejected next round visible and permits one new deliberate attempt', () => {
+    const root = document.createElement('div'), onNextRound = vi.fn()
+    showMatchEnd(root, [], new Map(), undefined, -1, { onNextRound })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.click()
+    showMatchEndError(root, '至少需要一名真人参赛者或自动 Bot')
+    expect(root.querySelector<HTMLElement>('.end-error')?.hidden).toBe(false)
+    expect(root.textContent).toContain('至少需要一名真人参赛者或自动 Bot')
+    expect(next.disabled).toBe(false)
+    next.click()
+    next.click()
+    expect(onNextRound).toHaveBeenCalledTimes(2)
+    expect(next.disabled).toBe(true)
+    hideMatchEnd(root)
+  })
+
+  it('does not lock the next-round action if transport is offline', () => {
+    const root = document.createElement('div')
+    showMatchEnd(root, [], new Map(), undefined, -1, { onNextRound: () => false })
+    const next = root.querySelector<HTMLButtonElement>('.end-next')!
+    next.click()
+    expect(next.disabled).toBe(false)
+    expect(root.textContent).toContain('连接恢复后可开始下一局')
+    hideMatchEnd(root)
   })
 
   it('keeps unchanged score snapshots cached while advancing the stale-score boundary', () => {
