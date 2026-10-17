@@ -123,6 +123,14 @@ type observerJob struct {
 	done  *sync.WaitGroup
 }
 
+func robotViewsByID(wv sim.WorldView) map[uint32]sim.RobotView {
+	byID := make(map[uint32]sim.RobotView, len(wv.Robots))
+	for _, robot := range wv.Robots {
+		byID[robot.ID] = robot
+	}
+	return byID
+}
+
 func (m *Match) startObserverPool() {
 	if m.obsJobs != nil || m.obsWorkers < 2 {
 		return
@@ -1263,6 +1271,13 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 	if len(ids) == 0 {
 		return
 	}
+	robotsByID := robotViewsByID(wv)
+	robotStateByID := make(map[uint32]sim.Robot, len(ids))
+	for _, rid := range ids {
+		if robot, ok := m.sim.Robot(rid); ok {
+			robotStateByID[rid] = robot
+		}
+	}
 	if off := int(m.tick % uint32(len(ids))); off > 0 {
 		rot := make([]uint32, 0, len(ids))
 		rot = append(rot, ids[off:]...)
@@ -1271,7 +1286,7 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 	}
 	deadline := time.Now().Add(sim.FrameBudget)
 	for _, rid := range ids {
-		self, ok := robotOf(wv, rid)
+		self, ok := robotsByID[rid]
 		if !ok {
 			continue
 		}
@@ -1279,7 +1294,7 @@ func (m *Match) runScripts(wv sim.WorldView, obsByRobot map[uint32]sim.Observati
 		if !ok {
 			continue
 		}
-		robot, _ := m.sim.Robot(rid)
+		robot := robotStateByID[rid]
 		_ = m.scriptPool.Submit(rid, sim.ScriptFrame{Self: self, Obs: obs, Upg: robot.Upg, ShieldReady: robot.Combat.ShieldReady, ShieldStarted: robot.Combat.ShieldStarted}, deadline)
 	}
 	for _, res := range m.scriptPool.Collect(deadline) {

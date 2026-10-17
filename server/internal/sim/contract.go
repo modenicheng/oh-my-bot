@@ -229,6 +229,14 @@ type ScriptFrame struct {
 	Upg           UpgradeState
 }
 
+// PreparedObservation keeps the immutable broad-phase inputs shared by all
+// scripts in one tick. The final Observation remains per robot because its
+// visibility and private uplink cooldowns differ.
+type PreparedObservation struct {
+	World       WorldView
+	WallCorners []Vec2
+}
+
 // ScriptCommands 是脚本的单 tick 输出意图。指针语义 = 本 tick 脚本
 // 明确操作过该轴；nil = 本 tick 不操作该轴，不会延续到下一 tick。
 // 人类按键的持续态由 ClientInput 单独维护；Aim 未操作时物理炮塔朝向保持。

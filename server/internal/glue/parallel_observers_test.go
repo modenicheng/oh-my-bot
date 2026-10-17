@@ -160,4 +160,12 @@ func TestParallelForReusesObserverWorkers(t *testing.T) {
 	}
 }
 
+func TestRobotViewsByIDBuildsOneLookupTable(t *testing.T) {
+	wv := sim.WorldView{Robots: []sim.RobotView{{ID: 9}, {ID: 17}}}
+	got := robotViewsByID(wv)
+	if len(got) != 2 || got[9].ID != 9 || got[17].ID != 17 {
+		t.Fatalf("robot lookup = %+v", got)
+	}
+}
+
 func nickOf(i int) string { return "bot" + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) }
