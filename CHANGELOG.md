@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1-rc.5](https://github.com/modenicheng/oh-my-bot/compare/v1.2.0-rc.5...v1.2.1-rc.5) (2026-10-17)
+
+
+### Performance Improvements
+
+* reuse private perception geometry scratch ([42a5c44](https://github.com/modenicheng/oh-my-bot/commit/42a5c449bd5b8c11e1e9ad08cb74ea498fb9ca0a))
+
 ## [1.2.0-rc.5](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.5...v1.2.0-rc.5) (2026-10-17)
 
 
