@@ -14,7 +14,11 @@ const work = mkdtempSync(join(tmpdir(), 'omb-bots-'))
 const shots = resolve(process.env.OMB_SHOTS || '../.artifacts/bots')
 mkdirSync(shots, { recursive: true })
 const base = 'http://127.0.0.1:18423'
-const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', '127.0.0.1:18423'], { cwd: work, stdio: 'ignore' })
+const server = spawn(resolve(process.env.OMB_BINARY || '../server/omb.exe'), ['-addr', '127.0.0.1:18423'], {
+  cwd: work, stdio: 'ignore',
+  env: { ...process.env, OMB_CONFIG_DIR: work, OMB_WEB_DIR: resolve(import.meta.dirname, '../dist'),
+    AUTH_ENABLED: 'false', OMB_MAX_PLAYERS: '64' },
+})
 async function until(fn, label, timeout = 15000) {
   const end = Date.now() + timeout
   while (Date.now() < end) { if (await fn()) return; await sleep(50) }
@@ -71,9 +75,9 @@ try {
   await page.click('#btn-warmup')
   await page.locator('#view-game').waitFor({ state: 'visible' })
   await until(() => tick > 90 && self, 'warmup simulation', 30_000)
-  assert.equal(map.generator_ver, 7)
+  assert.equal(map.generator_ver, 11)
   assert.equal(map.core_rules.period_ticks, 480)
-  assert.equal(map.core_rules.target_alive, 28)
+  assert.equal(map.core_rules.target_alive, 36)
   assert.equal(map.health_packs.length, 4, 'generated map contains four public health-pack locations')
   assert.ok(map.health_packs.every(pack => Number.isFinite(pack.pos.X) && Number.isFinite(pack.pos.Y)), 'health-pack coordinates are finite')
   assert.ok(map.walls.some(w => Math.hypot((w.min.X+w.max.X)/2, (w.min.Y+w.max.Y)/2) < 28), 'map includes inner cover')
@@ -110,6 +114,13 @@ try {
   assert.equal(initial.robots.length, 64, 'one real robot and 63 synthetic bots')
   const bots = initial.robots.filter(r => r.nick.startsWith('TEST-BOT-'))
   assert.equal(bots.length, 63)
+  const assertScoreNames = async label => {
+    await until(async () => await page.locator('#hud-score-rows .score-name').count() === 64, `${label}: global scoreboard`)
+    const names = await page.locator('#hud-score-rows .score-name').allTextContents()
+    assert.deepEqual([...names].sort(), ['solo-host', ...bots.map(bot => bot.nick)].sort(),
+      `${label}: all bot names present even outside the player's AOI`)
+  }
+  await assertScoreNames('formal match')
   for (const bot of bots) {
     assert.ok(log.some(r => r.robot_id === bot.id && r.control?.toggles === 1), 'bot explicitly enables assist')
     assert.ok(log.some(r => r.robot_id === bot.id && r.control?.script), 'bot commands are replayable')
@@ -119,6 +130,7 @@ try {
   await page.reload()
   await startClient(page)
   await until(() => self?.robotId === identity && tick > 90, 'formal reconnect identity')
+  await assertScoreNames('reconnect catch-up')
   assert.equal(room.soloBots, 63)
   assert.equal(room.robotsOnline, 1)
   assert.equal(await page.locator('#btn-solo-bots').isVisible(), false, 'no running-match reconfiguration')

@@ -6,6 +6,10 @@ import (
 )
 
 func (match *Match) broadcastPerceivedEventLocked(event *ombv1.ServerEvent) {
+	if result := event.GetSingleShotResult(); result != nil {
+		match.sendSingleShotResultLocked(result, event.Tick)
+		return
+	}
 	world := match.sim.WorldView()
 	for playerID, session := range match.rc.sessions {
 		robotID := match.robotOf[playerID]
@@ -20,9 +24,15 @@ func (match *Match) broadcastPerceivedEventLocked(event *ombv1.ServerEvent) {
 	for _, session := range match.rc.spectators {
 		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: event}})
 	}
+	if session := match.rc.hostSession; session != nil {
+		session.SendReliable(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: event}})
+	}
 }
 
 func eventPerceived(world sim.WorldView, observerID uint32, event *ombv1.ServerEvent) bool {
+	if result := event.GetSingleShotResult(); result != nil {
+		return result.Robot == observerID
+	}
 	if event.GetSay() != nil {
 		return true
 	}

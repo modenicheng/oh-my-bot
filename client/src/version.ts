@@ -1,3 +1,8 @@
+import { observedFetch } from './observability/http'
+import { createLogger } from './observability/logger'
+
+const log = createLogger('version')
+
 /** 二进制是版本来源；开发构建和请求失败显示 dev。 */
 export function appVersionLabel(value: string | null | undefined): string {
   if (!value || value === 'dev') return 'dev'
@@ -9,7 +14,7 @@ export async function initAppVersion(): Promise<void> {
   const footer = document.getElementById('app-version')
   if (!footer) return
   try {
-    const res = await fetch('/api/version')
+    const res = await observedFetch('/api/version')
     if (!res.ok) return
     const payload: unknown = await res.json()
     const version =
@@ -18,7 +23,8 @@ export async function initAppVersion(): Promise<void> {
         : undefined
     if (typeof version !== 'string' || version.length === 0 || version.length > 64) return
     footer.textContent = appVersionLabel(version)
-  } catch {
+  } catch (error) {
+    log.warn('version.unavailable', { error })
     // 版本查询失败不影响进入游戏，保留初始 dev 文案。
   }
 }

@@ -12,6 +12,9 @@ import (
 type Config struct {
 	// TickTimeout 单 tick wall-clock 配额（<=0 取 DefaultTickTimeout）。
 	TickTimeout time.Duration
+	// InitTimeout bounds module evaluation and entry resolution. Zero keeps
+	// the tick quota; trusted built-ins can opt into a separate startup budget.
+	InitTimeout time.Duration
 	// PoolSize 并行 worker 数（<=0 取 NumWorkers()）。
 	PoolSize int
 }

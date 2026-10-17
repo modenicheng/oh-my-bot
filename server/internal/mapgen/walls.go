@@ -146,9 +146,9 @@ func overlapDims(a, b rect) (float64, float64) {
 // overlap is confined to the two pieces of one assembly; every other pair of
 // walls keeps the ≥2.2m separation.
 //
-// Candidates are a seeded cyclic traversal of a bounded 7×7 local lattice,
-// with small shared radial/angular jitter. Rejection only relocates cover
-// inside its assigned cell, never into an already crowded part of the ring.
+// Candidates are a seeded cyclic traversal of a bounded local lattice,
+// with small shared radial/angular jitter. An exhausted stratum gets a wider
+// search with the same jitter; all clearance and connectivity checks still apply.
 func genWalls(r *rng, l layout, uplinks []sim.UplinkDef, pads []sim.CorePadDef, healthPacks []sim.HealthPackDef) ([]sim.Wall, error) {
 	cells := l.coverCells()
 	walls := make([]sim.Wall, 0, len(cells)*8*2)
@@ -195,60 +195,64 @@ func genWalls(r *rng, l layout, uplinks []sim.UplinkDef, pads []sim.CorePadDef, 
 	if l.scale > 1 {
 		lattice = 11
 	}
-	center := (lattice - 1) / 2
 	for cell, c := range cells {
 		start := r.intn(lattice * lattice)
 		radialJitter, angularJitter := r.rangeF(-0.25, 0.25), r.rangeF(-0.25, 0.25)
-		accepted := false
 		clearReject, batchReject, shapeReject, connectivityReject := 0, 0, 0, 0
-		for attempt := 0; attempt < lattice*lattice; attempt++ {
-			index := (start + attempt) % (lattice * lattice)
-			var radius, angle float64
-			if cell < innerCoverCells {
-				// Inner strata are inaccessible while locked and become meaningful
-				// cover after CORE_OPEN. Each searches its own bounded local lattice.
-				radius = c.radius + float64(index/lattice-center)*0.5 + radialJitter
-				angle = c.angle + float64(index%lattice-center)*1.2 + angularJitter
-			} else {
-				radius = c.radius + float64(index/lattice-center)*0.8 + radialJitter
-				angle = c.angle + float64(index%lattice-center)*1.2 + angularJitter
-			}
-			proto := slotDirection(angle / 7.5).Scale(radius)
-			batch := make([]sim.Wall, 0, 16)
-			pieces := make([]stampedPiece, 0, 16)
-			valid := true
-			for k := 0; k < 8 && valid; k++ {
-				for _, pc := range stampCell(c, proto, k) {
-					if clear(pc.r, cell < innerCoverCells) != 0 {
-						clearReject++
-						valid = false
-						break
+		place := func(width int) bool {
+			center := (width - 1) / 2
+			for attempt := 0; attempt < width*width; attempt++ {
+				index := (start + attempt) % (width * width)
+				var radius, angle float64
+				if cell < innerCoverCells {
+					// Inner strata are inaccessible while locked and become meaningful
+					// cover after CORE_OPEN. Each searches its own bounded local lattice.
+					radius = c.radius + float64(index/width-center)*0.5 + radialJitter
+					angle = c.angle + float64(index%width-center)*1.2 + angularJitter
+				} else {
+					radius = c.radius + float64(index/width-center)*0.8 + radialJitter
+					angle = c.angle + float64(index%width-center)*1.2 + angularJitter
+				}
+				proto := slotDirection(angle / 7.5).Scale(radius)
+				batch := make([]sim.Wall, 0, 16)
+				pieces := make([]stampedPiece, 0, 16)
+				valid := true
+				for k := 0; k < 8 && valid; k++ {
+					for _, pc := range stampCell(c, proto, k) {
+						if clear(pc.r, cell < innerCoverCells) != 0 {
+							clearReject++
+							valid = false
+							break
+						}
+						sibling := pc.group >= 0 && len(pieces) > 0 && pieces[len(pieces)-1].group == pc.group
+						if sibling && !positiveOverlap(pieces[len(pieces)-1].r, pc.r) {
+							shapeReject++
+							valid = false
+							break
+						}
+						if !pieceHasClearance(pc, pieces) {
+							batchReject++
+							valid = false
+							break
+						}
+						pieces = append(pieces, pc)
+						batch = append(batch, rectToWall(uint32(len(walls)+len(batch)+1), pc.r))
 					}
-					sibling := pc.group >= 0 && len(pieces) > 0 && pieces[len(pieces)-1].group == pc.group
-					if sibling && !positiveOverlap(pieces[len(pieces)-1].r, pc.r) {
-						shapeReject++
-						valid = false
-						break
-					}
-					if !pieceHasClearance(pc, pieces) {
-						batchReject++
-						valid = false
-						break
-					}
-					pieces = append(pieces, pc)
-					batch = append(batch, rectToWall(uint32(len(walls)+len(batch)+1), pc.r))
+				}
+				if valid && connectivityOK(l, append(walls, batch...)) {
+					walls = append(walls, batch...)
+					return true
+				}
+				if valid {
+					connectivityReject++
 				}
 			}
-			if valid && connectivityOK(l, append(walls, batch...)) {
-				walls = append(walls, batch...)
-				accepted = true
-				break
-			}
-			if valid {
-				connectivityReject++
-			}
+			return false
 		}
-		if !accepted {
+		// A valid map can exhaust the local lattice when independently jittered
+		// pads cover every candidate. Expand only that stratum, without consuming
+		// more randomness or moving accepted walls, so successful layouts stay put.
+		if !place(lattice) && !place(lattice+4) {
 			return nil, fmt.Errorf("no legal cover in stratum %d (clear=%d batch=%d shape=%d connectivity=%d)",
 				cell, clearReject, batchReject, shapeReject, connectivityReject)
 		}

@@ -10,6 +10,7 @@
 import { create } from '@bufbuild/protobuf'
 import { ClientInputSchema, type ClientInput } from '@omb/protocol'
 import type { Camera } from './camera'
+import { viewportPoint, viewportRect } from '../app/landscape'
 
 // axis_mask 位定义（omb.proto ClientInput.axis_mask）
 export const AXIS_MOVE = 1 << 0
@@ -23,6 +24,17 @@ export interface InputSample {
   msg: ClientInput
   /** 该帧是否值得发送（有任一轴被人类操作过） */
   active: boolean
+}
+
+export interface TouchInputSnapshot {
+  moveX: number
+  moveY: number
+  aim?: number
+  fire: boolean
+  dash: boolean
+  shield: boolean
+  interact: boolean
+  axisMask: number
 }
 
 /** 驾驶辅助（Space 三分支：关→开并清接管；开+手操→交回脚本；开+全脚本→关）。
@@ -39,8 +51,12 @@ export class InputSampler {
   private releaseAxes = 0
   private seq = 0
   private lastAim = 0
+  private touchMode = false
+  private touchInput: TouchInputSnapshot = { moveX: 0, moveY: 0, fire: false, dash: false, shield: false, interact: false, axisMask: 0 }
   private cam: Camera | null = null
   private canvas: HTMLCanvasElement | null = null
+  private bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null = null
+  private readonly geometryChanged = () => this.refreshBounds()
   private disposers: (() => void)[] = []
   /** assist 开关状态（本地镜像，快照权威回写） */
   assistOn = false
@@ -54,8 +70,15 @@ export class InputSampler {
     this.detach()
     this.canvas = canvas
     this.cam = cam
+    this.refreshBounds()
+    window.addEventListener('resize', this.geometryChanged)
+    window.addEventListener('landscapechange', this.geometryChanged)
+    window.addEventListener('scroll', this.geometryChanged, true)
+    let observer: ResizeObserver | undefined
+    if (typeof ResizeObserver !== 'undefined') { observer = new ResizeObserver(this.geometryChanged); observer.observe(canvas) }
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (this.touchMode) return
       // 输入框聚焦时不动游戏输入（大厅/聊天场景）
       const t = e.target as HTMLElement | null
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || t?.closest('input, textarea, select, button, a, summary, [contenteditable]')) return
@@ -83,17 +106,20 @@ export class InputSampler {
       if (k === 'KeyW' || k === 'KeyA' || k === 'KeyS' || k === 'KeyD' || k === 'KeyQ' || k === 'KeyE' || k === 'KeyF' || k === 'ShiftLeft' || k === 'ShiftRight') this.keys.delete(k)
     }
     const onMouseMove = (e: MouseEvent) => {
+      if (this.touchMode) return
+      const point = viewportPoint(e.clientX, e.clientY)
       // 指针微抖也会持续置位：只在真实移动（坐标变化）时抢占 aim 轴。
-      if (e.clientX !== this.pointer.x || e.clientY !== this.pointer.y) {
+      if (point.x !== this.pointer.x || point.y !== this.pointer.y) {
         // guard：脚本正控制炮塔且人未持有该轴时，鼠标移动只更新指针，
         // 不发 aim mask（否则开自瞄手点左键时点击微动就永远打断辅助瞄准）。
         if (!this.aimUnderScript || this.stickyAxes & AXIS_AIM) this.stickyAxes |= AXIS_AIM
         else this.onAimGuarded?.()
       }
-      this.pointer.x = e.clientX
-      this.pointer.y = e.clientY
+      this.pointer.x = point.x
+      this.pointer.y = point.y
     }
     const onMouseDown = (e: MouseEvent) => {
+      if (this.touchMode) return
       if (e.button === 0) {
         onMouseMove(e)
         this.mouseDown = true
@@ -127,6 +153,10 @@ export class InputSampler {
     window.addEventListener('blur', onBlur)
 
     this.disposers.push(
+      () => window.removeEventListener('resize', this.geometryChanged),
+      () => window.removeEventListener('landscapechange', this.geometryChanged),
+      () => window.removeEventListener('scroll', this.geometryChanged, true),
+      () => observer?.disconnect(),
       () => document.removeEventListener('visibilitychange', onVisibility),
       () => window.removeEventListener('keydown', onKeyDown),
       () => window.removeEventListener('keyup', onKeyUp),
@@ -142,6 +172,29 @@ export class InputSampler {
     this.seq = Math.max(this.seq, seq)
   }
 
+  setTouchMode(touch: boolean): void {
+    if (this.touchMode === touch) return
+    this.release()
+    this.touchMode = touch
+  }
+
+  /** Touch owns direction directly; it must not use the desktop world-pointer projection. */
+  applyTouch(snapshot: TouchInputSnapshot): void {
+    if (!this.touchMode || !this.canvas) return
+    const axisMask = snapshot.axisMask & 15
+    const component = (value: number) => Number.isFinite(value) ? Math.round(Math.max(-1000, Math.min(1000, value))) : 0
+    this.touchInput = { ...snapshot, moveX: component(snapshot.moveX), moveY: component(snapshot.moveY), axisMask }
+    if (snapshot.aim !== undefined && Number.isFinite(snapshot.aim)) this.lastAim = snapshot.aim
+    this.stickyAxes |= axisMask
+  }
+
+  prepareSingleShot(aim: number): void {
+    if (!this.touchMode || !Number.isFinite(aim)) return
+    this.lastAim = aim
+    this.touchInput = { ...this.touchInput, aim, fire: false }
+    this.stickyAxes |= AXIS_AIM | AXIS_FIRE
+  }
+
   /** 清除按键/鼠标按下状态，但不改轴归属：接管轴保持人工（停止帧仍带 mask），
    * 之后不再发接管帧，直到真实新输入。blur/死亡/重连/full snapshot 时调用。
    * 若需同时交回轴（Space、失焦归零），调用 resetTakeover()。 */
@@ -149,6 +202,7 @@ export class InputSampler {
     this.keys.clear()
     this.mouseDown = false
     this.dashMouseDown = false
+    this.touchInput = { moveX: 0, moveY: 0, fire: false, dash: false, shield: false, interact: false, axisMask: 0 }
   }
 
   /** 释放按键并把全部人工接管轴归零（下一个采样帧发出 0 mask，交回仲裁）。
@@ -166,6 +220,7 @@ export class InputSampler {
     this.stickyAxes = 0
     this.releaseAxes = 0
     this.canvas = null
+    this.bounds = null
     this.cam = null
     this.aimUnderScript = false
   }
@@ -173,11 +228,19 @@ export class InputSampler {
   /** Every draw and input sample uses the same current camera and CSS pointer position. */
   aimAt(selfX: number, selfY: number): number | undefined {
     if (!(this.stickyAxes & AXIS_AIM) || !this.cam || !this.canvas) return undefined
-    const rect = this.canvas.getBoundingClientRect()
+    if (this.touchMode) return this.lastAim
+    const rect = this.bounds
+    if (!rect) return undefined
     if (rect.width <= 0 || rect.height <= 0) return undefined
     const px = (this.pointer.x - rect.left) * this.cam.cw / rect.width
     const py = (this.pointer.y - rect.top) * this.cam.ch / rect.height
     return Math.atan2(this.cam.toWorldY(py) - selfY, this.cam.toWorldX(px) - selfX)
+  }
+
+  /** Geometry events prepare the CSS mapping; aim projection never flushes layout. */
+  refreshBounds(): void {
+    const rect = this.canvas ? viewportRect(this.canvas) : undefined
+    this.bounds = rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
   }
 
   /** Mirror the server's three branches, including axes retained after focus loss. */
@@ -240,13 +303,13 @@ export class InputSampler {
 
     const msg = create(ClientInputSchema, {
       seq: ++this.seq,
-      moveX,
-      moveY,
+      moveX: this.touchMode ? this.touchInput.moveX : moveX,
+      moveY: this.touchMode ? this.touchInput.moveY : moveY,
       aim,
-      fire: this.mouseDown,
-      dash,
-      shield,
-      interact,
+      fire: this.touchMode ? this.touchInput.fire : this.mouseDown,
+      dash: this.touchMode ? this.touchInput.dash : dash,
+      shield: this.touchMode ? this.touchInput.shield : shield,
+      interact: this.touchMode ? this.touchInput.interact : interact,
       axisMask,
     })
     return { msg, active: axisMask !== 0 || dash || interact }

@@ -1,0 +1,33 @@
+{
+  "realm": "omb-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "omb",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "local-oidc-test-secret",
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://127.0.0.1:18430/auth/callback"],
+      "webOrigins": []
+    }
+  ],
+  "users": [
+    {
+      "username": "modenicheng",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "oidc-test@example.invalid",
+      "firstName": "OIDC",
+      "lastName": "Test",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local-oidc-test-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
