@@ -5,11 +5,14 @@ import (
 	"sort"
 )
 
-func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) *MapDef {
+func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2, walls []Wall) *MapDef {
 	local := &MapDef{Version: 1, Partial: true}
 	source := world.Frame.Map
 	if source == nil {
 		return local
+	}
+	if walls == nil {
+		walls = source.Walls
 	}
 	local.CoreZone.UnlockPhase = source.CoreZone.UnlockPhase
 	for _, uplink := range source.Uplinks {
@@ -48,7 +51,7 @@ func (world WorldView) localMap(center Vec2, radius float64, visible, surfaceVis
 			corners = append(corners, Vec2{math.Cos(direction) * zone.Radius, math.Sin(direction) * zone.Radius})
 		}
 	}
-	for _, wall := range source.Walls {
+	for _, wall := range walls {
 		if center.X < wall.Min.X {
 			local.Walls = append(local.Walls, visibleFace(center, radius, Vec2{wall.Min.X, wall.Min.Y}, Vec2{wall.Min.X, wall.Max.Y}, corners, visible)...)
 		}

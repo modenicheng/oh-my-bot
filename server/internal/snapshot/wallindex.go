@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"math"
+	"sort"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/sim"
 )
@@ -78,6 +79,65 @@ func NewWallIndex(walls []sim.Wall, cellSide float64) *WallIndex {
 
 // Corners returns immutable wall-corner geometry prepared with the index.
 func (ix *WallIndex) Corners() []sim.Vec2 { return ix.corners }
+
+// WallsNear returns walls whose AABB is within radius of center. The cell
+// query is only a broad phase; the final AABB-distance test keeps the result
+// exact for walls that merely share an expanded query cell. Results retain
+// source order because local-map wall IDs are assigned from it.
+func (ix *WallIndex) WallsNear(center sim.Vec2, radius float64) []sim.Wall {
+	if len(ix.walls) == 0 || radius <= 0 || math.IsNaN(radius) || math.IsInf(radius, 0) {
+		return []sim.Wall{}
+	}
+	minX, maxX := center.X-radius, center.X+radius
+	minY, maxY := center.Y-radius, center.Y+radius
+	cx0 := ix.clampCol(ix.colOf(minX))
+	cx1 := ix.clampCol(ix.colOf(maxX))
+	cy0 := ix.clampRow(ix.rowOf(minY))
+	cy1 := ix.clampRow(ix.rowOf(maxY))
+	indices := make([]int32, 0)
+	for y := cy0; y <= cy1; y++ {
+		row := ix.cells[y]
+		if row == nil {
+			continue
+		}
+		for x := cx0; x <= cx1; x++ {
+			indices = append(indices, row[x]...)
+		}
+	}
+	if len(indices) == 0 {
+		return []sim.Wall{}
+	}
+	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	near := make([]sim.Wall, 0, len(indices))
+	var previous int32 = -1
+	for _, index := range indices {
+		if index == previous {
+			continue
+		}
+		previous = index
+		wall := ix.walls[index]
+		if aabbDistanceSquared(center, wall) <= radius*radius {
+			near = append(near, wall)
+		}
+	}
+	return near
+}
+
+func aabbDistanceSquared(point sim.Vec2, wall sim.Wall) float64 {
+	dx := 0.0
+	if point.X < wall.Min.X {
+		dx = wall.Min.X - point.X
+	} else if point.X > wall.Max.X {
+		dx = point.X - wall.Max.X
+	}
+	dy := 0.0
+	if point.Y < wall.Min.Y {
+		dy = wall.Min.Y - point.Y
+	} else if point.Y > wall.Max.Y {
+		dy = point.Y - wall.Max.Y
+	}
+	return dx*dx + dy*dy
+}
 
 // Visible 判断 from→to 视线是否无遮挡。零墙直接可见；否则遍历视线包围盒
 // 覆盖的格子，先做墙 AABB 与视线包围盒的重叠粗筛，再做精确线段-AABB

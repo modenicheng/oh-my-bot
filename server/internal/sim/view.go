@@ -231,10 +231,17 @@ func (v WorldView) ObserveLocalWithVisibility(id uint32, radius float64, visible
 }
 
 func (v WorldView) ObserveLocalWithVisibilityAndCorners(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) (Observation, bool) {
+	return v.ObserveLocalWithVisibilityAndCornersAndWalls(id, radius, visible, surfaceVisible, corners, nil)
+}
+
+// ObserveLocalWithVisibilityAndCornersAndWalls is the prepared-geometry form
+// used by the snapshot layer. A non-nil walls slice is a broad-phase subset
+// of Frame.Map.Walls; nil keeps the legacy full-map behavior.
+func (v WorldView) ObserveLocalWithVisibilityAndCornersAndWalls(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2, walls []Wall) (Observation, bool) {
 	if surfaceVisible == nil {
 		surfaceVisible = v.SurfaceVisible
 	}
-	return v.observeLocalWithVisibilityAndCorners(id, radius, visible, surfaceVisible, corners)
+	return v.observeLocalWithVisibilityAndCornersAndWalls(id, radius, visible, surfaceVisible, corners, walls)
 }
 
 func (v WorldView) observeLocal(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool) (Observation, bool) {
@@ -242,6 +249,10 @@ func (v WorldView) observeLocal(id uint32, radius float64, visible, surfaceVisib
 }
 
 func (v WorldView) observeLocalWithVisibilityAndCorners(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2) (Observation, bool) {
+	return v.observeLocalWithVisibilityAndCornersAndWalls(id, radius, visible, surfaceVisible, corners, nil)
+}
+
+func (v WorldView) observeLocalWithVisibilityAndCornersAndWalls(id uint32, radius float64, visible, surfaceVisible func(Vec2, Vec2) bool, corners []Vec2, walls []Wall) (Observation, bool) {
 	var self RobotView
 	found := false
 	for _, r := range v.Robots {
@@ -258,7 +269,7 @@ func (v WorldView) observeLocalWithVisibilityAndCorners(id uint32, radius float6
 		visible = v.LineOfSight
 	}
 	canSee := func(position Vec2) bool { return self.Pos.Sub(position).Len() <= radius && visible(self.Pos, position) }
-	frame.Map = v.localMap(self.Pos, radius, visible, surfaceVisible, corners)
+	frame.Map = v.localMap(self.Pos, radius, visible, surfaceVisible, corners, walls)
 	obs := Observation{Frame: frame, VisionRadius: radius}
 	for _, r := range v.Robots {
 		if r.ID == id || canSee(r.Pos) {

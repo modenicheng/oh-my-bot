@@ -88,10 +88,17 @@ func BuildObservation(w World, ix *WallIndex, observerID, _ uint32, radii ...flo
 		}
 	}
 	var corners []sim.Vec2
+	var walls []sim.Wall
 	if ix != nil {
 		corners = ix.Corners()
+		for _, robot := range w.Robots {
+			if robot.ID == observerID {
+				walls = ix.WallsNear(robot.Pos, visionRadius)
+				break
+			}
+		}
 	}
-	obs, found := world.ObserveLocalWithVisibilityAndCorners(observerID, visionRadius, visibility, surfaceVisibility, corners)
+	obs, found := world.ObserveLocalWithVisibilityAndCornersAndWalls(observerID, visionRadius, visibility, surfaceVisibility, corners, walls)
 	if !found {
 		return sim.Observation{Frame: sim.FrameView{Tick: w.Tick, Phase: w.Phase, TimeLeftS: w.TimeLeftS, Map: &sim.MapDef{Version: 1, Partial: true}}, VisionRadius: visionRadius}
 	}

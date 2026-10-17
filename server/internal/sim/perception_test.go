@@ -144,3 +144,26 @@ func TestLocalMapUsesProvidedWallCorners(t *testing.T) {
 		t.Fatalf("provided corner set was ignored: without=%d calls/%d walls, with=%d calls/%d walls", withoutCalls, len(withoutCorners.Frame.Map.Walls), withCalls, len(withCorners.Frame.Map.Walls))
 	}
 }
+
+func TestLocalMapUsesProvidedWallCandidates(t *testing.T) {
+	walls := []Wall{
+		{ID: 1, Min: Vec2{X: 4, Y: -2}, Max: Vec2{X: 5, Y: 2}},
+		{ID: 2, Min: Vec2{X: 40, Y: -2}, Max: Vec2{X: 41, Y: 2}},
+	}
+	world := WorldView{
+		Frame:  FrameView{Map: &MapDef{Walls: walls}},
+		Robots: []RobotView{{ID: 1, Pos: Vec2{X: 0, Y: 0}}},
+	}
+	visible := func(Vec2, Vec2) bool { return true }
+	full, found := world.ObserveLocalWithVisibilityAndCorners(1, VisionRadius, visible, visible, nil)
+	if !found {
+		t.Fatal("observer should be found")
+	}
+	near, found := world.ObserveLocalWithVisibilityAndCornersAndWalls(1, VisionRadius, visible, visible, nil, walls[:1])
+	if !found {
+		t.Fatal("observer should be found with candidates")
+	}
+	if len(full.Frame.Map.Walls) != len(near.Frame.Map.Walls) || full.Frame.Map.Walls[0] != near.Frame.Map.Walls[0] {
+		t.Fatalf("candidate wall output changed: full=%+v near=%+v", full.Frame.Map.Walls, near.Frame.Map.Walls)
+	}
+}
