@@ -640,6 +640,7 @@ try {
   await scoring.setViewportSize({ width: 1440, height: 900 })
   await scoring.locator('.end-back').click()
   await scoring.locator('#view-room').waitFor({ state: 'visible' })
+  assert.equal(await scoring.locator('#hud-score-rows > *').count(), 0, 'leaving battle clears the reused HUD scoreboard')
   for (let i = 0; i < 40; i++) {
     if (await weights() === titleWeights) break
     await scoring.waitForTimeout(100)
@@ -658,6 +659,13 @@ try {
   assert.equal(await scoring.locator('.end-overlay').count(), 0, 'new bootstrap removes old settlement')
   assert.equal(await scoring.locator('.hud-death').count(), 1, 'new controller does not leak death panels')
   assert.equal(await scoring.locator('.hud-death').isVisible(), false)
+  assert.equal(await scoring.locator('#hud-score-rows .score-row').count(), 1, 'reentry renders only the new battle scores')
+  assert.equal(await scoring.locator('#hud-score-rows .score-self').count(), 1, 'reentry does not retain an earlier self row')
+  event('SCOR', 'scoreboard', EvScoreboardSchema, { tick: 2, rows: [{ robot: 101, score: 0 }, { robot: 202, score: 100 }, { robot: 303, score: 25 }] }, 2)
+  await scoring.waitForFunction(() => document.querySelector('#hud-score-rows .score-first')?.getAttribute('data-robot') === '202')
+  assert.deepEqual(await scoring.locator('#hud-score-rows .score-row').evaluateAll(rows => rows.map(row => row.dataset.robot)), ['202', '303', '101'])
+  assert.equal(await scoring.locator('#hud-score-rows .score-self .score-rank-number').textContent(), '3', 'self follows the actual score ranking after reentry')
+  assert.equal(await scoring.locator('#hud-score-rows [data-icon="crown"]').count(), 1, 'only the current leader has a crown')
   // Long lists and every active title remain reachable in a narrow viewport.
   const activeTitles = [...Array.from({ length: 9 }, (_, i) => i + 1), 11, 12, 13, 14, 15]
   event('SCOR', 'matchEnd', EvMatchEndSchema, { scores: Array.from({ length: 64 }, (_, i) => ({ robot: 101 + i, score: 64 - i, titles: i === 0 ? [...activeTitles, Title.BEST_PARTNER, 999] : [] })) }, 2)

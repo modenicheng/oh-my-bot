@@ -250,6 +250,9 @@ export class Hud {
 
   dispose(): void {
     this.clearMsg(); this.clearInnerRing(); this.clearCountdown()
+    // The static HUD root is reused by the next battle's renderer.
+    this.scoreRenderer.clear()
+    this.scoreRows.replaceChildren()
     this.timeEl.classList.remove('urgent')
     this.innerBanner.remove()
     this.death.dispose()
