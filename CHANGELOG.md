@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0-rc.4](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.4...v1.2.0-rc.4) (2026-10-17)
+
+
+### Features
+
+* improve spawn and respawn placement ([fd0f748](https://github.com/modenicheng/oh-my-bot/commit/fd0f748c1619eae0942e9d3cfb2837aea8871651))
+
+
+### Bug Fixes
+
+* align Docker Go version with go.mod ([11d0015](https://github.com/modenicheng/oh-my-bot/commit/11d0015ffe0f95ae03c7ceb46e98ccefce43c61f))
+
 ## [1.1.0-rc.4](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.3...v1.1.0-rc.4) (2026-10-17)
 
 
