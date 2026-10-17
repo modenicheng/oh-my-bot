@@ -357,6 +357,7 @@ function onServerMsg(roomCode: string, msg: ServerMsg): void {
   if (session && roomCode) setStatus('ok', 'connected')
   if (msg.payload.case === 'event') {
     const ev = msg.payload.value
+    if (ev.kind.case === 'tickTelemetry') { debugPanel.acceptServerTick(ev.kind.value); return }
     if (ev.kind.case === 'scriptResult') { workbench.acceptResult(ev.kind.value); return }
     if (ev.kind.case === 'snippetResult') { workbench.acceptSnippetResult(ev.kind.value); return }
     if (ev.kind.case === 'scriptVersions') { workbench.acceptScriptVersions(ev.kind.value); return }

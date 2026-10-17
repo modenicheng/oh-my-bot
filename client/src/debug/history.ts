@@ -11,10 +11,20 @@ export interface DebugSample {
   sentMessages: number
   connections: number
   rttMs: number | null
+  serverTick?: number | null
+  serverTickAvgMs?: number | null
+  serverTickP95Ms?: number | null
+  serverScriptDeferrals?: number | null
+  serverWindowTicks?: number | null
+  serverTickRate?: number | null
+  serverFrameBudgetMs?: number | null
+  serverWarmup?: boolean | null
 }
 
 export const metricKeys = [
   'fps', 'heapMiB', 'receivedKiB', 'sentKiB', 'receivedMessages', 'sentMessages', 'connections', 'rttMs',
+  'serverTick', 'serverTickAvgMs', 'serverTickP95Ms', 'serverScriptDeferrals', 'serverWindowTicks',
+  'serverTickRate', 'serverFrameBudgetMs',
 ] as const
 export type Metric = typeof metricKeys[number]
 const STRIDE = metricKeys.length + 1

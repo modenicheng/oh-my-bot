@@ -445,6 +445,19 @@ message EvSingleShotResult {
   string outcome = 3; // fired, cooldown, energy, shield, dead, projectile_capacity, etc.
 }
 
+// Tick execution telemetry for the F3 developer panel. This is a low-frequency
+// diagnostic projection, not part of the replay event log or gameplay state.
+message EvTickTelemetry {
+  uint32 tick = 1;              // latest authoritative simulation tick
+  double tick_avg_ms = 2;       // recent wall-clock tick average
+  double tick_p95_ms = 3;       // recent wall-clock tick nearest-rank p95
+  uint32 window_ticks = 4;      // number of measured ticks in the window
+  uint64 script_deferrals = 5;  // cumulative script deadline/worker deferrals
+  uint32 tick_rate = 6;         // target simulation frequency
+  double frame_budget_ms = 7;   // shared server tick budget
+  bool warmup = 8;              // true when this is the warmup match
+}
+
 // SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
 // owner，经 EvMapBootstrap 一次性可靠下发。只放客户端实际消费的漂移高危集
 // （审计 D3/D5），不倾倒内部专用常量；不落 Match Event Log，回放不消费
@@ -562,6 +575,7 @@ message ServerEvent {
     EvPointDropSpawn point_drop_spawn = 37; // 赏金阵亡散落（全场可见，落事件日志）
     EvPointDropPickup point_drop_pickup = 38; // 晶片拾取（全场可见，落事件日志）
     EvSingleShotResult single_shot_result = 39; // Owner-only; never broadcast to spectators.
+    EvTickTelemetry tick_telemetry = 40; // Low-frequency F3 diagnostics; not replayed.
   }
 }
 

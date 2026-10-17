@@ -13,6 +13,34 @@ function fixture() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('debug sampler', () => {
+  it('carries the latest server tick telemetry into samples', () => {
+    const { sampler, network } = fixture()
+    sampler.resume(0)
+    sampler.updateServerTick({
+      tick: 60, tickAvgMs: 3.25, tickP95Ms: 8.5, scriptDeferrals: 4,
+      windowTicks: 60, tickRate: 60, frameBudgetMs: 12, warmup: false,
+    }, 100)
+    network.receivedBytes += 1024
+
+    expect(sampler.frame(250)).toMatchObject({
+      serverTick: 60, serverTickAvgMs: 3.25, serverTickP95Ms: 8.5,
+      serverScriptDeferrals: 4, serverWindowTicks: 60, serverTickRate: 60,
+      serverFrameBudgetMs: 12, serverWarmup: false,
+    })
+  })
+
+  it('marks server telemetry unavailable after the stream stops advancing', () => {
+    const { sampler } = fixture()
+    sampler.resume(0)
+    sampler.updateServerTick({
+      tick: 60, tickAvgMs: 3.25, tickP95Ms: 8.5, scriptDeferrals: 4,
+      windowTicks: 60, tickRate: 60, frameBudgetMs: 12, warmup: false,
+    }, 100)
+
+    expect(sampler.frame(3250)?.serverTick).toBeUndefined()
+    expect(sampler.latest?.serverTickAvgMs).toBeUndefined()
+  })
+
   it('does no network/memory reads between samples and divides traffic by actual elapsed time', () => {
     const { sampler, network, read, memory } = fixture()
     sampler.resume(0)

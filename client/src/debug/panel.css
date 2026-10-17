@@ -30,7 +30,7 @@
   cursor: pointer;
 }
 .debug-panel button:hover { border-color: var(--accent); color: var(--accent); }
-.debug-panel canvas { display: block; width: 100%; height: 348px; }
+.debug-panel canvas { display: block; width: 100%; height: 372px; }
 .debug-panel footer {
   display: flex;
   justify-content: space-between;

@@ -1,5 +1,6 @@
 import { HISTORY_MS, SAMPLE_MS, scaleCeiling, type Metric } from './history'
-import { DebugSampler } from './sampler'
+import { DebugSampler, type ServerTickTelemetry } from './sampler'
+import type { EvTickTelemetry } from '@omb/protocol'
 import './panel.css'
 
 interface Series { key: Metric; color: string; label?: string }
@@ -7,8 +8,10 @@ interface Chart { title: string; unit: string; series: Series[]; minimum: number
 
 const CYAN = '#22d3ee'
 const LIME = '#a3e635'
+const AMBER = '#fbbf24'
 const BACKGROUND = '#10141a'
-const ROW_HEIGHT = 58
+const ROW_HEIGHT = 50
+const STATUS_HEIGHT = 22
 const charts: Chart[] = [
   { title: '帧率', unit: 'FPS', series: [{ key: 'fps', color: CYAN }], minimum: 30 },
   { title: 'JS 堆', unit: 'MiB', series: [{ key: 'heapMiB', color: CYAN }], minimum: 1 },
@@ -20,8 +23,13 @@ const charts: Chart[] = [
   ] },
   { title: 'WS 连接', unit: '个', series: [{ key: 'connections', color: CYAN }], minimum: 1, integer: true },
   { title: 'RTT', unit: 'ms', series: [{ key: 'rttMs', color: CYAN }], minimum: 10 },
+  { title: '服务器 Tick', unit: 'ms', series: [
+    { key: 'serverTickAvgMs', color: CYAN, label: 'avg' },
+    { key: 'serverTickP95Ms', color: AMBER, label: 'p95' },
+  ], minimum: 1 },
 ]
 const HEIGHT = charts.length * ROW_HEIGHT
+const CANVAS_HEIGHT = HEIGHT + STATUS_HEIGHT
 
 function number(value: number, integer = false): string {
   return value.toFixed(integer || value >= 100 ? 0 : 1)
@@ -48,8 +56,8 @@ export class DebugPanel {
     this.root.innerHTML = '<header><h2>开发者调试</h2><span>30s / 自动缩放</span><button type="button" aria-label="关闭调试面板">F3 关闭</button></header>'
     this.root.querySelector('button')!.addEventListener('click', () => this.hide())
     this.canvas.setAttribute('role', 'img')
-    this.canvas.setAttribute('aria-label', '最近 30 秒：帧率、JS 堆、WS 上下行带宽、消息速率、活跃连接数、RTT')
-    this.canvas.title = '青色：接收；绿色：发送。仅统计应用 WS 载荷（含心跳），不含 HTTP/TLS 与帧头。JS 堆为浏览器估计，不支持时显示不可用。RTT 为活跃 WS 最近心跳测量的最大值。'
+    this.canvas.setAttribute('aria-label', '最近 30 秒：帧率、JS 堆、WS 上下行带宽、消息速率、活跃连接数、RTT、服务器 Tick 平均值和 p95')
+    this.canvas.title = '青色：接收/平均值；绿色：发送；黄色：服务器 p95。服务器 Tick 为最近窗口墙钟统计，不代表客户端渲染耗时。'
     this.root.append(this.canvas)
     const footer = document.createElement('footer')
     footer.innerHTML = '<span>-30s</span><span>采样 250ms / 过期淘汰</span><span>现在</span>'
@@ -66,6 +74,20 @@ export class DebugPanel {
     window.addEventListener('pageshow', this.onPageShow)
     document.addEventListener('visibilitychange', this.syncActivity)
     this.syncActivity()
+  }
+
+  acceptServerTick(telemetry: EvTickTelemetry): void {
+    const value: ServerTickTelemetry = {
+      tick: telemetry.tick,
+      tickAvgMs: telemetry.tickAvgMs,
+      tickP95Ms: telemetry.tickP95Ms,
+      windowTicks: telemetry.windowTicks,
+      scriptDeferrals: Number(telemetry.scriptDeferrals),
+      tickRate: telemetry.tickRate,
+      frameBudgetMs: telemetry.frameBudgetMs,
+      warmup: telemetry.warmup,
+    }
+    this.sampler.updateServerTick(value, performance.now())
   }
 
   dispose(): void {
@@ -144,12 +166,28 @@ export class DebugPanel {
     if (this.dpr !== dpr || this.canvas.width !== Math.round(this.width * dpr)) {
       this.dpr = dpr
       this.canvas.width = Math.round(this.width * dpr)
-      this.canvas.height = Math.round(HEIGHT * dpr)
+      this.canvas.height = Math.round(CANVAS_HEIGHT * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
     ctx.fillStyle = BACKGROUND
-    ctx.fillRect(0, 0, this.width, HEIGHT)
+    ctx.fillRect(0, 0, this.width, CANVAS_HEIGHT)
     for (let row = 0; row < charts.length; row++) this.drawChart(charts[row]!, row * ROW_HEIGHT, now)
+    this.drawServerStatus(HEIGHT)
+  }
+
+  private drawServerStatus(offset: number): void {
+    const ctx = this.ctx
+    const latest = this.sampler.latest
+    ctx.font = '10px ui-monospace, monospace'
+    ctx.textAlign = 'left'
+    ctx.fillStyle = '#8b98a9'
+    if (!latest?.serverTickRate) {
+      ctx.fillText('服务器 tick：等待遥测', 0, offset + 14)
+      return
+    }
+    const warmup = latest.serverWarmup ? '热身' : '正式'
+    const text = `服务器 tick ${latest.serverTick} | 窗口 ${latest.serverWindowTicks} | 顺延 ${latest.serverScriptDeferrals} | ${latest.serverTickRate}Hz / budget ${number(latest.serverFrameBudgetMs ?? 0)}ms | ${warmup}`
+    ctx.fillText(text, 0, offset + 14)
   }
 
   private drawChart(chart: Chart, offset: number, now: number): void {

@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import { preview } from 'vite'
 import { WebSocketServer } from 'ws'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
-import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, EvRoomStateSchema } from '../../packages/protocol/src/index.ts'
+import { ClientMsgSchema, ServerMsgSchema, ServerEventSchema, EvRoomStateSchema, EvTickTelemetrySchema } from '../../packages/protocol/src/index.ts'
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -26,6 +26,13 @@ sockets.on('connection', socket => {
     const event = create(ServerEventSchema, { kind: { case: 'roomState', value } })
     const message = create(ServerMsgSchema, { payload: { case: 'event', value: event } })
     socket.send(Buffer.concat([Buffer.from([3]), toBinary(ServerMsgSchema, message)]))
+    const telemetry = create(EvTickTelemetrySchema, {
+      tick: 60, tickAvgMs: 3.25, tickP95Ms: 8.5, windowTicks: 60,
+      scriptDeferrals: 4n, tickRate: 60, frameBudgetMs: 12, warmup: false,
+    })
+    const telemetryEvent = create(ServerEventSchema, { tick: 60, kind: { case: 'tickTelemetry', value: telemetry } })
+    const telemetryMessage = create(ServerMsgSchema, { payload: { case: 'event', value: telemetryEvent } })
+    socket.send(Buffer.concat([Buffer.from([3]), toBinary(ServerMsgSchema, telemetryMessage)]))
   })
 })
 let browser
@@ -39,7 +46,7 @@ try {
     const isDebug = ctx => ctx.canvas.parentElement?.id === 'debug-panel'
     const fillRect = CanvasRenderingContext2D.prototype.fillRect
     CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h) {
-      if (isDebug(this) && x === 0 && y === 0 && h === 348) {
+      if (isDebug(this) && x === 0 && y === 0 && h === 372) {
         stats.draws++
         stats.rows = {}
         const started = performance.now()
@@ -49,8 +56,8 @@ try {
     }
     const fillText = CanvasRenderingContext2D.prototype.fillText
     CanvasRenderingContext2D.prototype.fillText = function (...args) {
-      if (isDebug(this) && args[2] % 58 === 12) {
-        const row = Math.floor(args[2] / 58)
+      if (isDebug(this) && Number.isFinite(args[2]) && Math.abs((args[2] - 12) % 50) < 0.01) {
+        const row = Math.round((args[2] - 12) / 50)
         ;(stats.rows[row] ??= []).push(args[0])
       }
       return fillText.apply(this, args)
@@ -79,6 +86,8 @@ try {
   await page.locator('#btn-join').click()
   await page.waitForFunction(() => window.__debugCheck.rows[4]?.some(text => text === '1 个'))
   await page.waitForFunction(() => window.__debugCheck.rows[5]?.some(text => /\d+(\.\d+)? ms/.test(text)), undefined, { timeout: 10_000 })
+  await page.waitForFunction(() => window.__debugCheck.rows[6]?.some(text => text.includes('avg 3.3 ms')) &&
+    window.__debugCheck.rows[6]?.some(text => text.includes('p95 8.5 ms')), undefined, { timeout: 10_000 })
   assert.equal(await page.locator('#view-room').isVisible(), true, 'application remains usable outside the panel')
   assert.ok(await page.evaluate(() => window.__debugCheck.rows[2].some(text => text.includes('B/s'))),
     'small heartbeat payloads use readable byte units')

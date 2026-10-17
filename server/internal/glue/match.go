@@ -46,6 +46,7 @@ type Match struct {
 	// scoreboard 记录最近一次已广播的实时积分榜指纹与事件，用于变更时才重发与观战者 catch-up。
 	lastScoreboard     string
 	lastScoreboardTick uint32
+	lastTelemetryTick  uint32
 
 	encoders map[uint32]*snapshot.DeltaEncoder
 	wallIX   *snapshot.WallIndex
@@ -594,6 +595,7 @@ type MatchStats struct {
 	Tick            uint32  `json:"tick"`
 	TickAvgMs       float64 `json:"tick_avg_ms"`
 	TickP95Ms       float64 `json:"tick_p95_ms"`
+	WindowTicks     uint32  `json:"window_ticks"`
 	Warmup          bool    `json:"warmup"`
 	ScriptDeferrals uint64  `json:"script_deferrals"`
 }
@@ -606,7 +608,7 @@ func (m *Match) StatSnapshot() MatchStats {
 	copy(window, m.tickWindow)
 	m.statMu.Unlock()
 	sort.Slice(window, func(i, j int) bool { return window[i] < window[j] })
-	out := MatchStats{Tick: m.tick, Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
+	out := MatchStats{Tick: m.tick, WindowTicks: uint32(len(window)), Warmup: m.warmup, ScriptDeferrals: m.deferrals.Load()}
 	if len(window) > 0 {
 		// 纳秒分辨率：小房单机 warmup 的 tick 可为亚微秒级，µs 取整会归零。
 		var total int64
@@ -618,6 +620,20 @@ func (m *Match) StatSnapshot() MatchStats {
 		out.TickP95Ms = float64(window[(95*len(window)+99)/100-1]) / 1e6
 	}
 	return out
+}
+
+// tickTelemetryEventOf projects the same bounded wall-clock window used by
+// /api/stats into the low-frequency client diagnostics stream.
+func tickTelemetryEventOf(st MatchStats) *ombv1.ServerEvent {
+	return &ombv1.ServerEvent{
+		Tick: st.Tick,
+		Kind: &ombv1.ServerEvent_TickTelemetry{TickTelemetry: &ombv1.EvTickTelemetry{
+			Tick: st.Tick, TickAvgMs: st.TickAvgMs, TickP95Ms: st.TickP95Ms,
+			WindowTicks: st.WindowTicks, ScriptDeferrals: st.ScriptDeferrals,
+			TickRate: uint32(sim.TickRate), FrameBudgetMs: sim.FrameBudget.Seconds() * 1000,
+			Warmup: st.Warmup,
+		}},
+	}
 }
 
 // Abort 实现 room.MatchHandle（幂等：room 状态机可能重复调用）。
@@ -1060,6 +1076,7 @@ func (m *Match) step() {
 	}
 
 	m.maybeBroadcastScoreboard(wv)
+	m.maybeBroadcastTickTelemetry()
 }
 
 // persistAssistStateLocked snapshots room identity state after a tick, including
@@ -1105,6 +1122,18 @@ func (m *Match) maybeBroadcastScoreboard(wv sim.WorldView) {
 	ev := scoreboardEventOf(m.tick, snap.Rows)
 	m.lastScoreboardEv = ev
 	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: ev}}) // 玩家 + 观战者，可靠通道（低频事件，不值得丢）
+}
+
+// maybeBroadcastTickTelemetry sends one shared diagnostic sample per second.
+// It uses reliable delivery because the payload is tiny and sparse; the F3
+// panel treats the event as a reading rather than gameplay state.
+func (m *Match) maybeBroadcastTickTelemetry() {
+	if m.tick != 1 && m.tick-m.lastTelemetryTick < sim.TickRate {
+		return
+	}
+	m.lastTelemetryTick = m.tick
+	st := m.StatSnapshot()
+	m.rc.broadcastLocked(&ombv1.ServerMsg{Payload: &ombv1.ServerMsg_Event{Event: tickTelemetryEventOf(st)}})
 }
 
 // scoreboardFingerprint includes public identity so name-only updates are published.
