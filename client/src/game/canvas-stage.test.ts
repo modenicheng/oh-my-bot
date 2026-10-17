@@ -8,7 +8,7 @@ beforeAll(() => {
   vi.stubGlobal('Image', class { onload?: () => void; onerror?: () => void; src = '' })
 })
 
-/** 轻量桩（同 kill-feed.test.ts 约定）：手动 rAF 队列 + 可触发的 ResizeObserver；
+/** 轻量桩：手动 rAF 队列 + 可触发的 ResizeObserver；
  *  canvas 只需 getContext/getBoundingClientRect/width/height。 */
 async function stageFixture() {
   const { CanvasStage } = await import('./canvas-stage')

@@ -4,6 +4,9 @@ import { stages } from './songs/score'
 import { defaultTune, voiceMix } from './tune'
 import type { StageId } from './types'
 import type { SongRender } from './render'
+import { createLogger } from '../observability/logger'
+
+const log = createLogger('music')
 
 export type MusicView = 'menu' | 'game' | 'live' | 'replay'
 export function phaseStage(phase: number): StageId { return phase >= 2 ? 'final' : 'arena' }
@@ -30,7 +33,7 @@ export class BackgroundMusic {
     if (!this.rendering) {
       this.renderer = this.makeRenderer()
       this.rendering = this.renderer.render(stages, 44100).catch(error => {
-        console.warn('Background music unavailable', error)
+        log.warn('music.unavailable', { error })
         return null // BGM 加载失败不能阻止游戏与音效。
       })
     }

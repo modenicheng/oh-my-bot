@@ -46,6 +46,17 @@ export class Camera {
     this.cy = clamp(ty, -halfH, halfH)
   }
 
+  /** Center a read-only observer on the whole arena instead of a player seat. */
+  fitWorld(padding = 0.96): void {
+    this.cx = 0
+    this.cy = 0
+    if (!Number.isFinite(this.extent) || this.extent <= 0 || this.cw <= 0 || this.ch <= 0) {
+      this.scale = this.baseScale * this.zoom
+      return
+    }
+    this.scale = Math.min(this.cw, this.ch) / (this.extent * 2) * clamp(padding, 0.5, 1)
+  }
+
   /** 世界 → 画布像素 */
   toPxX(wx: number): number { return (wx - this.cx) * this.scale + this.cw / 2 }
   toPxY(wy: number): number { return (wy - this.cy) * this.scale + this.ch / 2 }

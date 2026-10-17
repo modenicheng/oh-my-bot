@@ -472,6 +472,11 @@ func validateRecord(r diskRecord) error {
 		if r.Control.Toggles > MaxControlToggles {
 			return fmt.Errorf("sim: control toggles %d exceed %d", r.Control.Toggles, MaxControlToggles)
 		}
+		if r.Control.SingleShots != nil {
+			if err := validateSingleShots(*r.Control.SingleShots, r.Tick-1, true); err != nil {
+				return err
+			}
+		}
 		// 升级购买同族防回放空转：单 tick 每机器人最多 MaxUpgradeBuysPerTick 次，
 		// 且轨号必须落在 1–5（consumeInputs 逐次校验，这里先拒绝明显坏值）。
 		if r.Control.Script != nil && len(r.Control.Script.Upgrades) != 0 {
@@ -503,6 +508,11 @@ func validateRecord(r diskRecord) error {
 		}
 		if r.State.SimulationVersion < 0 || r.State.SimulationVersion > SimulationVersion {
 			return fmt.Errorf("sim: unsupported simulation_version %d", r.State.SimulationVersion)
+		}
+		for _, robot := range r.State.Robots {
+			if err := validateRobotSingleShots(robot, r.State.SimulationVersion, r.Tick); err != nil {
+				return err
+			}
 		}
 		if r.Type == RecordTypeDiskName(RecordMatchStart) && len(r.Players) != 0 {
 			known := make(map[uint32]bool, len(r.State.Robots))

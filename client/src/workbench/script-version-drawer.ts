@@ -5,6 +5,7 @@
 // 键盘可达：行按钮原生 <button>；Esc 收起并把焦点还给 toggle。
 import type { EvScriptRollbackResult } from '@omb/protocol'
 import { icon } from '../icons'
+import { landscapeSize, viewportRect } from '../app/landscape'
 import {
   computePanelPlacement, PANEL_VIEWPORT_MARGIN,
 } from './script-version-placement'
@@ -152,8 +153,8 @@ export class ScriptVersionDrawer {
   /** 重算面板几何（打开期间 resize/滚动/布局变化时由监听器调用）。 */
   refreshPosition(): void {
     if (!this.open) return
-    const rect = this.toggleButton.getBoundingClientRect()
-    const viewport = { width: window.innerWidth, height: window.innerHeight }
+    const rect = viewportRect(this.toggleButton)
+    const viewport = landscapeSize()
     const place = computePanelPlacement(
       { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
       viewport,

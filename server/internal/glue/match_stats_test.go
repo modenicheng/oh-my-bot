@@ -44,7 +44,29 @@ func TestMatchStatSnapshotRecordsTickWindow(t *testing.T) {
 	if st.TickAvgMs <= 0 || st.TickP95Ms < st.TickAvgMs {
 		t.Fatalf("window stats not recorded: %+v", st)
 	}
+	if st.WindowTicks != 5 {
+		t.Fatalf("window ticks = %d, want 5", st.WindowTicks)
+	}
 	if !st.Warmup {
 		t.Fatal("warmup flag lost")
+	}
+}
+
+func TestTickTelemetryEventOfProjectsMatchStats(t *testing.T) {
+	st := MatchStats{
+		Tick: 123, TickAvgMs: 3.25, TickP95Ms: 8.5, WindowTicks: 60,
+		ScriptDeferrals: 4, Warmup: true,
+	}
+
+	ev := tickTelemetryEventOf(st)
+	telemetry := ev.GetTickTelemetry()
+	if telemetry == nil {
+		t.Fatal("tick telemetry event payload is nil")
+	}
+	if ev.GetTick() != st.Tick || telemetry.GetTick() != st.Tick ||
+		telemetry.GetTickAvgMs() != st.TickAvgMs || telemetry.GetTickP95Ms() != st.TickP95Ms ||
+		telemetry.GetWindowTicks() != st.WindowTicks || telemetry.GetScriptDeferrals() != st.ScriptDeferrals ||
+		telemetry.GetTickRate() != 60 || telemetry.GetFrameBudgetMs() != 12 || !telemetry.GetWarmup() {
+		t.Fatalf("telemetry = %+v, event tick = %d", telemetry, ev.GetTick())
 	}
 }

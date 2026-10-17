@@ -79,6 +79,13 @@ message ClientInput {
   // 本帧实际操作过的轴才置位（bit0 move / bit1 aim / bit2 fire / bit3 ability）。
   // 未置位轴 = 本帧未操作：仲裁器不视为抢占，脚本轴保持。
   uint32 axis_mask = 9;
+  SingleShot single_shot = 10; // Discrete release; request ID is this frame's seq.
+}
+
+message SingleShot {
+  double aim = 1;
+  uint32 observed_tick = 2;
+  uint32 generation = 3; // Latest owner bootstrap generation; never resend after resync.
 }
 
 // match_minutes / core_open_minutes：对局时长与核心区开放时点（开局后第几分钟），
@@ -90,6 +97,7 @@ message JoinRoom {
   string color = 3;
   uint32 match_minutes = 4;
   uint32 core_open_minutes = 5;
+  bool spectator_mode = 6; // First-join intent: keep host control without taking a player seat.
 }
 // Read-only full-world connection; never allocates a player or robot.
 message SpectateRoom { string room_code = 1; }
@@ -263,6 +271,7 @@ message SelfState {
   optional UpgradeSelf upgrade = 12; // 局内升级状态；缺失表示旧服务器（=0 点全零级）
   optional uint32 shield_ready_tick = 13;
   optional uint32 shield_started_tick = 14;
+  optional uint32 input_generation = 15; // Owner generation, including death/respawn updates without map reload.
 }
 
 message SnapshotDelta {
@@ -328,7 +337,12 @@ message EvMatchStart { uint64 map_seed = 1; uint32 players = 2; } // 开局：�
 message EvWallHit { uint32 robot = 1; Vec2 at = 2; float impact = 3; } // 0.5s/robot 节流（铁头娃埋点）
 message EvScriptError { uint32 robot = 1; string error = 2; uint32 script_rev = 3; } // 人工智障埋点
 message EvMatchEnd { repeated ScoreRow scores = 1; }
-message ScoreRow { uint32 robot = 1; sint32 score = 2; repeated Title titles = 3; }
+message ScoreRow {
+  uint32 robot = 1;
+  sint32 score = 2;
+  repeated Title titles = 3;
+  string nick = 4; // Global identity; opponents need not have entered the recipient's AOI.
+}
 message EvScoreboard { // 局内实时积分榜（服务器权威，约 1s 一拍；不落 Match Event Log，仅下发）
   repeated ScoreRow rows = 1;
   uint32 tick = 2;
@@ -421,6 +435,28 @@ message EvMapBootstrap { // 开赛一次性可靠下发：地图定义（服务�
   string map_hash = 2;        // 一致性校验
   uint32 generator_version = 3;
   SimTuning tuning = 4;        // 客户端可见对局数值（审计 X-3；缺失 = 旧服务器，客户端用本地兜底）
+  uint32 generation = 5; // Owner input generation, refreshed on match/connection/life changes.
+  bool discrete_shot_supported = 6;
+}
+
+// Terminal feedback, reliable and owner-only (including admission rejections).
+message EvSingleShotResult {
+  uint32 robot = 1;
+  uint32 seq = 2;
+  string outcome = 3; // fired, cooldown, energy, shield, dead, projectile_capacity, etc.
+}
+
+// Tick execution telemetry for the F3 developer panel. This is a low-frequency
+// diagnostic projection, not part of the replay event log or gameplay state.
+message EvTickTelemetry {
+  uint32 tick = 1;              // latest authoritative simulation tick
+  double tick_avg_ms = 2;       // recent wall-clock tick average
+  double tick_p95_ms = 3;       // recent wall-clock tick nearest-rank p95
+  uint32 window_ticks = 4;      // number of measured ticks in the window
+  uint64 script_deferrals = 5;  // cumulative script deadline/worker deferrals
+  uint32 tick_rate = 6;         // target simulation frequency
+  double frame_budget_ms = 7;   // shared server tick budget
+  bool warmup = 8;              // true when this is the warmup match
 }
 
 // SimTuning（审计 X-3）：客户端渲染/HUD 当前复算或手抄的对局数值，服务器为唯一
@@ -487,6 +523,7 @@ message EvRoomState { // 房间生命周期广播（含 Session 榜）
   string host_nick = 3;
   uint32 solo_bots = 4; // room-scoped deterministic test opponents; zero when disabled
   bool paused = 5;      // 房主已暂停正式对局（仅 state=R_RUNNING 时有意义）；缺失 = 旧服务器未暂停
+  bool host_spectator = 6; // Host controls the room without occupying a player seat.
 }
 
 message EvAiQuota {
@@ -539,6 +576,8 @@ message ServerEvent {
     EvScriptRollbackResult script_rollback_result = 36; // 版本回退定向回执（不落事件日志）
     EvPointDropSpawn point_drop_spawn = 37; // 赏金阵亡散落（全场可见，落事件日志）
     EvPointDropPickup point_drop_pickup = 38; // 晶片拾取（全场可见，落事件日志）
+    EvSingleShotResult single_shot_result = 39; // Owner-only; never broadcast to spectators.
+    EvTickTelemetry tick_telemetry = 40; // Low-frequency F3 diagnostics; not replayed.
   }
 }
 

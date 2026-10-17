@@ -21,11 +21,12 @@ type GameplayReplaySink interface {
 	OnControl(tick, robotID uint32, control ControlRecord)
 }
 type ControlRecord struct {
-	Script       *ScriptCommands `json:"script,omitempty"`
-	ScriptFailed bool            `json:"script_failed,omitempty"`
-	Toggles      uint32          `json:"toggles,omitempty"`
-	Respawn      bool            `json:"respawn,omitempty"`
-	Say          string          `json:"say,omitempty"`
+	SingleShots  *SingleShotState `json:"single_shots,omitempty"`
+	Script       *ScriptCommands  `json:"script,omitempty"`
+	ScriptFailed bool             `json:"script_failed,omitempty"`
+	Toggles      uint32           `json:"toggles,omitempty"`
+	Respawn      bool             `json:"respawn,omitempty"`
+	Say          string           `json:"say,omitempty"`
 	// Upgrades 记录本 tick 待消费的升级购买（轨号 1–5，按序逐次校验/扣点）；
 	// 上限 MaxUpgradeBuysPerTick（S-29 同思路防回放空转）。
 	Upgrades []uint8 `json:"upgrades,omitempty"`
@@ -274,13 +275,22 @@ func (s *Sim) consumeInputs() {
 			}
 			c.PendingScript.Upgrades = nil
 		}
-		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" || len(c.PendingUpgrades) != 0 {
-			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay, Upgrades: append([]uint8(nil), c.PendingUpgrades...)}})
+		if c.ScriptPending || c.ToggleCount != 0 || r.RespawnPending || c.PendingSay != "" || len(c.PendingUpgrades) != 0 || r.SingleShots.Changed {
+			record := ControlRecord{Script: cloneCommands(c.PendingScript), ScriptFailed: c.ScriptFailed, Toggles: c.ToggleCount, Respawn: r.RespawnPending, Say: c.PendingSay, Upgrades: append([]uint8(nil), c.PendingUpgrades...)}
+			if r.SingleShots.Changed {
+				shots := cloneSingleShots(r.SingleShots)
+				record.SingleShots = &shots
+				r.SingleShots.Changed = false
+			}
+			s.controlEvents = append(s.controlEvents, controlRecord{r.ID, record})
 		}
 		// Log even an input discarded by a same-tick respawn: its sequence guard
 		// has already advanced and must be reproducible from the replay stream.
 		if r.InputPending {
 			r.ConsumedSeq = r.PendingInput.Seq
+			if s.simulationVersion >= 8 {
+				r.HasConsumedSeq = true
+			}
 			s.consumed = append(s.consumed, consumedInput{r.ID, r.PendingInput})
 		}
 		if r.RespawnPending || (r.State == Dead && r.Combat.RespawnAt != 0 && s.tick >= r.Combat.RespawnAt) {
@@ -362,7 +372,10 @@ func (s *Sim) consumeInputs() {
 		if c.Output.TurretSrc != '-' {
 			r.Heading = c.Output.Aim
 		}
-		if c.Output.Fire || c.Output.Interact {
+		// A human discrete release is the same protection-breaking fire intent,
+		// even though its held snapshot is deliberately false. Hand-back wins.
+		discreteFire := s.simulationVersion >= 8 && len(r.SingleShots.Pending) != 0 && c.HumanAxes&(AxisAim|AxisFire) == AxisAim|AxisFire
+		if c.Output.Fire || c.Output.Interact || discreteFire {
 			r.Combat.Invulnerable, r.Combat.InvulnUntil = false, 0
 		}
 		if r.Combat.InvulnUntil != 0 && s.tick >= r.Combat.InvulnUntil {

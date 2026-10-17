@@ -1,3 +1,5 @@
+import { viewportPoint } from '../app/landscape'
+
 export interface ScriptLogEntry {
   robotId: number
   scriptRev: number
@@ -378,7 +380,7 @@ export class ScriptConsoleView {
       event.preventDefault()
       this.resizeHandle.focus({ preventScroll: true })
       this.resizeHandle.setPointerCapture(event.pointerId)
-      drag = { pointerId: event.pointerId, startY: event.clientY, height: this.appliedHeight }
+      drag = { pointerId: event.pointerId, startY: viewportPoint(event.clientX, event.clientY).y, height: this.appliedHeight }
       this.finishResize = () => finish()
       document.documentElement.dataset.consoleResize = ''
       this.resizeHandle.dataset.resizing = ''
@@ -386,7 +388,7 @@ export class ScriptConsoleView {
     this.resizeHandle.addEventListener('pointermove', event => {
       if (!drag || event.pointerId !== drag.pointerId) return
       event.preventDefault()
-      this.setHeight(drag.height + drag.startY - event.clientY, false)
+      this.setHeight(drag.height + drag.startY - viewportPoint(event.clientX, event.clientY).y, false)
     })
     this.resizeHandle.addEventListener('pointerup', finish)
     this.resizeHandle.addEventListener('pointercancel', finish)

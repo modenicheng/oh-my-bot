@@ -19,6 +19,7 @@ type WorldView struct {
 }
 
 func cloneRobot(r Robot) Robot {
+	r.SingleShots = cloneSingleShots(r.SingleShots)
 	r.Control.PendingScript = cloneCommands(r.Control.PendingScript)
 	if r.Combat.DamageBy != nil {
 		copy := make(map[uint32]float64, len(r.Combat.DamageBy))

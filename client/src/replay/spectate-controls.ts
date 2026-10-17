@@ -6,6 +6,7 @@
 // 播放语义留在调用方：live 无 Space 动作，replay 经 onSpace 切换播放；
 // 重绘入口由调用方注入（live: requestDraw，replay: drawFrame）。
 import type { SpectatorCamera } from './spectator'
+import { viewportPoint, viewportRect } from '../app/landscape'
 
 const PAN_STEP_PX = 48
 const ZOOM_IN = 1.25
@@ -64,18 +65,19 @@ export function bindSpectateControls(deps: SpectateControlsDeps): () => void {
     if (e.button !== 0 || !e.isPrimary || !deps.enabled()) return
     canvas.focus({ preventScroll: true })
     canvas.setPointerCapture(e.pointerId)
-    drag = { id: e.pointerId, x: e.clientX, y: e.clientY }
+    drag = { id: e.pointerId, ...viewportPoint(e.clientX, e.clientY) }
     canvas.classList.add('dragging')
     e.preventDefault()
   }, { signal })
 
   canvas.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return
-    const dx = e.clientX - drag.x, dy = e.clientY - drag.y
+    const point = viewportPoint(e.clientX, e.clientY)
+    const dx = point.x - drag.x, dy = point.y - drag.y
     if (dx === 0 && dy === 0) return // 同点重复派发不触发平移/重绘
     camera.pan(dx, dy)
-    drag.x = e.clientX
-    drag.y = e.clientY
+    drag.x = point.x
+    drag.y = point.y
     requestDraw()
   }, { signal })
 
@@ -84,13 +86,14 @@ export function bindSpectateControls(deps: SpectateControlsDeps): () => void {
     canvas.addEventListener(type, release, { signal })
   }
   window.addEventListener('blur', () => endDrag(), { signal })
+  window.addEventListener('landscapechange', () => endDrag(), { signal })
 
   canvas.addEventListener('wheel', e => {
     if (!deps.enabled()) return
     e.preventDefault()
-    const rect = canvas.getBoundingClientRect()
+    const rect = viewportRect(canvas), point = viewportPoint(e.clientX, e.clientY)
     const units = wheelUnits(e.deltaMode, rect.height)
-    camera.zoomAt(wheelZoomFactor(e.deltaY, units), e.clientX - rect.left, e.clientY - rect.top)
+    camera.zoomAt(wheelZoomFactor(e.deltaY, units), point.x - rect.left, point.y - rect.top)
     requestDraw()
   }, { signal, passive: false })
 

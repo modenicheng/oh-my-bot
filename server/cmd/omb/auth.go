@@ -7,13 +7,14 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/modenicheng/oh-my-bot/server/internal/ai"
 	"github.com/modenicheng/oh-my-bot/server/internal/auth"
+	"github.com/modenicheng/oh-my-bot/server/internal/observability"
 )
 
 // setupAuth 按 config.yaml auth.* 段装配认证器。默认开启：issuer/client_id/
@@ -36,14 +37,14 @@ func setupAuth(cfg ai.ServerConfig) *auth.Auth {
 		BypassProxy:      ac.BypassProxy,
 	}
 	if !oidcCfg.Complete() {
-		log.Printf("auth disabled: auth.* config incomplete (need issuer/client_id/client_secret); configure them or set auth.enabled=false")
+		slog.Warn("auth.disabled", "reason", "incomplete issuer/client_id/client_secret configuration")
 		return nil
 	}
 	if oidcCfg.HMACSecret == "" {
 		oidcCfg.HMACSecret = auth.EphemeralSecret()
-		log.Printf("auth: OMB_AUTH_SECRET not set; using ephemeral secret (all logins reset on restart)")
+		slog.Warn("auth.ephemeral_secret", "reason", "OMB_AUTH_SECRET not set; logins reset on restart")
 	}
-	log.Printf("auth enabled: issuer=%s client_id=%s token_ttl=%s", ac.Issuer, ac.ClientID, ac.TokenTTL)
+	slog.Info("auth.enabled", "client_id", ac.ClientID, "token_ttl", ac.TokenTTL)
 	return auth.New(oidcCfg)
 }
 
@@ -61,7 +62,7 @@ func registerAuthRoutes(mux *http.ServeMux, a *auth.Auth) {
 		state, nonce := a.NewState(r.URL.Query().Get("room"))
 		target, err := a.LoginURL(r.Context(), state, nonce, a.RedirectFor(r))
 		if err != nil {
-			log.Printf("auth login: %v", err)
+			observability.Logger(r.Context()).Error("auth.login_failed", "error", err)
 			http.Error(w, "OIDC provider unavailable, try again later", http.StatusBadGateway)
 			return
 		}
@@ -85,12 +86,11 @@ func registerAuthRoutes(mux *http.ServeMux, a *auth.Auth) {
 		}
 		sub, name, err := a.Exchange(r.Context(), a.RedirectFor(r), code, nonce)
 		if err != nil {
-			log.Printf("auth callback: %v", err)
+			observability.Logger(r.Context()).Error("auth.callback_failed", "error", err)
 			http.Error(w, "login exchange failed, try again", http.StatusBadGateway)
 			return
 		}
-		// 只重定向到本应用，不落任何服务端状态；query 不写访问日志（本项目
-		// 本就没有请求日志，此注释是约定而非实现依赖）。
+		// The access logger records paths only: this redirect carries a token.
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		target := url.Values{"token": {a.Issue(sub, name, time.Now())}}
 		if room != "" {
