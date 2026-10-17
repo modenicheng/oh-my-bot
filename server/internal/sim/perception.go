@@ -119,17 +119,20 @@ func (world WorldView) visibleBoundary(center Vec2, radius, boundaryRadius float
 	}
 	sort.Float64s(angles)
 	pointAt := func(angle float64) Vec2 {
-		return Vec2{math.Cos(angle) * boundaryRadius, math.Sin(angle) * boundaryRadius}
+		sine, cosine := math.Sincos(angle)
+		return Vec2{cosine * boundaryRadius, sine * boundaryRadius}
 	}
 	type visibleArc struct{ start, end float64 }
 	var arcs []visibleArc
+	radiusSquared := radius * radius
+	endpointRadiusSquared := (radius + 1e-7) * (radius + 1e-7)
 	for index := 1; index < len(angles); index++ {
 		left, right := angles[index-1], angles[index]
 		if right-left < 1e-10 {
 			continue
 		}
 		midpoint, start, end := pointAt((left+right)/2), pointAt(left), pointAt(right)
-		if center.Sub(midpoint).Len() > radius || center.Sub(start).Len() > radius+1e-7 || center.Sub(end).Len() > radius+1e-7 || !visible(center, midpoint) {
+		if distanceSquared(center, midpoint) > radiusSquared || distanceSquared(center, start) > endpointRadiusSquared || distanceSquared(center, end) > endpointRadiusSquared || !visible(center, midpoint) {
 			continue
 		}
 		if len(arcs) > 0 && math.Abs(arcs[len(arcs)-1].end-left) < 1e-10 {
@@ -198,11 +201,16 @@ func visibleFace(center Vec2, radius float64, start, end Vec2, corners []Vec2, v
 			continue
 		}
 		minimum, maximum := start.Add(direction.Scale(left)), start.Add(direction.Scale(right))
-		if len(faces) > 0 && faces[len(faces)-1].Max.Sub(minimum).Len() < 1e-8 {
+		if len(faces) > 0 && distanceSquared(faces[len(faces)-1].Max, minimum) < 1e-16 {
 			faces[len(faces)-1].Max = maximum
 		} else {
 			faces = append(faces, Wall{Min: minimum, Max: maximum})
 		}
 	}
 	return faces
+}
+
+func distanceSquared(a, b Vec2) float64 {
+	dx, dy := a.X-b.X, a.Y-b.Y
+	return dx*dx + dy*dy
 }
