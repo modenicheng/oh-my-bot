@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/modenicheng/oh-my-bot/compare/v1.0.0...v1.1.0) (2026-10-17)
+
+### Stable Release
+
+* Promote the 1.1 release series to the stable channel. This release includes
+  host spectator rooms and rematches, mobile controls, compact binary snapshots,
+  configurable logging, spawn improvements, and the server performance work
+  completed through private perception scratch reuse.
+* Reuse private wall-corner and boundary clipping buffers while keeping returned
+  observations independent. Preserve map geometry, endpoint tolerance, and replay
+  behavior with regression tests.
+* Expose bounded per-stage tick timings and reject distant resource pickups
+  before collision sweeps.
+* The 200-heavy-script target of stable tick p95 below 12ms remains under
+  investigation; this release does not claim that target has been met.
+
 ## [1.2.0-rc.5](https://github.com/modenicheng/oh-my-bot/compare/v1.1.0-rc.5...v1.2.0-rc.5) (2026-10-17)
 
 
