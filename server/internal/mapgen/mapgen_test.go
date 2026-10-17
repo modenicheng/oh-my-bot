@@ -41,7 +41,7 @@ func TestTopologyInvariants(t *testing.T) {
 			t.Fatalf("seed %d: Generate: %v", seed, err)
 		}
 		// 元数据。
-		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 11 {
+		if def.Version != 1 || def.GeneratorVer != GeneratorVer || GeneratorVer != 12 {
 			t.Fatalf("seed %d: version fields wrong", seed)
 		}
 		if def.Seed != seed {
@@ -70,6 +70,9 @@ func TestTopologyInvariants(t *testing.T) {
 			}
 			// 出生方块四角全部落在外环带 [55,80] 与本扇区楔内（1° 余量）。
 			r := s.SpawnArea
+			if width := r.Max.X - r.Min.X; width < 17-1e-9 {
+				t.Fatalf("seed %d: sector %d spawn width %.3f is too small", seed, k, width)
+			}
 			for _, c := range []sim.Vec2{
 				{X: r.Min.X, Y: r.Min.Y}, {X: r.Max.X, Y: r.Min.Y},
 				{X: r.Min.X, Y: r.Max.Y}, {X: r.Max.X, Y: r.Max.Y},
@@ -645,6 +648,9 @@ func TestLargeRoomLayoutBreakpoints(t *testing.T) {
 			l := layoutFor(tc.n)
 			if math.Abs(def.ArenaRadius-l.outerMaxR) > 1e-9 {
 				t.Fatalf("arena radius %.3f, want %.3f", def.ArenaRadius, l.outerMaxR)
+			}
+			if got := def.Sectors[0].SpawnArea.Max.X - def.Sectors[0].SpawnArea.Min.X; math.Abs(got-17*l.scale) > 1e-9 {
+				t.Fatalf("spawn width %.3f, want %.3f", got, 17*l.scale)
 			}
 			if got := len(def.Uplinks); got != tc.uplinks+1 {
 				t.Fatalf("uplinks = %d, want %d+main", got, tc.uplinks)
